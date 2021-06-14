@@ -1,0 +1,8 @@
+# Zig generated files
+zig-cache
+zig-out
+
+# Dependency based documentation 
+deps/docs/*
+# Dependency based documentation readme
+!/deps/docs/README.md 
