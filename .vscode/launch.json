@@ -15,6 +15,17 @@
             "environment": [],
             "console": "externalTerminal",
             "preLaunchTask": "build"
+        },
+        {
+            "name": "(Linux) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/zig-out/bin/zig_vulkan",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "preLaunchTask": "build"
         }
     ]
 }

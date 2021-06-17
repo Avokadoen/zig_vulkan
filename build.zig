@@ -18,12 +18,14 @@ pub fn build(b: *std.build.Builder) void {
     exe.setTarget(target);
     exe.setBuildMode(mode);
     
-    // TODO: this will only really work for my computer. Should vary based on platform too
-    const sdl_path = "C:\\lib\\SDL2-2.0.14\\";
-    exe.addIncludeDir(sdl_path ++ "include");
-    exe.addLibPath(sdl_path ++ "lib\\x64");
-    b.installBinFile(sdl_path ++ "lib\\x64\\SDL2.dll", "SDL2.dll");
-    exe.linkSystemLibrary("sdl2");
+    switch(target.getOs().tag) {
+        .linux, .macos => {
+            exe.linkSystemLibrary("glfw");
+        },
+        else => |platform| {
+            std.debug.panic("Unsuported system {}", .{platform});
+        }
+    }
     
     exe.linkLibC();
 
