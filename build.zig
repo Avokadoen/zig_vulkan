@@ -30,6 +30,7 @@ pub fn build(b: *std.build.Builder) void {
     exe.linkLibC();
 
     exe.addPackagePath("ecs", "deps/zig-ecs/src/ecs.zig");
+    exe.addPackagePath("zalgebra", "deps/zalgebra/src/main.zig");
 
     const vk_xml_path = b.option([]const u8, "vulkan-registry", "Override the to the Vulkan registry") orelse "deps/vk.xml";
     const gen = vkgen.VkGenerateStep.init(b, vk_xml_path, "vk.zig");
