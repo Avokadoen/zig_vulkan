@@ -1,16 +1,14 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
-pub const OutOfMemory = error{OutOfMemory};
 const ArrayList = std.ArrayList;
+
 const dbg = std.builtin.mode == std.builtin.Mode.Debug;
 
 const ecs = @import("ecs");
 const zalgebra = @import("zalgebra");
 
-const c = @cImport({
-    @cInclude("GLFW/glfw3.h");
-});
+const c = @import("c.zig");
 const vk = @import("vulkan");
 
 const GLFWError = error {
@@ -18,10 +16,16 @@ const GLFWError = error {
     WindowCreationFailed
 };
 
-// enable validation laye
+// enable validation layer in debug
 const enable_validation_layers = std.debug.builtin.mode == .Debug;
 const application_name = "zig vulkan";
 const engine_name = "nop";
+
+// Base used to load initial instance
+const BaseDispatch = struct {
+    vkCreateInstance: vk.PfnCreateInstance,
+    usingnamespace vk.BaseWrapper(@This());
+};
 
 fn handleGLFWError() noreturn {
     var description: [*c][*c]u8 = null;
@@ -56,7 +60,8 @@ fn handleGLFWError() noreturn {
 //     if (!enableValidationLayers) return;
 
 //     var createInfo = vk.DebugReportCallbackCreateInfoEXT {
-//         .flags = vk.DebugReportFlagsEXT.error_bit_ext | vk.DebugReportFlagsEXT.warning_bit_ext,
+        /// toint
+//         .flags = vk.DebugReportFlagsEXT.error_bit_ext  vk.DebugReportFlagsEXT.warning_bit_ext,
 //         .pfnCallback = debugCallback,
 //         .pNext = null,
 //         .pUserData = null,
@@ -81,7 +86,7 @@ fn handleGLFWError() noreturn {
 
 
 // vk.Instance
-fn createVkInstance(allocator: *Allocator) !void {
+fn createVkInstance() !vk.Instance {
     const appInfo = vk.ApplicationInfo {
         .p_next = null,
         .p_application_name = application_name,
@@ -94,6 +99,7 @@ fn createVkInstance(allocator: *Allocator) !void {
     var glfw_extensions_count: u32 = 0;
     const glfw_extensions_raw = c.glfwGetRequiredInstanceExtensions(&glfw_extensions_count);
 
+    const vkb = try BaseDispatch.load(c.glfwGetInstanceProcAddress);
     const instanceInfo = vk.InstanceCreateInfo {
         .p_next = null,
         .flags = undefined,
@@ -103,6 +109,7 @@ fn createVkInstance(allocator: *Allocator) !void {
         .enabled_extension_count = @intCast(u32, glfw_extensions_count),
         .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, glfw_extensions_raw),
     };
+    return try vkb.createInstance(instanceInfo, null);
 }
 
 pub fn main() anyerror!void {
@@ -146,8 +153,8 @@ pub fn main() anyerror!void {
     
     // Make the window's context current 
     c.glfwMakeContextCurrent(window);
-
-    _ = try createVkInstance(&gpa.allocator);
+    // Construct our vulkan instance
+    const vkInstance = try createVkInstance();
 
     // Loop until the user closes the window 
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE)
