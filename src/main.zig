@@ -5,7 +5,8 @@ const ArrayList = std.ArrayList;
 
 const dbg = std.builtin.mode == std.builtin.Mode.Debug;
 
-const ecs = @import("ecs");
+// TODO: update, see: https://github.com/prime31/zig-ecs/pull/10
+// const ecs = @import("ecs");
 const zalgebra = @import("zalgebra");
 
 const c = @import("c.zig");
@@ -21,10 +22,73 @@ const enable_validation_layers = std.debug.builtin.mode == .Debug;
 const application_name = "zig vulkan";
 const engine_name = "nop";
 
-// Base used to load initial instance
-const BaseDispatch = struct {
-    vkCreateInstance: vk.PfnCreateInstance,
-    usingnamespace vk.BaseWrapper(@This());
+const BaseDispatch = vk.BaseWrapper([_]vk.BaseCommand{
+    .create_instance,
+    .enumerate_instance_extension_properties,
+});
+
+const InstanceDispath = vk.InstanceWrapper([_]vk.InstanceCommand{
+    .destroy_instance,
+});
+
+const InstanceObject = struct {
+    const Self = @This();
+
+    instance: vk.Instance,
+    vki: InstanceDispath,
+
+    // Caller should make sure to call deinit
+    pub fn init(allocator: *Allocator) !Self {
+        const appInfo = vk.ApplicationInfo {
+            .p_next = null,
+            .p_application_name = application_name,
+            .application_version = vk.makeApiVersion(0, 0, 0, 1),
+            .p_engine_name = engine_name,
+            .engine_version = vk.makeApiVersion(0, 0, 0, 1),
+            .api_version = vk.API_VERSION_1_2,
+        };
+
+        var glfw_extensions_count: u32 = 0;
+        const glfw_extensions_raw = c.glfwGetRequiredInstanceExtensions(&glfw_extensions_count);
+
+
+        // load base dispatch wrapper
+        const vkb = try BaseDispatch.load(c.glfwGetInstanceProcAddress);
+
+        // query extensions available
+        var supported_extensions_count: u32 = 0;
+        // ignore result, TODO: handle "VkResult.incomplete"
+        _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, null);
+        var extensions = try ArrayList(vk.ExtensionProperties).initCapacity(allocator, supported_extensions_count);
+        _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, extensions.items.ptr);
+        extensions.items.len = supported_extensions_count;
+        defer extensions.deinit();
+
+        for (extensions.items) |ext| {
+            std.debug.print("{s}\n", .{ext.extension_name});
+        }
+
+        const instanceInfo = vk.InstanceCreateInfo {
+            .p_next = null,
+            .flags = undefined,
+            .p_application_info = &appInfo,
+            .enabled_layer_count = 0,
+            .pp_enabled_layer_names = undefined,
+            .enabled_extension_count = @intCast(u32, glfw_extensions_count),
+            .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, glfw_extensions_raw),
+        };
+        var instance = try vkb.createInstance(instanceInfo, null);
+        const vki = try InstanceDispath.load(instance, c.glfwGetInstanceProcAddress);
+        
+        return Self {
+            .instance = instance,
+            .vki = vki,
+        };
+    }
+
+    pub fn deinit(self: Self) void {
+        self.vki.destroyInstance(self.instance, null);
+    }
 };
 
 fn handleGLFWError() noreturn {
@@ -85,33 +149,6 @@ fn handleGLFWError() noreturn {
 // }
 
 
-// vk.Instance
-fn createVkInstance() !vk.Instance {
-    const appInfo = vk.ApplicationInfo {
-        .p_next = null,
-        .p_application_name = application_name,
-        .application_version = vk.makeApiVersion(0, 0, 0, 1),
-        .p_engine_name = engine_name,
-        .engine_version = vk.makeApiVersion(0, 0, 0, 1),
-        .api_version = vk.API_VERSION_1_2,
-    };
-
-    var glfw_extensions_count: u32 = 0;
-    const glfw_extensions_raw = c.glfwGetRequiredInstanceExtensions(&glfw_extensions_count);
-
-    const vkb = try BaseDispatch.load(c.glfwGetInstanceProcAddress);
-    const instanceInfo = vk.InstanceCreateInfo {
-        .p_next = null,
-        .flags = undefined,
-        .p_application_info = &appInfo,
-        .enabled_layer_count = 0,
-        .pp_enabled_layer_names = undefined,
-        .enabled_extension_count = @intCast(u32, glfw_extensions_count),
-        .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, glfw_extensions_raw),
-    };
-    return try vkb.createInstance(instanceInfo, null);
-}
-
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
 
@@ -123,7 +160,7 @@ pub fn main() anyerror!void {
         if (leak) {
             // TODO: lazy error handling can be improved
             // If error occur here we are screwed anyways 
-            stderr.print("Leak detected in gpa!", .{}) catch unreachable;
+            stderr.print("leak detected in gpa!", .{}) catch unreachable;
         }
     }
 
@@ -139,7 +176,7 @@ pub fn main() anyerror!void {
     c.glfwWindowHint(c.GLFW_RESIZABLE, c.GLFW_FALSE);
 
     if (c.glfwVulkanSupported() == c.GLFW_FALSE) {
-         std.debug.panic("Vulkan not supported on device (glfw)", .{});
+        std.debug.panic("Vulkan not supported on device (glfw)", .{});
     }
 
     // Create a windowed mode window and its OpenGL context
@@ -154,7 +191,8 @@ pub fn main() anyerror!void {
     // Make the window's context current 
     c.glfwMakeContextCurrent(window);
     // Construct our vulkan instance
-    const vkInstance = try createVkInstance();
+    const vkInstance = try InstanceObject.init(&gpa.allocator);
+    defer vkInstance.deinit();
 
     // Loop until the user closes the window 
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE)

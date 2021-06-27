@@ -18,13 +18,13 @@
         },
         {
             "name": "(Linux) Launch",
-            "type": "cppdbg",
+            "type": "lldb",
             "request": "launch",
             "program": "${workspaceFolder}/zig-out/bin/zig_vulkan",
             "args": [],
-            "stopAtEntry": false,
+            // "stopAtEntry": false,
             "cwd": "${fileDirname}",
-            "environment": [],
+            // "environment": [],
             "preLaunchTask": "build"
         }
     ]
