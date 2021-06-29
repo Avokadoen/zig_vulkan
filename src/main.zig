@@ -18,24 +18,29 @@ const GLFWError = error {
 };
 
 // enable validation layer in debug
-const enable_validation_layers = std.debug.builtin.mode == .Debug;
+const enable_validation_layers = std.builtin.mode == .Debug;
 const application_name = "zig vulkan";
 const engine_name = "nop";
 
 const BaseDispatch = vk.BaseWrapper([_]vk.BaseCommand{
-    .create_instance,
-    .enumerate_instance_extension_properties,
+    .CreateInstance,
+    .EnumerateInstanceExtensionProperties,
+    .EnumerateInstanceLayerProperties,
 });
 
 const InstanceDispath = vk.InstanceWrapper([_]vk.InstanceCommand{
-    .destroy_instance,
+    .DestroyInstance,
 });
 
-const InstanceObject = struct {
+// TODO: Unit testing
+const GfxContext = struct {
     const Self = @This();
 
-    instance: vk.Instance,
+    vkb: BaseDispatch,
     vki: InstanceDispath,
+
+    instance: vk.Instance,
+    allocator: *Allocator,
 
     // Caller should make sure to call deinit
     pub fn init(allocator: *Allocator) !Self {
@@ -51,39 +56,57 @@ const InstanceObject = struct {
         var glfw_extensions_count: u32 = 0;
         const glfw_extensions_raw = c.glfwGetRequiredInstanceExtensions(&glfw_extensions_count);
 
-
         // load base dispatch wrapper
         const vkb = try BaseDispatch.load(c.glfwGetInstanceProcAddress);
 
-        // query extensions available
-        var supported_extensions_count: u32 = 0;
-        // ignore result, TODO: handle "VkResult.incomplete"
-        _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, null);
-        var extensions = try ArrayList(vk.ExtensionProperties).initCapacity(allocator, supported_extensions_count);
-        _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, extensions.items.ptr);
-        extensions.items.len = supported_extensions_count;
-        defer extensions.deinit();
+        // TODO: move to checkExtensions fn
+        // // query extensions available
+        // var supported_extensions_count: u32 = 0;
+        // // ignore result, TODO: handle "VkResult.incomplete"
+        // _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, null);
+        // var extensions = try ArrayList(vk.ExtensionProperties).initCapacity(allocator, supported_extensions_count);
+        // _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, extensions.items.ptr);
+        // extensions.items.len = supported_extensions_count;
+        // defer extensions.deinit();
 
-        for (extensions.items) |ext| {
-            std.debug.print("{s}\n", .{ext.extension_name});
+        // for (extensions.items) |ext| {
+        //     std.debug.print("{s}\n", .{ext.extension_name});
+        // }
+
+        var enabled_layer_count: u8 = 0;
+        var enabled_layer_names: [*]const [*:0]const u8 = undefined;
+        if (enable_validation_layers) {
+            const validation_layers = [_][*:0] const u8{ "VK_LAYER_KHRONOS_validation" };
+            const is_valid = try isValidationLayersPresent(allocator, vkb, validation_layers[0..validation_layers.len]);
+            if (!is_valid) {
+                std.debug.panic("debug build without validation layer support", .{});
+            }
+            enabled_layer_count = validation_layers.len;
+            enabled_layer_names = @ptrCast([*]const [*:0]const u8, &validation_layers);
         }
 
         const instanceInfo = vk.InstanceCreateInfo {
             .p_next = null,
             .flags = undefined,
             .p_application_info = &appInfo,
-            .enabled_layer_count = 0,
-            .pp_enabled_layer_names = undefined,
+            .enabled_layer_count = enabled_layer_count,
+            .pp_enabled_layer_names = enabled_layer_names,
             .enabled_extension_count = @intCast(u32, glfw_extensions_count),
             .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, glfw_extensions_raw),
         };
         var instance = try vkb.createInstance(instanceInfo, null);
-        const vki = try InstanceDispath.load(instance, c.glfwGetInstanceProcAddress);
         
-        return Self {
-            .instance = instance,
+        const vki = try InstanceDispath.load(instance, c.glfwGetInstanceProcAddress);
+        errdefer vki.destroyInstance(instance, null);
+        
+        const self = Self {
+            .vkb = vkb,
             .vki = vki,
+            .instance = instance,
+            .allocator = allocator,
         };
+
+        return self;
     }
 
     pub fn deinit(self: Self) void {
@@ -91,16 +114,42 @@ const InstanceObject = struct {
     }
 };
 
+/// check if validation layer exist
+fn isValidationLayersPresent(allocator: *Allocator, vkb: BaseDispatch, target_layers: []const [*:0]const u8) !bool {
+    var layer_count: u32 = 0;
+    // TODO: handle vk.INCOMPLETE
+    _ = try vkb.enumerateInstanceLayerProperties(&layer_count, null);
+
+    var available_layers = try ArrayList(vk.LayerProperties).initCapacity(allocator, layer_count);
+    defer available_layers.deinit();
+
+    _ = try vkb.enumerateInstanceLayerProperties(&layer_count, available_layers.items.ptr);
+    available_layers.items.len = layer_count;
+
+    for (target_layers) |target_layer| {
+        // check if target layer exist in available_layers
+        inner: for (available_layers.items) |available_layer| {
+            const layer_name = available_layer.layer_name;
+            // if target_layer and available_layer is the same
+            if (std.cstr.cmp(target_layer, @ptrCast([*:0]const u8, &layer_name)) == 0) {
+                break :inner;
+            }
+        } else return false; // if our loop never break, then a requested layer is missing
+    }
+
+    return true;
+}
+
 fn handleGLFWError() noreturn {
     var description: [*c][*c]u8 = null;
     switch (c.glfwGetError(description)) {
         c.GLFW_NOT_INITIALIZED => {
             // TODO: use stderr
             // std.debug.print("Error description: {s}", .{std.mem.span(description.*)});
-            std.debug.panic("GLFW not initialized, call glfwInit", .{});
+            std.debug.panic("GLFW not initialized, call glfwInit()", .{});
         },
         else => |err_code| {
-            std.debug.panic("Unhandeled glfw error {d}", .{err_code});
+            std.debug.panic("unhandeled glfw error {d}", .{err_code});
         }
     }
 }
@@ -176,7 +225,7 @@ pub fn main() anyerror!void {
     c.glfwWindowHint(c.GLFW_RESIZABLE, c.GLFW_FALSE);
 
     if (c.glfwVulkanSupported() == c.GLFW_FALSE) {
-        std.debug.panic("Vulkan not supported on device (glfw)", .{});
+        std.debug.panic("vulkan not supported on device (glfw)", .{});
     }
 
     // Create a windowed mode window and its OpenGL context
@@ -191,8 +240,8 @@ pub fn main() anyerror!void {
     // Make the window's context current 
     c.glfwMakeContextCurrent(window);
     // Construct our vulkan instance
-    const vkInstance = try InstanceObject.init(&gpa.allocator);
-    defer vkInstance.deinit();
+    const ctx = try GfxContext.init(&gpa.allocator);
+    defer ctx.deinit();
 
     // Loop until the user closes the window 
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE)
