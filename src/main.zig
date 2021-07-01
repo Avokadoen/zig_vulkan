@@ -53,25 +53,17 @@ const GfxContext = struct {
             .api_version = vk.API_VERSION_1_2,
         };
 
-        var glfw_extensions_count: u32 = 0;
-        const glfw_extensions_raw = c.glfwGetRequiredInstanceExtensions(&glfw_extensions_count);
+        const application_extensions = blk: {
+            if (enable_validation_layers) {
+                break :blk [_][*:0] const u8 { vk.extension_info.ext_debug_report.name };
+            }
+            break :blk [_][*:0] const u8 { };
+        };
+        const extensions = try getRequiredInstanceExtensions(allocator, application_extensions[0..application_extensions.len]);
+        defer extensions.deinit();
 
         // load base dispatch wrapper
         const vkb = try BaseDispatch.load(c.glfwGetInstanceProcAddress);
-
-        // TODO: move to checkExtensions fn
-        // // query extensions available
-        // var supported_extensions_count: u32 = 0;
-        // // ignore result, TODO: handle "VkResult.incomplete"
-        // _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, null);
-        // var extensions = try ArrayList(vk.ExtensionProperties).initCapacity(allocator, supported_extensions_count);
-        // _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, extensions.items.ptr);
-        // extensions.items.len = supported_extensions_count;
-        // defer extensions.deinit();
-
-        // for (extensions.items) |ext| {
-        //     std.debug.print("{s}\n", .{ext.extension_name});
-        // }
 
         var enabled_layer_count: u8 = 0;
         var enabled_layer_names: [*]const [*:0]const u8 = undefined;
@@ -91,8 +83,8 @@ const GfxContext = struct {
             .p_application_info = &appInfo,
             .enabled_layer_count = enabled_layer_count,
             .pp_enabled_layer_names = enabled_layer_names,
-            .enabled_extension_count = @intCast(u32, glfw_extensions_count),
-            .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, glfw_extensions_raw),
+            .enabled_extension_count = @intCast(u32, extensions.items.len),
+            .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, extensions.items.ptr),
         };
         var instance = try vkb.createInstance(instanceInfo, null);
         
@@ -140,6 +132,41 @@ fn isValidationLayersPresent(allocator: *Allocator, vkb: BaseDispatch, target_la
     return true;
 }
 
+// TODO (see isValidationLayersPresent())
+// fn isExtensionsPresent(allocator: *Allocator, vkb, target_extensions: []const [*:0]const u8) !bool {
+    // // query extensions available
+    // var supported_extensions_count: u32 = 0;
+    // // ignore result, TODO: handle "VkResult.incomplete"
+    // _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, null);
+    // var extensions = try ArrayList(vk.ExtensionProperties).initCapacity(allocator, supported_extensions_count);
+    // _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, extensions.items.ptr);
+    // extensions.items.len = supported_extensions_count;
+    // defer extensions.deinit();
+
+    // for (extensions.items) |ext| {
+    //     std.debug.print("{s}\n", .{ext.extension_name});
+    // }
+// }
+
+/// Caller must deinit returned ArrayList
+fn getRequiredInstanceExtensions(allocator: *Allocator, target_extensions: []const [*:0] const u8) !ArrayList([*:0]const u8) {
+    var glfw_extensions_count: u32 = 0;
+    const glfw_extensions_raw = c.glfwGetRequiredInstanceExtensions(&glfw_extensions_count);
+    const glfw_extensions_slice = glfw_extensions_raw[0..glfw_extensions_count];
+
+    var extensions = try ArrayList([*:0]const u8).initCapacity(allocator, glfw_extensions_count + 1);
+
+    for (glfw_extensions_slice) |extension| {
+        try extensions.append(extension);
+    }
+
+    for (target_extensions) |extension| {
+        try extensions.append(extension);
+    }
+
+    return extensions;
+}
+
 fn handleGLFWError() noreturn {
     var description: [*c][*c]u8 = null;
     switch (c.glfwGetError(description)) {
@@ -153,50 +180,6 @@ fn handleGLFWError() noreturn {
         }
     }
 }
-
-// // source: https://github.com/andrewrk/zig-vulkan-triangle/blob/04c344e20451650b43b2b5b0216bb8d286813dfc/src/main.zig#L883
-// fn debugCallback(
-//     flags: vk.DebugReportFlagsEXT,
-//     objType: vk.DebugReportObjectTypeEXT,
-//     obj: u64,
-//     location: usize,
-//     code: i32,
-//     layerPrefix: [*:0]const u8,
-//     msg: [*:0]const u8,
-//     userData: ?*c_void,
-// ) callconv(.C) vk.Bool32 {
-//     std.debug.warn("validation layer: {s}\n", .{msg});
-//     return vk.FALSE;
-// }
-
-// fn setupDebugCallback() error{FailedToSetUpDebugCallback}!void {
-//     if (!enableValidationLayers) return;
-
-//     var createInfo = vk.DebugReportCallbackCreateInfoEXT {
-        /// toint
-//         .flags = vk.DebugReportFlagsEXT.error_bit_ext  vk.DebugReportFlagsEXT.warning_bit_ext,
-//         .pfnCallback = debugCallback,
-//         .pNext = null,
-//         .pUserData = null,
-//     };
-
-//     if (CreateDebugReportCallbackEXT(&createInfo, null, &callback) != vk.SUCCESS) {
-//         return error.FailedToSetUpDebugCallback;
-//     }
-// }
-
-// fn CreateDebugReportCallbackEXT(
-//     pCreateInfo: *const c.VkDebugReportCallbackCreateInfoEXT,
-//     pAllocator: ?*const c.VkAllocationCallbacks,
-//     pCallback: *c.VkDebugReportCallbackEXT,
-// ) c.VkResult {
-//     const func = @ptrCast(c.PFN_vkCreateDebugReportCallbackEXT, vk.GetInstanceProcAddr(
-//         instance,
-//         "vkCreateDebugReportCallbackEXT",
-//     )) orelse return c.VK_ERROR_EXTENSION_NOT_PRESENT;
-//     return func(instance, pCreateInfo, pAllocator, pCallback);
-// }
-
 
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
