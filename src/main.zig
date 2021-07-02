@@ -3,6 +3,8 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
+// Source: https://vulkan-tutorial.com
+
 const dbg = std.builtin.mode == std.builtin.Mode.Debug;
 
 // TODO: update, see: https://github.com/prime31/zig-ecs/pull/10
@@ -23,23 +25,29 @@ const application_name = "zig vulkan";
 const engine_name = "nop";
 
 const BaseDispatch = vk.BaseWrapper([_]vk.BaseCommand{
-    .create_instance,
-    .enumerate_instance_extension_properties,
-    .enumerate_instance_layer_properties,
+    .CreateInstance,
+    .EnumerateInstanceExtensionProperties,
+    .EnumerateInstanceLayerProperties,
 });
 
-const InstanceDispath = vk.InstanceWrapper([_]vk.InstanceCommand{
-    .destroy_instance,
+const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{
+    .DestroyInstance,
+    .CreateDebugUtilsMessengerEXT,
+    .DestroyDebugUtilsMessengerEXT,
 });
 
+// TODO: Unit testing
 const GfxContext = struct {
     const Self = @This();
 
+    allocator: *Allocator,
+
     vkb: BaseDispatch,
-    vki: InstanceDispath,
+    vki: InstanceDispatch,
 
     instance: vk.Instance,
-    allocator: *Allocator,
+    // TODO: utilize comptime for this
+    messenger: ?vk.DebugUtilsMessengerEXT,
 
     // Caller should make sure to call deinit
     pub fn init(allocator: *Allocator) !Self {
@@ -52,87 +60,177 @@ const GfxContext = struct {
             .api_version = vk.API_VERSION_1_2,
         };
 
-        var glfw_extensions_count: u32 = 0;
-        const glfw_extensions_raw = c.glfwGetRequiredInstanceExtensions(&glfw_extensions_count);
+        const application_extensions = blk: {
+            if (enable_validation_layers) {
+                break :blk [_][*:0] const u8 { 
+                    vk.extension_info.ext_debug_report.name, 
+                    vk.extension_info.ext_debug_utils.name 
+                };
+            }
+            break :blk [_][*:0] const u8 { };
+        };
+        const extensions = try getRequiredInstanceExtensions(allocator, application_extensions[0..application_extensions.len]);
+        defer extensions.deinit();
 
         // load base dispatch wrapper
         const vkb = try BaseDispatch.load(c.glfwGetInstanceProcAddress);
 
-        // TODO: move to checkExtensions fn
-        // // query extensions available
-        // var supported_extensions_count: u32 = 0;
-        // // ignore result, TODO: handle "VkResult.incomplete"
-        // _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, null);
-        // var extensions = try ArrayList(vk.ExtensionProperties).initCapacity(allocator, supported_extensions_count);
-        // _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, extensions.items.ptr);
-        // extensions.items.len = supported_extensions_count;
-        // defer extensions.deinit();
-
-        // for (extensions.items) |ext| {
-        //     std.debug.print("{s}\n", .{ext.extension_name});
-        // }
+        var enabled_layer_count: u8 = 0;
+        var enabled_layer_names: [*]const [*:0]const u8 = undefined;
+        if (enable_validation_layers) {
+            const validation_layers = [_][*:0] const u8{ "VK_LAYER_KHRONOS_validation" };
+            const is_valid = try isValidationLayersPresent(allocator, vkb, validation_layers[0..validation_layers.len]);
+            if (!is_valid) {
+                std.debug.panic("debug build without validation layer support", .{});
+            }
+            enabled_layer_count = validation_layers.len;
+            enabled_layer_names = @ptrCast([*]const [*:0]const u8, &validation_layers);
+        }
 
         const instanceInfo = vk.InstanceCreateInfo {
             .p_next = null,
-            .flags = undefined,
+            .flags = 0,
             .p_application_info = &appInfo,
-            .enabled_layer_count = 0,
-            .pp_enabled_layer_names = undefined,
-            .enabled_extension_count = @intCast(u32, glfw_extensions_count),
-            .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, glfw_extensions_raw),
+            .enabled_layer_count = enabled_layer_count,
+            .pp_enabled_layer_names = enabled_layer_names,
+            .enabled_extension_count = @intCast(u32, extensions.items.len),
+            .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, extensions.items.ptr),
         };
         var instance = try vkb.createInstance(instanceInfo, null);
         
-        const vki = try InstanceDispath.load(instance, c.glfwGetInstanceProcAddress);
+        const vki = try InstanceDispatch.load(instance, c.glfwGetInstanceProcAddress);
         errdefer vki.destroyInstance(instance, null);
+
+        const messenger = try setupDebugCallback(vki, instance);
         
-        const self = Self {
+        return Self {
             .vkb = vkb,
             .vki = vki,
             .instance = instance,
             .allocator = allocator,
+            .messenger = messenger,
         };
-
-        if (enable_validation_layers) {
-            const validation_layers = [_][:0] const u8{ "VK_LAYER_KHRONOS_validation" };
-            const is_valid = try isValidationLayersPresent(self, validation_layers[0..validation_layers.len]);
-            if (!is_valid) {
-                std.debug.panic("debug build without validation layer support", .{});
-            }
-        }
-
-        return self;
     }
-
-    /// check if validation layer exist
-    pub fn isValidationLayersPresent(self: Self, target_layers: []const [:0]const u8) !bool {
-        var layer_count: u32 = 0;
-        // TODO: handle vk.INCOMPLETE
-        _ = try self.vkb.enumerateInstanceLayerProperties(&layer_count, null);
-
-        var available_layers = try ArrayList(vk.LayerProperties).initCapacity(self.allocator, layer_count);
-        _ = try self.vkb.enumerateInstanceLayerProperties(&layer_count, available_layers.items.ptr);
-        available_layers.items.len = layer_count;
-
-        for (target_layers) |target_layer| {
-            // check if target layer exist in available_layers
-            for (available_layers.items) |available_layer| {
-                const layer_name = available_layer.layer_name;
-                // TODO: not proper way of comparing two c strings
-                if (std.mem.eql(u8, target_layer, layer_name[0..layer_name.len])) {
-                    break;
-                }
-            } else return false;
-        }
-
-        return true;
-    }
-
 
     pub fn deinit(self: Self) void {
+        if (enable_validation_layers) {
+            // broken, see: https://github.com/Snektron/vulkan-zig/issues/13
+            self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.messenger.?, null);
+        }
+
         self.vki.destroyInstance(self.instance, null);
     }
 };
+
+/// check if validation layer exist
+fn isValidationLayersPresent(allocator: *Allocator, vkb: BaseDispatch, target_layers: []const [*:0]const u8) !bool {
+    var layer_count: u32 = 0;
+    // TODO: handle vk.INCOMPLETE
+    _ = try vkb.enumerateInstanceLayerProperties(&layer_count, null);
+
+    var available_layers = try ArrayList(vk.LayerProperties).initCapacity(allocator, layer_count);
+    defer available_layers.deinit();
+
+    _ = try vkb.enumerateInstanceLayerProperties(&layer_count, available_layers.items.ptr);
+    available_layers.items.len = layer_count;
+
+    for (target_layers) |target_layer| {
+        // check if target layer exist in available_layers
+        inner: for (available_layers.items) |available_layer| {
+            const layer_name = available_layer.layer_name;
+            // if target_layer and available_layer is the same
+            if (std.cstr.cmp(target_layer, @ptrCast([*:0]const u8, &layer_name)) == 0) {
+                break :inner;
+            }
+        } else return false; // if our loop never break, then a requested layer is missing
+    }
+
+    return true;
+}
+
+// TODO (see isValidationLayersPresent())
+// fn isExtensionsPresent(allocator: *Allocator, vkb, target_extensions: []const [*:0]const u8) !bool {
+    // // query extensions available
+    // var supported_extensions_count: u32 = 0;
+    // // ignore result, TODO: handle "VkResult.incomplete"
+    // _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, null);
+    // var extensions = try ArrayList(vk.ExtensionProperties).initCapacity(allocator, supported_extensions_count);
+    // _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, extensions.items.ptr);
+    // extensions.items.len = supported_extensions_count;
+    // defer extensions.deinit();
+
+    // for (extensions.items) |ext| {
+    //     std.debug.print("{s}\n", .{ext.extension_name});
+    // }
+// }
+
+/// Caller must deinit returned ArrayList
+fn getRequiredInstanceExtensions(allocator: *Allocator, target_extensions: []const [*:0] const u8) !ArrayList([*:0]const u8) {
+    var glfw_extensions_count: u32 = 0;
+    const glfw_extensions_raw = c.glfwGetRequiredInstanceExtensions(&glfw_extensions_count);
+    const glfw_extensions_slice = glfw_extensions_raw[0..glfw_extensions_count];
+
+    var extensions = try ArrayList([*:0]const u8).initCapacity(allocator, glfw_extensions_count + 1);
+
+    for (glfw_extensions_slice) |extension| {
+        try extensions.append(extension);
+    }
+
+    for (target_extensions) |extension| {
+        try extensions.append(extension);
+    }
+
+    return extensions;
+}
+
+fn messageCallback(
+    message_severity: vk.DebugUtilsMessageSeverityFlagsEXT.IntType,
+    message_types: vk.DebugUtilsMessageTypeFlagsEXT.IntType,
+    p_callback_data: *const vk.DebugUtilsMessengerCallbackDataEXT,
+    p_user_data: *c_void,
+) callconv(vk.vulkan_call_conv) vk.Bool32 {
+    // keep parameters for API, "if (false)"" ensures no runtime cost
+    if (false) {
+        _ = message_severity;
+        _ = message_types;
+        _ = p_user_data;
+    }
+
+    // TODO: pass stdout in p_user_data or otherwise avoid global stdout
+    stdout.print("validation layer: {s}\n", .{p_callback_data.p_message}) catch { 
+        std.debug.print("error from stdout print in message callback", .{});
+    };
+    return vk.FALSE;
+}
+
+fn setupDebugCallback(vki: InstanceDispatch, instance: vk.Instance) !?vk.DebugUtilsMessengerEXT {
+    if (!enable_validation_layers) return null;
+
+    const message_severity = vk.DebugUtilsMessageSeverityFlagsEXT {
+        .verbose_bit_ext = true,
+        .warning_bit_ext = true,
+        .error_bit_ext = true,
+    };
+
+    const message_type = vk.DebugUtilsMessageTypeFlagsEXT {
+        .general_bit_ext = true,
+        .validation_bit_ext = true,
+        .performance_bit_ext = true,
+    };
+
+    const create_info = vk.DebugUtilsMessengerCreateInfoEXT {
+        .flags = vk.DebugUtilsMessengerCreateFlagsEXT { },
+        .message_severity = message_severity,
+        .message_type = message_type,
+        .pfn_user_callback = messageCallback,
+        .p_user_data = null,
+    };
+
+    return vki.createDebugUtilsMessengerEXT(instance, create_info, null) catch {
+        std.debug.panic("failed to create debug messenger", .{});
+    };
+}
+
 
 fn handleGLFWError() noreturn {
     var description: [*c][*c]u8 = null;
@@ -148,52 +246,11 @@ fn handleGLFWError() noreturn {
     }
 }
 
-// // source: https://github.com/andrewrk/zig-vulkan-triangle/blob/04c344e20451650b43b2b5b0216bb8d286813dfc/src/main.zig#L883
-// fn debugCallback(
-//     flags: vk.DebugReportFlagsEXT,
-//     objType: vk.DebugReportObjectTypeEXT,
-//     obj: u64,
-//     location: usize,
-//     code: i32,
-//     layerPrefix: [*:0]const u8,
-//     msg: [*:0]const u8,
-//     userData: ?*c_void,
-// ) callconv(.C) vk.Bool32 {
-//     std.debug.warn("validation layer: {s}\n", .{msg});
-//     return vk.FALSE;
-// }
-
-// fn setupDebugCallback() error{FailedToSetUpDebugCallback}!void {
-//     if (!enableValidationLayers) return;
-
-//     var createInfo = vk.DebugReportCallbackCreateInfoEXT {
-        /// toint
-//         .flags = vk.DebugReportFlagsEXT.error_bit_ext  vk.DebugReportFlagsEXT.warning_bit_ext,
-//         .pfnCallback = debugCallback,
-//         .pNext = null,
-//         .pUserData = null,
-//     };
-
-//     if (CreateDebugReportCallbackEXT(&createInfo, null, &callback) != vk.SUCCESS) {
-//         return error.FailedToSetUpDebugCallback;
-//     }
-// }
-
-// fn CreateDebugReportCallbackEXT(
-//     pCreateInfo: *const c.VkDebugReportCallbackCreateInfoEXT,
-//     pAllocator: ?*const c.VkAllocationCallbacks,
-//     pCallback: *c.VkDebugReportCallbackEXT,
-// ) c.VkResult {
-//     const func = @ptrCast(c.PFN_vkCreateDebugReportCallbackEXT, vk.GetInstanceProcAddr(
-//         instance,
-//         "vkCreateDebugReportCallbackEXT",
-//     )) orelse return c.VK_ERROR_EXTENSION_NOT_PRESENT;
-//     return func(instance, pCreateInfo, pAllocator, pCallback);
-// }
-
+var stdout: std.fs.File.Writer = undefined;
 
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
+    stdout = std.io.getStdOut().writer();
 
     // TODO: use c_allocator in optimized compile mode since we have to link with libc anyways
     // create a gpa with default configuration
