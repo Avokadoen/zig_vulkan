@@ -3,6 +3,8 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
+// Source: https://vulkan-tutorial.com
+
 const dbg = std.builtin.mode == std.builtin.Mode.Debug;
 
 // TODO: update, see: https://github.com/prime31/zig-ecs/pull/10
@@ -28,19 +30,24 @@ const BaseDispatch = vk.BaseWrapper([_]vk.BaseCommand{
     .EnumerateInstanceLayerProperties,
 });
 
-const InstanceDispath = vk.InstanceWrapper([_]vk.InstanceCommand{
+const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{
     .DestroyInstance,
+    .CreateDebugUtilsMessengerEXT,
+    .DestroyDebugUtilsMessengerEXT,
 });
 
 // TODO: Unit testing
 const GfxContext = struct {
     const Self = @This();
 
+    allocator: *Allocator,
+
     vkb: BaseDispatch,
-    vki: InstanceDispath,
+    vki: InstanceDispatch,
 
     instance: vk.Instance,
-    allocator: *Allocator,
+    // TODO: utilize comptime for this
+    messenger: ?vk.DebugUtilsMessengerEXT,
 
     // Caller should make sure to call deinit
     pub fn init(allocator: *Allocator) !Self {
@@ -55,7 +62,10 @@ const GfxContext = struct {
 
         const application_extensions = blk: {
             if (enable_validation_layers) {
-                break :blk [_][*:0] const u8 { vk.extension_info.ext_debug_report.name };
+                break :blk [_][*:0] const u8 { 
+                    vk.extension_info.ext_debug_report.name, 
+                    vk.extension_info.ext_debug_utils.name 
+                };
             }
             break :blk [_][*:0] const u8 { };
         };
@@ -88,20 +98,26 @@ const GfxContext = struct {
         };
         var instance = try vkb.createInstance(instanceInfo, null);
         
-        const vki = try InstanceDispath.load(instance, c.glfwGetInstanceProcAddress);
+        const vki = try InstanceDispatch.load(instance, c.glfwGetInstanceProcAddress);
         errdefer vki.destroyInstance(instance, null);
+
+        const messenger = try setupDebugCallback(vki, instance);
         
-        const self = Self {
+        return Self {
             .vkb = vkb,
             .vki = vki,
             .instance = instance,
             .allocator = allocator,
+            .messenger = messenger,
         };
-
-        return self;
     }
 
     pub fn deinit(self: Self) void {
+        if (enable_validation_layers) {
+            // broken, see: https://github.com/Snektron/vulkan-zig/issues/13
+            self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.messenger.?, null);
+        }
+
         self.vki.destroyInstance(self.instance, null);
     }
 };
@@ -167,6 +183,48 @@ fn getRequiredInstanceExtensions(allocator: *Allocator, target_extensions: []con
     return extensions;
 }
 
+fn messageCallback(
+    message_severity: vk.DebugUtilsMessageSeverityFlagsEXT.IntType,
+    message_types: vk.DebugUtilsMessageTypeFlagsEXT.IntType,
+    p_callback_data: *const vk.DebugUtilsMessengerCallbackDataEXT,
+    p_user_data: *c_void,
+) callconv(vk.vulkan_call_conv) vk.Bool32 {
+    // TODO: pass stdout in p_user_data or otherwise avoid global stdout
+    stdout.print("validation layer: {s}\n", .{p_callback_data.p_message}) catch { 
+        std.debug.print("error from stdout print in message callback", .{});
+    };
+    return vk.FALSE;
+}
+
+fn setupDebugCallback(vki: InstanceDispatch, instance: vk.Instance) !?vk.DebugUtilsMessengerEXT {
+    if (!enable_validation_layers) return null;
+
+    const message_severity = vk.DebugUtilsMessageSeverityFlagsEXT {
+        .verbose_bit_ext = true,
+        .warning_bit_ext = true,
+        .error_bit_ext = true,
+    };
+
+    const message_type = vk.DebugUtilsMessageTypeFlagsEXT {
+        .general_bit_ext = true,
+        .validation_bit_ext = true,
+        .performance_bit_ext = true,
+    };
+
+    const create_info = vk.DebugUtilsMessengerCreateInfoEXT {
+        .flags = vk.DebugUtilsMessengerCreateFlagsEXT { },
+        .message_severity = message_severity,
+        .message_type = message_type,
+        .pfn_user_callback = messageCallback,
+        .p_user_data = null,
+    };
+
+    return vki.createDebugUtilsMessengerEXT(instance, create_info, null) catch {
+        std.debug.panic("failed to create debug messenger", .{});
+    };
+}
+
+
 fn handleGLFWError() noreturn {
     var description: [*c][*c]u8 = null;
     switch (c.glfwGetError(description)) {
@@ -181,8 +239,11 @@ fn handleGLFWError() noreturn {
     }
 }
 
+var stdout: std.fs.File.Writer = undefined;
+
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
+    stdout = std.io.getStdOut().writer();
 
     // TODO: use c_allocator in optimized compile mode since we have to link with libc anyways
     // create a gpa with default configuration
