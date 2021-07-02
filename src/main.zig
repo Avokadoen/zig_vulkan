@@ -89,7 +89,7 @@ const GfxContext = struct {
 
         const instanceInfo = vk.InstanceCreateInfo {
             .p_next = null,
-            .flags = 0,
+            .flags = vk.InstanceCreateFlags {},
             .p_application_info = &appInfo,
             .enabled_layer_count = enabled_layer_count,
             .pp_enabled_layer_names = enabled_layer_names,
