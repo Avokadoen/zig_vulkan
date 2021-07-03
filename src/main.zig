@@ -19,6 +19,11 @@ const GLFWError = error {
     WindowCreationFailed
 };
 
+const Writers = struct {
+    stdout: *const std.fs.File.Writer,
+    stderr: *const std.fs.File.Writer,
+};
+
 // enable validation layer in debug
 const enable_validation_layers = std.builtin.mode == .Debug;
 const application_name = "zig vulkan";
@@ -50,7 +55,7 @@ const GfxContext = struct {
     messenger: ?vk.DebugUtilsMessengerEXT,
 
     // Caller should make sure to call deinit
-    pub fn init(allocator: *Allocator) !Self {
+    pub fn init(allocator: *Allocator, writers: *Writers) !Self {
         const appInfo = vk.ApplicationInfo {
             .p_next = null,
             .p_application_name = application_name,
@@ -77,6 +82,7 @@ const GfxContext = struct {
 
         var enabled_layer_count: u8 = 0;
         var enabled_layer_names: [*]const [*:0]const u8 = undefined;
+        var create_p_next: ?*c_void = null;
         if (enable_validation_layers) {
             const validation_layers = [_][*:0] const u8{ "VK_LAYER_KHRONOS_validation" };
             const is_valid = try isValidationLayersPresent(allocator, vkb, validation_layers[0..validation_layers.len]);
@@ -85,10 +91,13 @@ const GfxContext = struct {
             }
             enabled_layer_count = validation_layers.len;
             enabled_layer_names = @ptrCast([*]const [*:0]const u8, &validation_layers);
+
+            var debug_create_info = createDefaultDebugCreateInfo(writers);
+            create_p_next = @ptrCast(?*c_void, &debug_create_info);
         }
 
         const instanceInfo = vk.InstanceCreateInfo {
-            .p_next = null,
+            .p_next = create_p_next,
             .flags = vk.InstanceCreateFlags {},
             .p_application_info = &appInfo,
             .enabled_layer_count = enabled_layer_count,
@@ -96,12 +105,13 @@ const GfxContext = struct {
             .enabled_extension_count = @intCast(u32, extensions.items.len),
             .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, extensions.items.ptr),
         };
+
         var instance = try vkb.createInstance(instanceInfo, null);
         
         const vki = try InstanceDispatch.load(instance, c.glfwGetInstanceProcAddress);
         errdefer vki.destroyInstance(instance, null);
 
-        const messenger = try setupDebugCallback(vki, instance);
+        const messenger = try setupDebugCallback(vki, instance, writers);
         
         return Self {
             .vkb = vkb,
@@ -114,7 +124,6 @@ const GfxContext = struct {
 
     pub fn deinit(self: Self) void {
         if (enable_validation_layers) {
-            // broken, see: https://github.com/Snektron/vulkan-zig/issues/13
             self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.messenger.?, null);
         }
 
@@ -189,23 +198,30 @@ fn messageCallback(
     p_callback_data: *const vk.DebugUtilsMessengerCallbackDataEXT,
     p_user_data: *c_void,
 ) callconv(vk.vulkan_call_conv) vk.Bool32 {
-    // keep parameters for API, "if (false)"" ensures no runtime cost
+    // TODO: figure out if the if is needed
+    // keep parameters for API, "if (false)"" ensures no runtime cost 
     if (false) {
-        _ = message_severity;
         _ = message_types;
-        _ = p_user_data;
     }
+    const writers = @ptrCast(*Writers, @alignCast(@alignOf(*Writers), p_user_data));
+    const error_mask = comptime blk: {
+        break :blk vk.DebugUtilsMessageSeverityFlagsEXT { 
+            .warning_bit_ext = true, 
+            .error_bit_ext = true, 
+        };
+    };
+    const is_severe = error_mask.toInt() & message_severity > 0;
+    const writer = if (is_severe) writers.stderr.* else writers.stdout.*; 
 
-    // TODO: pass stdout in p_user_data or otherwise avoid global stdout
-    stdout.print("validation layer: {s}\n", .{p_callback_data.p_message}) catch { 
+    writer.print("validation layer: {s}\n", .{p_callback_data.p_message}) catch { 
         std.debug.print("error from stdout print in message callback", .{});
     };
+
     return vk.FALSE;
 }
 
-fn setupDebugCallback(vki: InstanceDispatch, instance: vk.Instance) !?vk.DebugUtilsMessengerEXT {
-    if (!enable_validation_layers) return null;
-
+// TODO: we don't need this, we can pass a createinfo from the init function
+fn createDefaultDebugCreateInfo(writers: *Writers) vk.DebugUtilsMessengerCreateInfoEXT {
     const message_severity = vk.DebugUtilsMessageSeverityFlagsEXT {
         .verbose_bit_ext = true,
         .warning_bit_ext = true,
@@ -218,13 +234,19 @@ fn setupDebugCallback(vki: InstanceDispatch, instance: vk.Instance) !?vk.DebugUt
         .performance_bit_ext = true,
     };
 
-    const create_info = vk.DebugUtilsMessengerCreateInfoEXT {
+    return vk.DebugUtilsMessengerCreateInfoEXT {
         .flags = vk.DebugUtilsMessengerCreateFlagsEXT { },
         .message_severity = message_severity,
         .message_type = message_type,
         .pfn_user_callback = messageCallback,
-        .p_user_data = null,
+        .p_user_data = @ptrCast(?*c_void, writers),
     };
+} 
+
+fn setupDebugCallback(vki: InstanceDispatch, instance: vk.Instance, writers: *Writers) !?vk.DebugUtilsMessengerEXT {
+    if (!enable_validation_layers) return null;
+
+    const create_info = createDefaultDebugCreateInfo(writers);
 
     return vki.createDebugUtilsMessengerEXT(instance, create_info, null) catch {
         std.debug.panic("failed to create debug messenger", .{});
@@ -246,11 +268,9 @@ fn handleGLFWError() noreturn {
     }
 }
 
-var stdout: std.fs.File.Writer = undefined;
-
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
-    stdout = std.io.getStdOut().writer();
+    const stdout = std.io.getStdOut().writer();
 
     // TODO: use c_allocator in optimized compile mode since we have to link with libc anyways
     // create a gpa with default configuration
@@ -287,11 +307,15 @@ pub fn main() anyerror!void {
             handleGLFWError();
         }
     };   
+    defer c.glfwDestroyWindow(window);
     
     // Make the window's context current 
     c.glfwMakeContextCurrent(window);
+
+    // TODO: find a way to convert to const 
+    var writers = Writers { .stdout = &stdout, .stderr = &stderr};
     // Construct our vulkan instance
-    const ctx = try GfxContext.init(&gpa.allocator);
+    const ctx = try GfxContext.init(&gpa.allocator, &writers);
     defer ctx.deinit();
 
     // Loop until the user closes the window 
