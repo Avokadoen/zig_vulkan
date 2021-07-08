@@ -39,6 +39,10 @@ const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{
     .DestroyInstance,
     .CreateDebugUtilsMessengerEXT,
     .DestroyDebugUtilsMessengerEXT,
+    .EnumeratePhysicalDevices,
+    .GetPhysicalDeviceProperties,
+    .GetPhysicalDeviceFeatures,
+    .GetPhysicalDeviceQueueFamilyProperties,
 });
 
 // TODO: Unit testing
@@ -51,6 +55,8 @@ const GfxContext = struct {
     vki: InstanceDispatch,
 
     instance: vk.Instance,
+    physical_device: vk.PhysicalDevice,
+
     // TODO: utilize comptime for this
     messenger: ?vk.DebugUtilsMessengerEXT,
 
@@ -112,11 +118,13 @@ const GfxContext = struct {
         errdefer vki.destroyInstance(instance, null);
 
         const messenger = try setupDebugCallback(vki, instance, writers);
+        const physical_device= try selectPhysicalDevice(allocator, vki, instance);
         
         return Self {
             .vkb = vkb,
             .vki = vki,
             .instance = instance,
+            .physical_device = physical_device,
             .allocator = allocator,
             .messenger = messenger,
         };
@@ -129,6 +137,7 @@ const GfxContext = struct {
 
         self.vki.destroyInstance(self.instance, null);
     }
+
 };
 
 /// check if validation layer exist
@@ -243,7 +252,7 @@ fn createDefaultDebugCreateInfo(writers: *Writers) vk.DebugUtilsMessengerCreateI
     };
 } 
 
-fn setupDebugCallback(vki: InstanceDispatch, instance: vk.Instance, writers: *Writers) !?vk.DebugUtilsMessengerEXT {
+inline fn setupDebugCallback(vki: InstanceDispatch, instance: vk.Instance, writers: *Writers) !?vk.DebugUtilsMessengerEXT {
     if (!enable_validation_layers) return null;
 
     const create_info = createDefaultDebugCreateInfo(writers);
@@ -253,7 +262,107 @@ fn setupDebugCallback(vki: InstanceDispatch, instance: vk.Instance, writers: *Wr
     };
 }
 
+/// Any suiteable GPU should result in a positive value, an unsuitable GPU might return a negative value
+inline fn deviceHeuristic(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice) i32 {
+    const property_score = blk: {
+        const device_properties = vki.getPhysicalDeviceProperties(device);
+        const discrete = @as(i32, @boolToInt(device_properties.device_type == vk.PhysicalDeviceType.discrete_gpu)) * 100;
+        break :blk discrete;
+    };
 
+    const feature_score = blk: {
+        const device_features = vki.getPhysicalDeviceFeatures(device);
+        // TODO: mechanism for requiring some features (bitmask?)
+        const atomics = @intCast(i32, device_features.fragment_stores_and_atomics); 
+        break :blk atomics;
+    };
+
+    // TODO: rewrite this if requirements does no@typeInfo(QueueFamilyIndices).Struct.fields.lent change, i.e we will not need indices at all
+    const queue_fam_score: i32 = blk: {
+        _ = getQueueFamilyIndices(allocator, vki, device) catch break :blk -1000;
+        break :blk 10;
+    };
+
+    return -100 + property_score + feature_score + queue_fam_score;
+}
+
+ // select primary physical device in init
+inline fn selectPhysicalDevice(allocator: *Allocator, vki: InstanceDispatch, instance: vk.Instance) !vk.PhysicalDevice {
+    var device_count: u32 = 0;
+    _ = try vki.enumeratePhysicalDevices(instance, &device_count, null); // TODO: handle incomplete
+    if (device_count < 0) {
+        std.debug.panic("no GPU suitable for vulkan identified");
+    }
+
+    var devices = try ArrayList(vk.PhysicalDevice).initCapacity(allocator, device_count);
+    defer devices.deinit();
+
+    _ = try vki.enumeratePhysicalDevices(instance, &device_count, devices.items.ptr); // TODO: handle incomplete
+    devices.items.len = device_count;
+
+    var device_score: i32 = -1;
+    var device_index: usize = 0;
+    for (devices.items) |device, i| {
+        const new_score = deviceHeuristic(allocator, vki, device);
+        if (device_score < new_score) {
+            device_score = new_score;
+            device_index = i;
+        }
+    }
+
+    if (device_score < 0) {
+        return error.NoSuitablePhysicalDevice;
+    } 
+
+    return devices.items[device_index];
+}
+
+const QueueFamilyIndices = struct {
+    graphics: usize, 
+    compute: usize,
+};
+
+inline fn getQueueFamilyIndices(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice) !QueueFamilyIndices {
+    var queue_family_count: u32 = 0;
+    vki.getPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, null);
+
+    var queue_families = try ArrayList(vk.QueueFamilyProperties).initCapacity(allocator, queue_family_count);
+    defer queue_families.deinit();
+
+    vki.getPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, queue_families.items.ptr);
+    queue_families.items.len = queue_family_count;
+
+    const graphics_bit = vk.QueueFlags {
+        .graphics_bit = true,
+    };
+    const compute_bit = vk.QueueFlags {
+        .compute_bit = true,
+    };
+    var indices = QueueFamilyIndices {
+        .graphics = 0,
+        .compute = 0,
+    };
+    var assigned_index_count: u32 = 0;
+    for (queue_families.items) |queue_family, i| {
+        if (queue_family.queue_flags.intersect(graphics_bit).toInt() > 0) {
+            indices.graphics = i;
+            assigned_index_count += 1;
+        } 
+        else if (queue_family.queue_flags.intersect(compute_bit).toInt() > 0) {
+            indices.compute = i;
+            assigned_index_count += 1;
+        }
+    }
+
+    const field_len = @typeInfo(QueueFamilyIndices).Struct.fields.len;
+    if (assigned_index_count != field_len) {
+        return error.MissingQueueFamilyIndex;
+    }
+
+    return indices;
+}
+
+// TODO: rewrite this 
 fn handleGLFWError() noreturn {
     var description: [*c][*c]u8 = null;
     switch (c.glfwGetError(description)) {
