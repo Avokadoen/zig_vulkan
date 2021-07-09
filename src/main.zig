@@ -7,8 +7,7 @@ const ArrayList = std.ArrayList;
 
 const dbg = std.builtin.mode == std.builtin.Mode.Debug;
 
-// TODO: update, see: https://github.com/prime31/zig-ecs/pull/10
-// const ecs = @import("ecs");
+const ecs = @import("ecs");
 const zalgebra = @import("zalgebra");
 
 const c = @import("c.zig");
