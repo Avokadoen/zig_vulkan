@@ -48,6 +48,7 @@ const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{
 
 const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{
     .DestroyDevice,
+    .GetDeviceQueue,
 });
 
 // TODO: Unit testing
@@ -63,6 +64,8 @@ const GfxContext = struct {
     instance: vk.Instance,
     physical_device: vk.PhysicalDevice,
     logical_device: vk.Device,
+
+    graphics_queue: vk.Queue,
 
     // TODO: utilize comptime for this (emit from struct if we are in release mode)
     messenger: ?vk.DebugUtilsMessengerEXT,
@@ -121,15 +124,19 @@ const GfxContext = struct {
         const logical_device = try createLogicalDevice(allocator, vkb, vki, physical_device);
 
         const vkd = try DeviceDispatch.load(logical_device, vki.dispatch.vkGetDeviceProcAddr);
+        // TODO: cache indices, avoid calling function multiple times
+        const indices = try getQueueFamilyIndices(allocator, vki, physical_device);
+        const graphics_queue = vkd.getDeviceQueue(logical_device, indices.graphics, 0);
         
         return Self {
+            .allocator = allocator,
             .vkb = vkb,
             .vki = vki,
             .vkd = vkd,
             .instance = instance,
             .physical_device = physical_device,
             .logical_device = logical_device,
-            .allocator = allocator,
+            .graphics_queue = graphics_queue,
             .messenger = messenger,
         };
     }
@@ -323,8 +330,8 @@ inline fn selectPhysicalDevice(allocator: *Allocator, vki: InstanceDispatch, ins
 }
 
 const QueueFamilyIndices = struct {
-    graphics: usize, 
-    compute: usize,
+    graphics: u32, 
+    compute: u32,
 };
 
 inline fn getQueueFamilyIndices(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice) !QueueFamilyIndices {
@@ -350,11 +357,11 @@ inline fn getQueueFamilyIndices(allocator: *Allocator, vki: InstanceDispatch, de
     var assigned_index_count: u32 = 0;
     for (queue_families.items) |queue_family, i| {
         if (queue_family.queue_flags.intersect(graphics_bit).toInt() > 0) {
-            indices.graphics = i;
+            indices.graphics = @intCast(u32, i);
             assigned_index_count += 1;
         } 
         else if (queue_family.queue_flags.intersect(compute_bit).toInt() > 0) {
-            indices.compute = i;
+            indices.compute = @intCast(u32, i);
             assigned_index_count += 1;
         }
     }
