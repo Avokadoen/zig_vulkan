@@ -1,6 +1,6 @@
 # Zig vulkan renderer
 
-A toy renderer written in zig using vulkan and sdl
+A toy renderer written in zig using vulkan and glfw
 
 # Sources:
 
