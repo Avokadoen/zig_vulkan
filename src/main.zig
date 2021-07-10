@@ -42,6 +42,12 @@ const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{
     .GetPhysicalDeviceProperties,
     .GetPhysicalDeviceFeatures,
     .GetPhysicalDeviceQueueFamilyProperties,
+    .GetDeviceProcAddr,
+    .CreateDevice,
+});
+
+const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{
+    .DestroyDevice,
 });
 
 // TODO: Unit testing
@@ -52,11 +58,13 @@ const GfxContext = struct {
 
     vkb: BaseDispatch,
     vki: InstanceDispatch,
+    vkd: DeviceDispatch,
 
     instance: vk.Instance,
     physical_device: vk.PhysicalDevice,
+    logical_device: vk.Device,
 
-    // TODO: utilize comptime for this
+    // TODO: utilize comptime for this (emit from struct if we are in release mode)
     messenger: ?vk.DebugUtilsMessengerEXT,
 
     // Caller should make sure to call deinit
@@ -85,28 +93,20 @@ const GfxContext = struct {
         // load base dispatch wrapper
         const vkb = try BaseDispatch.load(c.glfwGetInstanceProcAddress);
 
-        var enabled_layer_count: u8 = 0;
-        var enabled_layer_names: [*]const [*:0]const u8 = undefined;
+        const validation_layer_info = try ValidationLayerInfo.init(allocator, vkb);
+
         var create_p_next: ?*c_void = null;
         if (enable_validation_layers) {
-            const validation_layers = [_][*:0] const u8{ "VK_LAYER_KHRONOS_validation" };
-            const is_valid = try isValidationLayersPresent(allocator, vkb, validation_layers[0..validation_layers.len]);
-            if (!is_valid) {
-                std.debug.panic("debug build without validation layer support", .{});
-            }
-            enabled_layer_count = validation_layers.len;
-            enabled_layer_names = @ptrCast([*]const [*:0]const u8, &validation_layers);
-
             var debug_create_info = createDefaultDebugCreateInfo(writers);
             create_p_next = @ptrCast(?*c_void, &debug_create_info);
         }
 
         const instanceInfo = vk.InstanceCreateInfo {
             .p_next = create_p_next,
-            .flags = vk.InstanceCreateFlags {},
+            .flags = .{},
             .p_application_info = &appInfo,
-            .enabled_layer_count = enabled_layer_count,
-            .pp_enabled_layer_names = enabled_layer_names,
+            .enabled_layer_count = validation_layer_info.enabled_layer_count,
+            .pp_enabled_layer_names = validation_layer_info.enabled_layer_names,
             .enabled_extension_count = @intCast(u32, extensions.items.len),
             .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, extensions.items.ptr),
         };
@@ -117,13 +117,18 @@ const GfxContext = struct {
         errdefer vki.destroyInstance(instance, null);
 
         const messenger = try setupDebugCallback(vki, instance, writers);
-        const physical_device= try selectPhysicalDevice(allocator, vki, instance);
+        const physical_device = try selectPhysicalDevice(allocator, vki, instance);
+        const logical_device = try createLogicalDevice(allocator, vkb, vki, physical_device);
+
+        const vkd = try DeviceDispatch.load(logical_device, vki.dispatch.vkGetDeviceProcAddr);
         
         return Self {
             .vkb = vkb,
             .vki = vki,
+            .vkd = vkd,
             .instance = instance,
             .physical_device = physical_device,
+            .logical_device = logical_device,
             .allocator = allocator,
             .messenger = messenger,
         };
@@ -134,6 +139,7 @@ const GfxContext = struct {
             self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.messenger.?, null);
         }
 
+        self.vkd.destroyDevice(self.logical_device, null);
         self.vki.destroyInstance(self.instance, null);
     }
 
@@ -243,7 +249,7 @@ fn createDefaultDebugCreateInfo(writers: *Writers) vk.DebugUtilsMessengerCreateI
     };
 
     return vk.DebugUtilsMessengerCreateInfoEXT {
-        .flags = vk.DebugUtilsMessengerCreateFlagsEXT { },
+        .flags = .{},
         .message_severity = message_severity,
         .message_type = message_type,
         .pfn_user_callback = messageCallback,
@@ -360,6 +366,100 @@ inline fn getQueueFamilyIndices(allocator: *Allocator, vki: InstanceDispatch, de
 
     return indices;
 }
+
+// TODO: this is probably a bit nono ... (Should probably explicitly set everyting to false)
+/// Construct VkPhysicalDeviceFeatures type with VkFalse as default field value 
+fn GetFalsePhysicalDeviceFeatures() type {
+    const features_type_info = @typeInfo(vk.PhysicalDeviceFeatures).Struct;
+    var new_type_fields: [features_type_info.fields.len]std.builtin.TypeInfo.StructField = undefined;
+
+    inline for (features_type_info.fields) |field, i| {
+        new_type_fields[i] = field;
+        new_type_fields[i].default_value = @intCast(u32, vk.FALSE); 
+    }
+
+    return @Type(.{
+        .Struct = .{
+            .layout = .Auto,
+            .fields = &new_type_fields,
+            .decls = &[_]std.builtin.TypeInfo.Declaration{},
+            .is_tuple = false,
+        },
+    });
+}
+const FalsePhysicalDeviceFeatures = GetFalsePhysicalDeviceFeatures();
+
+fn createLogicalDevice(allocator: *Allocator, vkb: BaseDispatch, vki: InstanceDispatch, physical_device: vk.PhysicalDevice) !vk.Device {
+    // TODO: it's a bit of waste to call this twice (we can cache it after first call in file scope later)
+    const indices = try getQueueFamilyIndices(allocator, vki, physical_device);
+    const queue_priority = [_]f32 { 1.0 };
+
+    const queue_create_info = [_]vk.DeviceQueueCreateInfo { 
+        .{
+            .flags = .{},
+            .queue_family_index = @intCast(u32, indices.graphics),
+            .queue_count = 1,
+            .p_queue_priorities = &queue_priority,
+        }
+    };
+
+    const device_features = FalsePhysicalDeviceFeatures { }; 
+
+    const validation_layer_info = try ValidationLayerInfo.init(allocator, vkb);
+
+    const create_info = vk.DeviceCreateInfo {
+        .flags = .{},
+        .queue_create_info_count = 1,
+        .p_queue_create_infos = &queue_create_info,
+        .enabled_layer_count = validation_layer_info.enabled_layer_count,
+        .pp_enabled_layer_names = validation_layer_info.enabled_layer_names,
+        .enabled_extension_count = 0,
+        .pp_enabled_extension_names = undefined,
+        .p_enabled_features = @ptrCast(*const vk.PhysicalDeviceFeatures, &device_features),
+    };
+
+    return vki.createDevice(physical_device, create_info, null);
+}
+
+fn CreateValidationLayerInfoType() type {
+    if (enable_validation_layers) {
+        return struct {
+            const Self = @This();
+
+            enabled_layer_count: u8,
+            enabled_layer_names: [*]const [*:0]const u8,
+
+            pub fn init(allocator: *Allocator, vkb: BaseDispatch) !Self {
+                const validation_layers = [_][*:0] const u8{ "VK_LAYER_KHRONOS_validation" };
+                const is_valid = try isValidationLayersPresent(allocator, vkb, validation_layers[0..validation_layers.len]);
+                if (!is_valid) {
+                    std.debug.panic("debug build without validation layer support", .{});
+                }
+
+                return Self {
+                    .enabled_layer_count = validation_layers.len,
+                    .enabled_layer_names = @ptrCast([*]const [*:0]const u8, &validation_layers),
+                };
+            }
+        };
+    } else {
+        return struct {
+            const Self = @This();
+
+            enabled_layer_count: u8,
+            enabled_layer_names: [*]const [*:0]const u8,
+
+            pub fn init(_: *Allocator, _: BaseDispatch) !Self {
+                return Self {
+                    .enabled_layer_count = 0,
+                    .enabled_layer_names = undefined,
+                };
+            }
+        };
+    }
+}
+const ValidationLayerInfo = CreateValidationLayerInfoType();
+
 
 // TODO: rewrite this 
 fn handleGLFWError() noreturn {
