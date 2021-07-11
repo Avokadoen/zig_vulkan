@@ -13,10 +13,7 @@ const zalgebra = @import("zalgebra");
 const c = @import("c.zig");
 const vk = @import("vulkan");
 
-const GLFWError = error {
-    FailedToInit,
-    WindowCreationFailed
-};
+const GLFWError = error{ FailedToInit, WindowCreationFailed };
 
 const Writers = struct {
     stdout: *const std.fs.File.Writer,
@@ -43,6 +40,7 @@ const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{
     .GetPhysicalDeviceFeatures,
     .GetPhysicalDeviceQueueFamilyProperties,
     .GetDeviceProcAddr,
+    .GetPhysicalDeviceSurfaceSupportKHR,
     .CreateDevice,
     .DestroySurfaceKHR,
 });
@@ -51,6 +49,9 @@ const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{
     .DestroyDevice,
     .GetDeviceQueue,
 });
+
+/// used to initialize different aspects of the GfxContext
+var queue_indices: ?QueueFamilyIndices = null;
 
 // TODO: Unit testing
 const GfxContext = struct {
@@ -67,6 +68,7 @@ const GfxContext = struct {
     logical_device: vk.Device,
 
     graphics_queue: vk.Queue,
+    present_queue: vk.Queue,
     surface: vk.SurfaceKHR,
 
     // TODO: utilize comptime for this (emit from struct if we are in release mode)
@@ -74,7 +76,7 @@ const GfxContext = struct {
 
     // Caller should make sure to call deinit
     pub fn init(allocator: *Allocator, window: *c.GLFWwindow, writers: *Writers) !Self {
-        const appInfo = vk.ApplicationInfo {
+        const appInfo = vk.ApplicationInfo{
             .p_next = null,
             .p_application_name = application_name,
             .application_version = vk.makeApiVersion(0, 0, 0, 1),
@@ -85,12 +87,10 @@ const GfxContext = struct {
 
         // TODO: move to global scope (currently crashes the zig compiler :') )
         const application_extensions = blk: {
-            const common_extensions = [_][*:0] const u8 { 
-                vk.extension_info.khr_surface.name
-            };
+            const common_extensions = [_][*:0]const u8{vk.extension_info.khr_surface.name};
             if (enable_validation_layers) {
-                break :blk [_][*:0] const u8 { 
-                    vk.extension_info.ext_debug_report.name, 
+                break :blk [_][*:0]const u8{
+                    vk.extension_info.ext_debug_report.name,
                     vk.extension_info.ext_debug_utils.name,
                 } ++ common_extensions;
             }
@@ -111,7 +111,7 @@ const GfxContext = struct {
             create_p_next = @ptrCast(?*c_void, &debug_create_info);
         }
 
-        const instanceInfo = vk.InstanceCreateInfo {
+        const instanceInfo = vk.InstanceCreateInfo{
             .p_next = create_p_next,
             .flags = .{},
             .p_application_info = &appInfo,
@@ -121,24 +121,26 @@ const GfxContext = struct {
             .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, extensions.items.ptr),
         };
 
-        var instance = try vkb.createInstance(instanceInfo, null);
-        
+        const instance = try vkb.createInstance(instanceInfo, null);
+
         const vki = try InstanceDispatch.load(instance, c.glfwGetInstanceProcAddress);
         errdefer vki.destroyInstance(instance, null);
 
+        const surface = try createSurface(instance, window);
+        errdefer vki.destroySurfaceKHR(instance, surface, null);
+
+        const physical_device = try selectPhysicalDevice(allocator, vki, instance, surface);
+
+        queue_indices = try getQueueFamilyIndices(allocator, vki, physical_device, surface);
+
         const messenger = try setupDebugCallback(vki, instance, writers);
-        const physical_device = try selectPhysicalDevice(allocator, vki, instance);
         const logical_device = try createLogicalDevice(allocator, vkb, vki, physical_device);
 
         const vkd = try DeviceDispatch.load(logical_device, vki.dispatch.vkGetDeviceProcAddr);
-        // TODO: cache indices, avoid calling function multiple times
-        const indices = try getQueueFamilyIndices(allocator, vki, physical_device);
-        const graphics_queue = vkd.getDeviceQueue(logical_device, indices.graphics, 0);
+        const graphics_queue = vkd.getDeviceQueue(logical_device, queue_indices.?.graphics, 0);
+        const present_queue = vkd.getDeviceQueue(logical_device, queue_indices.?.present, 0);
 
-        const surface = try createSurface(instance, window);
-        errdefer vki.destroySurfaceKHR(self.instance, self.surface, null);
-        
-        return Self {
+        return Self{
             .allocator = allocator,
             .vkb = vkb,
             .vki = vki,
@@ -147,6 +149,7 @@ const GfxContext = struct {
             .physical_device = physical_device,
             .logical_device = logical_device,
             .graphics_queue = graphics_queue,
+            .present_queue = present_queue,
             .surface = surface,
             .messenger = messenger,
         };
@@ -161,7 +164,6 @@ const GfxContext = struct {
         self.vkd.destroyDevice(self.logical_device, null);
         self.vki.destroyInstance(self.instance, null);
     }
-
 };
 
 /// check if validation layer exist
@@ -192,22 +194,22 @@ fn isValidationLayersPresent(allocator: *Allocator, vkb: BaseDispatch, target_la
 
 // TODO (see isValidationLayersPresent())
 // fn isExtensionsPresent(allocator: *Allocator, vkb, target_extensions: []const [*:0]const u8) !bool {
-    // // query extensions available
-    // var supported_extensions_count: u32 = 0;
-    // // ignore result, TODO: handle "VkResult.incomplete"
-    // _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, null);
-    // var extensions = try ArrayList(vk.ExtensionProperties).initCapacity(allocator, supported_extensions_count);
-    // _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, extensions.items.ptr);
-    // extensions.items.len = supported_extensions_count;
-    // defer extensions.deinit();
+// // query extensions available
+// var supported_extensions_count: u32 = 0;
+// // ignore result, TODO: handle "VkResult.incomplete"
+// _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, null);
+// var extensions = try ArrayList(vk.ExtensionProperties).initCapacity(allocator, supported_extensions_count);
+// _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, extensions.items.ptr);
+// extensions.items.len = supported_extensions_count;
+// defer extensions.deinit();
 
-    // for (extensions.items) |ext| {
-    //     std.debug.print("{s}\n", .{ext.extension_name});
-    // }
+// for (extensions.items) |ext| {
+//     std.debug.print("{s}\n", .{ext.extension_name});
+// }
 // }
 
 /// Caller must deinit returned ArrayList
-fn getRequiredInstanceExtensions(allocator: *Allocator, target_extensions: []const [*:0] const u8) !ArrayList([*:0]const u8) {
+fn getRequiredInstanceExtensions(allocator: *Allocator, target_extensions: []const [*:0]const u8) !ArrayList([*:0]const u8) {
     var glfw_extensions_count: u32 = 0;
     const glfw_extensions_raw = c.glfwGetRequiredInstanceExtensions(&glfw_extensions_count);
     const glfw_extensions_slice = glfw_extensions_raw[0..glfw_extensions_count];
@@ -232,21 +234,21 @@ fn messageCallback(
     p_user_data: *c_void,
 ) callconv(vk.vulkan_call_conv) vk.Bool32 {
     // TODO: figure out if the if is needed
-    // keep parameters for API, "if (false)"" ensures no runtime cost 
+    // keep parameters for API, "if (false)"" ensures no runtime cost
     if (false) {
         _ = message_types;
     }
     const writers = @ptrCast(*Writers, @alignCast(@alignOf(*Writers), p_user_data));
     const error_mask = comptime blk: {
-        break :blk vk.DebugUtilsMessageSeverityFlagsEXT { 
-            .warning_bit_ext = true, 
-            .error_bit_ext = true, 
+        break :blk vk.DebugUtilsMessageSeverityFlagsEXT{
+            .warning_bit_ext = true,
+            .error_bit_ext = true,
         };
     };
     const is_severe = error_mask.toInt() & message_severity > 0;
-    const writer = if (is_severe) writers.stderr.* else writers.stdout.*; 
+    const writer = if (is_severe) writers.stderr.* else writers.stdout.*;
 
-    writer.print("validation layer: {s}\n", .{p_callback_data.p_message}) catch { 
+    writer.print("validation layer: {s}\n", .{p_callback_data.p_message}) catch {
         std.debug.print("error from stdout print in message callback", .{});
     };
 
@@ -255,26 +257,26 @@ fn messageCallback(
 
 // TODO: we don't need this, we can pass a createinfo from the init function
 fn createDefaultDebugCreateInfo(writers: *Writers) vk.DebugUtilsMessengerCreateInfoEXT {
-    const message_severity = vk.DebugUtilsMessageSeverityFlagsEXT {
+    const message_severity = vk.DebugUtilsMessageSeverityFlagsEXT{
         .verbose_bit_ext = true,
         .warning_bit_ext = true,
         .error_bit_ext = true,
     };
 
-    const message_type = vk.DebugUtilsMessageTypeFlagsEXT {
+    const message_type = vk.DebugUtilsMessageTypeFlagsEXT{
         .general_bit_ext = true,
         .validation_bit_ext = true,
         .performance_bit_ext = true,
     };
 
-    return vk.DebugUtilsMessengerCreateInfoEXT {
+    return vk.DebugUtilsMessengerCreateInfoEXT{
         .flags = .{},
         .message_severity = message_severity,
         .message_type = message_type,
         .pfn_user_callback = messageCallback,
         .p_user_data = @ptrCast(?*c_void, writers),
     };
-} 
+}
 
 inline fn setupDebugCallback(vki: InstanceDispatch, instance: vk.Instance, writers: *Writers) !?vk.DebugUtilsMessengerEXT {
     if (!enable_validation_layers) return null;
@@ -287,7 +289,7 @@ inline fn setupDebugCallback(vki: InstanceDispatch, instance: vk.Instance, write
 }
 
 /// Any suiteable GPU should result in a positive value, an unsuitable GPU might return a negative value
-inline fn deviceHeuristic(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice) i32 {
+inline fn deviceHeuristic(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) i32 {
     const property_score = blk: {
         const device_properties = vki.getPhysicalDeviceProperties(device);
         const discrete = @as(i32, @boolToInt(device_properties.device_type == vk.PhysicalDeviceType.discrete_gpu)) * 100;
@@ -297,21 +299,21 @@ inline fn deviceHeuristic(allocator: *Allocator, vki: InstanceDispatch, device: 
     const feature_score = blk: {
         const device_features = vki.getPhysicalDeviceFeatures(device);
         // TODO: mechanism for requiring some features (bitmask?)
-        const atomics = @intCast(i32, device_features.fragment_stores_and_atomics); 
+        const atomics = @intCast(i32, device_features.fragment_stores_and_atomics);
         break :blk atomics;
     };
 
     // TODO: rewrite this if requirements does no@typeInfo(QueueFamilyIndices).Struct.fields.lent change, i.e we will not need indices at all
     const queue_fam_score: i32 = blk: {
-        _ = getQueueFamilyIndices(allocator, vki, device) catch break :blk -1000;
+        _ = getQueueFamilyIndices(allocator, vki, device, surface) catch break :blk -1000;
         break :blk 10;
     };
 
     return -100 + property_score + feature_score + queue_fam_score;
 }
 
- // select primary physical device in init
-inline fn selectPhysicalDevice(allocator: *Allocator, vki: InstanceDispatch, instance: vk.Instance) !vk.PhysicalDevice {
+// select primary physical device in init
+inline fn selectPhysicalDevice(allocator: *Allocator, vki: InstanceDispatch, instance: vk.Instance, surface: vk.SurfaceKHR) !vk.PhysicalDevice {
     var device_count: u32 = 0;
     _ = try vki.enumeratePhysicalDevices(instance, &device_count, null); // TODO: handle incomplete
     if (device_count < 0) {
@@ -325,65 +327,61 @@ inline fn selectPhysicalDevice(allocator: *Allocator, vki: InstanceDispatch, ins
     devices.items.len = device_count;
 
     var device_score: i32 = -1;
-    var device_index: usize = 0;
+    var device_index: ?usize = null;
     for (devices.items) |device, i| {
-        const new_score = deviceHeuristic(allocator, vki, device);
+        const new_score = deviceHeuristic(allocator, vki, device, surface);
         if (device_score < new_score) {
             device_score = new_score;
             device_index = i;
         }
     }
 
-    if (device_score < 0) {
+    if (device_index == null) {
         return error.NoSuitablePhysicalDevice;
-    } 
+    }
 
-    return devices.items[device_index];
+    return devices.items[device_index.?];
 }
 
 const QueueFamilyIndices = struct {
-    graphics: u32, 
-    compute: u32,
+    graphics: u32,
+    present: u32,
 };
 
-inline fn getQueueFamilyIndices(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice) !QueueFamilyIndices {
+inline fn getQueueFamilyIndices(allocator: *Allocator, vki: InstanceDispatch, physical_device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !QueueFamilyIndices {
     var queue_family_count: u32 = 0;
-    vki.getPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, null);
+    vki.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, null);
 
     var queue_families = try ArrayList(vk.QueueFamilyProperties).initCapacity(allocator, queue_family_count);
     defer queue_families.deinit();
 
-    vki.getPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, queue_families.items.ptr);
+    vki.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families.items.ptr);
     queue_families.items.len = queue_family_count;
 
-    const graphics_bit = vk.QueueFlags {
+    const graphics_bit = vk.QueueFlags{
         .graphics_bit = true,
     };
-    const compute_bit = vk.QueueFlags {
-        .compute_bit = true,
-    };
-    var indices = QueueFamilyIndices {
-        .graphics = 0,
-        .compute = 0,
-    };
-    var assigned_index_count: u32 = 0;
+
+    var graphics_index: ?u32 = null;
+    var present_index: ?u32 = null;
     for (queue_families.items) |queue_family, i| {
-        if (queue_family.queue_flags.intersect(graphics_bit).toInt() > 0) {
-            indices.graphics = @intCast(u32, i);
-            assigned_index_count += 1;
-        } 
-        else if (queue_family.queue_flags.intersect(compute_bit).toInt() > 0) {
-            indices.compute = @intCast(u32, i);
-            assigned_index_count += 1;
+        const index = @intCast(u32, i);
+        if (graphics_index == null and queue_family.queue_flags.intersect(graphics_bit).toInt() > 0) {
+            graphics_index = index;
+        }
+        if (present_index == null and (try vki.getPhysicalDeviceSurfaceSupportKHR(physical_device, index, surface)) == vk.TRUE) {
+            present_index = index;
         }
     }
 
-    const field_len = @typeInfo(QueueFamilyIndices).Struct.fields.len;
-    if (assigned_index_count != field_len) {
+    if (graphics_index == null or present_index == null) {
         return error.MissingQueueFamilyIndex;
     }
 
-    return indices;
+    return QueueFamilyIndices{
+        .graphics = graphics_index.?,
+        .present = present_index.?,
+    };
 }
 
 // TODO: this is probably a bit nono ... (Should probably explicitly set everyting to false)
@@ -394,7 +392,7 @@ fn GetFalsePhysicalDeviceFeatures() type {
 
     inline for (features_type_info.fields) |field, i| {
         new_type_fields[i] = field;
-        new_type_fields[i].default_value = @intCast(u32, vk.FALSE); 
+        new_type_fields[i].default_value = @intCast(u32, vk.FALSE);
     }
 
     return @Type(.{
@@ -409,27 +407,29 @@ fn GetFalsePhysicalDeviceFeatures() type {
 const FalsePhysicalDeviceFeatures = GetFalsePhysicalDeviceFeatures();
 
 fn createLogicalDevice(allocator: *Allocator, vkb: BaseDispatch, vki: InstanceDispatch, physical_device: vk.PhysicalDevice) !vk.Device {
-    // TODO: it's a bit of waste to call this twice (we can cache it after first call in file scope later)
-    const indices = try getQueueFamilyIndices(allocator, vki, physical_device);
-    const queue_priority = [_]f32 { 1.0 };
+    std.debug.assert(queue_indices != null);
+    const indices = queue_indices.?;
 
-    const queue_create_info = [_]vk.DeviceQueueCreateInfo { 
-        .{
+    const queue_priority = [_]f32{1.0};
+    const family_indices = [_]u32{ indices.graphics, indices.present };
+    var queue_create_infos: [family_indices.len]vk.DeviceQueueCreateInfo = undefined;
+    for (family_indices) |family_index, i| {
+        queue_create_infos[i] = vk.DeviceQueueCreateInfo{
             .flags = .{},
-            .queue_family_index = @intCast(u32, indices.graphics),
+            .queue_family_index = family_index,
             .queue_count = 1,
             .p_queue_priorities = &queue_priority,
-        }
-    };
+        };
+    }
 
-    const device_features = FalsePhysicalDeviceFeatures { }; 
+    const device_features = FalsePhysicalDeviceFeatures{};
 
     const validation_layer_info = try ValidationLayerInfo.init(allocator, vkb);
 
-    const create_info = vk.DeviceCreateInfo {
+    const create_info = vk.DeviceCreateInfo{
         .flags = .{},
-        .queue_create_info_count = 1,
-        .p_queue_create_infos = &queue_create_info,
+        .queue_create_info_count = queue_create_infos.len,
+        .p_queue_create_infos = &queue_create_infos,
         .enabled_layer_count = validation_layer_info.enabled_layer_count,
         .pp_enabled_layer_names = validation_layer_info.enabled_layer_names,
         .enabled_extension_count = 0,
@@ -449,13 +449,13 @@ fn CreateValidationLayerInfoType() type {
             enabled_layer_names: [*]const [*:0]const u8,
 
             pub fn init(allocator: *Allocator, vkb: BaseDispatch) !Self {
-                const validation_layers = [_][*:0] const u8{ "VK_LAYER_KHRONOS_validation" };
+                const validation_layers = [_][*:0]const u8{"VK_LAYER_KHRONOS_validation"};
                 const is_valid = try isValidationLayersPresent(allocator, vkb, validation_layers[0..validation_layers.len]);
                 if (!is_valid) {
                     std.debug.panic("debug build without validation layer support", .{});
                 }
 
-                return Self {
+                return Self{
                     .enabled_layer_count = validation_layers.len,
                     .enabled_layer_names = @ptrCast([*]const [*:0]const u8, &validation_layers),
                 };
@@ -469,7 +469,7 @@ fn CreateValidationLayerInfoType() type {
             enabled_layer_names: [*]const [*:0]const u8,
 
             pub fn init(_: *Allocator, _: BaseDispatch) !Self {
-                return Self {
+                return Self{
                     .enabled_layer_count = 0,
                     .enabled_layer_names = undefined,
                 };
@@ -479,7 +479,7 @@ fn CreateValidationLayerInfoType() type {
 }
 const ValidationLayerInfo = CreateValidationLayerInfoType();
 
-fn createSurface(instance: vk.Instance, window: *c.GLFWwindow)  !vk.SurfaceKHR {
+fn createSurface(instance: vk.Instance, window: *c.GLFWwindow) !vk.SurfaceKHR {
     var surface: vk.SurfaceKHR = undefined;
     if (c.glfwCreateWindowSurface(instance, window, null, &surface) != .success) {
         return error.SurfaceInitFailed;
@@ -488,7 +488,7 @@ fn createSurface(instance: vk.Instance, window: *c.GLFWwindow)  !vk.SurfaceKHR {
     return surface;
 }
 
-// TODO: rewrite this 
+// TODO: rewrite this
 fn handleGLFWError() noreturn {
     var description: [*c][*c]u8 = null;
     switch (c.glfwGetError(description)) {
@@ -499,7 +499,7 @@ fn handleGLFWError() noreturn {
         },
         else => |err_code| {
             std.debug.panic("unhandeled glfw error {d}", .{err_code});
-        }
+        },
     }
 }
 
@@ -514,7 +514,7 @@ pub fn main() anyerror!void {
         const leak = gpa.deinit();
         if (leak) {
             // TODO: lazy error handling can be improved
-            // If error occur here we are screwed anyways 
+            // If error occur here we are screwed anyways
             stderr.print("leak detected in gpa!", .{}) catch unreachable;
         }
     }
@@ -541,28 +541,26 @@ pub fn main() anyerror!void {
         } else {
             handleGLFWError();
         }
-    };   
+    };
     defer c.glfwDestroyWindow(window);
-    
-    // Make the window's context current 
+
+    // Make the window's context current
     c.glfwMakeContextCurrent(window);
 
-    // TODO: find a way to convert to const 
-    var writers = Writers { .stdout = &stdout, .stderr = &stderr};
+    // TODO: find a way to convert to const
+    var writers = Writers{ .stdout = &stdout, .stderr = &stderr };
     // Construct our vulkan instance
     const ctx = try GfxContext.init(&gpa.allocator, window, &writers);
     defer ctx.deinit();
 
-    // Loop until the user closes the window 
-    while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE)
-    {
-        // Render here 
+    // Loop until the user closes the window
+    while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
+        // Render here
 
-        // Swap front and back buffers 
+        // Swap front and back buffers
         c.glfwSwapBuffers(window);
 
-        // Poll for and process events 
+        // Poll for and process events
         c.glfwPollEvents();
     }
-
 }
