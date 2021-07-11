@@ -44,6 +44,7 @@ const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{
     .GetPhysicalDeviceQueueFamilyProperties,
     .GetDeviceProcAddr,
     .CreateDevice,
+    .DestroySurfaceKHR,
 });
 
 const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{
@@ -66,12 +67,13 @@ const GfxContext = struct {
     logical_device: vk.Device,
 
     graphics_queue: vk.Queue,
+    surface: vk.SurfaceKHR,
 
     // TODO: utilize comptime for this (emit from struct if we are in release mode)
     messenger: ?vk.DebugUtilsMessengerEXT,
 
     // Caller should make sure to call deinit
-    pub fn init(allocator: *Allocator, writers: *Writers) !Self {
+    pub fn init(allocator: *Allocator, window: *c.GLFWwindow, writers: *Writers) !Self {
         const appInfo = vk.ApplicationInfo {
             .p_next = null,
             .p_application_name = application_name,
@@ -81,15 +83,20 @@ const GfxContext = struct {
             .api_version = vk.API_VERSION_1_2,
         };
 
+        // TODO: move to global scope (currently crashes the zig compiler :') )
         const application_extensions = blk: {
+            const common_extensions = [_][*:0] const u8 { 
+                vk.extension_info.khr_surface.name
+            };
             if (enable_validation_layers) {
                 break :blk [_][*:0] const u8 { 
                     vk.extension_info.ext_debug_report.name, 
-                    vk.extension_info.ext_debug_utils.name 
-                };
+                    vk.extension_info.ext_debug_utils.name,
+                } ++ common_extensions;
             }
-            break :blk [_][*:0] const u8 { };
+            break :blk common_extensions;
         };
+
         const extensions = try getRequiredInstanceExtensions(allocator, application_extensions[0..application_extensions.len]);
         defer extensions.deinit();
 
@@ -127,6 +134,9 @@ const GfxContext = struct {
         // TODO: cache indices, avoid calling function multiple times
         const indices = try getQueueFamilyIndices(allocator, vki, physical_device);
         const graphics_queue = vkd.getDeviceQueue(logical_device, indices.graphics, 0);
+
+        const surface = try createSurface(instance, window);
+        errdefer vki.destroySurfaceKHR(self.instance, self.surface, null);
         
         return Self {
             .allocator = allocator,
@@ -137,6 +147,7 @@ const GfxContext = struct {
             .physical_device = physical_device,
             .logical_device = logical_device,
             .graphics_queue = graphics_queue,
+            .surface = surface,
             .messenger = messenger,
         };
     }
@@ -146,6 +157,7 @@ const GfxContext = struct {
             self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.messenger.?, null);
         }
 
+        self.vki.destroySurfaceKHR(self.instance, self.surface, null);
         self.vkd.destroyDevice(self.logical_device, null);
         self.vki.destroyInstance(self.instance, null);
     }
@@ -467,6 +479,14 @@ fn CreateValidationLayerInfoType() type {
 }
 const ValidationLayerInfo = CreateValidationLayerInfoType();
 
+fn createSurface(instance: vk.Instance, window: *c.GLFWwindow)  !vk.SurfaceKHR {
+    var surface: vk.SurfaceKHR = undefined;
+    if (c.glfwCreateWindowSurface(instance, window, null, &surface) != .success) {
+        return error.SurfaceInitFailed;
+    }
+
+    return surface;
+}
 
 // TODO: rewrite this 
 fn handleGLFWError() noreturn {
@@ -530,7 +550,7 @@ pub fn main() anyerror!void {
     // TODO: find a way to convert to const 
     var writers = Writers { .stdout = &stdout, .stderr = &stderr};
     // Construct our vulkan instance
-    const ctx = try GfxContext.init(&gpa.allocator, &writers);
+    const ctx = try GfxContext.init(&gpa.allocator, window, &writers);
     defer ctx.deinit();
 
     // Loop until the user closes the window 
