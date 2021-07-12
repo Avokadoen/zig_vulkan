@@ -192,21 +192,30 @@ fn isValidationLayersPresent(allocator: *Allocator, vkb: BaseDispatch, target_la
     return true;
 }
 
-// TODO (see isValidationLayersPresent())
-// fn isExtensionsPresent(allocator: *Allocator, vkb, target_extensions: []const [*:0]const u8) !bool {
-// // query extensions available
-// var supported_extensions_count: u32 = 0;
-// // ignore result, TODO: handle "VkResult.incomplete"
-// _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, null);
-// var extensions = try ArrayList(vk.ExtensionProperties).initCapacity(allocator, supported_extensions_count);
-// _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, extensions.items.ptr);
-// extensions.items.len = supported_extensions_count;
-// defer extensions.deinit();
+fn isExtensionsPresent(allocator: *Allocator, vkb: BaseDispatch, target_extensions: []const [*:0]const u8) !bool {
+    // query extensions available
+    var supported_extensions_count: u32 = 0;
+    // TODO: handle "VkResult.incomplete"
+    _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, null);
 
-// for (extensions.items) |ext| {
-//     std.debug.print("{s}\n", .{ext.extension_name});
-// }
-// }
+    var extensions = try ArrayList(vk.ExtensionProperties).initCapacity(allocator, supported_extensions_count);
+    defer extensions.deinit();
+
+    _ = try vkb.enumerateInstanceExtensionProperties(null, &supported_extensions_count, extensions.items.ptr);
+    extensions.items.len = supported_extensions_count;
+
+    var matches: u32 = 0;
+    for (target_extensions) |target_extension| {
+        cmp: for (extensions.items) |existing_extension| {
+            if (std.cstr.cmp(target_extension, existing_extension) == 0) {
+                matches += 1;
+                break :cmp; 
+            }
+        } 
+    }
+
+    return matches == target_extensions.len;
+}
 
 /// Caller must deinit returned ArrayList
 fn getRequiredInstanceExtensions(allocator: *Allocator, target_extensions: []const [*:0]const u8) !ArrayList([*:0]const u8) {
