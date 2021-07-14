@@ -25,6 +25,8 @@ const enable_validation_layers = std.builtin.mode == .Debug;
 const application_name = "zig vulkan";
 const engine_name = "nop";
 
+const logicical_device_extensions = [_][*:0]const u8{ vk.extension_info.khr_swapchain.name };
+
 const BaseDispatch = vk.BaseWrapper([_]vk.BaseCommand{
     .CreateInstance,
     .EnumerateInstanceExtensionProperties,
@@ -36,6 +38,7 @@ const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{
     .CreateDebugUtilsMessengerEXT,
     .DestroyDebugUtilsMessengerEXT,
     .EnumeratePhysicalDevices,
+    .EnumerateDeviceExtensionProperties,
     .GetPhysicalDeviceProperties,
     .GetPhysicalDeviceFeatures,
     .GetPhysicalDeviceQueueFamilyProperties,
@@ -56,6 +59,7 @@ var queue_indices: ?QueueFamilyIndices = null;
 // TODO: Unit testing
 const GfxContext = struct {
     const Self = @This();
+
 
     allocator: *Allocator,
 
@@ -87,21 +91,25 @@ const GfxContext = struct {
 
         // TODO: move to global scope (currently crashes the zig compiler :') )
         const application_extensions = blk: {
-            const common_extensions = [_][*:0]const u8{vk.extension_info.khr_surface.name};
+            const common_extensions = [_][*:0]const u8{ vk.extension_info.khr_surface.name };
             if (enable_validation_layers) {
-                break :blk [_][*:0]const u8{
+                const debug_extensions = [_][*:0]const u8{
                     vk.extension_info.ext_debug_report.name,
                     vk.extension_info.ext_debug_utils.name,
                 } ++ common_extensions;
+                break :blk debug_extensions[0..debug_extensions.len];
             }
-            break :blk common_extensions;
+            break :blk common_extensions[0..common_extensions.len];
         };
 
-        const extensions = try getRequiredInstanceExtensions(allocator, application_extensions[0..application_extensions.len]);
+        const extensions = try getRequiredInstanceExtensions(allocator, application_extensions);
         defer extensions.deinit();
 
         // load base dispatch wrapper
         const vkb = try BaseDispatch.load(c.glfwGetInstanceProcAddress);
+        if (!(try isInstanceExtensionsPresent(allocator, vkb, application_extensions))) {
+            return error.InstanceExtensionNotPresent;
+        }
 
         const validation_layer_info = try ValidationLayerInfo.init(allocator, vkb);
 
@@ -169,12 +177,12 @@ const GfxContext = struct {
 /// check if validation layer exist
 fn isValidationLayersPresent(allocator: *Allocator, vkb: BaseDispatch, target_layers: []const [*:0]const u8) !bool {
     var layer_count: u32 = 0;
-    // TODO: handle vk.INCOMPLETE
     _ = try vkb.enumerateInstanceLayerProperties(&layer_count, null);
 
     var available_layers = try ArrayList(vk.LayerProperties).initCapacity(allocator, layer_count);
     defer available_layers.deinit();
 
+    // TODO: handle vk.INCOMPLETE (Array too small)
     _ = try vkb.enumerateInstanceLayerProperties(&layer_count, available_layers.items.ptr);
     available_layers.items.len = layer_count;
 
@@ -192,7 +200,7 @@ fn isValidationLayersPresent(allocator: *Allocator, vkb: BaseDispatch, target_la
     return true;
 }
 
-fn isExtensionsPresent(allocator: *Allocator, vkb: BaseDispatch, target_extensions: []const [*:0]const u8) !bool {
+fn isInstanceExtensionsPresent(allocator: *Allocator, vkb: BaseDispatch, target_extensions: []const [*:0]const u8) !bool {
     // query extensions available
     var supported_extensions_count: u32 = 0;
     // TODO: handle "VkResult.incomplete"
@@ -206,16 +214,45 @@ fn isExtensionsPresent(allocator: *Allocator, vkb: BaseDispatch, target_extensio
 
     var matches: u32 = 0;
     for (target_extensions) |target_extension| {
-        cmp: for (extensions.items) |existing_extension| {
-            if (std.cstr.cmp(target_extension, existing_extension) == 0) {
+        cmp: for (extensions.items) |existing| {
+            const existing_name = @ptrCast([*:0] const u8, &existing.extension_name);
+            if (std.cstr.cmp(target_extension, existing_name) == 0) {
                 matches += 1;
-                break :cmp; 
+                break :cmp;
             }
-        } 
+        }
     }
 
     return matches == target_extensions.len;
 }
+
+/// TODO: unify with instance function?
+fn isPhysicalDeviceExtensionsPresent(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice, target_extensions: []const [*:0]const u8) !bool {
+    // query extensions available
+    var supported_extensions_count: u32 = 0;
+    // TODO: handle "VkResult.incomplete"
+    _ = try vki.enumerateDeviceExtensionProperties(device, null, &supported_extensions_count, null);
+
+    var extensions = try ArrayList(vk.ExtensionProperties).initCapacity(allocator, supported_extensions_count);
+    defer extensions.deinit();
+
+    _ = try vki.enumerateDeviceExtensionProperties(device, null, &supported_extensions_count, extensions.items.ptr);
+    extensions.items.len = supported_extensions_count;
+
+    var matches: u32 = 0;
+    for (target_extensions) |target_extension| {
+        cmp: for (extensions.items) |existing| {
+            const existing_name = @ptrCast([*:0] const u8, &existing.extension_name);
+            if (std.cstr.cmp(target_extension, existing_name) == 0) {
+                matches += 1;
+                break :cmp;
+            }
+        }
+    }
+
+    return matches == target_extensions.len;
+}
+
 
 /// Caller must deinit returned ArrayList
 fn getRequiredInstanceExtensions(allocator: *Allocator, target_extensions: []const [*:0]const u8) !ArrayList([*:0]const u8) {
@@ -298,27 +335,35 @@ inline fn setupDebugCallback(vki: InstanceDispatch, instance: vk.Instance, write
 }
 
 /// Any suiteable GPU should result in a positive value, an unsuitable GPU might return a negative value
-inline fn deviceHeuristic(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) i32 {
+inline fn deviceHeuristic(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !i32 {
+    // TODO: rewrite function to have clearer distinction between required and bonus features (2 bitmaps?)
     const property_score = blk: {
         const device_properties = vki.getPhysicalDeviceProperties(device);
-        const discrete = @as(i32, @boolToInt(device_properties.device_type == vk.PhysicalDeviceType.discrete_gpu)) * 100;
+        const discrete = @as(i32, @boolToInt(device_properties.device_type == vk.PhysicalDeviceType.discrete_gpu)) + 5;
         break :blk discrete;
     };
 
     const feature_score = blk: {
         const device_features = vki.getPhysicalDeviceFeatures(device);
-        // TODO: mechanism for requiring some features (bitmask?)
         const atomics = @intCast(i32, device_features.fragment_stores_and_atomics);
         break :blk atomics;
     };
 
-    // TODO: rewrite this if requirements does no@typeInfo(QueueFamilyIndices).Struct.fields.lent change, i.e we will not need indices at all
     const queue_fam_score: i32 = blk: {
         _ = getQueueFamilyIndices(allocator, vki, device, surface) catch break :blk -1000;
         break :blk 10;
     };
 
-    return -100 + property_score + feature_score + queue_fam_score;
+    const extensions_score: i32 = blk: {
+        const extension_slice = logicical_device_extensions[0..logicical_device_extensions.len];
+        const extensions_available = try isPhysicalDeviceExtensionsPresent(allocator, vki, device, extension_slice);
+        if (!extensions_available) {
+            break :blk -1000;
+        }
+        break :blk 10;
+    };
+
+    return -20 + property_score + feature_score + queue_fam_score;
 }
 
 // select primary physical device in init
@@ -338,7 +383,7 @@ inline fn selectPhysicalDevice(allocator: *Allocator, vki: InstanceDispatch, ins
     var device_score: i32 = -1;
     var device_index: ?usize = null;
     for (devices.items) |device, i| {
-        const new_score = deviceHeuristic(allocator, vki, device, surface);
+        const new_score = try deviceHeuristic(allocator, vki, device, surface);
         if (device_score < new_score) {
             device_score = new_score;
             device_index = i;
@@ -441,8 +486,8 @@ fn createLogicalDevice(allocator: *Allocator, vkb: BaseDispatch, vki: InstanceDi
         .p_queue_create_infos = &queue_create_infos,
         .enabled_layer_count = validation_layer_info.enabled_layer_count,
         .pp_enabled_layer_names = validation_layer_info.enabled_layer_names,
-        .enabled_extension_count = 0,
-        .pp_enabled_extension_names = undefined,
+        .enabled_extension_count = logicical_device_extensions.len,
+        .pp_enabled_extension_names = &logicical_device_extensions,
         .p_enabled_features = @ptrCast(*const vk.PhysicalDeviceFeatures, &device_features),
     };
 
