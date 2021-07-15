@@ -363,7 +363,7 @@ inline fn deviceHeuristic(allocator: *Allocator, vki: InstanceDispatch, device: 
         break :blk 10;
     };
 
-    return -20 + property_score + feature_score + queue_fam_score;
+    return -20 + property_score + feature_score + queue_fam_score + extensions_score;
 }
 
 // select primary physical device in init
@@ -438,28 +438,6 @@ inline fn getQueueFamilyIndices(allocator: *Allocator, vki: InstanceDispatch, ph
     };
 }
 
-// TODO: this is probably a bit nono ... (Should probably explicitly set everyting to false)
-/// Construct VkPhysicalDeviceFeatures type with VkFalse as default field value 
-fn GetFalsePhysicalDeviceFeatures() type {
-    const features_type_info = @typeInfo(vk.PhysicalDeviceFeatures).Struct;
-    var new_type_fields: [features_type_info.fields.len]std.builtin.TypeInfo.StructField = undefined;
-
-    inline for (features_type_info.fields) |field, i| {
-        new_type_fields[i] = field;
-        new_type_fields[i].default_value = @intCast(u32, vk.FALSE);
-    }
-
-    return @Type(.{
-        .Struct = .{
-            .layout = .Auto,
-            .fields = &new_type_fields,
-            .decls = &[_]std.builtin.TypeInfo.Declaration{},
-            .is_tuple = false,
-        },
-    });
-}
-const FalsePhysicalDeviceFeatures = GetFalsePhysicalDeviceFeatures();
-
 fn createLogicalDevice(allocator: *Allocator, vkb: BaseDispatch, vki: InstanceDispatch, physical_device: vk.PhysicalDevice) !vk.Device {
     std.debug.assert(queue_indices != null);
     const indices = queue_indices.?;
@@ -476,7 +454,7 @@ fn createLogicalDevice(allocator: *Allocator, vkb: BaseDispatch, vki: InstanceDi
         };
     }
 
-    const device_features = FalsePhysicalDeviceFeatures{};
+    const device_features = vk.PhysicalDeviceVulkan12Features{};
 
     const validation_layer_info = try ValidationLayerInfo.init(allocator, vkb);
 
