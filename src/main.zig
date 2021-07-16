@@ -21,36 +21,38 @@ const Writers = struct {
 };
 
 // enable validation layer in debug
-const enable_validation_layers = std.builtin.mode == .Debug;
 const application_name = "zig vulkan";
+const enable_validation_layers = std.builtin.mode == .Debug;
 const engine_name = "nop";
 
 const logicical_device_extensions = [_][*:0]const u8{ vk.extension_info.khr_swapchain.name };
 
 const BaseDispatch = vk.BaseWrapper([_]vk.BaseCommand{
-    .CreateInstance,
-    .EnumerateInstanceExtensionProperties,
     .EnumerateInstanceLayerProperties,
+    .EnumerateInstanceExtensionProperties,
+    .CreateInstance,
 });
 
 const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{
-    .DestroyInstance,
     .CreateDebugUtilsMessengerEXT,
-    .DestroyDebugUtilsMessengerEXT,
-    .EnumeratePhysicalDevices,
-    .EnumerateDeviceExtensionProperties,
-    .GetPhysicalDeviceProperties,
-    .GetPhysicalDeviceFeatures,
-    .GetPhysicalDeviceQueueFamilyProperties,
-    .GetDeviceProcAddr,
-    .GetPhysicalDeviceSurfaceSupportKHR,
     .CreateDevice,
+    .DestroyDebugUtilsMessengerEXT,
+    .DestroyInstance,
     .DestroySurfaceKHR,
+    .EnumerateDeviceExtensionProperties,
+    .EnumeratePhysicalDevices,
+    .GetDeviceProcAddr,
+    .GetPhysicalDeviceFeatures,
+    .GetPhysicalDeviceProperties,
+    .GetPhysicalDeviceQueueFamilyProperties,
+    .GetPhysicalDeviceSurfaceCapabilitiesKHR
+    .GetPhysicalDeviceSurfacePresentModesKHR,
+    .GetPhysicalDeviceSurfaceSupportKHR,
 });
 
 const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{
-    .DestroyDevice,
     .GetDeviceQueue,
+    .DestroyDevice,
 });
 
 /// used to initialize different aspects of the GfxContext
