@@ -45,9 +45,10 @@ const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{
     .GetPhysicalDeviceFeatures,
     .GetPhysicalDeviceProperties,
     .GetPhysicalDeviceQueueFamilyProperties,
-    .GetPhysicalDeviceSurfaceCapabilitiesKHR
+    .GetPhysicalDeviceSurfaceCapabilitiesKHR,
+    .GetPhysicalDeviceSurfaceFormatsKHR,
     .GetPhysicalDeviceSurfacePresentModesKHR,
-    .GetPhysicalDeviceSurfaceSupportKHR,
+    .GetPhysicalDeviceSurfaceSupportKHR
 });
 
 const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{
@@ -338,7 +339,10 @@ inline fn setupDebugCallback(vki: InstanceDispatch, instance: vk.Instance, write
 
 /// Any suiteable GPU should result in a positive value, an unsuitable GPU might return a negative value
 inline fn deviceHeuristic(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !i32 {
-    // TODO: rewrite function to have clearer distinction between required and bonus features (2 bitmaps?)
+    // TODO: rewrite function to have clearer distinction between required and bonus features 
+    //       possible solutions:
+    //          - return error if missing feature and discard negative return value (use u32 instead)
+    //          - 2 bitmaps
     const property_score = blk: {
         const device_properties = vki.getPhysicalDeviceProperties(device);
         const discrete = @as(i32, @boolToInt(device_properties.device_type == vk.PhysicalDeviceType.discrete_gpu)) + 5;
@@ -365,7 +369,16 @@ inline fn deviceHeuristic(allocator: *Allocator, vki: InstanceDispatch, device: 
         break :blk 10;
     };
 
-    return -20 + property_score + feature_score + queue_fam_score + extensions_score;
+    const swap_chain_score: i32 = blk: {
+        if (SwapChainSupportDetails.init(allocator, vki, device, surface)) |ok| {
+            defer ok.deinit();
+            break :blk 10;
+        } else |_| {
+            break :blk -1000;
+        }
+    };
+
+    return -30 + property_score + feature_score + queue_fam_score + extensions_score + swap_chain_score;
 }
 
 // select primary physical device in init
@@ -521,6 +534,57 @@ fn createSurface(instance: vk.Instance, window: *c.GLFWwindow) !vk.SurfaceKHR {
 
     return surface;
 }
+
+const SwapChainSupportDetails = struct {
+    const Self = @This();
+
+    capabilities: vk.SurfaceCapabilitiesKHR,
+    formats: ArrayList(vk.SurfaceFormatKHR),
+    present_modes: ArrayList(vk.PresentModeKHR),
+
+    /// calle has to make sure to also call deinit
+    fn init(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !Self {
+        const capabilities = try vki.getPhysicalDeviceSurfaceCapabilitiesKHR(device, surface);
+        
+        var format_count: u32 = 0;
+        // TODO: handle incomplete
+        _ = try vki.getPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count, null);
+        if (format_count <= 0) {
+            return error.NoSurfaceFormatsSupported;
+        }
+        const formats = blk: {
+            var formats = try ArrayList(vk.SurfaceFormatKHR).initCapacity(allocator, format_count);
+            _ = try vki.getPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count, formats.items.ptr);
+            formats.items.len = format_count;
+            break :blk formats;
+        }; 
+        errdefer formats.deinit();
+
+        var present_modes_count: u32 = 0;
+        _ = try vki.getPhysicalDeviceSurfacePresentModesKHR(device, surface, &present_modes_count, null);
+        if (present_modes_count <= 0) {
+            return error.NoPresentModesSupported;
+        }
+        const present_modes = blk: {
+            var present_modes = try ArrayList(vk.PresentModeKHR).initCapacity(allocator, present_modes_count);
+            _ = try vki.getPhysicalDeviceSurfacePresentModesKHR(device, surface, &present_modes_count, present_modes.items.ptr);
+            present_modes.items.len = present_modes_count;
+            break :blk present_modes;
+        };
+        errdefer present_modes.deinit(); 
+
+        return Self {
+            .capabilities = capabilities,
+            .formats = formats,
+            .present_modes = present_modes,
+        };
+    }
+
+    fn deinit(self: Self) void {
+        self.formats.deinit();
+        self.present_modes.deinit();
+    }
+};
 
 // TODO: rewrite this
 fn handleGLFWError() noreturn {
