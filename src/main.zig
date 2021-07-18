@@ -40,10 +40,18 @@ const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{
     .DestroyDevice,
     .DestroySwapchainKHR,
     .GetDeviceQueue,
+    .GetSwapchainImagesKHR
 });
 
 /// used to initialize different aspects of the GfxContext
 var queue_indices: ?QueueFamilyIndices = null;
+
+const SwapchainData = struct {
+    swapchain: vk.SwapchainKHR,
+    images: ArrayList(vk.Image),
+    format: vk.Format,
+    extent: vk.Extent2D,
+};
 
 // TODO: Unit testing
 const GfxContext = struct {
@@ -62,7 +70,7 @@ const GfxContext = struct {
     graphics_queue: vk.Queue,
     present_queue: vk.Queue,
     surface: vk.SurfaceKHR,
-    swap_chain: vk.SwapchainKHR,
+    swapchain_data: SwapchainData,
 
     // TODO: utilize comptime for this (emit from struct if we are in release mode)
     messenger: ?vk.DebugUtilsMessengerEXT,
@@ -137,11 +145,28 @@ const GfxContext = struct {
         const graphics_queue = vkd.getDeviceQueue(logical_device, queue_indices.?.graphics, 0);
         const present_queue = vkd.getDeviceQueue(logical_device, queue_indices.?.present, 0);
 
-        const swap_chain = blk: {
-            const sc_create_info = try createSwapChainCreateInfo(allocator, vki, physical_device, surface);
-            break :blk try vkd.createSwapchainKHR(logical_device, sc_create_info, null);
-        };
 
+        const swapchain_data = blk1: {
+            const sc_create_info = try createSwapchainCreateInfo(allocator, vki, physical_device, surface);
+            const swapchain = try vkd.createSwapchainKHR(logical_device, sc_create_info, null);
+            const swapchain_images = blk2: {
+                var image_count: u32 = 0;
+                // TODO: handle incomplete
+                _ = try vkd.getSwapchainImagesKHR(logical_device, swapchain, &image_count, null);
+                var images = try ArrayList(vk.Image).initCapacity(allocator, image_count);
+                _ = try vkd.getSwapchainImagesKHR(logical_device, swapchain, &image_count, images.items.ptr);
+                images.items.len = image_count;
+                break :blk2 images;
+            };
+
+            break :blk1 SwapchainData {
+                .swapchain = swapchain,
+                .images = swapchain_images,
+                .format = sc_create_info.image_format,
+                .extent = sc_create_info.image_extent,
+            };
+        };
+    
         return Self{
             .allocator = allocator,
             .vkb = vkb,
@@ -153,13 +178,15 @@ const GfxContext = struct {
             .graphics_queue = graphics_queue,
             .present_queue = present_queue,
             .surface = surface,
-            .swap_chain = swap_chain,
+            .swapchain_data = swapchain_data,
             .messenger = messenger,
         };
     }
 
     pub fn deinit(self: Self) void {
-        self.vkd.destroySwapchainKHR(self.logical_device, self.swap_chain, null);
+        self.swapchain_data.images.deinit();
+
+        self.vkd.destroySwapchainKHR(self.logical_device, self.swapchain_data.swapchain, null);
         self.vki.destroySurfaceKHR(self.instance, self.surface, null);
         self.vkd.destroyDevice(self.logical_device, null);
 
@@ -361,8 +388,8 @@ inline fn deviceHeuristic(allocator: *Allocator, vki: InstanceDispatch, device: 
         break :blk 10;
     };
 
-    const swap_chain_score: i32 = blk: {
-        if (SwapChainSupportDetails.init(allocator, vki, device, surface)) |ok| {
+    const swapchain_score: i32 = blk: {
+        if (SwapchainSupportDetails.init(allocator, vki, device, surface)) |ok| {
             defer ok.deinit();
             break :blk 10;
         } else |_| {
@@ -370,7 +397,7 @@ inline fn deviceHeuristic(allocator: *Allocator, vki: InstanceDispatch, device: 
         }
     };
 
-    return -30 + property_score + feature_score + queue_fam_score + extensions_score + swap_chain_score;
+    return -30 + property_score + feature_score + queue_fam_score + extensions_score + swapchain_score;
 }
 
 // select primary physical device in init
@@ -527,7 +554,7 @@ fn createSurface(instance: vk.Instance, window: *c.GLFWwindow) !vk.SurfaceKHR {
     return surface;
 }
 
-const SwapChainSupportDetails = struct {
+const SwapchainSupportDetails = struct {
     const Self = @This();
 
     capabilities: vk.SurfaceCapabilitiesKHR,
@@ -586,7 +613,7 @@ const SwapChainSupportDetails = struct {
         return self.formats.items[0];
     }
 
-    fn selectSwapChainPresentMode(self: Self) vk.PresentModeKHR {
+    fn selectSwapchainPresentMode(self: Self) vk.PresentModeKHR {
         for (self.present_modes.items) |present_mode| {
             if (present_mode == vk.PresentModeKHR.mailbox_khr) {
                 return present_mode;
@@ -626,14 +653,14 @@ const SwapChainSupportDetails = struct {
     }
 };
 
-fn createSwapChainCreateInfo(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !vk.SwapchainCreateInfoKHR {
+fn createSwapchainCreateInfo(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !vk.SwapchainCreateInfoKHR {
     std.debug.assert(queue_indices != null);
 
-    const sc_support = try SwapChainSupportDetails.init(allocator, vki, device, surface);
+    const sc_support = try SwapchainSupportDetails.init(allocator, vki, device, surface);
     defer sc_support.deinit();
 
     const format = sc_support.selectSwapChainFormat();
-    const present_mode = sc_support.selectSwapChainPresentMode();
+    const present_mode = sc_support.selectSwapchainPresentMode();
     const extent = sc_support.constructSwapChainExtent();
 
     const image_count = std.math.min(sc_support.capabilities.min_image_count + 1, sc_support.capabilities.max_image_count);
