@@ -25,35 +25,21 @@ const application_name = "zig vulkan";
 const enable_validation_layers = std.builtin.mode == .Debug;
 const engine_name = "nop";
 
-const logicical_device_extensions = [_][*:0]const u8{ vk.extension_info.khr_swapchain.name };
+const logicical_device_extensions = [_][*:0]const u8{vk.extension_info.khr_swapchain.name};
 
 const BaseDispatch = vk.BaseWrapper([_]vk.BaseCommand{
-    .EnumerateInstanceLayerProperties,
-    .EnumerateInstanceExtensionProperties,
     .CreateInstance,
+    .EnumerateInstanceExtensionProperties,
+    .EnumerateInstanceLayerProperties,
 });
 
-const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{
-    .CreateDebugUtilsMessengerEXT,
-    .CreateDevice,
-    .DestroyDebugUtilsMessengerEXT,
-    .DestroyInstance,
-    .DestroySurfaceKHR,
-    .EnumerateDeviceExtensionProperties,
-    .EnumeratePhysicalDevices,
-    .GetDeviceProcAddr,
-    .GetPhysicalDeviceFeatures,
-    .GetPhysicalDeviceProperties,
-    .GetPhysicalDeviceQueueFamilyProperties,
-    .GetPhysicalDeviceSurfaceCapabilitiesKHR,
-    .GetPhysicalDeviceSurfaceFormatsKHR,
-    .GetPhysicalDeviceSurfacePresentModesKHR,
-    .GetPhysicalDeviceSurfaceSupportKHR
-});
+const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{ .CreateDebugUtilsMessengerEXT, .CreateDevice, .DestroyDebugUtilsMessengerEXT, .DestroyInstance, .DestroySurfaceKHR, .EnumerateDeviceExtensionProperties, .EnumeratePhysicalDevices, .GetDeviceProcAddr, .GetPhysicalDeviceFeatures, .GetPhysicalDeviceProperties, .GetPhysicalDeviceQueueFamilyProperties, .GetPhysicalDeviceSurfaceCapabilitiesKHR, .GetPhysicalDeviceSurfaceFormatsKHR, .GetPhysicalDeviceSurfacePresentModesKHR, .GetPhysicalDeviceSurfaceSupportKHR });
 
 const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{
-    .GetDeviceQueue,
+    .CreateSwapchainKHR,
     .DestroyDevice,
+    .DestroySwapchainKHR,
+    .GetDeviceQueue,
 });
 
 /// used to initialize different aspects of the GfxContext
@@ -62,7 +48,6 @@ var queue_indices: ?QueueFamilyIndices = null;
 // TODO: Unit testing
 const GfxContext = struct {
     const Self = @This();
-
 
     allocator: *Allocator,
 
@@ -77,6 +62,7 @@ const GfxContext = struct {
     graphics_queue: vk.Queue,
     present_queue: vk.Queue,
     surface: vk.SurfaceKHR,
+    swap_chain: vk.SwapchainKHR,
 
     // TODO: utilize comptime for this (emit from struct if we are in release mode)
     messenger: ?vk.DebugUtilsMessengerEXT,
@@ -94,7 +80,7 @@ const GfxContext = struct {
 
         // TODO: move to global scope (currently crashes the zig compiler :') )
         const application_extensions = blk: {
-            const common_extensions = [_][*:0]const u8{ vk.extension_info.khr_surface.name };
+            const common_extensions = [_][*:0]const u8{vk.extension_info.khr_surface.name};
             if (enable_validation_layers) {
                 const debug_extensions = [_][*:0]const u8{
                     vk.extension_info.ext_debug_report.name,
@@ -151,6 +137,11 @@ const GfxContext = struct {
         const graphics_queue = vkd.getDeviceQueue(logical_device, queue_indices.?.graphics, 0);
         const present_queue = vkd.getDeviceQueue(logical_device, queue_indices.?.present, 0);
 
+        const swap_chain = blk: {
+            const sc_create_info = try createSwapChainCreateInfo(allocator, vki, physical_device, surface);
+            break :blk try vkd.createSwapchainKHR(logical_device, sc_create_info, null);
+        };
+
         return Self{
             .allocator = allocator,
             .vkb = vkb,
@@ -162,17 +153,19 @@ const GfxContext = struct {
             .graphics_queue = graphics_queue,
             .present_queue = present_queue,
             .surface = surface,
+            .swap_chain = swap_chain,
             .messenger = messenger,
         };
     }
 
     pub fn deinit(self: Self) void {
+        self.vkd.destroySwapchainKHR(self.logical_device, self.swap_chain, null);
+        self.vki.destroySurfaceKHR(self.instance, self.surface, null);
+        self.vkd.destroyDevice(self.logical_device, null);
+
         if (enable_validation_layers) {
             self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.messenger.?, null);
         }
-
-        self.vki.destroySurfaceKHR(self.instance, self.surface, null);
-        self.vkd.destroyDevice(self.logical_device, null);
         self.vki.destroyInstance(self.instance, null);
     }
 };
@@ -218,7 +211,7 @@ fn isInstanceExtensionsPresent(allocator: *Allocator, vkb: BaseDispatch, target_
     var matches: u32 = 0;
     for (target_extensions) |target_extension| {
         cmp: for (extensions.items) |existing| {
-            const existing_name = @ptrCast([*:0] const u8, &existing.extension_name);
+            const existing_name = @ptrCast([*:0]const u8, &existing.extension_name);
             if (std.cstr.cmp(target_extension, existing_name) == 0) {
                 matches += 1;
                 break :cmp;
@@ -245,7 +238,7 @@ fn isPhysicalDeviceExtensionsPresent(allocator: *Allocator, vki: InstanceDispatc
     var matches: u32 = 0;
     for (target_extensions) |target_extension| {
         cmp: for (extensions.items) |existing| {
-            const existing_name = @ptrCast([*:0] const u8, &existing.extension_name);
+            const existing_name = @ptrCast([*:0]const u8, &existing.extension_name);
             if (std.cstr.cmp(target_extension, existing_name) == 0) {
                 matches += 1;
                 break :cmp;
@@ -255,7 +248,6 @@ fn isPhysicalDeviceExtensionsPresent(allocator: *Allocator, vki: InstanceDispatc
 
     return matches == target_extensions.len;
 }
-
 
 /// Caller must deinit returned ArrayList
 fn getRequiredInstanceExtensions(allocator: *Allocator, target_extensions: []const [*:0]const u8) !ArrayList([*:0]const u8) {
@@ -339,7 +331,7 @@ inline fn setupDebugCallback(vki: InstanceDispatch, instance: vk.Instance, write
 
 /// Any suiteable GPU should result in a positive value, an unsuitable GPU might return a negative value
 inline fn deviceHeuristic(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !i32 {
-    // TODO: rewrite function to have clearer distinction between required and bonus features 
+    // TODO: rewrite function to have clearer distinction between required and bonus features
     //       possible solutions:
     //          - return error if missing feature and discard negative return value (use u32 instead)
     //          - 2 bitmaps
@@ -545,7 +537,7 @@ const SwapChainSupportDetails = struct {
     /// calle has to make sure to also call deinit
     fn init(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !Self {
         const capabilities = try vki.getPhysicalDeviceSurfaceCapabilitiesKHR(device, surface);
-        
+
         var format_count: u32 = 0;
         // TODO: handle incomplete
         _ = try vki.getPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count, null);
@@ -557,7 +549,7 @@ const SwapChainSupportDetails = struct {
             _ = try vki.getPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count, formats.items.ptr);
             formats.items.len = format_count;
             break :blk formats;
-        }; 
+        };
         errdefer formats.deinit();
 
         var present_modes_count: u32 = 0;
@@ -571,13 +563,61 @@ const SwapChainSupportDetails = struct {
             present_modes.items.len = present_modes_count;
             break :blk present_modes;
         };
-        errdefer present_modes.deinit(); 
+        errdefer present_modes.deinit();
 
-        return Self {
+        return Self{
             .capabilities = capabilities,
             .formats = formats,
             .present_modes = present_modes,
         };
+    }
+
+    fn selectSwapChainFormat(self: Self) vk.SurfaceFormatKHR {
+        // TODO: in some cases this is a valid state?
+        //       if so return error here instead ...
+        assert(self.formats.items.len > 0);
+
+        for (self.formats.items) |format| {
+            if (format.format == vk.Format.b8g8r8_srgb and format.color_space == vk.ColorSpaceKHR.srgb_nonlinear_khr) {
+                return format;
+            }
+        }
+
+        return self.formats.items[0];
+    }
+
+    fn selectSwapChainPresentMode(self: Self) vk.PresentModeKHR {
+        for (self.present_modes.items) |present_mode| {
+            if (present_mode == vk.PresentModeKHR.mailbox_khr) {
+                return present_mode;
+            }
+        }
+
+        return vk.PresentModeKHR.fifo_khr;
+    }
+
+    fn constructSwapChainExtent(self: Self) vk.Extent2D {
+        if (self.capabilities.current_extent.width != std.math.maxInt(u32)) {
+            return self.capabilities.current_extent;
+        } else {
+            var window_size = blk: {
+                var x: u32 = 0;
+                var y: u32 = 0;
+                // TODO: this makes this function dependent on window being set, add some checks to verify correct use
+                //       preferably utilizing comptime
+                const window = c.glfwGetCurrentContext();
+                c.glfwGetFramebufferSize(window, @ptrCast(*i32, &x), @ptrCast(*i32, &y));
+                break :blk vk.Extent2D{ .width = x, .height = y };
+            };
+
+            const clamp = std.math.clamp;
+            const min = self.capabilities.min_image_extent;
+            const max = self.capabilities.max_image_extent;
+            return vk.Extent2D{
+                .width = clamp(window_size.width, min.width, max.width),
+                .height = clamp(window_size.height, min.height, max.height),
+            };
+        }
     }
 
     fn deinit(self: Self) void {
@@ -585,6 +625,62 @@ const SwapChainSupportDetails = struct {
         self.present_modes.deinit();
     }
 };
+
+fn createSwapChainCreateInfo(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !vk.SwapchainCreateInfoKHR {
+    std.debug.assert(queue_indices != null);
+
+    const sc_support = try SwapChainSupportDetails.init(allocator, vki, device, surface);
+    defer sc_support.deinit();
+
+    const format = sc_support.selectSwapChainFormat();
+    const present_mode = sc_support.selectSwapChainPresentMode();
+    const extent = sc_support.constructSwapChainExtent();
+
+    const image_count = std.math.min(sc_support.capabilities.min_image_count + 1, sc_support.capabilities.max_image_count);
+
+    const Config = struct {
+        sharing_mode: vk.SharingMode,
+        index_count: u32,
+        p_indices: [*]const u32,
+    };
+    const sharing_config = blk: {
+        const indices = queue_indices.?;
+        if (indices.graphics != indices.present) {
+            const indices_arr = [_]u32{ indices.graphics, indices.present };
+            break :blk Config {
+                .sharing_mode = vk.SharingMode.concurrent, // TODO: read up on ownership in this context
+                .index_count = 2,
+                .p_indices = @ptrCast([*]const u32, &indices_arr[0..indices_arr.len]),
+            };
+        } else {
+            const indices_arr = [_]u32{ indices.graphics, indices.present };
+            break :blk Config {
+                .sharing_mode = vk.SharingMode.exclusive,
+                .index_count = 0,
+                .p_indices = @ptrCast([*]const u32, &indices_arr[0..indices_arr.len]),
+            };
+        }
+    };
+
+    return vk.SwapchainCreateInfoKHR{
+        .flags = .{},
+        .surface = surface,
+        .min_image_count = image_count,
+        .image_format = format.format,
+        .image_color_space = format.color_space,
+        .image_extent = extent,
+        .image_array_layers = 1,
+        .image_usage = vk.ImageUsageFlags{ .color_attachment_bit = true },
+        .image_sharing_mode = sharing_config.sharing_mode,
+        .queue_family_index_count = sharing_config.index_count,
+        .p_queue_family_indices = sharing_config.p_indices,
+        .pre_transform = sc_support.capabilities.current_transform,
+        .composite_alpha = vk.CompositeAlphaFlagsKHR{ .opaque_bit_khr = true },
+        .present_mode = present_mode,
+        .clipped = vk.TRUE,
+        .old_swapchain = vk.SwapchainKHR.null_handle,
+    };
+}
 
 // TODO: rewrite this
 fn handleGLFWError() noreturn {
