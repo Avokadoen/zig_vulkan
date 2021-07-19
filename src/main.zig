@@ -35,13 +35,7 @@ const BaseDispatch = vk.BaseWrapper([_]vk.BaseCommand{
 
 const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{ .CreateDebugUtilsMessengerEXT, .CreateDevice, .DestroyDebugUtilsMessengerEXT, .DestroyInstance, .DestroySurfaceKHR, .EnumerateDeviceExtensionProperties, .EnumeratePhysicalDevices, .GetDeviceProcAddr, .GetPhysicalDeviceFeatures, .GetPhysicalDeviceProperties, .GetPhysicalDeviceQueueFamilyProperties, .GetPhysicalDeviceSurfaceCapabilitiesKHR, .GetPhysicalDeviceSurfaceFormatsKHR, .GetPhysicalDeviceSurfacePresentModesKHR, .GetPhysicalDeviceSurfaceSupportKHR });
 
-const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{
-    .CreateSwapchainKHR,
-    .DestroyDevice,
-    .DestroySwapchainKHR,
-    .GetDeviceQueue,
-    .GetSwapchainImagesKHR
-});
+const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{ .CreateImageView, .CreateSwapchainKHR, .DestroyDevice, .DestroyImageView, .DestroySwapchainKHR, .GetDeviceQueue, .GetSwapchainImagesKHR });
 
 /// used to initialize different aspects of the GfxContext
 var queue_indices: ?QueueFamilyIndices = null;
@@ -49,6 +43,7 @@ var queue_indices: ?QueueFamilyIndices = null;
 const SwapchainData = struct {
     swapchain: vk.SwapchainKHR,
     images: ArrayList(vk.Image),
+    views: ArrayList(vk.ImageView),
     format: vk.Format,
     extent: vk.Extent2D,
 };
@@ -145,7 +140,6 @@ const GfxContext = struct {
         const graphics_queue = vkd.getDeviceQueue(logical_device, queue_indices.?.graphics, 0);
         const present_queue = vkd.getDeviceQueue(logical_device, queue_indices.?.present, 0);
 
-
         const swapchain_data = blk1: {
             const sc_create_info = try createSwapchainCreateInfo(allocator, vki, physical_device, surface);
             const swapchain = try vkd.createSwapchainKHR(logical_device, sc_create_info, null);
@@ -159,14 +153,50 @@ const GfxContext = struct {
                 break :blk2 images;
             };
 
-            break :blk1 SwapchainData {
+            const image_views = blk2: {
+                const image_count = swapchain_images.items.len;
+                var views = try ArrayList(vk.ImageView).initCapacity(allocator, image_count);
+                const components = vk.ComponentMapping{
+                    .r = vk.ComponentSwizzle.identity,
+                    .g = vk.ComponentSwizzle.identity,
+                    .b = vk.ComponentSwizzle.identity,
+                    .a = vk.ComponentSwizzle.identity,
+                };
+                const subresource_range = vk.ImageSubresourceRange{
+                    .aspect_mask = vk.ImageAspectFlags{ .color_bit = true },
+                    .base_mip_level = 0,
+                    .level_count = 1,
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                };
+                {
+                    var i: u32 = 0;
+                    while (i < image_count) : (i += 1) {
+                        const create_info = vk.ImageViewCreateInfo{
+                            .flags = vk.ImageViewCreateFlags{},
+                            .image = swapchain_images.items[i],
+                            .view_type = vk.ImageViewType.@"2d",
+                            .format = sc_create_info.image_format,
+                            .components = components,
+                            .subresource_range = subresource_range,
+                        };
+                        const view = try vkd.createImageView(logical_device, create_info, null);
+                        views.appendAssumeCapacity(view);
+                    }
+                }
+
+                break :blk2 views;
+            };
+
+            break :blk1 SwapchainData{
                 .swapchain = swapchain,
                 .images = swapchain_images,
+                .views = image_views,
                 .format = sc_create_info.image_format,
                 .extent = sc_create_info.image_extent,
             };
         };
-    
+
         return Self{
             .allocator = allocator,
             .vkb = vkb,
@@ -184,6 +214,10 @@ const GfxContext = struct {
     }
 
     pub fn deinit(self: Self) void {
+        for (self.swapchain_data.views.items) |view| {
+            self.vkd.destroyImageView(self.logical_device, view, null);
+        }
+        self.swapchain_data.views.deinit();
         self.swapchain_data.images.deinit();
 
         self.vkd.destroySwapchainKHR(self.logical_device, self.swapchain_data.swapchain, null);
@@ -674,14 +708,14 @@ fn createSwapchainCreateInfo(allocator: *Allocator, vki: InstanceDispatch, devic
         const indices = queue_indices.?;
         if (indices.graphics != indices.present) {
             const indices_arr = [_]u32{ indices.graphics, indices.present };
-            break :blk Config {
+            break :blk Config{
                 .sharing_mode = vk.SharingMode.concurrent, // TODO: read up on ownership in this context
                 .index_count = 2,
                 .p_indices = @ptrCast([*]const u32, &indices_arr[0..indices_arr.len]),
             };
         } else {
             const indices_arr = [_]u32{ indices.graphics, indices.present };
-            break :blk Config {
+            break :blk Config{
                 .sharing_mode = vk.SharingMode.exclusive,
                 .index_count = 0,
                 .p_indices = @ptrCast([*]const u32, &indices_arr[0..indices_arr.len]),
