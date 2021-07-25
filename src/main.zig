@@ -313,10 +313,10 @@ inline fn getQueueFamilyIndices(allocator: *Allocator, vki: InstanceDispatch, ph
     };
 }
 
-// TODO: this is probably a bit nono ... (Should probably explicitly set everyting to false)
+// TODO: support mixed types
 /// Construct VkPhysicalDeviceFeatures type with VkFalse as default field value 
-fn GetFalsePhysicalDeviceFeatures() type {
-    const features_type_info = @typeInfo(vk.PhysicalDeviceFeatures).Struct;
+fn GetFalseFeatures(comptime T: type) type {
+    const features_type_info = @typeInfo(T).Struct;
     var new_type_fields: [features_type_info.fields.len]std.builtin.TypeInfo.StructField = undefined;
 
     inline for (features_type_info.fields) |field, i| {
@@ -333,7 +333,7 @@ fn GetFalsePhysicalDeviceFeatures() type {
         },
     });
 }
-const FalsePhysicalDeviceFeatures = GetFalsePhysicalDeviceFeatures();
+const FalsePhysicalDeviceFeatures = GetFalseFeatures(vk.PhysicalDeviceFeatures);
 
 fn createLogicalDevice(allocator: *Allocator, vkb: BaseDispatch, vki: InstanceDispatch, physical_device: vk.PhysicalDevice) !vk.Device {
     std.debug.assert(queue_indices != null);
@@ -351,7 +351,7 @@ fn createLogicalDevice(allocator: *Allocator, vkb: BaseDispatch, vki: InstanceDi
 
     var queue_create_infos = try ArrayList(vk.DeviceQueueCreateInfo).initCapacity(allocator, family_indices.len);
     defer queue_create_infos.deinit();
-    
+
     for (family_indices) |family_index| {
         queue_create_infos.appendAssumeCapacity(vk.DeviceQueueCreateInfo{
             .flags = .{},
