@@ -531,6 +531,9 @@ fn createSwapchainCreateInfo(allocator: *Allocator, vki: InstanceDispatch, devic
 
     const sc_support = try SwapchainSupportDetails.init(allocator, vki, device, surface);
     defer sc_support.deinit();
+    if (sc_support.capabilities.max_image_count <= 0) {
+        return error.SwapchainNoImageSupport;
+    }
 
     const format = sc_support.selectSwapChainFormat();
     const present_mode = sc_support.selectSwapchainPresentMode();
