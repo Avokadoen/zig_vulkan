@@ -31,12 +31,12 @@ const BaseDispatch = vk.BaseWrapper([_]vk.BaseCommand{
     .CreateInstance,
     .EnumerateInstanceExtensionProperties,
     .EnumerateInstanceLayerProperties,
+    .CreatePipelineLayout,
 });
 
 const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{ .CreateDebugUtilsMessengerEXT, .CreateDevice, .DestroyDebugUtilsMessengerEXT, .DestroyInstance, .DestroySurfaceKHR, .EnumerateDeviceExtensionProperties, .EnumeratePhysicalDevices, .GetDeviceProcAddr, .GetPhysicalDeviceFeatures, .GetPhysicalDeviceProperties, .GetPhysicalDeviceQueueFamilyProperties, .GetPhysicalDeviceSurfaceCapabilitiesKHR, .GetPhysicalDeviceSurfaceFormatsKHR, .GetPhysicalDeviceSurfacePresentModesKHR, .GetPhysicalDeviceSurfaceSupportKHR });
 
-const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{ .CreateImageView, .CreateSwapchainKHR, .DestroyDevice, .DestroyImageView, .DestroySwapchainKHR, .GetDeviceQueue, .GetSwapchainImagesKHR });
-
+const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{ .CreateImageView, .CreatePipelineLayout, .CreateShaderModule, .CreateSwapchainKHR, .DestroyDevice, .DestroyImageView, .DestroyPipelineLayout, .DestroyShaderModule, .DestroySwapchainKHR, .GetDeviceQueue, .GetSwapchainImagesKHR });
 
 /// check if validation layer exist
 fn isValidationLayersPresent(allocator: *Allocator, vkb: BaseDispatch, target_layers: []const [*:0]const u8) !bool {
@@ -346,7 +346,7 @@ fn createLogicalDevice(allocator: *Allocator, vkb: BaseDispatch, vki: InstanceDi
         if (indices.graphics != indices.present) {
             break :blk &[_]u32{ indices.graphics, indices.present };
         }
-        break :blk &[_]u32{ indices.graphics };
+        break :blk &[_]u32{indices.graphics};
     };
 
     var queue_create_infos = try ArrayList(vk.DeviceQueueCreateInfo).initCapacity(allocator, family_indices.len);
@@ -597,7 +597,7 @@ const SwapchainData = struct {
 };
 
 // TODO: Unit testing
-const GfxContext = struct {
+const GraphicsContext = struct {
     const Self = @This();
 
     allocator: *Allocator,
@@ -761,6 +761,54 @@ const GfxContext = struct {
         };
     }
 
+    /// caller must destroy returned module
+    pub fn createShaderModule(self: Self, spir_v: []const u8) !vk.ShaderModule {
+        const create_info = vk.ShaderModuleCreateInfo{
+            .flags = .{},
+            .p_code = @ptrCast([*]const u32, @alignCast(4, spir_v.ptr)),
+            .code_size = spir_v.len,
+        };
+
+        return self.vkd.createShaderModule(self.logical_device, create_info, null);
+    }
+
+    pub fn destroyShaderModule(self: Self, module: vk.ShaderModule) void {
+        self.vkd.destroyShaderModule(self.logical_device, module, null);
+    }
+
+    /// caller must destroy returned module 
+    pub fn createPipelineLayout(self: Self, create_info: PipelineLayoutCreateInfo) !vk.PipelineLayout {
+        return self.vkd.createPipelineLayout(self.logical_device, create_info, null);
+    }
+
+    pub fn destroyPipelineLayout(self: Self, pipeline_layout: PipelineLayout) void {
+        self.vkd.destroyPipelineLayout(self.logical_device, pipeline_layout, null);
+    }
+
+    /// utility to create simple view state info
+    pub fn createViewportScissors(self: Self) struct { viewport: [1]vk.Viewport, scissor: [1]vk.Rect2D } {
+        // TODO: this can be broken down a bit since the code is pretty cluster fck
+        const width = self.swapchain_data.extent.width;
+        const height = self.swapchain_data.extent.width;
+        return .{
+            .viewport = [1]vk.Viewport{
+                .{ .x = 0, .y = 0, .width = @intToFloat(f32, width), .height = @intToFloat(f32, height), .min_depth = 0.0, .max_depth = 1.0 },
+            },
+            .scissor = [1]vk.Rect2D{
+                .{
+                    .offset = .{
+                        .x = 0,
+                        .y = 0,
+                    },
+                    .extent = .{
+                        .width = width,
+                        .height = height,
+                    },
+                },
+            },
+        };
+    }
+
     pub fn deinit(self: Self) void {
         for (self.swapchain_data.views.items) |view| {
             self.vkd.destroyImageView(self.logical_device, view, null);
@@ -779,8 +827,172 @@ const GfxContext = struct {
     }
 };
 
+/// caller must deinit returned memory
+fn readFile(allocator: *Allocator, absolute_path: []const u8) !ArrayList(u8) {
+    const file = try std.fs.openFileAbsolute(absolute_path, .{ .read = true });
+    defer file.close();
+
+    var reader = file.reader();
+    const file_size = (try reader.context.stat()).size;
+    var buffer = try ArrayList(u8).initCapacity(allocator, file_size);
+    // set buffer len so that reader is aware of usable memory
+    buffer.items.len = file_size;
+
+    const read = try reader.readAll(buffer.items);
+    if (read != file_size) {
+        return error.DidNotReadWholeFile;
+    }
+
+    return buffer;
+}
+
 const GraphicsPipeline = struct {
+    // TODO: https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkRayTracingPipelineCreateInfoKHR.html
     
+    // TODO: unless this struct does not get more state/methods, convert init to a normal function
+    pipeline_layout: vk.PipelineLayout,
+
+    /// initialize a graphics pipe line 
+    fn init(allocator: *Allocator, ctx: GraphicsContext) !GraphicsPipeline {
+        const self_path = try std.fs.selfExePathAlloc(allocator);
+        defer ctx.allocator.destroy(self_path.ptr);
+
+        // TODO: function in context for shader stage creation?
+        const vert_code = blk1: {
+            const path = blk2: {
+                const join_path = [_][]const u8{ self_path, "../../triangle.vert.spv" };
+                break :blk2 try std.fs.path.resolve(allocator, join_path[0..]);
+            };
+            defer allocator.destroy(path.ptr);
+
+            break :blk1 try readFile(allocator, path);
+        };
+        const vert_module = try ctx.createShaderModule(vert_code.items[0..]);
+        defer {
+            ctx.destroyShaderModule(vert_module);
+            vert_code.deinit();
+        }
+
+        const vert_stage = vk.PipelineShaderStageCreateInfo{ .flags = .{}, .stage = .{ .vertex_bit = true }, .module = vert_module, .p_name = "main", .p_specialization_info = null };
+
+        const frag_code = blk1: {
+            const path = blk2: {
+                const join_path = [_][]const u8{ self_path, "../../triangle.frag.spv" };
+                break :blk2 try std.fs.path.resolve(allocator, join_path[0..]);
+            };
+            defer allocator.destroy(path.ptr);
+
+            break :blk1 try readFile(allocator, path);
+        };
+        const frag_module = try ctx.createShaderModule(frag_code.items[0..]);
+        defer {
+            ctx.destroyShaderModule(frag_module);
+            frag_code.deinit();
+        }
+
+        const frag_stage = vk.PipelineShaderStageCreateInfo{ .flags = .{}, .stage = .{ .fragment_bit = true }, .module = frag_module, .p_name = "main", .p_specialization_info = null };
+
+        const shader_stages_info = [_]vk.PipelineShaderStageCreateInfo{ vert_stage, frag_stage };
+
+        const vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
+            .flags = .{},
+            .vertex_binding_description_count = 0,
+            .p_vertex_binding_descriptions = undefined,
+            .vertex_attribute_description_count = 0,
+            .p_vertex_attribute_descriptions = undefined,
+        };
+
+        const input_assembley_info = vk.PipelineInputAssemblyStateCreateInfo{
+            .flags = .{},
+            .topology = vk.PrimitiveTopology.triangle_list,
+            .primitive_restart_enable = vk.FALSE,
+        };
+
+        const view = ctx.createViewportScissors();
+        const viewport_info = vk.PipelineViewportStateCreateInfo{
+            .flags = .{},
+            .viewport_count = view.viewport.len,
+            .p_viewports = @ptrCast(?[*]const vk.Viewport, &view.viewport),
+            .scissor_count = view.scissor.len,
+            .p_scissors = @ptrCast(?[*]const vk.Rect2D, &view.scissor),
+        };
+
+        const rasterizer_info = vk.PipelineRasterizationStateCreateInfo{
+            .flags = .{},
+            .depth_clamp_enable = vk.FALSE,
+            .rasterization_discard_enable = vk.FALSE,
+            .polygon_mode = .fill,
+            .cull_mode = .{ .back_bit = true },
+            .front_face = .clock_wise,
+            .depth_bias_enable = vk.FALSE,
+            .depth_bias_constant_factor = 0.0,
+            .depth_bias_clamp = 0.0,
+            .depth_bias_slope_factor = 0.0,
+            .line_width = 1.0,
+        };
+
+        const multisample_info = vk.PipelineMultisampleStateCreateInfo{
+            .flags = .{},
+            .rasterization_samples = .{ .@"1_bit" = false },
+            .sample_shading_enable = vk.FALSE,
+            .min_sample_shading = 1.0,
+            .p_sample_mask = null,
+            .alpha_to_coverage_enable = vk.FALSE,
+            .alpha_to_one_enable = vk.FALSE,
+        };
+
+        const stencil_info: ?vk.PipelineDepthStencilStateCreateInfo = null;
+
+        const color_blend_attachments = [_]vk.PipelineColorBlendAttachmentState {
+            .{
+                .flags = .{},
+                .src_color_blend_factor = .one,
+                .dst_color_blend_factor = .zero,
+                .color_blend_op = .add,
+                .src_alpha_blend_factor = .one,
+                .dst_alpha_blend_factor = .zero,
+                .alpha_blend_op = .add,
+                .color_write_mask = .{ 
+                    .r_bit = true, 
+                    .g_bit = true, 
+                    .b_bit = true, 
+                    .a_bit = true 
+                },
+            },
+        };
+
+        const color_blend_state = vk.PipelineColorBlendStateCreateInfo {
+            .flags = .{},
+            .logic_io_enable = vk.FALSE,
+            .logic_op = .copy,
+            .attachment_count = color_blend_attachments.len,
+            .p_attachments = @ptrCast([*]const PipelineColorBlendAttachmentState, &color_blend_attachments),
+            .blend_constants = [_]f32{0.0} ** 4,
+        };
+
+        const dynamic_States = [_]vk.DynamicState {
+            .viewport,
+        };
+        const dynamic_state_info = vk.PipelineDynamicStateCreateInfo {
+            .flags = .{},
+            .dynamic_state_count = dynamic_States.len,
+            .p_dynamic_states = @ptrCast([*]const DynamicState, &dynamic_States),
+        };
+
+        const pipeline_layout_info = vk.PipelineLayoutCreateInfo {
+            .flags = .{},
+            .set_layout_count = 0,
+            .p_set_layout = null,
+            .push_constant_range_count = 0,
+            .p_push_constant_ranges = null,
+        };
+
+        const pipeline_layout = try ctx.createPipelineLayout(pipeline_layout_info);
+
+        return GraphicsPipeline{
+            .pipeline_layout = pipeline_layout,
+        };
+    }
 };
 
 // TODO: rewrite this
@@ -845,8 +1057,11 @@ pub fn main() anyerror!void {
     // TODO: find a way to convert to const
     var writers = Writers{ .stdout = &stdout, .stderr = &stderr };
     // Construct our vulkan instance
-    const ctx = try GfxContext.init(&gpa.allocator, window, &writers);
+    const ctx = try GraphicsContext.init(&gpa.allocator, window, &writers);
     defer ctx.deinit();
+
+    // const gfx_pipe
+    _ = try GraphicsPipeline.init(&gpa.allocator, ctx);
 
     // Loop until the user closes the window
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
