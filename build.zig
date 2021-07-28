@@ -45,7 +45,7 @@ const ShaderMoveStep = struct {
 
         for (self.abs_from) |from| {
             if (from) |some| {
-                try self.moveResourceToOut(some);
+                try self.moveShaderToOut(some);
             } else {
                 break;
             }
@@ -53,7 +53,7 @@ const ShaderMoveStep = struct {
     }
 
     /// moves a given resource to a given path relative to the output binary
-    fn moveResourceToOut(self: *ShaderMoveStep, abs_from: []const u8) anyerror!void {
+    fn moveShaderToOut(self: *ShaderMoveStep, abs_from: []const u8) anyerror!void {
         const SplitPath = struct {
             dir: []const u8,
             file_name: []const u8,
@@ -81,7 +81,16 @@ const ShaderMoveStep = struct {
         var new_dir = try fs.openDirAbsolute(self.builder.install_prefix, .{});
         defer new_dir.close();
 
-        try fs.rename(old_dir, old_path.file_name, new_dir, old_path.file_name);
+        const old_len = old_path.file_name.len;
+        const new_file_name = try self.*.builder.allocator.alloc(u8, old_len + 4);
+        defer self.*.builder.allocator.destroy(new_file_name.ptr);
+
+        std.mem.copy(u8, new_file_name, old_path.file_name);
+        new_file_name[old_len] = '.';
+        new_file_name[old_len + 1] = 's';
+        new_file_name[old_len + 2] = 'p';
+        new_file_name[old_len + 3] = 'v';
+        try fs.rename(old_dir, old_path.file_name, new_dir, new_file_name);
     }
 };
 
@@ -124,6 +133,7 @@ pub fn build(b: *Builder) void {
     
     const shader_comp = vkgen.ShaderCompileStep.init(
         b,
+        // TODO: -O (optimize), -I (includes) 
         &[_][]const u8{"glslc", "--target-env=vulkan1.2"}, 
     );
     const resource_step = ShaderMoveStep.init(b, shader_comp) catch unreachable;
