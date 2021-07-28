@@ -81,15 +81,10 @@ const ShaderMoveStep = struct {
         var new_dir = try fs.openDirAbsolute(self.builder.install_prefix, .{});
         defer new_dir.close();
 
-        const old_len = old_path.file_name.len;
-        const new_file_name = try self.*.builder.allocator.alloc(u8, old_len + 4);
-        defer self.*.builder.allocator.destroy(new_file_name.ptr);
+        const join_arr = [_][]const u8 {old_path.file_name, "spv" };
+        const new_file_name = try std.mem.join(self.*.builder.allocator, ".", join_arr[0..join_arr.len]);
+        self.*.builder.allocator.destroy(new_file_name.ptr);
 
-        std.mem.copy(u8, new_file_name, old_path.file_name);
-        new_file_name[old_len] = '.';
-        new_file_name[old_len + 1] = 's';
-        new_file_name[old_len + 2] = 'p';
-        new_file_name[old_len + 3] = 'v';
         try fs.rename(old_dir, old_path.file_name, new_dir, new_file_name);
     }
 };
