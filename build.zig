@@ -43,6 +43,13 @@ const ShaderMoveStep = struct {
     fn make(step: *Step) anyerror!void {
         const self: *ShaderMoveStep = @fieldParentPtr(ShaderMoveStep, "step", step);
 
+        if (fs.makeDirAbsolute(self.builder.install_prefix)) |_| {
+            // ok
+        } else |err| switch(err) {
+            std.os.MakeDirError.PathAlreadyExists => {},
+            else => |e| std.debug.panic("got error when creating zig_out: {}", .{e}),
+        }
+
         for (self.abs_from) |from| {
             if (from) |some| {
                 try self.moveShaderToOut(some);
