@@ -6,3 +6,6 @@ zig-out
 deps/docs/*
 # Dependency based documentation readme
 !/deps/docs/README.md 
+
+# Ignore any generated zig vulkan header (usually moved to root for zls) 
+vk.zig
