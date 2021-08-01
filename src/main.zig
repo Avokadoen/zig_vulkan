@@ -35,7 +35,7 @@ const BaseDispatch = vk.BaseWrapper([_]vk.BaseCommand{
 
 const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{ .CreateDebugUtilsMessengerEXT, .CreateDevice, .DestroyDebugUtilsMessengerEXT, .DestroyInstance, .DestroySurfaceKHR, .EnumerateDeviceExtensionProperties, .EnumeratePhysicalDevices, .GetDeviceProcAddr, .GetPhysicalDeviceFeatures, .GetPhysicalDeviceProperties, .GetPhysicalDeviceQueueFamilyProperties, .GetPhysicalDeviceSurfaceCapabilitiesKHR, .GetPhysicalDeviceSurfaceFormatsKHR, .GetPhysicalDeviceSurfacePresentModesKHR, .GetPhysicalDeviceSurfaceSupportKHR });
 
-const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{ .CreateGraphicsPipelines, .CreateImageView, .CreatePipelineLayout, .CreateRenderPass, .CreateShaderModule, .CreateSwapchainKHR, .DestroyDevice, .DestroyImageView, .DestroyPipeline, .DestroyPipelineLayout, .DestroyRenderPass, .DestroyShaderModule, .DestroySwapchainKHR, .GetDeviceQueue, .GetSwapchainImagesKHR });
+const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{ .CreateFramebuffer, .CreateGraphicsPipelines, .CreateImageView, .CreatePipelineLayout, .CreateRenderPass, .CreateShaderModule, .CreateSwapchainKHR, .DestroyDevice, .DestroyFramebuffer, .DestroyImageView, .DestroyPipeline, .DestroyPipelineLayout, .DestroyRenderPass, .DestroyShaderModule, .DestroySwapchainKHR, .GetDeviceQueue, .GetSwapchainImagesKHR });
 
 /// check if validation layer exist
 fn isValidationLayersPresent(allocator: *Allocator, vkb: BaseDispatch, target_layers: []const [*:0]const u8) !bool {
@@ -925,22 +925,24 @@ fn readFile(allocator: *Allocator, absolute_path: []const u8) !ArrayList(u8) {
     return buffer;
 }
 
-const GraphicsPipeline = struct {
+const ApplicationPipeline = struct {
     // TODO: https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkRayTracingPipelineCreateInfoKHR.html
+    const Self = @This();
 
     render_pass: vk.RenderPass,
     pipeline_layout: vk.PipelineLayout,
     pipeline: *vk.Pipeline,
+    framebuffers: ArrayList(vk.Framebuffer), 
 
     allocator: *Allocator,
 
     /// initialize a graphics pipe line 
-    pub fn init(allocator: *Allocator, ctx: GraphicsContext) !GraphicsPipeline {
+    pub fn init(allocator: *Allocator, ctx: GraphicsContext) !Self {
         const pipeline_layout = blk: {
             const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
                 .flags = .{},
                 .set_layout_count = 0,
-                .p_set_layouts = undefined, // TODO: undefined breaks spec
+                .p_set_layouts = undefined,
                 .push_constant_range_count = 0,
                 .p_push_constant_ranges = undefined,
             };
@@ -1091,15 +1093,39 @@ const GraphicsPipeline = struct {
             break :blk try ctx.createGraphicsPipelines(allocator, pipeline_info);
         };
 
-        return GraphicsPipeline{
+        var framebuffers = try ArrayList(vk.Framebuffer).initCapacity(allocator, ctx.swapchain_data.views.items.len);
+        for (ctx.swapchain_data.views.items) |view| {
+            const attachments = [_]vk.ImageView{
+                view,
+            };
+            const framebuffer_info = vk.FramebufferCreateInfo{
+                .flags = .{},
+                .render_pass = render_pass,
+                .attachment_count = attachments.len,
+                .p_attachments = @ptrCast([*]const vk.ImageView, &attachments),
+                .width = ctx.swapchain_data.extent.width,
+                .height = ctx.swapchain_data.extent.height,
+                .layers = 1,
+            };
+            const framebuffer = try ctx.vkd.createFramebuffer(ctx.logical_device, framebuffer_info, null);
+            framebuffers.appendAssumeCapacity(framebuffer);
+        }
+
+        return Self{
             .render_pass = render_pass,
             .pipeline_layout = pipeline_layout,
             .pipeline = pipeline,
+            .framebuffers = framebuffers,
             .allocator = allocator,
         };
     }
 
-    pub fn deinit(self: GraphicsPipeline, ctx: GraphicsContext) void {
+    pub fn deinit(self: Self, ctx: GraphicsContext) void {
+        for (self.framebuffers.items) |framebuffer| {
+            ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
+        }
+        self.framebuffers.deinit();
+
         ctx.destroyPipelineLayout(self.pipeline_layout);
         ctx.destroyRenderPass(self.render_pass);
         ctx.destroyPipeline(self.pipeline);
@@ -1173,7 +1199,7 @@ pub fn main() anyerror!void {
     defer ctx.deinit();
 
     // const gfx_pipe
-    const pipeline = try GraphicsPipeline.init(&gpa.allocator, ctx);
+    const pipeline = try ApplicationPipeline.init(&gpa.allocator, ctx);
     defer pipeline.deinit(ctx);
 
     // Loop until the user closes the window
