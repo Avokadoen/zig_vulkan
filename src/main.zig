@@ -790,17 +790,10 @@ const GraphicsContext = struct {
         var pipeLine = try allocator.create(vk.Pipeline);
         errdefer allocator.destroy(pipeLine);
 
-        const create_infos = [_]vk.GraphicsPipelineCreateInfo {
+        const create_infos = [_]vk.GraphicsPipelineCreateInfo{
             create_info,
         };
-        const result = try self.vkd.createGraphicsPipelines(
-            self.logical_device, 
-            .null_handle, 
-            create_infos.len, 
-            @ptrCast([*]const vk.GraphicsPipelineCreateInfo, &create_infos),
-            null,
-            @ptrCast([*]vk.Pipeline, pipeLine)
-        );
+        const result = try self.vkd.createGraphicsPipelines(self.logical_device, .null_handle, create_infos.len, @ptrCast([*]const vk.GraphicsPipelineCreateInfo, &create_infos), null, @ptrCast([*]vk.Pipeline, pipeLine));
         if (result != vk.Result.success) {
             // TODO: not panic?
             std.debug.panic("failed to initialize pipeline!", .{});
@@ -816,32 +809,34 @@ const GraphicsContext = struct {
 
     /// caller must destroy returned render pass
     pub fn createRenderPass(self: Self) !vk.RenderPass {
-        const color_attachment = [_]vk.AttachmentDescription {
+        const color_attachment = [_]vk.AttachmentDescription{
             .{
                 .flags = .{},
                 .format = self.swapchain_data.format,
-                .samples = .{ .@"1_bit" = true, },
+                .samples = .{
+                    .@"1_bit" = true,
+                },
                 .load_op = .clear,
                 .store_op = .store,
                 .stencil_load_op = .dont_care,
                 .stencil_store_op = .dont_care,
                 .initial_layout = .@"undefined",
                 .final_layout = .present_src_khr,
-            },        
+            },
         };
 
-        const color_attachment_refs = [_]vk.AttachmentReference {
+        const color_attachment_refs = [_]vk.AttachmentReference{
             .{
                 .attachment = 0,
                 .layout = .color_attachment_optimal,
             },
         };
 
-        const subpass = [_]vk.SubpassDescription {
+        const subpass = [_]vk.SubpassDescription{
             .{
                 .flags = .{},
                 .pipeline_bind_point = .graphics,
-                .input_attachment_count = 0, 
+                .input_attachment_count = 0,
                 .p_input_attachments = undefined,
                 .color_attachment_count = color_attachment_refs.len,
                 .p_color_attachments = &color_attachment_refs,
@@ -852,7 +847,7 @@ const GraphicsContext = struct {
             },
         };
 
-        const render_pass_info = vk.RenderPassCreateInfo {
+        const render_pass_info = vk.RenderPassCreateInfo{
             .flags = .{},
             .attachment_count = color_attachment.len,
             .p_attachments = &color_attachment,
@@ -942,7 +937,7 @@ const GraphicsPipeline = struct {
     /// initialize a graphics pipe line 
     pub fn init(allocator: *Allocator, ctx: GraphicsContext) !GraphicsPipeline {
         const pipeline_layout = blk: {
-            const pipeline_layout_info = vk.PipelineLayoutCreateInfo {
+            const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
                 .flags = .{},
                 .set_layout_count = 0,
                 .p_set_layouts = undefined, // TODO: undefined breaks spec
@@ -1033,7 +1028,7 @@ const GraphicsPipeline = struct {
 
             const multisample_info = vk.PipelineMultisampleStateCreateInfo{
                 .flags = .{},
-                .rasterization_samples = .{ .@"1_bit" = false },
+                .rasterization_samples = .{ .@"1_bit" = true },
                 .sample_shading_enable = vk.FALSE,
                 .min_sample_shading = 1.0,
                 .p_sample_mask = null,
@@ -1041,7 +1036,7 @@ const GraphicsPipeline = struct {
                 .alpha_to_one_enable = vk.FALSE,
             };
 
-            const color_blend_attachments = [_]vk.PipelineColorBlendAttachmentState {
+            const color_blend_attachments = [_]vk.PipelineColorBlendAttachmentState{
                 .{
                     .blend_enable = vk.FALSE,
                     .src_color_blend_factor = .one,
@@ -1050,16 +1045,11 @@ const GraphicsPipeline = struct {
                     .src_alpha_blend_factor = .one,
                     .dst_alpha_blend_factor = .zero,
                     .alpha_blend_op = .add,
-                    .color_write_mask = .{ 
-                        .r_bit = true, 
-                        .g_bit = true, 
-                        .b_bit = true, 
-                        .a_bit = true 
-                    },
+                    .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
                 },
             };
 
-            const color_blend_state = vk.PipelineColorBlendStateCreateInfo {
+            const color_blend_state = vk.PipelineColorBlendStateCreateInfo{
                 .flags = .{},
                 .logic_op_enable = vk.FALSE,
                 .logic_op = .copy,
@@ -1068,16 +1058,17 @@ const GraphicsPipeline = struct {
                 .blend_constants = [_]f32{0.0} ** 4,
             };
 
-            const dynamic_states = [_]vk.DynamicState {
+            const dynamic_states = [_]vk.DynamicState{
                 .viewport,
+                .scissor,
             };
-            const dynamic_state_info = vk.PipelineDynamicStateCreateInfo {
+            const dynamic_state_info = vk.PipelineDynamicStateCreateInfo{
                 .flags = .{},
                 .dynamic_state_count = dynamic_states.len,
                 .p_dynamic_states = @ptrCast([*]const vk.DynamicState, &dynamic_states),
             };
 
-            const pipeline_info = vk.GraphicsPipelineCreateInfo {
+            const pipeline_info = vk.GraphicsPipelineCreateInfo{
                 .flags = .{},
                 .stage_count = shader_stages_info.len,
                 .p_stages = @ptrCast([*]const vk.PipelineShaderStageCreateInfo, &shader_stages_info),
@@ -1114,7 +1105,6 @@ const GraphicsPipeline = struct {
         ctx.destroyPipeline(self.pipeline);
         self.allocator.destroy(self.pipeline);
     }
-
 };
 
 // TODO: rewrite this
