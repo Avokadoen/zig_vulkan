@@ -658,17 +658,18 @@ const GraphicsContext = struct {
             create_p_next = @ptrCast(?*c_void, &debug_create_info);
         }
 
-        const instanceInfo = vk.InstanceCreateInfo{
-            .p_next = create_p_next,
-            .flags = .{},
-            .p_application_info = &appInfo,
-            .enabled_layer_count = validation_layer_info.enabled_layer_count,
-            .pp_enabled_layer_names = validation_layer_info.enabled_layer_names,
-            .enabled_extension_count = @intCast(u32, extensions.items.len),
-            .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, extensions.items.ptr),
+        const instance = blk: {
+            const instanceInfo = vk.InstanceCreateInfo{
+                .p_next = create_p_next,
+                .flags = .{},
+                .p_application_info = &appInfo,
+                .enabled_layer_count = validation_layer_info.enabled_layer_count,
+                .pp_enabled_layer_names = validation_layer_info.enabled_layer_names,
+                .enabled_extension_count = @intCast(u32, extensions.items.len),
+                .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, extensions.items.ptr),
+            };
+            break :blk try vkb.createInstance(instanceInfo, null);
         };
-
-        const instance = try vkb.createInstance(instanceInfo, null);
 
         const vki = try InstanceDispatch.load(instance, c.glfwGetInstanceProcAddress);
         errdefer vki.destroyInstance(instance, null);
@@ -824,14 +825,12 @@ const GraphicsContext = struct {
                 .final_layout = .present_src_khr,
             },
         };
-
         const color_attachment_refs = [_]vk.AttachmentReference{
             .{
                 .attachment = 0,
                 .layout = .color_attachment_optimal,
             },
         };
-
         const subpass = [_]vk.SubpassDescription{
             .{
                 .flags = .{},
@@ -846,7 +845,6 @@ const GraphicsContext = struct {
                 .p_preserve_attachments = undefined,
             },
         };
-
         const render_pass_info = vk.RenderPassCreateInfo{
             .flags = .{},
             .attachment_count = color_attachment.len,
@@ -932,7 +930,7 @@ const ApplicationPipeline = struct {
     render_pass: vk.RenderPass,
     pipeline_layout: vk.PipelineLayout,
     pipeline: *vk.Pipeline,
-    framebuffers: ArrayList(vk.Framebuffer), 
+    framebuffers: ArrayList(vk.Framebuffer),
 
     allocator: *Allocator,
 
@@ -988,7 +986,6 @@ const ApplicationPipeline = struct {
             }
 
             const frag_stage = vk.PipelineShaderStageCreateInfo{ .flags = .{}, .stage = .{ .fragment_bit = true }, .module = frag_module, .p_name = "main", .p_specialization_info = null };
-
             const shader_stages_info = [_]vk.PipelineShaderStageCreateInfo{ vert_stage, frag_stage };
 
             const vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
@@ -998,13 +995,11 @@ const ApplicationPipeline = struct {
                 .vertex_attribute_description_count = 0,
                 .p_vertex_attribute_descriptions = undefined,
             };
-
             const input_assembley_info = vk.PipelineInputAssemblyStateCreateInfo{
                 .flags = .{},
                 .topology = vk.PrimitiveTopology.triangle_list,
                 .primitive_restart_enable = vk.FALSE,
             };
-
             const view = ctx.createViewportScissors();
             const viewport_info = vk.PipelineViewportStateCreateInfo{
                 .flags = .{},
@@ -1013,7 +1008,6 @@ const ApplicationPipeline = struct {
                 .scissor_count = view.scissor.len,
                 .p_scissors = @ptrCast(?[*]const vk.Rect2D, &view.scissor),
             };
-
             const rasterizer_info = vk.PipelineRasterizationStateCreateInfo{
                 .flags = .{},
                 .depth_clamp_enable = vk.FALSE,
@@ -1027,7 +1021,6 @@ const ApplicationPipeline = struct {
                 .depth_bias_slope_factor = 0.0,
                 .line_width = 1.0,
             };
-
             const multisample_info = vk.PipelineMultisampleStateCreateInfo{
                 .flags = .{},
                 .rasterization_samples = .{ .@"1_bit" = true },
@@ -1037,7 +1030,6 @@ const ApplicationPipeline = struct {
                 .alpha_to_coverage_enable = vk.FALSE,
                 .alpha_to_one_enable = vk.FALSE,
             };
-
             const color_blend_attachments = [_]vk.PipelineColorBlendAttachmentState{
                 .{
                     .blend_enable = vk.FALSE,
@@ -1050,7 +1042,6 @@ const ApplicationPipeline = struct {
                     .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
                 },
             };
-
             const color_blend_state = vk.PipelineColorBlendStateCreateInfo{
                 .flags = .{},
                 .logic_op_enable = vk.FALSE,
@@ -1059,7 +1050,6 @@ const ApplicationPipeline = struct {
                 .p_attachments = @ptrCast([*]const vk.PipelineColorBlendAttachmentState, &color_blend_attachments),
                 .blend_constants = [_]f32{0.0} ** 4,
             };
-
             const dynamic_states = [_]vk.DynamicState{
                 .viewport,
                 .scissor,
@@ -1069,7 +1059,6 @@ const ApplicationPipeline = struct {
                 .dynamic_state_count = dynamic_states.len,
                 .p_dynamic_states = @ptrCast([*]const vk.DynamicState, &dynamic_states),
             };
-
             const pipeline_info = vk.GraphicsPipelineCreateInfo{
                 .flags = .{},
                 .stage_count = shader_stages_info.len,
@@ -1089,7 +1078,6 @@ const ApplicationPipeline = struct {
                 .base_pipeline_handle = .null_handle,
                 .base_pipeline_index = -1,
             };
-
             break :blk try ctx.createGraphicsPipelines(allocator, pipeline_info);
         };
 
