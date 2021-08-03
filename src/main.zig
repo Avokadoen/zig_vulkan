@@ -35,7 +35,7 @@ const BaseDispatch = vk.BaseWrapper([_]vk.BaseCommand{
 
 const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{ .CreateDebugUtilsMessengerEXT, .CreateDevice, .DestroyDebugUtilsMessengerEXT, .DestroyInstance, .DestroySurfaceKHR, .EnumerateDeviceExtensionProperties, .EnumeratePhysicalDevices, .GetDeviceProcAddr, .GetPhysicalDeviceFeatures, .GetPhysicalDeviceProperties, .GetPhysicalDeviceQueueFamilyProperties, .GetPhysicalDeviceSurfaceCapabilitiesKHR, .GetPhysicalDeviceSurfaceFormatsKHR, .GetPhysicalDeviceSurfacePresentModesKHR, .GetPhysicalDeviceSurfaceSupportKHR });
 
-const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{ .CreateCommandPool, .CreateFramebuffer, .CreateGraphicsPipelines, .CreateImageView, .CreatePipelineLayout, .CreateRenderPass, .CreateShaderModule, .CreateSwapchainKHR, .DestroyCommandPool, .DestroyDevice, .DestroyFramebuffer, .DestroyImageView, .DestroyPipeline, .DestroyPipelineLayout, .DestroyRenderPass, .DestroyShaderModule, .DestroySwapchainKHR, .GetDeviceQueue, .GetSwapchainImagesKHR });
+const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{ .AllocateCommandBuffers, .BeginCommandBuffer, .CmdBeginRenderPass, .CmdBindPipeline, .CmdDraw, .CmdEndRenderPass, .CreateCommandPool, .CreateFramebuffer, .CreateGraphicsPipelines, .CreateImageView, .CreatePipelineLayout, .CreateRenderPass, .CreateShaderModule, .CreateSwapchainKHR, .DestroyCommandPool, .DestroyDevice, .DestroyFramebuffer, .DestroyImageView, .DestroyPipeline, .DestroyPipelineLayout, .DestroyRenderPass, .DestroyShaderModule, .DestroySwapchainKHR, .EndCommandBuffer, .GetDeviceQueue, .GetSwapchainImagesKHR });
 
 /// check if validation layer exist
 fn isValidationLayersPresent(allocator: *Allocator, vkb: BaseDispatch, target_layers: []const [*:0]const u8) !bool {
@@ -924,7 +924,9 @@ const ApplicationPipeline = struct {
     pipeline_layout: vk.PipelineLayout,
     pipeline: *vk.Pipeline,
     framebuffers: ArrayList(vk.Framebuffer),
+
     command_pool: vk.CommandPool,
+    command_buffers: ArrayList(vk.CommandBuffer),
 
     allocator: *Allocator,
 
@@ -1044,14 +1046,15 @@ const ApplicationPipeline = struct {
                 .p_attachments = @ptrCast([*]const vk.PipelineColorBlendAttachmentState, &color_blend_attachments),
                 .blend_constants = [_]f32{0.0} ** 4,
             };
-            const dynamic_states = [_]vk.DynamicState{
-                .viewport,
-                .scissor,
-            };
+            // TODO: allocate view struct and store pointer in this struct
+            // const dynamic_states = [_]vk.DynamicState{
+            //     .viewport,
+            //     .scissor,
+            // };
             const dynamic_state_info = vk.PipelineDynamicStateCreateInfo{
                 .flags = .{},
-                .dynamic_state_count = dynamic_states.len,
-                .p_dynamic_states = @ptrCast([*]const vk.DynamicState, &dynamic_states),
+                .dynamic_state_count = 0, // dynamic_states.len,
+                .p_dynamic_states = undefined, // @ptrCast([*]const vk.DynamicState, &dynamic_states),
             };
             const pipeline_info = vk.GraphicsPipelineCreateInfo{
                 .flags = .{},
@@ -1102,18 +1105,70 @@ const ApplicationPipeline = struct {
             break :blk try ctx.vkd.createCommandPool(ctx.logical_device, pool_info, null);
         };
 
+        const command_buffers = blk: {
+            var buffers = try ArrayList(vk.CommandBuffer).initCapacity(allocator, framebuffers.items.len);
+            const alloc_info = vk.CommandBufferAllocateInfo{
+                .command_pool = command_pool,
+                .level = vk.CommandBufferLevel.primary,
+                .command_buffer_count = @intCast(u32, buffers.capacity),
+            };
+
+            try ctx.vkd.allocateCommandBuffers(ctx.logical_device, alloc_info, buffers.items.ptr);
+            buffers.items.len = buffers.capacity;
+
+            break :blk buffers;
+        };
+
+        const clear_color = [_]vk.ClearColorValue{
+            .{
+                .float_32 = [_]f32 {0.0, 0.0, 0.0, 1.0},
+            },
+        };
+        for (command_buffers.items) |command_buffer, i| {
+            const command_begin_info = vk.CommandBufferBeginInfo{
+                .flags = .{},
+                .p_inheritance_info = null,
+            };
+            try ctx.vkd.beginCommandBuffer(command_buffer, command_begin_info);
+
+            const render_begin_info = vk.RenderPassBeginInfo{
+                .render_pass = render_pass,
+                .framebuffer = framebuffers.items[i],
+                .render_area = .{
+                    .offset = .{ .x = 0, .y = 0 },
+                    .extent = ctx.swapchain_data.extent
+                },
+                .clear_value_count = clear_color.len,
+                .p_clear_values = @ptrCast([*]const vk.ClearValue, &clear_color),
+            };
+
+            ctx.vkd.cmdBeginRenderPass(command_buffer, render_begin_info, vk.SubpassContents.@"inline");
+            ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.graphics, pipeline.*);
+            ctx.vkd.cmdDraw(command_buffer, 3, 1, 0, 0);
+            ctx.vkd.cmdEndRenderPass(command_buffer);
+            try ctx.vkd.endCommandBuffer(command_buffer);
+        }
+
         return Self{
             .render_pass = render_pass,
             .pipeline_layout = pipeline_layout,
             .pipeline = pipeline,
             .framebuffers = framebuffers,
             .command_pool = command_pool,
+            .command_buffers = command_buffers,
             .allocator = allocator,
         };
     }
 
+    pub fn draw(self: Self, ctx: GraphicsContext) void {
+        _ = self;
+        _ = ctx;
+    }
+
     pub fn deinit(self: Self, ctx: GraphicsContext) void {
+        self.command_buffers.deinit();
         ctx.vkd.destroyCommandPool(ctx.logical_device, self.command_pool, null);
+        
         for (self.framebuffers.items) |framebuffer| {
             ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
         }
@@ -1200,6 +1255,7 @@ pub fn main() anyerror!void {
     // Loop until the user closes the window
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
         // Render here
+        pipeline.draw(ctx);
 
         // Swap front and back buffers
         c.glfwSwapBuffers(window);
