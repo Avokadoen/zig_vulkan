@@ -35,7 +35,7 @@ const BaseDispatch = vk.BaseWrapper([_]vk.BaseCommand{
 
 const InstanceDispatch = vk.InstanceWrapper([_]vk.InstanceCommand{ .CreateDebugUtilsMessengerEXT, .CreateDevice, .DestroyDebugUtilsMessengerEXT, .DestroyInstance, .DestroySurfaceKHR, .EnumerateDeviceExtensionProperties, .EnumeratePhysicalDevices, .GetDeviceProcAddr, .GetPhysicalDeviceFeatures, .GetPhysicalDeviceProperties, .GetPhysicalDeviceQueueFamilyProperties, .GetPhysicalDeviceSurfaceCapabilitiesKHR, .GetPhysicalDeviceSurfaceFormatsKHR, .GetPhysicalDeviceSurfacePresentModesKHR, .GetPhysicalDeviceSurfaceSupportKHR });
 
-const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{ .CreateFramebuffer, .CreateGraphicsPipelines, .CreateImageView, .CreatePipelineLayout, .CreateRenderPass, .CreateShaderModule, .CreateSwapchainKHR, .DestroyDevice, .DestroyFramebuffer, .DestroyImageView, .DestroyPipeline, .DestroyPipelineLayout, .DestroyRenderPass, .DestroyShaderModule, .DestroySwapchainKHR, .GetDeviceQueue, .GetSwapchainImagesKHR });
+const DeviceDispatch = vk.DeviceWrapper([_]vk.DeviceCommand{ .CreateCommandPool, .CreateFramebuffer, .CreateGraphicsPipelines, .CreateImageView, .CreatePipelineLayout, .CreateRenderPass, .CreateShaderModule, .CreateSwapchainKHR, .DestroyCommandPool, .DestroyDevice, .DestroyFramebuffer, .DestroyImageView, .DestroyPipeline, .DestroyPipelineLayout, .DestroyRenderPass, .DestroyShaderModule, .DestroySwapchainKHR, .GetDeviceQueue, .GetSwapchainImagesKHR });
 
 /// check if validation layer exist
 fn isValidationLayersPresent(allocator: *Allocator, vkb: BaseDispatch, target_layers: []const [*:0]const u8) !bool {
@@ -924,6 +924,7 @@ const ApplicationPipeline = struct {
     pipeline_layout: vk.PipelineLayout,
     pipeline: *vk.Pipeline,
     framebuffers: ArrayList(vk.Framebuffer),
+    command_pool: vk.CommandPool,
 
     allocator: *Allocator,
 
@@ -1092,16 +1093,27 @@ const ApplicationPipeline = struct {
             framebuffers.appendAssumeCapacity(framebuffer);
         }
 
+        const command_pool = blk: {
+            const pool_info = vk.CommandPoolCreateInfo{
+                .flags = .{},
+                .queue_family_index = ctx.queue_indices.graphics,
+            };
+
+            break :blk try ctx.vkd.createCommandPool(ctx.logical_device, pool_info, null);
+        };
+
         return Self{
             .render_pass = render_pass,
             .pipeline_layout = pipeline_layout,
             .pipeline = pipeline,
             .framebuffers = framebuffers,
+            .command_pool = command_pool,
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: Self, ctx: GraphicsContext) void {
+        ctx.vkd.destroyCommandPool(ctx.logical_device, self.command_pool, null);
         for (self.framebuffers.items) |framebuffer| {
             ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
         }
@@ -1113,6 +1125,8 @@ const ApplicationPipeline = struct {
         self.allocator.destroy(self.pipeline);
     }
 };
+
+
 
 // TODO: rewrite this
 fn handleGLFWError() noreturn {
