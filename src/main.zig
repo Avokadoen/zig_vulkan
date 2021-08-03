@@ -334,18 +334,15 @@ fn GetFalseFeatures(comptime T: type) type {
 }
 const FalsePhysicalDeviceFeatures = GetFalseFeatures(vk.PhysicalDeviceFeatures);
 
-fn createLogicalDevice(allocator: *Allocator, vkb: BaseDispatch, vki: InstanceDispatch, physical_device: vk.PhysicalDevice) !vk.Device {
-    std.debug.assert(queue_indices != null);
-    const indices = queue_indices.?;
-
+fn createLogicalDevice(allocator: *Allocator, vkb: BaseDispatch, vki: InstanceDispatch, queue_indices: QueueFamilyIndices, physical_device: vk.PhysicalDevice) !vk.Device {
     const queue_priority = [_]f32{1.0};
 
     // merge indices if they are identical according to vulkan spec
     const family_indices: []const u32 = blk: {
-        if (indices.graphics != indices.present) {
-            break :blk &[_]u32{ indices.graphics, indices.present };
+        if (queue_indices.graphics != queue_indices.present) {
+            break :blk &[_]u32{ queue_indices.graphics, queue_indices.present };
         }
-        break :blk &[_]u32{indices.graphics};
+        break :blk &[_]u32{queue_indices.graphics};
     };
 
     var queue_create_infos = try ArrayList(vk.DeviceQueueCreateInfo).initCapacity(allocator, family_indices.len);
@@ -525,9 +522,7 @@ const SwapchainSupportDetails = struct {
     }
 };
 
-fn createSwapchainCreateInfo(allocator: *Allocator, vki: InstanceDispatch, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !vk.SwapchainCreateInfoKHR {
-    std.debug.assert(queue_indices != null);
-
+fn createSwapchainCreateInfo(allocator: *Allocator, vki: InstanceDispatch, queue_indices: QueueFamilyIndices, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !vk.SwapchainCreateInfoKHR {
     const sc_support = try SwapchainSupportDetails.init(allocator, vki, device, surface);
     defer sc_support.deinit();
     if (sc_support.capabilities.max_image_count <= 0) {
@@ -546,16 +541,15 @@ fn createSwapchainCreateInfo(allocator: *Allocator, vki: InstanceDispatch, devic
         p_indices: [*]const u32,
     };
     const sharing_config = blk: {
-        const indices = queue_indices.?;
-        if (indices.graphics != indices.present) {
-            const indices_arr = [_]u32{ indices.graphics, indices.present };
+        if (queue_indices.graphics != queue_indices.present) {
+            const indices_arr = [_]u32{ queue_indices.graphics, queue_indices.present };
             break :blk Config{
                 .sharing_mode = vk.SharingMode.concurrent, // TODO: read up on ownership in this context
-                .index_count = 2,
+                .index_count = indices_arr.len,
                 .p_indices = @ptrCast([*]const u32, &indices_arr[0..indices_arr.len]),
             };
         } else {
-            const indices_arr = [_]u32{ indices.graphics, indices.present };
+            const indices_arr = [_]u32{ queue_indices.graphics, queue_indices.present };
             break :blk Config{
                 .sharing_mode = vk.SharingMode.exclusive,
                 .index_count = 0,
@@ -584,9 +578,6 @@ fn createSwapchainCreateInfo(allocator: *Allocator, vki: InstanceDispatch, devic
     };
 }
 
-/// used to initialize different aspects of the GfxContext
-var queue_indices: ?QueueFamilyIndices = null;
-
 const SwapchainData = struct {
     swapchain: vk.SwapchainKHR,
     images: ArrayList(vk.Image),
@@ -613,6 +604,7 @@ const GraphicsContext = struct {
     present_queue: vk.Queue,
     surface: vk.SurfaceKHR,
     swapchain_data: SwapchainData,
+    queue_indices: QueueFamilyIndices,
 
     // TODO: utilize comptime for this (emit from struct if we are in release mode)
     messenger: ?vk.DebugUtilsMessengerEXT,
@@ -679,17 +671,17 @@ const GraphicsContext = struct {
 
         const physical_device = try selectPhysicalDevice(allocator, vki, instance, surface);
 
-        queue_indices = try getQueueFamilyIndices(allocator, vki, physical_device, surface);
+        const queue_indices = try getQueueFamilyIndices(allocator, vki, physical_device, surface);
 
         const messenger = try setupDebugCallback(vki, instance, writers);
-        const logical_device = try createLogicalDevice(allocator, vkb, vki, physical_device);
+        const logical_device = try createLogicalDevice(allocator, vkb, vki, queue_indices, physical_device);
 
         const vkd = try DeviceDispatch.load(logical_device, vki.dispatch.vkGetDeviceProcAddr);
-        const graphics_queue = vkd.getDeviceQueue(logical_device, queue_indices.?.graphics, 0);
-        const present_queue = vkd.getDeviceQueue(logical_device, queue_indices.?.present, 0);
+        const graphics_queue = vkd.getDeviceQueue(logical_device, queue_indices.graphics, 0);
+        const present_queue = vkd.getDeviceQueue(logical_device, queue_indices.present, 0);
 
         const swapchain_data = blk1: {
-            const sc_create_info = try createSwapchainCreateInfo(allocator, vki, physical_device, surface);
+            const sc_create_info = try createSwapchainCreateInfo(allocator, vki, queue_indices, physical_device, surface);
             const swapchain = try vkd.createSwapchainKHR(logical_device, sc_create_info, null);
             const swapchain_images = blk2: {
                 var image_count: u32 = 0;
@@ -756,6 +748,7 @@ const GraphicsContext = struct {
             .graphics_queue = graphics_queue,
             .present_queue = present_queue,
             .surface = surface,
+            .queue_indices = queue_indices,
             .swapchain_data = swapchain_data,
             .messenger = messenger,
         };
