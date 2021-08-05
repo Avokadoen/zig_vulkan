@@ -128,6 +128,9 @@ pub fn build(b: *Builder) void {
     exe.addPackagePath("ecs", "deps/zig-ecs/src/ecs.zig");
     exe.addPackagePath("zalgebra", "deps/zalgebra/src/main.zig");
 
+    // TODO: separate renderer in a package (and repo)
+    // exe.addPackagePath("renderer", "src/renderer");
+
     const vk_xml_path = b.option([]const u8, "vulkan-registry", "Override to the Vulkan registry") orelse "deps/vk.xml";
     const gen = vkgen.VkGenerateStep.init(b, vk_xml_path, "vk.zig");
     exe.step.dependOn(&gen.step);
