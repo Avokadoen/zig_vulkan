@@ -13,6 +13,8 @@ pub const ApplicationPipeline = struct {
     // TODO: https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkRayTracingPipelineCreateInfoKHR.html
     const Self = @This();
 
+    allocator: *Allocator,
+
     render_pass: vk.RenderPass,
     pipeline_layout: vk.PipelineLayout,
     pipeline: *vk.Pipeline,
@@ -21,7 +23,8 @@ pub const ApplicationPipeline = struct {
     command_pool: vk.CommandPool,
     command_buffers: ArrayList(vk.CommandBuffer),
 
-    allocator: *Allocator,
+    image_available_s: vk.Semaphore,
+    renderer_finished_s: vk.Semaphore,
 
     /// initialize a graphics pipe line 
     pub fn init(allocator: *Allocator, ctx: Context) !Self {
@@ -239,23 +242,77 @@ pub const ApplicationPipeline = struct {
             try ctx.vkd.endCommandBuffer(command_buffer);
         }
 
+        const semaphore_info = vk.SemaphoreCreateInfo{
+            .flags = .{},
+        };
+        const image_available_s = try ctx.vkd.createSemaphore(ctx.logical_device, semaphore_info, null);
+        const renderer_finished_s = try ctx.vkd.createSemaphore(ctx.logical_device, semaphore_info, null);
+
         return Self{
+            .allocator = allocator,
             .render_pass = render_pass,
             .pipeline_layout = pipeline_layout,
             .pipeline = pipeline,
             .framebuffers = framebuffers,
             .command_pool = command_pool,
             .command_buffers = command_buffers,
-            .allocator = allocator,
+            .image_available_s = image_available_s,
+            .renderer_finished_s = renderer_finished_s,
         };
     }
 
-    pub fn draw(self: Self, ctx: Context) void {
-        _ = self;
-        _ = ctx;
+    pub fn draw(self: Self, ctx: Context) !void {
+        const max_u64 = std.math.maxInt(u64); 
+        // TODO: couldn't a fence simplify this code a lot? (read up on fence use)
+        const acquire_result = try ctx.vkd.acquireNextImageKHR(
+            ctx.logical_device, 
+            ctx.swapchain_data.swapchain, 
+            max_u64, 
+            self.image_available_s,
+            .null_handle
+        );
+        if (acquire_result.result != vk.Result.success) {
+            // TODO: actual errors ...
+            // Possible errors codes:
+            // timeout (not possible with current use)
+            // not_ready
+            // suboptimal_khr
+            // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkAcquireNextImageKHR.html#_description
+            return error.AcquireCError; 
+        }
+        const wait_stages = vk.PipelineStageFlags{ .color_attachment_output_bit = true };
+        const submit_info = vk.SubmitInfo{
+            .wait_semaphore_count = 1,
+            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.image_available_s),
+            .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &wait_stages),
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers.items[acquire_result.image_index]),
+            .signal_semaphore_count = 1,
+            .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s),
+        };
+        const p_submit_info = @ptrCast([*]const vk.SubmitInfo, &submit_info);
+        try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, p_submit_info, .null_handle);
+
+        const present_info = vk.PresentInfoKHR{
+            .wait_semaphore_count = 1,
+            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s),
+            .swapchain_count = 1,
+            .p_swapchains = @ptrCast([*]const vk.SwapchainKHR, &ctx.swapchain_data.swapchain),
+            .p_image_indices = @ptrCast([*]const u32, &acquire_result.image_index),
+            .p_results = null,
+        };
+        
+        if (ctx.vkd.queuePresentKHR(ctx.present_queue, present_info)) |_| {
+            // TODO:
+        } else |_| {
+            // TODO:
+        }
     }
 
     pub fn deinit(self: Self, ctx: Context) void {
+        ctx.vkd.destroySemaphore(ctx.logical_device, self.image_available_s, null);
+        ctx.vkd.destroySemaphore(ctx.logical_device, self.renderer_finished_s, null);
+
         self.command_buffers.deinit();
         ctx.vkd.destroyCommandPool(ctx.logical_device, self.command_pool, null);
 

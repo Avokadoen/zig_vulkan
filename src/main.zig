@@ -92,7 +92,7 @@ pub fn main() anyerror!void {
     // Loop until the user closes the window
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
         // Render here
-        pipeline.draw(ctx);
+        try pipeline.draw(ctx);
 
         // Swap front and back buffers
         c.glfwSwapBuffers(window);

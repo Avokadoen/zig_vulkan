@@ -305,14 +305,23 @@ pub const Context = struct {
                 .p_preserve_attachments = undefined,
             },
         };
+        const subpass_dependency = vk.SubpassDependency{
+            .src_subpass = vk.SUBPASS_EXTERNAL,
+            .dst_subpass = 0,
+            .src_stage_mask = .{ .color_attachment_output_bit = true, },
+            .dst_stage_mask = .{ .color_attachment_output_bit = true, },
+            .src_access_mask = .{},
+            .dst_access_mask = .{ .color_attachment_write_bit = true, },
+            .dependency_flags = .{},
+        };
         const render_pass_info = vk.RenderPassCreateInfo{
             .flags = .{},
             .attachment_count = color_attachment.len,
             .p_attachments = &color_attachment,
             .subpass_count = subpass.len,
             .p_subpasses = &subpass,
-            .dependency_count = 0,
-            .p_dependencies = undefined,
+            .dependency_count = 1,
+            .p_dependencies = @ptrCast([*]const vk.SubpassDependency, &subpass_dependency),
         };
 
         return try self.vkd.createRenderPass(self.logical_device, render_pass_info, null);
