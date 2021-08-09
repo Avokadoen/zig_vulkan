@@ -79,7 +79,6 @@ pub fn main() anyerror!void {
     // Make the window's context current
     c.glfwMakeContextCurrent(window);
 
-    // TODO: find a way to convert to const
     var writers = renderer.Writers{ .stdout = &stdout, .stderr = &stderr };
     // Construct our vulkan instance
     const ctx = try renderer.Context.init(&gpa.allocator, application_name, window, &writers);

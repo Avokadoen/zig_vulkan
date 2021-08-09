@@ -40,8 +40,9 @@ pub const Context = struct {
 
     // TODO: utilize comptime for this (emit from struct if we are in release mode)
     messenger: ?vk.DebugUtilsMessengerEXT,
+    writers: *IoWriters,
 
-    // Caller should make sure to call deinit
+    // Caller should make sure to call deinit, context takes ownership of IoWriters
     pub fn init(allocator: *Allocator, application_name: []const u8, window: *c.GLFWwindow, writers: *IoWriters) !Context {
         const app_name = try std.cstr.addNullByte(allocator, application_name);
         defer allocator.destroy(app_name.ptr);
@@ -214,6 +215,7 @@ pub const Context = struct {
             .queue_indices = queue_indices,
             .swapchain_data = swapchain_data,
             .messenger = messenger,
+            .writers = writers,
         };
     }
 
