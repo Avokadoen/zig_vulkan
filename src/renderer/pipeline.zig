@@ -369,6 +369,18 @@ pub const ApplicationPipeline = struct {
     }
 
     pub fn deinit(self: Self, ctx: Context) void {
+        _ = ctx.vkd.waitForFences(
+            ctx.logical_device, 
+            @intCast(u32, self.images_in_flight.items.len),
+            self.images_in_flight.items.ptr,
+            vk.TRUE,
+            std.math.maxInt(u64) 
+        ) catch |err| {
+            ctx.writers.stderr.print("waiting for fence failed: {}", .{err}) catch |e| switch (e) {
+                else => {}, // Discard print errors ...
+            };
+        };
+
         {
             var i: usize = 0;
             while (i < constants.max_frames_in_flight) : (i += 1) {
