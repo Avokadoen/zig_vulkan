@@ -36,7 +36,9 @@ fn InfoType() type {
             enabled_layer_count: u8,
             enabled_layer_names: [*]const [*:0]const u8,
 
-            pub fn init(_: *Allocator, _: dispatch.Base) !Self {
+            pub fn init(allocator: *Allocator, vkb: dispatch.Base) !Self {
+                _ = allocator;
+                _ = vkb;
                 return Self{
                     .enabled_layer_count = 0,
                     .enabled_layer_names = undefined,

@@ -63,26 +63,22 @@ pub const Context = struct {
                     vk.extension_info.ext_debug_report.name,
                     vk.extension_info.ext_debug_utils.name,
                 } ++ common_extensions;
-                break :blk debug_extensions[0..debug_extensions.len];
+                break :blk debug_extensions[0..];
             }
-            break :blk common_extensions[0..common_extensions.len];
+            break :blk common_extensions[0..];
         };
 
         const extensions = blk: {
             var glfw_extensions_count: u32 = 0;
             const glfw_extensions_raw = c.glfwGetRequiredInstanceExtensions(&glfw_extensions_count);
             const glfw_extensions_slice = glfw_extensions_raw[0..glfw_extensions_count];
-
-            var extensions = try ArrayList([*:0]const u8).initCapacity(allocator, glfw_extensions_count + 1);
-
+            var extensions = try ArrayList([*:0]const u8).initCapacity(allocator, glfw_extensions_slice.len + application_extensions.len);
             for (glfw_extensions_slice) |extension| {
-                try extensions.append(extension);
+                extensions.appendAssumeCapacity(extension);
             }
-
             for (application_extensions) |extension| {
-                try extensions.append(extension);
+                extensions.appendAssumeCapacity(extension);
             }
-
             break :blk extensions;
         };
         defer extensions.deinit();

@@ -23,8 +23,10 @@ pub const ApplicationPipeline = struct {
     command_pool: vk.CommandPool,
     command_buffers: ArrayList(vk.CommandBuffer),
 
-    image_available_s: vk.Semaphore,
-    renderer_finished_s: vk.Semaphore,
+    image_available_s: ArrayList(vk.Semaphore),
+    renderer_finished_s: ArrayList(vk.Semaphore),
+    in_flight_fences: ArrayList(vk.Fence),
+    images_in_flight: ArrayList(vk.Fence),
 
     /// initialize a graphics pipe line 
     pub fn init(allocator: *Allocator, ctx: Context) !Self {
@@ -242,11 +244,36 @@ pub const ApplicationPipeline = struct {
             try ctx.vkd.endCommandBuffer(command_buffer);
         }
 
+        const images_in_flight = blk: {
+            var images_in_flight = try ArrayList(vk.Fence).initCapacity(allocator, ctx.swapchain_data.images.items.len);
+            var i: usize = 0;
+            while(i < images_in_flight.capacity) : (i += 1) {
+                images_in_flight.appendAssumeCapacity(.null_handle);
+            }
+            break :blk images_in_flight;
+        };   
+        var image_available_s = try ArrayList(vk.Semaphore).initCapacity(allocator, constants.max_frames_in_flight);
+        var renderer_finished_s = try ArrayList(vk.Semaphore).initCapacity(allocator, constants.max_frames_in_flight);
+        var in_flight_fences = try ArrayList(vk.Fence).initCapacity(allocator, constants.max_frames_in_flight);
         const semaphore_info = vk.SemaphoreCreateInfo{
             .flags = .{},
         };
-        const image_available_s = try ctx.vkd.createSemaphore(ctx.logical_device, semaphore_info, null);
-        const renderer_finished_s = try ctx.vkd.createSemaphore(ctx.logical_device, semaphore_info, null);
+        const fence_info = vk.FenceCreateInfo{
+            .flags = .{ .signaled_bit = true, },
+        };
+        {
+            var i: usize = 0;
+            while (i < constants.max_frames_in_flight) : (i += 1) {
+                const image_sem = try ctx.vkd.createSemaphore(ctx.logical_device, semaphore_info, null);
+                image_available_s.appendAssumeCapacity(image_sem);
+
+                const finish_sem = try ctx.vkd.createSemaphore(ctx.logical_device, semaphore_info, null);
+                renderer_finished_s.appendAssumeCapacity(finish_sem);
+
+                const fence = try ctx.vkd.createFence(ctx.logical_device, fence_info, null);
+                in_flight_fences.appendAssumeCapacity(fence);
+            }
+        }
 
         return Self{
             .allocator = allocator,
@@ -258,44 +285,74 @@ pub const ApplicationPipeline = struct {
             .command_buffers = command_buffers,
             .image_available_s = image_available_s,
             .renderer_finished_s = renderer_finished_s,
+            .in_flight_fences = in_flight_fences,
+            .images_in_flight = images_in_flight,
         };
     }
 
     pub fn draw(self: Self, ctx: Context) !void {
+        const state = struct {
+            var current_frame: usize = 0;
+        };
         const max_u64 = std.math.maxInt(u64); 
-        // TODO: couldn't a fence simplify this code a lot? (read up on fence use)
+
+        const in_flight_fence_p = @ptrCast([*]const vk.Fence, &self.in_flight_fences.items[state.current_frame]);
+        _ = try ctx.vkd.waitForFences(
+            ctx.logical_device, 
+            1, 
+            in_flight_fence_p, 
+            vk.TRUE, 
+            max_u64
+        );
         const acquire_result = try ctx.vkd.acquireNextImageKHR(
             ctx.logical_device, 
             ctx.swapchain_data.swapchain, 
             max_u64, 
-            self.image_available_s,
+            self.image_available_s.items[state.current_frame],
             .null_handle
         );
         if (acquire_result.result != vk.Result.success) {
             // TODO: actual errors ...
             // Possible errors codes:
-            // timeout (not possible with current use)
-            // not_ready
-            // suboptimal_khr
+            // - timeout (not possible with current use)
+            // - not_ready
+            // - suboptimal_khr
             // https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/vkAcquireNextImageKHR.html#_description
             return error.AcquireCError; 
         }
+        // TODO: refactor so we always wait 
+        if (self.images_in_flight.items[acquire_result.image_index] != .null_handle) {
+            const p_fence = @ptrCast([*]const vk.Fence, &self.images_in_flight.items[acquire_result.image_index]);
+            _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, p_fence, vk.TRUE, max_u64);
+        }
+        self.images_in_flight.items[acquire_result.image_index] = self.in_flight_fences.items[state.current_frame];
+
         const wait_stages = vk.PipelineStageFlags{ .color_attachment_output_bit = true };
         const submit_info = vk.SubmitInfo{
             .wait_semaphore_count = 1,
-            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.image_available_s),
+            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.image_available_s.items[state.current_frame]),
             .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &wait_stages),
             .command_buffer_count = 1,
             .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers.items[acquire_result.image_index]),
             .signal_semaphore_count = 1,
-            .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s),
+            .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s.items[state.current_frame]),
         };
         const p_submit_info = @ptrCast([*]const vk.SubmitInfo, &submit_info);
-        try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, p_submit_info, .null_handle);
+        _ = try ctx.vkd.resetFences(
+            ctx.logical_device, 
+            1, 
+            in_flight_fence_p
+        );
+        try ctx.vkd.queueSubmit(
+            ctx.graphics_queue, 
+            1, 
+            p_submit_info, 
+            self.in_flight_fences.items[state.current_frame]
+        );
 
         const present_info = vk.PresentInfoKHR{
             .wait_semaphore_count = 1,
-            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s),
+            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s.items[state.current_frame]),
             .swapchain_count = 1,
             .p_swapchains = @ptrCast([*]const vk.SwapchainKHR, &ctx.swapchain_data.swapchain),
             .p_image_indices = @ptrCast([*]const u32, &acquire_result.image_index),
@@ -307,11 +364,23 @@ pub const ApplicationPipeline = struct {
         } else |_| {
             // TODO:
         }
+
+        state.current_frame = (state.current_frame + 1) % constants.max_frames_in_flight;
     }
 
     pub fn deinit(self: Self, ctx: Context) void {
-        ctx.vkd.destroySemaphore(ctx.logical_device, self.image_available_s, null);
-        ctx.vkd.destroySemaphore(ctx.logical_device, self.renderer_finished_s, null);
+        {
+            var i: usize = 0;
+            while (i < constants.max_frames_in_flight) : (i += 1) {
+                ctx.vkd.destroySemaphore(ctx.logical_device, self.image_available_s.items[i], null);
+                ctx.vkd.destroySemaphore(ctx.logical_device, self.renderer_finished_s.items[i], null);
+                ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fences.items[i], null);
+            }
+        }
+        self.image_available_s.deinit();
+        self.renderer_finished_s.deinit();
+        self.in_flight_fences.deinit();
+        self.images_in_flight.deinit();
 
         self.command_buffers.deinit();
         ctx.vkd.destroyCommandPool(ctx.logical_device, self.command_pool, null);
