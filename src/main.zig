@@ -9,6 +9,7 @@ const dbg = std.builtin.mode == std.builtin.Mode.Debug;
 
 const ecs = @import("ecs");
 const zalgebra = @import("zalgebra");
+const glfw = @import("glfw");
 
 const c = @import("c.zig"); 
 const vk = @import("vulkan");
@@ -19,21 +20,6 @@ const constants = renderer.constant;
 const GLFWError = error{ FailedToInit, WindowCreationFailed };
 
 pub const application_name = "zig vulkan";
-
-// TODO: rewrite this
-fn handleGLFWError() noreturn {
-    var description: [*c][*c]u8 = null;
-    switch (c.glfwGetError(description)) {
-        c.GLFW_NOT_INITIALIZED => {
-            // TODO: use stderr
-            // std.debug.print("Error description: {s}", .{std.mem.span(description.*)});
-            std.debug.panic("GLFW not initialized, call glfwInit()", .{});
-        },
-        else => |err_code| {
-            std.debug.panic("unhandeled glfw error {d}", .{err_code});
-        },
-    }
-}
 
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
@@ -50,38 +36,30 @@ pub fn main() anyerror!void {
             stderr.print("leak detected in gpa!", .{}) catch unreachable;
         }
     }
-
+    
     // Initialize the library *
-    if (c.glfwInit() == c.GLFW_FALSE) {
-        return GLFWError.FailedToInit;
-    }
-    defer c.glfwTerminate();
+    try glfw.init();
+    defer glfw.terminate();
 
-    // Tell glfw that we are planning to use a custom API (not opengl)
-    c.glfwWindowHint(c.GLFW_CLIENT_API, c.GLFW_NO_API);
-    // We will not support resizing window (yet)
-    c.glfwWindowHint(c.GLFW_RESIZABLE, c.GLFW_FALSE);
-
-    if (c.glfwVulkanSupported() == c.GLFW_FALSE) {
+    if (!glfw.vulkanSupported()) {
         std.debug.panic("vulkan not supported on device (glfw)", .{});
     }
 
-    // Create a windowed mode window and its OpenGL context
-    var window: *c.GLFWwindow = blk: {
-        if (c.glfwCreateWindow(640, 480, application_name, null, null)) |created_window| {
-            break :blk created_window;
-        } else {
-            handleGLFWError();
-        }
-    };
-    defer c.glfwDestroyWindow(window);
+    // We will not support resizing window (yet)
+    try glfw.Window.hint(glfw.resizable, glfw.@"false");
+    // Tell glfw that we are planning to use a custom API (not opengl)
+    try glfw.Window.hint(glfw.client_api, glfw.no_api);
 
-    // Make the window's context current
-    c.glfwMakeContextCurrent(window);
+    // Create a windowed mode window 
+    var window = glfw.Window.create(640, 480, application_name, null, null) catch |err| {
+        try stderr.print("failed to create window, code: {}", .{err});
+        return;
+    };
+    defer window.destroy();
 
     var writers = renderer.Writers{ .stdout = &stdout, .stderr = &stderr };
     // Construct our vulkan instance
-    const ctx = try renderer.Context.init(&gpa.allocator, application_name, window, &writers);
+    const ctx = try renderer.Context.init(&gpa.allocator, application_name, &window, &writers);
     defer ctx.deinit();
 
     // const gfx_pipe
@@ -89,14 +67,14 @@ pub fn main() anyerror!void {
     defer pipeline.deinit(ctx);
 
     // Loop until the user closes the window
-    while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
+    while (!window.shouldClose()) {
         // Render here
         try pipeline.draw(ctx);
 
         // Swap front and back buffers
-        c.glfwSwapBuffers(window);
+        window.swapBuffers();
 
         // Poll for and process events
-        c.glfwPollEvents();
+        try glfw.pollEvents();
     }
 }

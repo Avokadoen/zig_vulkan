@@ -4,7 +4,7 @@ const ArrayList = std.ArrayList;
 
 const vk = @import("vulkan");
 
-const constants = @import("constants.zig");
+const constants = @import("consts.zig");
 const swapchain = @import("swapchain.zig");
 const Context = @import("context.zig").Context;
 const utils = @import("../utils.zig");
@@ -371,8 +371,8 @@ pub const ApplicationPipeline = struct {
     pub fn deinit(self: Self, ctx: Context) void {
         _ = ctx.vkd.waitForFences(
             ctx.logical_device, 
-            @intCast(u32, self.images_in_flight.items.len),
-            self.images_in_flight.items.ptr,
+            @intCast(u32, self.in_flight_fences.items.len),
+            self.in_flight_fences.items.ptr,
             vk.TRUE,
             std.math.maxInt(u64) 
         ) catch |err| {

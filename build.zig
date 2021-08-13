@@ -2,6 +2,8 @@ const std = @import("std");
 const fs = std.fs;
 const vkgen = @import("deps/vulkan-zig/generator/index.zig");
 
+const glfw = @import("deps/mach/glfw/build.zig");
+
 const LibExeObjStep = std.build.LibExeObjStep;
 const Builder = std.build.Builder;
 const Step = std.build.Step;
@@ -102,9 +104,7 @@ pub fn build(b: *Builder) void {
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
     // for restricting supported target set are available.
-    const target = b.standardTargetOptions(.{ 
-        .default_target = .{ .abi = .gnu },
-    });
+    const target = b.standardTargetOptions(.{});
 
     // Standard release options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
@@ -113,21 +113,13 @@ pub fn build(b: *Builder) void {
     const exe = b.addExecutable("zig_vulkan", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
-    
-    switch(target.getOs().tag) {
-        .linux => {
-            exe.linkSystemLibrary("glfw");
-        },
-        else => |platform| {
-            std.debug.panic("{} is currently not supported", .{platform});
-        }
-    }
-    
     exe.linkLibC();
+    
+    glfw.linkStep(b, exe, .{});
+    exe.addPackagePath("glfw", "deps/mach/glfw/src/main.zig");
 
     exe.addPackagePath("ecs", "deps/zig-ecs/src/ecs.zig");
     exe.addPackagePath("zalgebra", "deps/zalgebra/src/main.zig");
-
     // TODO: separate renderer in a package (and repo)
     // exe.addPackagePath("renderer", "src/renderer");
 
@@ -135,7 +127,7 @@ pub fn build(b: *Builder) void {
     const gen = vkgen.VkGenerateStep.init(b, vk_xml_path, "vk.zig");
     exe.step.dependOn(&gen.step);
     exe.addPackage(gen.package);
-    
+
     const shader_comp = vkgen.ShaderCompileStep.init(
         b,
         // TODO: -O (optimize), -I (includes) 
@@ -153,7 +145,7 @@ pub fn build(b: *Builder) void {
     exe.step.dependOn(&resource_step.step);
 
     exe.install();
-
+    
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {

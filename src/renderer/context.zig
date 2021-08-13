@@ -3,10 +3,11 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
 const vk = @import("vulkan");
+const glfw = @import("glfw");
 // TODO: problematic to have c in outer scope if it is used here ...
 const c = @import("../c.zig");
 
-const constants = @import("constants.zig");
+const constants = @import("consts.zig");
 const dispatch = @import("dispatch.zig");
 const swapchain = @import("swapchain.zig");
 const physical_device = @import("physical_device.zig");
@@ -42,8 +43,11 @@ pub const Context = struct {
     messenger: ?vk.DebugUtilsMessengerEXT,
     writers: *IoWriters,
 
+    /// pointer to the window handle. Caution is adviced when using this pointer ...
+    window_ptr: *glfw.Window,
+
     // Caller should make sure to call deinit, context takes ownership of IoWriters
-    pub fn init(allocator: *Allocator, application_name: []const u8, window: *c.GLFWwindow, writers: *IoWriters) !Context {
+    pub fn init(allocator: *Allocator, application_name: []const u8, window: *glfw.Window, writers: *IoWriters) !Context {
         const app_name = try std.cstr.addNullByte(allocator, application_name);
         defer allocator.destroy(app_name.ptr);
         
@@ -70,9 +74,7 @@ pub const Context = struct {
         };
 
         const extensions = blk: {
-            var glfw_extensions_count: u32 = 0;
-            const glfw_extensions_raw = c.glfwGetRequiredInstanceExtensions(&glfw_extensions_count);
-            const glfw_extensions_slice = glfw_extensions_raw[0..glfw_extensions_count];
+            const glfw_extensions_slice = try glfw.vulkan.getRequiredInstanceExtensions();
             var extensions = try ArrayList([*:0]const u8).initCapacity(allocator, glfw_extensions_slice.len + application_extensions.len);
             for (glfw_extensions_slice) |extension| {
                 extensions.appendAssumeCapacity(extension);
@@ -114,14 +116,10 @@ pub const Context = struct {
         const vki = try dispatch.Instance.load(instance, c.glfwGetInstanceProcAddress);
         errdefer vki.destroyInstance(instance, null);
 
-        const surface = blk: {
-            var surface: vk.SurfaceKHR = undefined;
-            if (c.glfwCreateWindowSurface(instance, window, null, &surface) != .success) {
-                return error.SurfaceInitFailed;
-            }
-
-            break :blk surface;
-        };
+        var surface: vk.SurfaceKHR = undefined;
+        if (c.glfwCreateWindowSurface(instance, window.handle, null, &surface) != .success) {
+            return error.SurfaceInitFailed;
+        }
         errdefer vki.destroySurfaceKHR(instance, surface, null);
 
         const p_device = try physical_device.selectPrimary(allocator, vki, instance, surface);
@@ -144,7 +142,7 @@ pub const Context = struct {
         const present_queue = vkd.getDeviceQueue(logical_device, queue_indices.present, 0);
 
         const swapchain_data = blk1: {
-            const sc_create_info = try swapchain.newCreateInfo(allocator, vki, queue_indices, p_device, surface);
+            const sc_create_info = try swapchain.newCreateInfo(allocator, vki, queue_indices, p_device, surface, window);
             const swapchain_khr = try vkd.createSwapchainKHR(logical_device, sc_create_info, null);
             const swapchain_images = blk2: {
                 var image_count: u32 = 0;
@@ -216,6 +214,7 @@ pub const Context = struct {
             .swapchain_data = swapchain_data,
             .messenger = messenger,
             .writers = writers,
+            .window_ptr = window,
         };
     }
 
