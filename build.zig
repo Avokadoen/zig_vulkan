@@ -1,13 +1,13 @@
 const std = @import("std");
 const fs = std.fs;
-const vkgen = @import("deps/vulkan-zig/generator/index.zig");
-
-const glfw = @import("deps/mach/glfw/build.zig");
 
 const LibExeObjStep = std.build.LibExeObjStep;
 const Builder = std.build.Builder;
 const Step = std.build.Step;
 const ArrayList = std.ArrayList;
+
+const vkgen = @import("deps/vulkan-zig/generator/index.zig");
+const glfw = @import("deps/mach/glfw/build.zig");
 
 const MoveDirError = error {
     NotFound
@@ -100,14 +100,7 @@ const ShaderMoveStep = struct {
 
 
 pub fn build(b: *Builder) void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
-
-    // Standard release options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
 
     const exe = b.addExecutable("zig_vulkan", "src/main.zig");
@@ -115,13 +108,12 @@ pub fn build(b: *Builder) void {
     exe.setBuildMode(mode);
     exe.linkLibC();
     
+    // compile and link with glfw statically
     glfw.linkStep(b, exe, .{});
     exe.addPackagePath("glfw", "deps/mach/glfw/src/main.zig");
 
     exe.addPackagePath("ecs", "deps/zig-ecs/src/ecs.zig");
     exe.addPackagePath("zalgebra", "deps/zalgebra/src/main.zig");
-    // TODO: separate renderer in a package (and repo)
-    // exe.addPackagePath("renderer", "src/renderer");
 
     const vk_xml_path = b.option([]const u8, "vulkan-registry", "Override to the Vulkan registry") orelse "deps/vk.xml";
     const gen = vkgen.VkGenerateStep.init(b, vk_xml_path, "vk.zig");
@@ -154,6 +146,4 @@ pub fn build(b: *Builder) void {
     
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
-
-   
 }

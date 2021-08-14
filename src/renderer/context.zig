@@ -7,7 +7,7 @@ const glfw = @import("glfw");
 // TODO: problematic to have c in outer scope if it is used here ...
 const c = @import("../c.zig");
 
-const constants = @import("consts.zig");
+const consts = @import("consts.zig");
 const dispatch = @import("dispatch.zig");
 const swapchain = @import("swapchain.zig");
 const physical_device = @import("physical_device.zig");
@@ -55,7 +55,7 @@ pub const Context = struct {
             .p_next = null,
             .p_application_name = app_name,
             .application_version = vk.makeApiVersion(0, 0, 1, 0),
-            .p_engine_name = constants.engine_name,
+            .p_engine_name = consts.engine_name,
             .engine_version = vk.makeApiVersion(0, 0, 1, 0),
             .api_version = vk.API_VERSION_1_2,
         };
@@ -63,7 +63,7 @@ pub const Context = struct {
         // TODO: move to global scope (currently crashes the zig compiler :') )
         const application_extensions = blk: {
             const common_extensions = [_][*:0]const u8{vk.extension_info.khr_surface.name};
-            if (constants.enable_validation_layers) {
+            if (consts.enable_validation_layers) {
                 const debug_extensions = [_][*:0]const u8{
                     vk.extension_info.ext_debug_report.name,
                     vk.extension_info.ext_debug_utils.name,
@@ -95,7 +95,7 @@ pub const Context = struct {
         const validation_layer_info = try validation_layer.Info.init(allocator, vkb);
 
         var create_p_next: ?*c_void = null;
-        if (constants.enable_validation_layers) {
+        if (consts.enable_validation_layers) {
             var debug_create_info = createDefaultDebugCreateInfo(writers);
             create_p_next = @ptrCast(?*c_void, &debug_create_info);
         }
@@ -127,7 +127,7 @@ pub const Context = struct {
         const queue_indices = try QueueFamilyIndices.init(allocator, vki, p_device, surface);
 
         const messenger = blk: {
-            if (!constants.enable_validation_layers) break :blk null;
+            if (!consts.enable_validation_layers) break :blk null;
 
             const create_info = createDefaultDebugCreateInfo(writers);
 
@@ -332,10 +332,17 @@ pub const Context = struct {
     pub fn createViewportScissors(self: Context) struct { viewport: [1]vk.Viewport, scissor: [1]vk.Rect2D } {
         // TODO: this can be broken down a bit since the code is pretty cluster fck
         const width = self.swapchain_data.extent.width;
-        const height = self.swapchain_data.extent.width;
+        const height = self.swapchain_data.extent.height;
         return .{
             .viewport = [1]vk.Viewport{
-                .{ .x = 0, .y = 0, .width = @intToFloat(f32, width), .height = @intToFloat(f32, height), .min_depth = 0.0, .max_depth = 1.0 },
+                .{ 
+                    .x = 0, 
+                    .y = 0, 
+                    .width = @intToFloat(f32, width), 
+                    .height = @intToFloat(f32, height), 
+                    .min_depth = 0.0, 
+                    .max_depth = 1.0 
+                },
             },
             .scissor = [1]vk.Rect2D{
                 .{
@@ -363,7 +370,7 @@ pub const Context = struct {
         self.vki.destroySurfaceKHR(self.instance, self.surface, null);
         self.vkd.destroyDevice(self.logical_device, null);
 
-        if (constants.enable_validation_layers) {
+        if (consts.enable_validation_layers) {
             self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.messenger.?, null);
         }
         self.vki.destroyInstance(self.instance, null);

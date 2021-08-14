@@ -51,7 +51,7 @@ pub fn main() anyerror!void {
     try glfw.Window.hint(glfw.client_api, glfw.no_api);
 
     // Create a windowed mode window 
-    var window = glfw.Window.create(640, 480, application_name, null, null) catch |err| {
+    var window = glfw.Window.create(800, 600, application_name, null, null) catch |err| {
         try stderr.print("failed to create window, code: {}", .{err});
         return;
     };
