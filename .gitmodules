@@ -7,3 +7,7 @@
 [submodule "deps/zalgebra"]
 	path = deps/zalgebra
 	url = https://github.com/kooparse/zalgebra.git
+[submodule "deps/mach"]
+	path = deps/mach
+	url = git@github.com:Avokadoen/mach.git
+	branch = ext-glfw

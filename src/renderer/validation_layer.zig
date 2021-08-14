@@ -4,7 +4,7 @@ const Allocator = std.mem.Allocator;
 
 const vk = @import("vulkan");
 
-const constants = @import("constants.zig");
+const constants = @import("consts.zig");
 const dispatch = @import("dispatch.zig");
 const IoWriters = @import("context.zig").IoWriters;
 

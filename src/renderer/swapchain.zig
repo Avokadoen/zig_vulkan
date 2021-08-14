@@ -3,14 +3,22 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
 const vk = @import("vulkan");
-const c = @import("../c.zig");
+const glfw = @import("glfw");
 
 const dispatch = @import("dispatch.zig");
 const physical_device = @import("physical_device.zig");
 const QueueFamilyIndices = physical_device.QueueFamilyIndices;
+const Context = @import("context.zig").Context;
 
 
-pub fn newCreateInfo(allocator: *Allocator, vki: dispatch.Instance, queue_indices: physical_device.QueueFamilyIndices, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !vk.SwapchainCreateInfoKHR {
+pub fn newCreateInfo(
+    allocator: *Allocator, 
+    vki: dispatch.Instance, 
+    queue_indices: physical_device.QueueFamilyIndices, 
+    device: vk.PhysicalDevice, 
+    surface: vk.SurfaceKHR, 
+    window: *glfw.Window
+) !vk.SwapchainCreateInfoKHR {
     const sc_support = try SupportDetails.init(allocator, vki, device, surface);
     defer sc_support.deinit();
     if (sc_support.capabilities.max_image_count <= 0) {
@@ -19,7 +27,7 @@ pub fn newCreateInfo(allocator: *Allocator, vki: dispatch.Instance, queue_indice
 
     const format = sc_support.selectSwapChainFormat();
     const present_mode = sc_support.selectSwapchainPresentMode();
-    const extent = sc_support.constructSwapChainExtent();
+    const extent = try sc_support.constructSwapChainExtent(window.*);
 
     const image_count = std.math.min(sc_support.capabilities.min_image_count + 1, sc_support.capabilities.max_image_count);
 
@@ -135,18 +143,16 @@ pub const SupportDetails = struct {
         return vk.PresentModeKHR.fifo_khr;
     }
 
-    pub fn constructSwapChainExtent(self: Self) vk.Extent2D {
+    pub fn constructSwapChainExtent(self: Self, window: glfw.Window) glfw.Error!vk.Extent2D {
         if (self.capabilities.current_extent.width != std.math.maxInt(u32)) {
             return self.capabilities.current_extent;
         } else {
             var window_size = blk: {
-                var x: u32 = 0;
-                var y: u32 = 0;
-                // TODO: this makes this function dependent on window being set, add some checks to verify correct use
-                //       preferably utilizing comptime
-                const window = c.glfwGetCurrentContext();
-                c.glfwGetFramebufferSize(window, @ptrCast(*i32, &x), @ptrCast(*i32, &y));
-                break :blk vk.Extent2D{ .width = x, .height = y };
+                const size = try window.getFramebufferSize();
+                break :blk vk.Extent2D{ 
+                    .width = @intCast(u32, size.width), 
+                    .height = @intCast(u32, size.height) 
+                };
             };
 
             const clamp = std.math.clamp;

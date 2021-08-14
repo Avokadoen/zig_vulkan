@@ -6,7 +6,7 @@ const ArrayList = std.ArrayList;
 
 const vk = @import("vulkan");
 const dispatch = @import("dispatch.zig");
-const constants = @import("constants.zig");
+const constants = @import("consts.zig");
 const swapchain = @import("swapchain.zig");
 const vk_utils = @import("vk_utils.zig");
 const validation_layer = @import("validation_layer.zig");
