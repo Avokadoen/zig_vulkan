@@ -9,6 +9,15 @@
             "problemMatcher": [
                 "$gcc"
             ]
+        },
+        {
+            "label": "safe",
+            "type": "shell",
+            "command": "zig build -Drelease-safe=true",
+            "group": "build",
+            "problemMatcher": [
+                "$gcc"
+            ]
         }
     ]
 }
