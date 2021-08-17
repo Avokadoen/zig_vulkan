@@ -45,8 +45,6 @@ pub fn main() anyerror!void {
         std.debug.panic("vulkan not supported on device (glfw)", .{});
     }
 
-    // We will not support resizing window (yet)
-    try glfw.Window.hint(glfw.resizable, glfw.@"false");
     // Tell glfw that we are planning to use a custom API (not opengl)
     try glfw.Window.hint(glfw.client_api, glfw.no_api);
 
@@ -63,7 +61,7 @@ pub fn main() anyerror!void {
     defer ctx.deinit();
 
     // const gfx_pipe
-    const pipeline = try renderer.ApplicationPipeline.init(&gpa.allocator, ctx);
+    var pipeline = try renderer.ApplicationPipeline.init(&gpa.allocator, ctx);
     defer pipeline.deinit(ctx);
 
     // Loop until the user closes the window

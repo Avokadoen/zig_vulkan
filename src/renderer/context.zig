@@ -36,7 +36,6 @@ pub const Context = struct {
     graphics_queue: vk.Queue,
     present_queue: vk.Queue,
     surface: vk.SurfaceKHR,
-    swapchain_data: swapchain.Data,
     queue_indices: QueueFamilyIndices,
 
     // TODO: utilize comptime for this (emit from struct if we are in release mode)
@@ -86,13 +85,17 @@ pub const Context = struct {
         };
         defer extensions.deinit();
 
+        // Partially init a context so that we can use "self" even in init 
+        var self: Context = undefined;
+        self.allocator = allocator;
+
         // load base dispatch wrapper
-        const vkb = try dispatch.Base.load(c.glfwGetInstanceProcAddress);
-        if (!(try vk_utils.isInstanceExtensionsPresent(allocator, vkb, application_extensions))) {
+        self.vkb = try dispatch.Base.load(c.glfwGetInstanceProcAddress);
+        if (!(try vk_utils.isInstanceExtensionsPresent(allocator, self.vkb, application_extensions))) {
             return error.InstanceExtensionNotPresent;
         }
 
-        const validation_layer_info = try validation_layer.Info.init(allocator, vkb);
+        const validation_layer_info = try validation_layer.Info.init(allocator, self.vkb);
 
         var create_p_next: ?*c_void = null;
         if (consts.enable_validation_layers) {
@@ -100,7 +103,7 @@ pub const Context = struct {
             create_p_next = @ptrCast(?*c_void, &debug_create_info);
         }
 
-        const instance = blk: {
+        self.instance = blk: {
             const instanceInfo = vk.InstanceCreateInfo{
                 .p_next = create_p_next,
                 .flags = .{},
@@ -110,110 +113,49 @@ pub const Context = struct {
                 .enabled_extension_count = @intCast(u32, extensions.items.len),
                 .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, extensions.items.ptr),
             };
-            break :blk try vkb.createInstance(instanceInfo, null);
+            break :blk try self.vkb.createInstance(instanceInfo, null);
         };
 
-        const vki = try dispatch.Instance.load(instance, c.glfwGetInstanceProcAddress);
-        errdefer vki.destroyInstance(instance, null);
+        self.vki = try dispatch.Instance.load(self.instance, c.glfwGetInstanceProcAddress);
+        errdefer self.vki.destroyInstance(self.instance, null);
 
-        var surface: vk.SurfaceKHR = undefined;
-        if (c.glfwCreateWindowSurface(instance, window.handle, null, &surface) != .success) {
+        if (c.glfwCreateWindowSurface(self.instance, window.handle, null, &self.surface) != .success) {
             return error.SurfaceInitFailed;
         }
-        errdefer vki.destroySurfaceKHR(instance, surface, null);
+        errdefer self.vki.destroySurfaceKHR(self.instance, self.surface, null);
 
-        const p_device = try physical_device.selectPrimary(allocator, vki, instance, surface);
+        self.physical_device = try physical_device.selectPrimary(allocator, self.vki, self.instance, self.surface);
+        self.queue_indices = try QueueFamilyIndices.init(allocator, self.vki, self.physical_device, self.surface);
 
-        const queue_indices = try QueueFamilyIndices.init(allocator, vki, p_device, surface);
-
-        const messenger = blk: {
+        self.messenger = blk: {
             if (!consts.enable_validation_layers) break :blk null;
-
             const create_info = createDefaultDebugCreateInfo(writers);
-
-            break :blk vki.createDebugUtilsMessengerEXT(instance, create_info, null) catch {
+            break :blk self.vki.createDebugUtilsMessengerEXT(self.instance, create_info, null) catch {
                 std.debug.panic("failed to create debug messenger", .{});
             };
         };
-        const logical_device = try physical_device.createLogicalDevice(allocator, vkb, vki, queue_indices, p_device);
+        self.logical_device = try physical_device.createLogicalDevice(allocator, self);
 
-        const vkd = try dispatch.Device.load(logical_device, vki.dispatch.vkGetDeviceProcAddr);
-        const graphics_queue = vkd.getDeviceQueue(logical_device, queue_indices.graphics, 0);
-        const present_queue = vkd.getDeviceQueue(logical_device, queue_indices.present, 0);
+        self.vkd = try dispatch.Device.load(self.logical_device, self.vki.dispatch.vkGetDeviceProcAddr);
+        self.graphics_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.graphics, 0);
+        self.present_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.present, 0);
 
-        const swapchain_data = blk1: {
-            const sc_create_info = try swapchain.newCreateInfo(allocator, vki, queue_indices, p_device, surface, window);
-            const swapchain_khr = try vkd.createSwapchainKHR(logical_device, sc_create_info, null);
-            const swapchain_images = blk2: {
-                var image_count: u32 = 0;
-                // TODO: handle incomplete
-                _ = try vkd.getSwapchainImagesKHR(logical_device, swapchain_khr, &image_count, null);
-                var images = try ArrayList(vk.Image).initCapacity(allocator, image_count);
-                // TODO: handle incomplete
-                _ = try vkd.getSwapchainImagesKHR(logical_device, swapchain_khr, &image_count, images.items.ptr);
-                images.items.len = image_count;
-                break :blk2 images;
-            };
-
-            const image_views = blk2: {
-                const image_count = swapchain_images.items.len;
-                var views = try ArrayList(vk.ImageView).initCapacity(allocator, image_count);
-                const components = vk.ComponentMapping{
-                    .r = vk.ComponentSwizzle.identity,
-                    .g = vk.ComponentSwizzle.identity,
-                    .b = vk.ComponentSwizzle.identity,
-                    .a = vk.ComponentSwizzle.identity,
-                };
-                const subresource_range = vk.ImageSubresourceRange{
-                    .aspect_mask = vk.ImageAspectFlags{ .color_bit = true },
-                    .base_mip_level = 0,
-                    .level_count = 1,
-                    .base_array_layer = 0,
-                    .layer_count = 1,
-                };
-                {
-                    var i: u32 = 0;
-                    while (i < image_count) : (i += 1) {
-                        const create_info = vk.ImageViewCreateInfo{
-                            .flags = vk.ImageViewCreateFlags{},
-                            .image = swapchain_images.items[i],
-                            .view_type = vk.ImageViewType.@"2d",
-                            .format = sc_create_info.image_format,
-                            .components = components,
-                            .subresource_range = subresource_range,
-                        };
-                        const view = try vkd.createImageView(logical_device, create_info, null);
-                        views.appendAssumeCapacity(view);
-                    }
-                }
-
-                break :blk2 views;
-            };
-
-            break :blk1 swapchain.Data{
-                .swapchain = swapchain_khr,
-                .images = swapchain_images,
-                .views = image_views,
-                .format = sc_create_info.image_format,
-                .extent = sc_create_info.image_extent,
-            };
-        };
-
+        // possibly a bit wasteful, but to get compile errors when forgetting to
+        // init a variable the partial context variables are moved to a new context which we return
         return Context{
-            .allocator = allocator,
-            .vkb = vkb,
-            .vki = vki,
-            .vkd = vkd,
-            .instance = instance,
-            .physical_device = p_device,
-            .logical_device = logical_device,
-            .graphics_queue = graphics_queue,
-            .present_queue = present_queue,
-            .surface = surface,
-            .queue_indices = queue_indices,
-            .swapchain_data = swapchain_data,
-            .messenger = messenger,
-            .writers = writers,
+            .allocator = self.allocator,
+            .vkb = self.vkb,
+            .vki = self.vki,
+            .vkd = self.vkd,
+            .instance = self.instance,
+            .physical_device = self.physical_device,
+            .logical_device = self.logical_device,
+            .graphics_queue = self.graphics_queue,
+            .present_queue = self.present_queue,
+            .surface = self.surface,
+            .queue_indices = self.queue_indices,
+            .messenger = self.messenger,
+            .writers = self.writers,
             .window_ptr = window,
         };
     }
@@ -266,11 +208,11 @@ pub const Context = struct {
     }
 
     /// caller must destroy returned render pass
-    pub fn createRenderPass(self: Context) !vk.RenderPass {
+    pub fn createRenderPass(self: Context, format: vk.Format) !vk.RenderPass {
         const color_attachment = [_]vk.AttachmentDescription{
             .{
                 .flags = .{},
-                .format = self.swapchain_data.format,
+                .format = format,
                 .samples = .{
                     .@"1_bit" = true,
                 },
@@ -328,45 +270,7 @@ pub const Context = struct {
         self.vkd.destroyRenderPass(self.logical_device, render_pass, null);
     }
 
-    /// utility to create simple view state info
-    pub fn createViewportScissors(self: Context) struct { viewport: [1]vk.Viewport, scissor: [1]vk.Rect2D } {
-        // TODO: this can be broken down a bit since the code is pretty cluster fck
-        const width = self.swapchain_data.extent.width;
-        const height = self.swapchain_data.extent.height;
-        return .{
-            .viewport = [1]vk.Viewport{
-                .{ 
-                    .x = 0, 
-                    .y = 0, 
-                    .width = @intToFloat(f32, width), 
-                    .height = @intToFloat(f32, height), 
-                    .min_depth = 0.0, 
-                    .max_depth = 1.0 
-                },
-            },
-            .scissor = [1]vk.Rect2D{
-                .{
-                    .offset = .{
-                        .x = 0,
-                        .y = 0,
-                    },
-                    .extent = .{
-                        .width = width,
-                        .height = height,
-                    },
-                },
-            },
-        };
-    }
-
     pub fn deinit(self: Context) void {
-        for (self.swapchain_data.views.items) |view| {
-            self.vkd.destroyImageView(self.logical_device, view, null);
-        }
-        self.swapchain_data.views.deinit();
-        self.swapchain_data.images.deinit();
-
-        self.vkd.destroySwapchainKHR(self.logical_device, self.swapchain_data.swapchain, null);
         self.vki.destroySurfaceKHR(self.instance, self.surface, null);
         self.vkd.destroyDevice(self.logical_device, null);
 

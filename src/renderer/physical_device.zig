@@ -10,6 +10,7 @@ const constants = @import("consts.zig");
 const swapchain = @import("swapchain.zig");
 const vk_utils = @import("vk_utils.zig");
 const validation_layer = @import("validation_layer.zig");
+const Context = @import("context.zig").Context;
 
 /// Type that share ABI with vkPhysicalDeviceFeatures and that has all values
 /// assigned to vkFALSE by default.
@@ -160,20 +161,20 @@ fn deviceHeuristic(allocator: *Allocator, vki: dispatch.Instance, device: vk.Phy
     return -30 + property_score + feature_score + queue_fam_score + extensions_score + swapchain_score;
 }
 
-pub fn createLogicalDevice(allocator: *Allocator, vkb: dispatch.Base, vki: dispatch.Instance, queue_indices: QueueFamilyIndices, device: vk.PhysicalDevice) !vk.Device {
-    const queue_priority = [_]f32{1.0};
+pub fn createLogicalDevice(allocator: *Allocator, ctx: Context) !vk.Device {
 
     // merge indices if they are identical according to vulkan spec
     const family_indices: []const u32 = blk: {
-        if (queue_indices.graphics != queue_indices.present) {
-            break :blk &[_]u32{ queue_indices.graphics, queue_indices.present };
+        if (ctx.queue_indices.graphics != ctx.queue_indices.present) {
+            break :blk &[_]u32{ ctx.queue_indices.graphics, ctx.queue_indices.present };
         }
-        break :blk &[_]u32{queue_indices.graphics};
+        break :blk &[_]u32{ctx.queue_indices.graphics};
     };
 
     var queue_create_infos = try ArrayList(vk.DeviceQueueCreateInfo).initCapacity(allocator, family_indices.len);
     defer queue_create_infos.deinit();
 
+    const queue_priority = [_]f32{1.0};
     for (family_indices) |family_index| {
         queue_create_infos.appendAssumeCapacity(vk.DeviceQueueCreateInfo{
             .flags = .{},
@@ -185,7 +186,7 @@ pub fn createLogicalDevice(allocator: *Allocator, vkb: dispatch.Base, vki: dispa
 
     const device_features = FalsePhysicalDeviceFeatures{};
 
-    const validation_layer_info = try validation_layer.Info.init(allocator, vkb);
+    const validation_layer_info = try validation_layer.Info.init(allocator, ctx.vkb);
 
     const create_info = vk.DeviceCreateInfo{
         .flags = .{},
@@ -198,5 +199,5 @@ pub fn createLogicalDevice(allocator: *Allocator, vkb: dispatch.Base, vki: dispa
         .p_enabled_features = @ptrCast(*const vk.PhysicalDeviceFeatures, &device_features),
     };
 
-    return vki.createDevice(device, create_info, null);
+    return ctx.vki.createDevice(ctx.physical_device, create_info, null);
 }

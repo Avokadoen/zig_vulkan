@@ -10,69 +10,181 @@ const physical_device = @import("physical_device.zig");
 const QueueFamilyIndices = physical_device.QueueFamilyIndices;
 const Context = @import("context.zig").Context;
 
+pub const ViewportScissor = struct {
+    viewport: [1]vk.Viewport, 
+    scissor: [1]vk.Rect2D,
 
-pub fn newCreateInfo(
-    allocator: *Allocator, 
-    vki: dispatch.Instance, 
-    queue_indices: physical_device.QueueFamilyIndices, 
-    device: vk.PhysicalDevice, 
-    surface: vk.SurfaceKHR, 
-    window: *glfw.Window
-) !vk.SwapchainCreateInfoKHR {
-    const sc_support = try SupportDetails.init(allocator, vki, device, surface);
-    defer sc_support.deinit();
-    if (sc_support.capabilities.max_image_count <= 0) {
-        return error.SwapchainNoImageSupport;
+    /// utility to create simple view state info
+    pub fn init(extent: vk.Extent2D) ViewportScissor {
+        // TODO: this can be broken down a bit since the code is pretty cluster fck
+        const width = extent.width;
+        const height = extent.height;
+        return .{
+            .viewport = [1]vk.Viewport{
+                .{ 
+                    .x = 0, 
+                    .y = 0, 
+                    .width = @intToFloat(f32, width), 
+                    .height = @intToFloat(f32, height), 
+                    .min_depth = 0.0, 
+                    .max_depth = 1.0 
+                },
+            },
+            .scissor = [1]vk.Rect2D{
+                .{
+                    .offset = .{
+                        .x = 0,
+                        .y = 0,
+                    },
+                    .extent = extent
+                },
+            },
+        };
     }
 
-    const format = sc_support.selectSwapChainFormat();
-    const present_mode = sc_support.selectSwapchainPresentMode();
-    const extent = try sc_support.constructSwapChainExtent(window.*);
+    pub fn update_extent(self: *ViewportScissor, extent: vk.Extent2D) void {
+        self.viewport[0].width = @intToFloat(f32, extent.width);
+        self.viewport[0].height = @intToFloat(f32, extent.height);
+        self.scissor[0].extent = extent;
+    }
+};
 
-    const image_count = std.math.min(sc_support.capabilities.min_image_count + 1, sc_support.capabilities.max_image_count);
+// TODO: rename
+pub const Data = struct {
+    swapchain: vk.SwapchainKHR,
+    images: ArrayList(vk.Image),
+    image_views: ArrayList(vk.ImageView),
+    format: vk.Format,
+    extent: vk.Extent2D,
+    support_details: SupportDetails,
+    
 
-    const Config = struct {
-        sharing_mode: vk.SharingMode,
-        index_count: u32,
-        p_indices: [*]const u32,
-    };
-    const sharing_config = blk: {
-        if (queue_indices.graphics != queue_indices.present) {
-            const indices_arr = [_]u32{ queue_indices.graphics, queue_indices.present };
-            break :blk Config{
-                .sharing_mode = vk.SharingMode.concurrent, // TODO: read up on ownership in this context
-                .index_count = indices_arr.len,
-                .p_indices = @ptrCast([*]const u32, &indices_arr[0..indices_arr.len]),
+    pub fn init(allocator: *Allocator, ctx: Context, old_swapchain: ?vk.SwapchainKHR) !Data {
+        const support_details = try SupportDetails.init(allocator, ctx.vki, ctx.physical_device, ctx.surface);
+        errdefer support_details.deinit();
+
+        const sc_create_info = blk1: {
+            if (support_details.capabilities.max_image_count <= 0) {
+                return error.SwapchainNoImageSupport;
+            }
+
+            const format = support_details.selectSwapChainFormat();
+            const present_mode = support_details.selectSwapchainPresentMode();
+            const extent = try support_details.constructSwapChainExtent(ctx.window_ptr.*);
+
+            const image_count = std.math.min(support_details.capabilities.min_image_count + 1, support_details.capabilities.max_image_count);
+
+            const Config = struct {
+                sharing_mode: vk.SharingMode,
+                index_count: u32,
+                p_indices: [*]const u32,
             };
-        } else {
-            const indices_arr = [_]u32{ queue_indices.graphics, queue_indices.present };
-            break :blk Config{
-                .sharing_mode = vk.SharingMode.exclusive,
-                .index_count = 0,
-                .p_indices = @ptrCast([*]const u32, &indices_arr[0..indices_arr.len]),
+            const sharing_config = blk2: {
+                if (ctx.queue_indices.graphics != ctx.queue_indices.present) {
+                    const indices_arr = [_]u32{ ctx.queue_indices.graphics, ctx.queue_indices.present };
+                    break :blk2 Config{
+                        .sharing_mode = vk.SharingMode.concurrent, // TODO: read up on ownership in this context
+                        .index_count = indices_arr.len,
+                        .p_indices = @ptrCast([*]const u32, &indices_arr[0..indices_arr.len]),
+                    };
+                } else {
+                    const indices_arr = [_]u32{ ctx.queue_indices.graphics, ctx.queue_indices.present };
+                    break :blk2 Config{
+                        .sharing_mode = vk.SharingMode.exclusive,
+                        .index_count = 0,
+                        .p_indices = @ptrCast([*]const u32, &indices_arr[0..indices_arr.len]),
+                    };
+                }
             };
+
+            break :blk1 vk.SwapchainCreateInfoKHR{
+                .flags = .{},
+                .surface = ctx.surface,
+                .min_image_count = image_count,
+                .image_format = format.format,
+                .image_color_space = format.color_space,
+                .image_extent = extent,
+                .image_array_layers = 1,
+                .image_usage = vk.ImageUsageFlags{ .color_attachment_bit = true },
+                .image_sharing_mode = sharing_config.sharing_mode,
+                .queue_family_index_count = sharing_config.index_count,
+                .p_queue_family_indices = sharing_config.p_indices,
+                .pre_transform = support_details.capabilities.current_transform,
+                .composite_alpha = vk.CompositeAlphaFlagsKHR{ .opaque_bit_khr = true },
+                .present_mode = present_mode,
+                .clipped = vk.TRUE,
+                .old_swapchain = old_swapchain orelse vk.SwapchainKHR.null_handle,
+            };
+        };
+        const swapchain_khr = try ctx.vkd.createSwapchainKHR(ctx.logical_device, sc_create_info, null);
+        const swapchain_images = blk: {
+            var image_count: u32 = 0;
+            // TODO: handle incomplete
+            _ = try ctx.vkd.getSwapchainImagesKHR(ctx.logical_device, swapchain_khr, &image_count, null);
+            var images = try ArrayList(vk.Image).initCapacity(allocator, image_count);
+            // TODO: handle incomplete
+            _ = try ctx.vkd.getSwapchainImagesKHR(ctx.logical_device, swapchain_khr, &image_count, images.items.ptr);
+            images.items.len = image_count;
+            break :blk images;
+        };
+
+        const image_views = blk: {
+            const image_view_count = swapchain_images.items.len;
+            var views = try ArrayList(vk.ImageView).initCapacity(allocator, image_view_count);
+            const components = vk.ComponentMapping{
+                .r = vk.ComponentSwizzle.identity,
+                .g = vk.ComponentSwizzle.identity,
+                .b = vk.ComponentSwizzle.identity,
+                .a = vk.ComponentSwizzle.identity,
+            };
+            const subresource_range = vk.ImageSubresourceRange{
+                .aspect_mask = vk.ImageAspectFlags{ .color_bit = true },
+                .base_mip_level = 0,
+                .level_count = 1,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            };
+            {
+                var i: u32 = 0;
+                while (i < image_view_count) : (i += 1) {
+                    const create_info = vk.ImageViewCreateInfo{
+                        .flags = vk.ImageViewCreateFlags{},
+                        .image = swapchain_images.items[i],
+                        .view_type = vk.ImageViewType.@"2d",
+                        .format = sc_create_info.image_format,
+                        .components = components,
+                        .subresource_range = subresource_range,
+                    };
+                    const view = try ctx.vkd.createImageView(ctx.logical_device, create_info, null);
+                    views.appendAssumeCapacity(view);
+                }
+            }
+
+            break :blk views;
+        };
+
+        return Data{
+            .swapchain = swapchain_khr,
+            .images = swapchain_images,
+            .image_views = image_views,
+            .format = sc_create_info.image_format,
+            .extent = sc_create_info.image_extent,
+            .support_details = support_details,
+        };
+    }
+
+    pub fn deinit(self: Data, ctx: Context) void {
+        for (self.image_views.items) |view| {
+            ctx.vkd.destroyImageView(ctx.logical_device, view, null);
         }
-    };
+        self.image_views.deinit();
+        self.images.deinit();
+        self.support_details.deinit();
 
-    return vk.SwapchainCreateInfoKHR{
-        .flags = .{},
-        .surface = surface,
-        .min_image_count = image_count,
-        .image_format = format.format,
-        .image_color_space = format.color_space,
-        .image_extent = extent,
-        .image_array_layers = 1,
-        .image_usage = vk.ImageUsageFlags{ .color_attachment_bit = true },
-        .image_sharing_mode = sharing_config.sharing_mode,
-        .queue_family_index_count = sharing_config.index_count,
-        .p_queue_family_indices = sharing_config.p_indices,
-        .pre_transform = sc_support.capabilities.current_transform,
-        .composite_alpha = vk.CompositeAlphaFlagsKHR{ .opaque_bit_khr = true },
-        .present_mode = present_mode,
-        .clipped = vk.TRUE,
-        .old_swapchain = vk.SwapchainKHR.null_handle,
-    };
-}
+        ctx.vkd.destroySwapchainKHR(ctx.logical_device, self.swapchain, null);
+    }
+    
+};
 
 pub const SupportDetails = struct {
     const Self = @This();
@@ -171,10 +283,3 @@ pub const SupportDetails = struct {
     }
 };
 
-pub const Data = struct {
-    swapchain: vk.SwapchainKHR,
-    images: ArrayList(vk.Image),
-    views: ArrayList(vk.ImageView),
-    format: vk.Format,
-    extent: vk.Extent2D,
-};
