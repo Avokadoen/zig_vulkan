@@ -285,11 +285,6 @@ pub const ApplicationPipeline = struct {
                 return err;
             },
         }
-
-        if (self.requested_rescale_pipeline == true) {
-            try self.rescale_pipeline(self.allocator, ctx);
-            return;
-        }
         
         if (self.images_in_flight.items[image_index] != .null_handle) {
             const p_fence = @ptrCast([*]const vk.Fence, &self.images_in_flight.items[image_index]);
@@ -333,6 +328,10 @@ pub const ApplicationPipeline = struct {
             // TODO:
         } else |_| {
             // TODO:
+        }
+
+        if (self.requested_rescale_pipeline == true) {
+            try self.rescale_pipeline(self.allocator, ctx);
         }
 
         state.current_frame = (state.current_frame + 1) % constants.max_frames_in_flight;
