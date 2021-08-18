@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
 const vk = @import("vulkan");
+const glfw = @import("glfw");
 
 const constants = @import("consts.zig");
 const swapchain = @import("swapchain.zig");
@@ -30,6 +31,8 @@ pub const ApplicationPipeline = struct {
     renderer_finished_s: ArrayList(vk.Semaphore),
     in_flight_fences: ArrayList(vk.Fence),
     images_in_flight: ArrayList(vk.Fence),
+
+    requested_rescale_pipeline: bool,
 
     /// initialize a graphics pipe line 
     pub fn init(allocator: *Allocator, ctx: Context) !Self {
@@ -237,6 +240,7 @@ pub const ApplicationPipeline = struct {
             .renderer_finished_s = renderer_finished_s,
             .in_flight_fences = in_flight_fences,
             .images_in_flight = images_in_flight,
+            .requested_rescale_pipeline = false,
         };
     }
 
@@ -267,9 +271,7 @@ pub const ApplicationPipeline = struct {
                 image_index = ok.image_index;
             },
             .suboptimal_khr => {
-                try self.rescale_pipeline(self.allocator, ctx);
-                self.view.update_extent(self.swapchain_data.extent);
-                return;
+                self.requested_rescale_pipeline = true;
             },
             else => {
                 // TODO: handle timeout and not_ready
@@ -277,13 +279,16 @@ pub const ApplicationPipeline = struct {
             }
         } else |err| switch(err) {
             error.OutOfDateKHR => {
-                try self.rescale_pipeline(self.allocator, ctx);
-                self.view.update_extent(self.swapchain_data.extent);
-                return;
+                self.requested_rescale_pipeline = true;
             },
             else => {
                 return err;
             },
+        }
+
+        if (self.requested_rescale_pipeline == true) {
+            try self.rescale_pipeline(self.allocator, ctx);
+            return;
         }
         
         if (self.images_in_flight.items[image_index] != .null_handle) {
@@ -334,7 +339,17 @@ pub const ApplicationPipeline = struct {
     }
 
     /// Used to update the pipeline according to changes in the window spec
-    pub fn rescale_pipeline(self: *Self, allocator: *Allocator, ctx: Context) !void {
+    /// This functions should only be called from the main thread (see glfwGetFramebufferSize)
+    fn rescale_pipeline(self: *Self, allocator: *Allocator, ctx: Context) !void {
+        var window_size = try ctx.window_ptr.*.getFramebufferSize();
+        while (window_size.width == 0 or window_size.height == 0) {
+            window_size = try ctx.window_ptr.*.getFramebufferSize();
+            try glfw.waitEvents();
+        }
+
+        self.requested_rescale_pipeline = false;
+        // TODO: swapchain can be recreated without waiting and so waiting in the top of the 
+        //       functions is wasteful
         // Wait for pipeline to become idle 
         self.wait_idle(ctx);
 

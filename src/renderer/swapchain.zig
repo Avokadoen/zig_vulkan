@@ -41,12 +41,6 @@ pub const ViewportScissor = struct {
             },
         };
     }
-
-    pub fn update_extent(self: *ViewportScissor, extent: vk.Extent2D) void {
-        self.viewport[0].width = @intToFloat(f32, extent.width);
-        self.viewport[0].height = @intToFloat(f32, extent.height);
-        self.scissor[0].extent = extent;
-    }
 };
 
 // TODO: rename

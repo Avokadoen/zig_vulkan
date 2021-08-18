@@ -20,6 +20,7 @@ const constants = renderer.constant;
 const GLFWError = error{ FailedToInit, WindowCreationFailed };
 
 pub const application_name = "zig vulkan";
+var pipeline: renderer.ApplicationPipeline = undefined;
 
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
@@ -61,8 +62,12 @@ pub fn main() anyerror!void {
     defer ctx.deinit();
 
     // const gfx_pipe
-    var pipeline = try renderer.ApplicationPipeline.init(&gpa.allocator, ctx);
-    defer pipeline.deinit(ctx);
+    pipeline = try renderer.ApplicationPipeline.init(&gpa.allocator, ctx);
+    _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
+    defer {
+        _ = window.setFramebufferSizeCallback(null);
+        pipeline.deinit(ctx);
+    }
 
     // Loop until the user closes the window
     while (!window.shouldClose()) {
@@ -75,4 +80,11 @@ pub fn main() anyerror!void {
         // Poll for and process events
         try glfw.pollEvents();
     }
+}
+
+fn framebufferSizeCallbackFn(window: ?*glfw.RawWindow, width: c_int, height: c_int) callconv(.C) void {
+    _ = window;
+    _ = width;
+    _ = height;
+    pipeline.requested_rescale_pipeline = true;
 }
