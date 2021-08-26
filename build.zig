@@ -17,7 +17,7 @@ const ShaderMoveStep = struct {
     step: Step,
     builder: *Builder,
 
-    abs_from: [2]?[]const u8 = [_]?[]const u8{null} ** 2,
+    abs_from: [20]?[]const u8 = [_]?[]const u8{null} ** 20,
     abs_len: usize = 0,
 
     fn init(b: *Builder, shader_step: *vkgen.ShaderCompileStep) !*ShaderMoveStep {
@@ -132,6 +132,9 @@ pub fn build(b: *Builder) void {
 
     const frag = shader_comp.add("assets/shaders/triangle.frag");
     resource_step.add_abs_resource(frag) catch unreachable;
+
+    const comp = shader_comp.add("assets/shaders/comp.comp");
+    resource_step.add_abs_resource(comp) catch unreachable;
 
     exe.step.dependOn(&shader_comp.step);
     exe.step.dependOn(&resource_step.step);
