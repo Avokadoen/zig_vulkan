@@ -10,7 +10,7 @@ const swapchain = @import("swapchain.zig");
 const Context = @import("context.zig").Context;
 const utils = @import("../utils.zig");
 
-pub const ApplicationPipeline = struct {
+pub const ApplicationGfxPipeline = struct {
     // TODO: https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkRayTracingPipelineCreateInfoKHR.html
     const Self = @This();
 
@@ -56,7 +56,7 @@ pub const ApplicationPipeline = struct {
             // TODO: function in context for shader stage creation?
             const vert_code = blk1: {
                 const path = blk2: {
-                    const join_path = [_][]const u8{ self_path, "../../triangle.vert.spv" };
+                    const join_path = [_][]const u8{ self_path, "../../pass.vert.spv" };
                     break :blk2 try std.fs.path.resolve(allocator, join_path[0..]);
                 };
                 defer allocator.destroy(path.ptr);
@@ -73,7 +73,7 @@ pub const ApplicationPipeline = struct {
 
             const frag_code = blk1: {
                 const path = blk2: {
-                    const join_path = [_][]const u8{ self_path, "../../triangle.frag.spv" };
+                    const join_path = [_][]const u8{ self_path, "../../pass.frag.spv" };
                     break :blk2 try std.fs.path.resolve(allocator, join_path[0..]);
                 };
                 defer allocator.destroy(path.ptr);
@@ -193,7 +193,7 @@ pub const ApplicationPipeline = struct {
             break :blk try ctx.vkd.createCommandPool(ctx.logical_device, pool_info, null);
         };
         const command_buffers = try createCmdBuffers(allocator, ctx, command_pool, framebuffers);
-        try recordCmdBuffers(ctx, command_buffers, render_pass, framebuffers, swapchain_data, view, pipeline);
+        try recordGfxCmdBuffers(ctx, command_buffers, render_pass, framebuffers, swapchain_data, view, pipeline);
 
         const images_in_flight = blk: {
             var images_in_flight = try ArrayList(vk.Fence).initCapacity(allocator, swapchain_data.images.items.len);
@@ -381,7 +381,7 @@ pub const ApplicationPipeline = struct {
         self.framebuffers = try createFramebuffers(allocator, ctx, self.swapchain_data, self.render_pass);
 
         self.command_buffers = try createCmdBuffers(allocator, ctx, self.command_pool, self.framebuffers);
-        try recordCmdBuffers(ctx, self.command_buffers, self.render_pass, self.framebuffers, self.swapchain_data, self.view, self.pipeline);
+        try recordGfxCmdBuffers(ctx, self.command_buffers, self.render_pass, self.framebuffers, self.swapchain_data, self.view, self.pipeline);
     }
 
     pub fn deinit(self: Self, ctx: Context) void {
@@ -470,7 +470,7 @@ inline fn createCmdBuffers(allocator: *Allocator, ctx: Context, command_pool: vk
 
 // TODO: refactor so we don't take 100000 arguments?
 /// record default commands to the command buffer
-inline fn recordCmdBuffers(
+inline fn recordGfxCmdBuffers(
     ctx: Context, 
     command_buffers: ArrayList(vk.CommandBuffer), 
     render_pass: vk.RenderPass, 
@@ -502,7 +502,7 @@ inline fn recordCmdBuffers(
         ctx.vkd.cmdSetScissor(command_buffer, 0, view.scissor.len, &view.scissor);
         ctx.vkd.cmdBeginRenderPass(command_buffer, render_begin_info, vk.SubpassContents.@"inline");
         ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.graphics, pipeline.*);
-        ctx.vkd.cmdDraw(command_buffer, 3, 1, 0, 0);
+        ctx.vkd.cmdDraw(command_buffer, 6, 1, 0, 0);
         ctx.vkd.cmdEndRenderPass(command_buffer);
         try ctx.vkd.endCommandBuffer(command_buffer);
     }

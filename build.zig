@@ -127,10 +127,10 @@ pub fn build(b: *Builder) void {
     );
     const resource_step = ShaderMoveStep.init(b, shader_comp) catch unreachable;
 
-    const vert = shader_comp.add("assets/shaders/triangle.vert");
+    const vert = shader_comp.add("assets/shaders/pass.vert");
     resource_step.add_abs_resource(vert) catch unreachable;
 
-    const frag = shader_comp.add("assets/shaders/triangle.frag");
+    const frag = shader_comp.add("assets/shaders/pass.frag");
     resource_step.add_abs_resource(frag) catch unreachable;
 
     const comp = shader_comp.add("assets/shaders/comp.comp");

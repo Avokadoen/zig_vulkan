@@ -15,12 +15,12 @@ const c = @import("c.zig");
 const vk = @import("vulkan");
 
 const renderer = @import("renderer/renderer.zig");
-const constants = renderer.constant;
+const consts = renderer.consts;
 
 const GLFWError = error{ FailedToInit, WindowCreationFailed };
 
 pub const application_name = "zig vulkan";
-var pipeline: renderer.ApplicationPipeline = undefined;
+var pipeline: renderer.ApplicationGfxPipeline = undefined;
 
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
@@ -28,15 +28,18 @@ pub fn main() anyerror!void {
 
     // TODO: use c_allocator in optimized compile mode since we have to link with libc anyways
     // create a gpa with default configuration
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var alloc = if (consts.enable_validation_layers) std.heap.GeneralPurposeAllocator(.{}){} else std.heap.c_allocator;
     defer {
-        const leak = gpa.deinit();
-        if (leak) {
-            // TODO: lazy error handling can be improved
-            // If error occur here we are screwed anyways
-            stderr.print("leak detected in gpa!", .{}) catch unreachable;
+        if (consts.enable_validation_layers) {
+            const leak = alloc.deinit();
+            if (leak) {
+                // TODO: lazy error handling can be improved
+                // If error occur here we are screwed anyways
+                stderr.print("leak detected in gpa!", .{}) catch unreachable;
+            }
         }
     }
+    var allocator = if (consts.enable_validation_layers) &alloc.allocator else alloc;
     
     // Initialize the library *
     try glfw.init();
@@ -58,11 +61,11 @@ pub fn main() anyerror!void {
 
     var writers = renderer.Writers{ .stdout = &stdout, .stderr = &stderr };
     // Construct our vulkan instance
-    const ctx = try renderer.Context.init(&gpa.allocator, application_name, &window, &writers);
+    const ctx = try renderer.Context.init(allocator, application_name, &window, &writers);
     defer ctx.deinit();
 
     // const gfx_pipe
-    pipeline = try renderer.ApplicationPipeline.init(&gpa.allocator, ctx);
+    pipeline = try renderer.ApplicationGfxPipeline.init(allocator, ctx);
     _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
     defer {
         _ = window.setFramebufferSizeCallback(null);
