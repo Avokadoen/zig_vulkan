@@ -8,6 +8,7 @@ const ArrayList = std.ArrayList;
 
 const vkgen = @import("deps/vulkan-zig/generator/index.zig");
 const glfw = @import("deps/mach/glfw/build.zig");
+const stbi = @import("deps/stb_image/build.zig");
 
 const MoveDirError = error {
     NotFound
@@ -114,6 +115,8 @@ pub fn build(b: *Builder) void {
 
     exe.addPackagePath("ecs", "deps/zig-ecs/src/ecs.zig");
     exe.addPackagePath("zalgebra", "deps/zalgebra/src/main.zig");
+    
+    stbi.linkStep(b, exe);
 
     const vk_xml_path = b.option([]const u8, "vulkan-registry", "Override to the Vulkan registry") orelse "deps/vk.xml";
     const gen = vkgen.VkGenerateStep.init(b, vk_xml_path, "vk.zig");
