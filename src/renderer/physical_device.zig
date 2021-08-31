@@ -17,6 +17,7 @@ const Context = @import("context.zig").Context;
 pub const FalsePhysicalDeviceFeatures = vk_utils.GetFalseFeatures(vk.PhysicalDeviceFeatures);
 
 pub const QueueFamilyIndices = struct {
+    compute: u32,
     graphics: u32,
     present: u32,
 
@@ -31,15 +32,22 @@ pub const QueueFamilyIndices = struct {
         vki.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families.items.ptr);
         queue_families.items.len = queue_family_count;
 
+        const compute_bit = vk.QueueFlags{
+            .compute_bit = true,
+        };
         const graphics_bit = vk.QueueFlags{
             .graphics_bit = true,
         };
 
+        var compute_index: ?u32 = null;
         var graphics_index: ?u32 = null;
         var present_index: ?u32 = null;
         for (queue_families.items) |queue_family, i| {
             const index = @intCast(u32, i);
-            if (graphics_index == null and queue_family.queue_flags.intersect(graphics_bit).toInt() > 0) {
+            if (compute_index == null and queue_family.queue_flags.contains(compute_bit)) {
+                compute_index = index;
+            }
+            if (graphics_index == null and queue_family.queue_flags.contains(graphics_bit)) {
                 graphics_index = index;
             }
             if (present_index == null and (try vki.getPhysicalDeviceSurfaceSupportKHR(physical_device, index, surface)) == vk.TRUE) {
@@ -47,11 +55,18 @@ pub const QueueFamilyIndices = struct {
             }
         }
 
-        if (graphics_index == null or present_index == null) {
-            return error.MissingQueueFamilyIndex;
+        if (compute_index == null) {
+            return error.ComputeIndexMissing;
+        }
+        if (graphics_index == null) {
+            return error.GraphicsIndexMissing;
+        }
+        if (present_index == null) {
+            return error.PresentIndexMissing;
         }
 
         return QueueFamilyIndices{
+            .compute = compute_index.?,
             .graphics = graphics_index.?,
             .present = present_index.?,
         };
