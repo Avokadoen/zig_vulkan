@@ -146,7 +146,10 @@ fn copyDir(src_dir: fs.Dir, dst_parent_dir: fs.Dir) void {
                 var src_child_dir = src_dir.openDir(asset.name, .{ .iterate = true, }) catch unreachable;
                 defer src_child_dir.close();
 
-                dst_parent_dir.makeDir(asset.name) catch unreachable;
+                dst_parent_dir.makeDir(asset.name) catch |err| switch(err) {
+                    std.os.MakeDirError.PathAlreadyExists => {}, // ok
+                    else => unreachable,
+                };
                 var dst_child_dir = dst_parent_dir.openDir(asset.name, .{}) catch unreachable;
                 defer dst_child_dir.close();
 
