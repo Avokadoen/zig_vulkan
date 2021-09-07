@@ -10,6 +10,7 @@ const dbg = std.builtin.mode == std.builtin.Mode.Debug;
 const ecs = @import("ecs");
 const zalgebra = @import("zalgebra");
 const glfw = @import("glfw");
+const stbi = @import("stbi");
 
 const c = @import("c.zig"); 
 const vk = @import("vulkan");
@@ -71,6 +72,9 @@ pub fn main() anyerror!void {
         _ = window.setFramebufferSizeCallback(null);
         pipeline.deinit(ctx);
     }
+    
+    const my_texture = try renderer.Texture.from_file(ctx, allocator, pipeline.command_pool, "assets\\images\\texture.jpg"[0..]);
+    defer my_texture.deinit(ctx);
 
     // Loop until the user closes the window
     while (!window.shouldClose()) {

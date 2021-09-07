@@ -15,10 +15,13 @@ const QueueFamilyIndices = physical_device.QueueFamilyIndices;
 const validation_layer = @import("validation_layer.zig");
 const vk_utils = @import("vk_utils.zig");
 
+// TODO: mutex protection before prints
 pub const IoWriters = struct {
     stdout: *const std.fs.File.Writer,
     stderr: *const std.fs.File.Writer,
 };
+
+// TODO: move command pool to context? 
 
 /// Utilized to supply vulkan methods and common vulkan state to other
 /// renderer functions and structs
@@ -33,8 +36,10 @@ pub const Context = struct {
     physical_device: vk.PhysicalDevice,
     logical_device: vk.Device,
 
+    compute_queue: vk.Queue,
     graphics_queue: vk.Queue,
     present_queue: vk.Queue,
+
     surface: vk.SurfaceKHR,
     queue_indices: QueueFamilyIndices,
 
@@ -137,6 +142,7 @@ pub const Context = struct {
         self.logical_device = try physical_device.createLogicalDevice(allocator, self);
 
         self.vkd = try dispatch.Device.load(self.logical_device, self.vki.dispatch.vkGetDeviceProcAddr);
+        self.compute_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.compute, 0);
         self.graphics_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.graphics, 0);
         self.present_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.present, 0);
 
@@ -150,6 +156,7 @@ pub const Context = struct {
             .instance = self.instance,
             .physical_device = self.physical_device,
             .logical_device = self.logical_device,
+            .compute_queue = self.compute_queue,
             .graphics_queue = self.graphics_queue,
             .present_queue = self.present_queue,
             .surface = self.surface,

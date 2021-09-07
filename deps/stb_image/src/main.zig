@@ -18,7 +18,20 @@ pub const Image = struct {
 
     // TODO: remove comptime keyword -> // TODO: acount for any channel type
     /// Caller must call deinit to free created memory
-    pub fn init(path: []const u8, comptime desired_channels: DesiredChannels) !Image {
+    pub fn init(allocator: *std.mem.Allocator, path: []const u8, comptime desired_channels: DesiredChannels) !Image {
+        var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        const exe_path = try std.fs.selfExeDirPath(buf[0..]);
+        const path_segments = [_][]const u8{exe_path, path};
+
+        var zig_use_path = try std.fs.path.join(allocator, path_segments[0..]);
+        defer allocator.destroy(zig_use_path.ptr);
+
+        const sep = [_]u8{ std.fs.path.sep };
+        _ = std.mem.replace(u8, zig_use_path, "\\", sep[0..], zig_use_path);
+        _ = std.mem.replace(u8, zig_use_path, "/", sep[0..], zig_use_path);
+
+        const use_path = try std.cstr.addNullByte(allocator, zig_use_path);
+        defer allocator.destroy(use_path.ptr);
         // TODO: acount for any channel type
         if(desired_channels != DesiredChannels.STBI_rgb_alpha) {
             const error_msg = std.fmt.comptimePrint("unimplemented channel type, expected {d}, found {d}", .{DesiredChannels.STBI_rgb_alpha, desired_channels});
@@ -28,8 +41,8 @@ pub const Image = struct {
         var width: i32 = undefined;
         var height: i32 = undefined;
         var channels: i32 = undefined;
-        const char_ptr = c.stbi_load(path.ptr, &width, &height, &channels, @enumToInt(desired_channels)); 
-        if (char_ptr == null or char_ptr.* == 0) {
+        const char_ptr = c.stbi_load(use_path.ptr, &width, &height, &channels, @enumToInt(desired_channels)); 
+        if (char_ptr == null) {
             return error.FailedToLoadImage; // Only error scenario here is failed to open file descriptor
         }
         // TODO: acount for any channel type

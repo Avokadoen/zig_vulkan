@@ -1,7 +1,10 @@
 /// library with utility wrappers around vulkan functions
-pub const Context = @import("context.zig").Context;
-pub const Writers = @import("context.zig").IoWriters;
+const context = @import("context.zig");
+pub const Context = context.Context;
+pub const Writers = context.IoWriters;
 pub const ApplicationGfxPipeline = @import("pipeline.zig").ApplicationGfxPipeline;
+pub const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
+pub const Texture = @import("texture.zig").Texture;
 
 pub const validation_layer = @import("validation_layer.zig");
 pub const dispatch = @import("dispatch.zig");

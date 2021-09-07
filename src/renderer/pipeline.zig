@@ -11,7 +11,6 @@ const Context = @import("context.zig").Context;
 const utils = @import("../utils.zig");
 
 pub const ApplicationGfxPipeline = struct {
-    // TODO: https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkRayTracingPipelineCreateInfoKHR.html
     const Self = @This();
 
     allocator: *Allocator,
@@ -331,7 +330,7 @@ pub const ApplicationGfxPipeline = struct {
         }
 
         if (self.requested_rescale_pipeline == true) {
-            try self.rescale_pipeline(self.allocator, ctx);
+            try self.rescalePipeline(self.allocator, ctx);
         }
 
         state.current_frame = (state.current_frame + 1) % constants.max_frames_in_flight;
@@ -339,7 +338,7 @@ pub const ApplicationGfxPipeline = struct {
 
     /// Used to update the pipeline according to changes in the window spec
     /// This functions should only be called from the main thread (see glfwGetFramebufferSize)
-    fn rescale_pipeline(self: *Self, allocator: *Allocator, ctx: Context) !void {
+    fn rescalePipeline(self: *Self, allocator: *Allocator, ctx: Context) !void {
         var window_size = try ctx.window_ptr.*.getFramebufferSize();
         while (window_size.width == 0 or window_size.height == 0) {
             window_size = try ctx.window_ptr.*.getFramebufferSize();
