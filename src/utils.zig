@@ -4,6 +4,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
+// TODO: don't use arraylist, just allocate slice with allocator
 /// caller must deinit returned memory
 pub fn readFile(allocator: *Allocator, absolute_path: []const u8) !ArrayList(u8) {
     const file = try std.fs.openFileAbsolute(absolute_path, .{ .read = true });

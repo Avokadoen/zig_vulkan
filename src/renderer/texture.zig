@@ -11,8 +11,10 @@ pub const Texture = struct {
 
     texture_size: vk.DeviceSize,
     image: vk.Image,
+    image_view: vk.ImageView,
     image_memory: vk.DeviceMemory,
     format: vk.Format,
+    sampler: vk.Sampler,
 
     /// caller has to make sure to call deinit
     pub fn from_file(ctx: Context, allocator: *Allocator,  command_pool: vk.CommandPool, path: []const u8) !Texture {
@@ -32,50 +34,106 @@ pub const Texture = struct {
         const indices = ctx.queue_indices;
         const queue_family_indices = [_]u32{ indices.present, indices.graphics, indices.compute };
         const format = .r8g8b8a8_srgb; // reflect stbi.DesiredChannels.STBI_rgb_alpha
-        // TODO: make sure we use correct usage bits https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkImageUsageFlagBits.html
-        // TODO: VK_IMAGE_CREATE_SPARSE_BINDING_BIT
-        const image_info = vk.ImageCreateInfo{
-            .flags = .{},
-            .image_type = .@"2d",
-            .format = format,
-            .extent = vk.Extent3D{
-                .width = @intCast(u32, stb_image.width),
-                .height = @intCast(u32, stb_image.height),
-                .depth = 1,
-            },
-            .mip_levels = 1,
-            .array_layers = 1,
-            .samples = .{ .@"1_bit" = true, },
-            .tiling = .optimal,
-            .usage = .{ .transfer_dst_bit = true, .sampled_bit = true, }, 
-            .sharing_mode = .exclusive, // TODO: concurrent :( especially for compute shader
-            .queue_family_index_count = queue_family_indices.len,
-            .p_queue_family_indices = &queue_family_indices,
-            .initial_layout = .@"undefined",
-        };
-        const image = try ctx.vkd.createImage(ctx.logical_device, image_info, null);
 
-        const memory_requirements = ctx.vkd.getImageMemoryRequirements(ctx.logical_device, image);
-        const alloc_info = vk.MemoryAllocateInfo{
-            .allocation_size = memory_requirements.size,
-            .memory_type_index = try vk_utils.findMemoryTypeIndex(ctx, memory_requirements.memory_type_bits, .{ .device_local_bit = true, }),
+        const image = blk: {
+            // TODO: make sure we use correct usage bits https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkImageUsageFlagBits.html
+            // TODO: VK_IMAGE_CREATE_SPARSE_BINDING_BIT
+            const image_info = vk.ImageCreateInfo{
+                .flags = .{},
+                .image_type = .@"2d",
+                .format = format,
+                .extent = vk.Extent3D{
+                    .width = @intCast(u32, stb_image.width),
+                    .height = @intCast(u32, stb_image.height),
+                    .depth = 1,
+                },
+                .mip_levels = 1,
+                .array_layers = 1,
+                .samples = .{ .@"1_bit" = true, },
+                .tiling = .optimal,
+                .usage = .{ .transfer_dst_bit = true, .sampled_bit = true, }, 
+                .sharing_mode = .exclusive, // TODO: concurrent :( especially for compute shader
+                .queue_family_index_count = queue_family_indices.len,
+                .p_queue_family_indices = &queue_family_indices,
+                .initial_layout = .@"undefined",
+            };
+            break :blk try ctx.vkd.createImage(ctx.logical_device, image_info, null);
         };
-        const image_memory = try ctx.vkd.allocateMemory(ctx.logical_device, alloc_info, null);
+
+        const image_memory = blk: {
+            const memory_requirements = ctx.vkd.getImageMemoryRequirements(ctx.logical_device, image);
+            const alloc_info = vk.MemoryAllocateInfo{
+                .allocation_size = memory_requirements.size,
+                .memory_type_index = try vk_utils.findMemoryTypeIndex(ctx, memory_requirements.memory_type_bits, .{ .device_local_bit = true, }),
+            };
+            break :blk try ctx.vkd.allocateMemory(ctx.logical_device, alloc_info, null);
+        };
         
         try ctx.vkd.bindImageMemory(ctx.logical_device, image, image_memory, 0);
         try transitionImageLayout(ctx, command_pool, image, .@"undefined", .transfer_dst_optimal);
         try copyImageToBuffer(ctx, command_pool, image, staging_buffer.buffer, @intCast(u32, stb_image.width), @intCast(u32, stb_image.height));
         try transitionImageLayout(ctx, command_pool, image, .transfer_dst_optimal, .shader_read_only_optimal); // TODO: some textures should be write!
 
+        const image_view = blk: {
+            // TODO: evaluate if this and swapchain should share logic (probably no)
+            const image_view_info = vk.ImageViewCreateInfo{
+                .flags = .{},
+                .image = image,
+                .view_type = .@"2d",
+                .format = format,
+                .components = .{
+                    .r = .identity,
+                    .g = .identity,
+                    .b = .identity,
+                    .a = .identity,
+                },
+                .subresource_range = .{
+                    .aspect_mask = .{ .color_bit = true, },
+                    .base_mip_level = 0,
+                    .level_count = 1,
+                    .base_array_layer = 0,
+                    .layer_count = 1,
+                },
+            };
+            break :blk try ctx.vkd.createImageView(ctx.logical_device, image_view_info, null);
+        };
+
+        const sampler = blk: {
+            // const device_properties = ctx.vki.getPhysicalDeviceProperties(ctx.physical_device);
+            const sampler_info = vk.SamplerCreateInfo{
+                .flags = .{},
+                .mag_filter = .nearest, // not sure what the application would need
+                .min_filter = .nearest, // RT should use linear, pixel sim should be nearest
+                .mipmap_mode = .linear,
+                .address_mode_u = .repeat,
+                .address_mode_v = .repeat,
+                .address_mode_w = .repeat,
+                .mip_lod_bias = 0.0,
+                .anisotropy_enable = vk.FALSE, // TODO: test with, and without
+                .max_anisotropy = 1.0, // device_properties.limits.max_sampler_anisotropy,
+                .compare_enable = vk.FALSE,
+                .compare_op = .always,
+                .min_lod = 0.0,
+                .max_lod = 0.0,
+                .border_color = .int_opaque_black,
+                .unnormalized_coordinates = vk.FALSE, // TODO: might be good for pixel sim to use true
+            };
+            break :blk try ctx.vkd.createSampler(ctx.logical_device, sampler_info, null);
+        };
+
         return Texture {
             .texture_size = texture_size,
             .image = image,
+            .image_view = image_view,
             .image_memory = image_memory,
             .format = format,
+            .sampler = sampler,
         };
     }
 
     pub fn deinit(self: Texture, ctx: Context) void {
+        ctx.vkd.destroySampler(ctx.logical_device, self.sampler, null);
+        ctx.vkd.destroyImageView(ctx.logical_device, self.image_view, null);
         ctx.vkd.destroyImage(ctx.logical_device, self.image, null);
         ctx.vkd.freeMemory(ctx.logical_device, self.image_memory, null);
     }

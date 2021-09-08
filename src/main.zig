@@ -21,7 +21,7 @@ const consts = renderer.consts;
 const GLFWError = error{ FailedToInit, WindowCreationFailed };
 
 pub const application_name = "zig vulkan";
-var pipeline: renderer.ApplicationGfxPipeline = undefined;
+var gfx_pipeline: renderer.ApplicationGfxPipeline = undefined;
 
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
@@ -66,20 +66,20 @@ pub fn main() anyerror!void {
     defer ctx.deinit();
 
     // const gfx_pipe
-    pipeline = try renderer.ApplicationGfxPipeline.init(allocator, ctx);
+    gfx_pipeline = try renderer.ApplicationGfxPipeline.init(allocator, ctx);
     _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
     defer {
         _ = window.setFramebufferSizeCallback(null);
-        pipeline.deinit(ctx);
+        gfx_pipeline.deinit(ctx);
     }
     
-    const my_texture = try renderer.Texture.from_file(ctx, allocator, pipeline.command_pool, "assets\\images\\texture.jpg"[0..]);
+    const my_texture = try renderer.Texture.from_file(ctx, allocator, gfx_pipeline.command_pool, "assets/images/texture.jpg"[0..]);
     defer my_texture.deinit(ctx);
 
     // Loop until the user closes the window
     while (!window.shouldClose()) {
         // Render here
-        try pipeline.draw(ctx);
+        try gfx_pipeline.draw(ctx);
 
         // Swap front and back buffers
         window.swapBuffers();
@@ -89,9 +89,12 @@ pub fn main() anyerror!void {
     }
 }
 
+/// called by glfw to message pipelines about scaling
+/// this should never be registered before pipeline init
 fn framebufferSizeCallbackFn(window: ?*glfw.RawWindow, width: c_int, height: c_int) callconv(.C) void {
     _ = window;
     _ = width;
     _ = height;
-    pipeline.requested_rescale_pipeline = true;
+    
+    gfx_pipeline.requested_rescale_pipeline = true;
 }

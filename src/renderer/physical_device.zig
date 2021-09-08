@@ -146,8 +146,9 @@ fn deviceHeuristic(allocator: *Allocator, vki: dispatch.Instance, device: vk.Phy
 
     const feature_score = blk: {
         const device_features = vki.getPhysicalDeviceFeatures(device);
-        const atomics = @intCast(i32, device_features.fragment_stores_and_atomics);
-        break :blk atomics;
+        const atomics = @intCast(i32, device_features.fragment_stores_and_atomics) * 5;
+        const anisotropy = @intCast(i32, device_features.sampler_anisotropy) * 5;
+        break :blk atomics + anisotropy;
     };
 
     const queue_fam_score: i32 = blk: {

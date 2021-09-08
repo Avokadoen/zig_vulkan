@@ -23,7 +23,7 @@ pub const ApplicationGfxPipeline = struct {
     pipeline: *vk.Pipeline,
     framebuffers: ArrayList(vk.Framebuffer),
 
-    command_pool: vk.CommandPool,
+    command_pool: vk.CommandPool, // command pool with graphics index
     command_buffers: ArrayList(vk.CommandBuffer),
 
     image_available_s: ArrayList(vk.Semaphore),
