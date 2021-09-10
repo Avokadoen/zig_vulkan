@@ -21,7 +21,7 @@ pub inline fn createDefaultVertexBuffer(ctx: Context, command_pool: vk.CommandPo
     var staging_buffer = try GpuBufferMemory.init(
         ctx, 
         buffer_size, 
-        .{ .vertex_buffer_bit = true, }, 
+        .{ .transfer_src_bit = true, }, 
         .{ .host_visible_bit = true, .host_coherent_bit = true, } 
     );
     defer staging_buffer.deinit();

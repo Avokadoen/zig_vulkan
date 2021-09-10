@@ -96,7 +96,7 @@ pub const Context = struct {
 
         // load base dispatch wrapper
         self.vkb = try dispatch.Base.load(c.glfwGetInstanceProcAddress);
-        if (!(try vk_utils.isInstanceExtensionsPresent(allocator, self.vkb, application_extensions))) {
+        if (!(try vk_utils.isInstanceExtensionsPresent(allocator, self.vkb, extensions.items))) {
             return error.InstanceExtensionNotPresent;
         }
 
@@ -104,6 +104,7 @@ pub const Context = struct {
 
         var create_p_next: ?*c_void = null;
         if (consts.enable_validation_layers) {
+            comptime { std.debug.assert(consts.enable_validation_layers); }
             var debug_create_info = createDefaultDebugCreateInfo(writers);
             create_p_next = @ptrCast(?*c_void, &debug_create_info);
         }
