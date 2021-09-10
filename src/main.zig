@@ -18,8 +18,6 @@ const vk = @import("vulkan");
 const renderer = @import("renderer/renderer.zig");
 const consts = renderer.consts;
 
-const Vertex = renderer.Vertex;
-
 const GLFWError = error{ FailedToInit, WindowCreationFailed };
 
 pub const application_name = "zig vulkan";
@@ -67,27 +65,7 @@ pub fn main() anyerror!void {
     const ctx = try renderer.Context.init(allocator, application_name, &window, &writers);
     defer ctx.deinit();
 
-    var vertices = [_]Vertex{ 
-        .{ .pos = .{ 1.0, -1.0 } },
-        .{ .pos = .{ 1.0,  1.0 } },
-        .{ .pos = .{-1.0,  1.0 } },
-        .{ .pos = .{-1.0, -1.0 } },
-        .{ .pos = .{ 1.0, -1.0 } },
-        .{ .pos = .{-1.0,  1.0 } }
-    };
-    const vertex_buffer = try renderer.GpuBufferMemory.init(
-        ctx, 
-        @sizeOf(Vertex) * vertices.len, 
-        .{ .vertex_buffer_bit = true, }, 
-        .{ .host_visible_bit = true, .host_coherent_bit = true, } 
-    );
-    defer vertex_buffer.deinit();
-    try vertex_buffer.bind();
-    // zig type inference is failing, so cast is needed currently
-    try vertex_buffer.transferData(Vertex, @as([]Vertex, vertices[0..])); 
-
-    // const gfx_pipe
-    gfx_pipeline = try renderer.ApplicationGfxPipeline.init(allocator, ctx, vertex_buffer);
+    gfx_pipeline = try renderer.ApplicationGfxPipeline.init(allocator, ctx);
     _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
     defer {
         _ = window.setFramebufferSizeCallback(null);

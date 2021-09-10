@@ -10,6 +10,11 @@ pub const GpuBufferMemory = struct {
 
     ctx: Context,
 
+    // TODO: might not make sense if different type, should be array
+    /// how many elements does the buffer contain
+    len: u32, 
+    // TODO: rename capacity, and add an accumulating size variable
+    /// how many bytes *can* be stored in the buffer
     size: vk.DeviceSize,
     buffer: vk.Buffer,
     memory: vk.DeviceMemory,
@@ -38,6 +43,7 @@ pub const GpuBufferMemory = struct {
         };
         return Self {
             .ctx = ctx,
+            .len = 0,
             .size = size,
             .buffer = buffer,
             .memory = memory,
@@ -48,18 +54,19 @@ pub const GpuBufferMemory = struct {
         try self.ctx.vkd.bindBufferMemory(self.ctx.logical_device, self.buffer, self.memory, 0);
     }
 
-    pub fn copyBuffer(self: Self, into: vk.Buffer, size: vk.DeviceSize, command_pool: vk.CommandPool) !void {
+    pub fn copyBuffer(self: Self, into: *GpuBufferMemory, size: vk.DeviceSize, command_pool: vk.CommandPool) !void {
         const command_buffer = try vk_utils.beginOneTimeCommandBuffer(self.ctx, command_pool);
-        const copy_region = vk.BufferCopy{
+        var copy_region = vk.BufferCopy{
             .src_offset = 0,
             .dst_offset = 0,
             .size = size,
         };
-        self.ctx.vkd.cmdCopyBuffer(command_buffer, self.buffer, into, 1, @ptrCast([*]vk.BufferCopy, copy_region));
-        try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, command_buffer);
+        self.ctx.vkd.cmdCopyBuffer(command_buffer, self.buffer, into.buffer, 1, @ptrCast([*]vk.BufferCopy, &copy_region));
+        try vk_utils.endOneTimeCommandBuffer(self.ctx, command_pool, command_buffer);
+        into.len += self.len;
     }
 
-    pub fn transferData(self: Self, comptime T: type, data: []T) !void {
+    pub fn transferData(self: *Self, comptime T: type, data: []T) !void {
         const size = data.len * @sizeOf(T);
         if (self.size < size) {
             return error.InsufficentBufferSize; // size of buffer is less than data being transfered
@@ -74,6 +81,7 @@ pub const GpuBufferMemory = struct {
             ptr.* = element;
         }
         self.ctx.vkd.unmapMemory(self.ctx.logical_device, self.memory);
+        self.len += @intCast(u32, data.len);
     }
 
     pub inline fn deinit(self: Self) void {

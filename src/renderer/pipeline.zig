@@ -37,9 +37,10 @@ pub const ApplicationGfxPipeline = struct {
     requested_rescale_pipeline: bool,
 
     vertex_buffer: GpuBufferMemory,
+    indices_buffer: GpuBufferMemory,
 
     /// initialize a graphics pipe line, caller must make sure to call deinit
-    pub fn init(allocator: *Allocator, ctx: Context, vertex_buffer: GpuBufferMemory) !Self {
+    pub fn init(allocator: *Allocator, ctx: Context) !Self {
         const swapchain_data = try swapchain.Data.init(allocator, ctx, null);
         const pipeline_layout = blk: {
             const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
@@ -198,8 +199,10 @@ pub const ApplicationGfxPipeline = struct {
 
             break :blk try ctx.vkd.createCommandPool(ctx.logical_device, pool_info, null);
         };
+        const vertex_buffer = try vertex.createDefaultVertexBuffer(ctx, command_pool);
+        const indices_buffer = try vertex.createDefaultIndicesBuffer(ctx, command_pool);
         const command_buffers = try createCmdBuffers(allocator, ctx, command_pool, framebuffers);
-        try recordGfxCmdBuffers(ctx, command_buffers, render_pass, framebuffers, swapchain_data, view, pipeline, vertex_buffer);
+        try recordGfxCmdBuffers(ctx, command_buffers, render_pass, framebuffers, swapchain_data, view, pipeline, vertex_buffer, indices_buffer);
 
         const images_in_flight = blk: {
             var images_in_flight = try ArrayList(vk.Fence).initCapacity(allocator, swapchain_data.images.items.len);
@@ -248,6 +251,7 @@ pub const ApplicationGfxPipeline = struct {
             .images_in_flight = images_in_flight,
             .requested_rescale_pipeline = false,
             .vertex_buffer = vertex_buffer,
+            .indices_buffer = indices_buffer,
         };
     }
 
@@ -388,7 +392,17 @@ pub const ApplicationGfxPipeline = struct {
         self.framebuffers = try createFramebuffers(allocator, ctx, self.swapchain_data, self.render_pass);
 
         self.command_buffers = try createCmdBuffers(allocator, ctx, self.command_pool, self.framebuffers);
-        try recordGfxCmdBuffers(ctx, self.command_buffers, self.render_pass, self.framebuffers, self.swapchain_data, self.view, self.pipeline, self.vertex_buffer);
+        try recordGfxCmdBuffers(
+            ctx, 
+            self.command_buffers, 
+            self.render_pass, 
+            self.framebuffers, 
+            self.swapchain_data, 
+            self.view, 
+            self.pipeline, 
+            self.vertex_buffer,
+            self.indices_buffer    
+        );
     }
 
     pub fn deinit(self: Self, ctx: Context) void {
@@ -401,6 +415,9 @@ pub const ApplicationGfxPipeline = struct {
                 ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fences.items[i], null);
             }
         }
+        self.vertex_buffer.deinit();
+        self.indices_buffer.deinit();
+
         self.image_available_s.deinit();
         self.renderer_finished_s.deinit();
         self.in_flight_fences.deinit();
@@ -485,7 +502,8 @@ inline fn recordGfxCmdBuffers(
     swapchain_data: swapchain.Data,
     view: swapchain.ViewportScissor,
     pipeline: *vk.Pipeline,
-    vertex_buffer: GpuBufferMemory
+    vertex_buffer: GpuBufferMemory,
+    indices_buffer: GpuBufferMemory,
 ) !void {
     const clear_color = [_]vk.ClearColorValue{
         .{
@@ -519,8 +537,8 @@ inline fn recordGfxCmdBuffers(
             @ptrCast([*]const vk.Buffer, &vertex_buffer.buffer), 
             @ptrCast([*]const vk.DeviceSize, &buffer_offsets)
         );
-        
-        ctx.vkd.cmdDraw(command_buffer, 6, 1, 0, 0);
+        ctx.vkd.cmdBindIndexBuffer(command_buffer, indices_buffer.buffer, 0, .uint32);
+        ctx.vkd.cmdDrawIndexed(command_buffer, indices_buffer.len, 1, 0, 0, 0);
         ctx.vkd.cmdEndRenderPass(command_buffer);
         try ctx.vkd.endCommandBuffer(command_buffer);
     }
