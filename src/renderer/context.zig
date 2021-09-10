@@ -58,9 +58,9 @@ pub const Context = struct {
         const app_info = vk.ApplicationInfo{
             .p_next = null,
             .p_application_name = app_name,
-            .application_version = vk.makeApiVersion(0, 0, 1, 0),
+            .application_version = consts.application_version,
             .p_engine_name = consts.engine_name,
-            .engine_version = vk.makeApiVersion(0, 0, 1, 0),
+            .engine_version = consts.engine_version,
             .api_version = vk.API_VERSION_1_2,
         };
 

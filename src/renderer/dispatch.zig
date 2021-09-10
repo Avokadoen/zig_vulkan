@@ -4,12 +4,18 @@
 /// see vk X_Command types for implementation details
 const vk = @import("vulkan");
 
+const consts = @import("consts.zig");
+
 pub const Base = vk.BaseWrapper([_]vk.BaseCommand{
     .CreateInstance,
     .EnumerateInstanceExtensionProperties,
     .EnumerateInstanceLayerProperties,
 });
 
-pub const Instance = vk.InstanceWrapper([_]vk.InstanceCommand{ .CreateDebugUtilsMessengerEXT, .CreateDevice, .DestroyDebugUtilsMessengerEXT, .DestroyInstance, .DestroySurfaceKHR, .EnumerateDeviceExtensionProperties, .EnumeratePhysicalDevices, .GetDeviceProcAddr, .GetPhysicalDeviceFeatures, .GetPhysicalDeviceMemoryProperties, .GetPhysicalDeviceProperties, .GetPhysicalDeviceQueueFamilyProperties, .GetPhysicalDeviceSurfaceCapabilitiesKHR, .GetPhysicalDeviceSurfaceFormatsKHR, .GetPhysicalDeviceSurfacePresentModesKHR, .GetPhysicalDeviceSurfaceSupportKHR });
+pub const Instance = blk: {
+    var default_commands = [_]vk.InstanceCommand{ .CreateDevice, .DestroyInstance, .DestroySurfaceKHR, .EnumerateDeviceExtensionProperties, .EnumeratePhysicalDevices, .GetDeviceProcAddr, .GetPhysicalDeviceFeatures, .GetPhysicalDeviceMemoryProperties, .GetPhysicalDeviceProperties, .GetPhysicalDeviceQueueFamilyProperties, .GetPhysicalDeviceSurfaceCapabilitiesKHR, .GetPhysicalDeviceSurfaceFormatsKHR, .GetPhysicalDeviceSurfacePresentModesKHR, .GetPhysicalDeviceSurfaceSupportKHR };
+    var output_commands = default_commands ++ if(consts.enable_validation_layers) [_]vk.InstanceCommand{ .CreateDebugUtilsMessengerEXT, .DestroyDebugUtilsMessengerEXT, } else [_]vk.InstanceCommand{};
+    break :blk vk.InstanceWrapper(output_commands);
+};
 
 pub const Device = vk.DeviceWrapper([_]vk.DeviceCommand{ .AcquireNextImageKHR, .AllocateCommandBuffers, .AllocateMemory, .BeginCommandBuffer, .BindBufferMemory, .BindImageMemory, .CmdBeginRenderPass, .CmdBindIndexBuffer, .CmdBindPipeline, .CmdBindVertexBuffers, .CmdCopyBuffer, .CmdCopyBufferToImage, .CmdCopyImageToBuffer, .CmdDrawIndexed, .CmdEndRenderPass, .CmdPipelineBarrier, .CmdSetScissor, .CmdSetViewport, .CreateBuffer, .CreateCommandPool, .CreateFence, .CreateFramebuffer, .CreateGraphicsPipelines, .CreateImage, .CreateImageView, .CreatePipelineLayout, .CreateRenderPass, .CreateSampler, .CreateSemaphore, .CreateShaderModule, .CreateSwapchainKHR, .DestroyBuffer, .DestroyCommandPool, .DestroyDevice, .DestroyFence, .DestroyFramebuffer, .DestroyImage, .DestroyImageView, .DestroyPipeline, .DestroyPipelineLayout, .DestroyRenderPass, .DestroySampler, .DestroySemaphore, .DestroyShaderModule, .DestroySwapchainKHR, .DeviceWaitIdle, .EndCommandBuffer, .FreeCommandBuffers, .FreeMemory, .GetBufferMemoryRequirements, .GetDeviceQueue, .GetImageMemoryRequirements, .GetSwapchainImagesKHR, .MapMemory, .QueuePresentKHR, .QueueSubmit, .QueueWaitIdle, .ResetFences, .UnmapMemory, .WaitForFences });
