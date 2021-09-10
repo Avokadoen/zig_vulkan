@@ -7,8 +7,11 @@ const glfw = @import("glfw");
 
 const constants = @import("consts.zig");
 const swapchain = @import("swapchain.zig");
-const Context = @import("context.zig").Context;
+const vertex = @import("vertex.zig");
 const utils = @import("../utils.zig");
+
+const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
+const Context = @import("context.zig").Context;
 
 pub const ApplicationGfxPipeline = struct {
     const Self = @This();
@@ -33,8 +36,10 @@ pub const ApplicationGfxPipeline = struct {
 
     requested_rescale_pipeline: bool,
 
-    /// initialize a graphics pipe line 
-    pub fn init(allocator: *Allocator, ctx: Context) !Self {
+    vertex_buffer: GpuBufferMemory,
+
+    /// initialize a graphics pipe line, caller must make sure to call deinit
+    pub fn init(allocator: *Allocator, ctx: Context, vertex_buffer: GpuBufferMemory) !Self {
         const swapchain_data = try swapchain.Data.init(allocator, ctx, null);
         const pipeline_layout = blk: {
             const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
@@ -88,12 +93,14 @@ pub const ApplicationGfxPipeline = struct {
             const frag_stage = vk.PipelineShaderStageCreateInfo{ .flags = .{}, .stage = .{ .fragment_bit = true }, .module = frag_module, .p_name = "main", .p_specialization_info = null };
             const shader_stages_info = [_]vk.PipelineShaderStageCreateInfo{ vert_stage, frag_stage };
 
+            const binding_desription = vertex.getBindingDescriptors();
+            const attrib_desriptions = vertex.getAttribureDescriptions();
             const vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
                 .flags = .{},
-                .vertex_binding_description_count = 0,
-                .p_vertex_binding_descriptions = undefined,
-                .vertex_attribute_description_count = 0,
-                .p_vertex_attribute_descriptions = undefined,
+                .vertex_binding_description_count = binding_desription.len,
+                .p_vertex_binding_descriptions = &binding_desription,
+                .vertex_attribute_description_count = attrib_desriptions.len,
+                .p_vertex_attribute_descriptions = &attrib_desriptions,
             };
             const input_assembley_info = vk.PipelineInputAssemblyStateCreateInfo{
                 .flags = .{},
@@ -192,7 +199,7 @@ pub const ApplicationGfxPipeline = struct {
             break :blk try ctx.vkd.createCommandPool(ctx.logical_device, pool_info, null);
         };
         const command_buffers = try createCmdBuffers(allocator, ctx, command_pool, framebuffers);
-        try recordGfxCmdBuffers(ctx, command_buffers, render_pass, framebuffers, swapchain_data, view, pipeline);
+        try recordGfxCmdBuffers(ctx, command_buffers, render_pass, framebuffers, swapchain_data, view, pipeline, vertex_buffer);
 
         const images_in_flight = blk: {
             var images_in_flight = try ArrayList(vk.Fence).initCapacity(allocator, swapchain_data.images.items.len);
@@ -240,6 +247,7 @@ pub const ApplicationGfxPipeline = struct {
             .in_flight_fences = in_flight_fences,
             .images_in_flight = images_in_flight,
             .requested_rescale_pipeline = false,
+            .vertex_buffer = vertex_buffer,
         };
     }
 
@@ -380,7 +388,7 @@ pub const ApplicationGfxPipeline = struct {
         self.framebuffers = try createFramebuffers(allocator, ctx, self.swapchain_data, self.render_pass);
 
         self.command_buffers = try createCmdBuffers(allocator, ctx, self.command_pool, self.framebuffers);
-        try recordGfxCmdBuffers(ctx, self.command_buffers, self.render_pass, self.framebuffers, self.swapchain_data, self.view, self.pipeline);
+        try recordGfxCmdBuffers(ctx, self.command_buffers, self.render_pass, self.framebuffers, self.swapchain_data, self.view, self.pipeline, self.vertex_buffer);
     }
 
     pub fn deinit(self: Self, ctx: Context) void {
@@ -476,7 +484,8 @@ inline fn recordGfxCmdBuffers(
     framebuffers: ArrayList(vk.Framebuffer),
     swapchain_data: swapchain.Data,
     view: swapchain.ViewportScissor,
-    pipeline: *vk.Pipeline
+    pipeline: *vk.Pipeline,
+    vertex_buffer: GpuBufferMemory
 ) !void {
     const clear_color = [_]vk.ClearColorValue{
         .{
@@ -501,6 +510,16 @@ inline fn recordGfxCmdBuffers(
         ctx.vkd.cmdSetScissor(command_buffer, 0, view.scissor.len, &view.scissor);
         ctx.vkd.cmdBeginRenderPass(command_buffer, render_begin_info, vk.SubpassContents.@"inline");
         ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.graphics, pipeline.*);
+
+        const buffer_offsets = [_]vk.DeviceSize{ 0 };
+        ctx.vkd.cmdBindVertexBuffers(
+            command_buffer, 
+            0, 
+            1, 
+            @ptrCast([*]const vk.Buffer, &vertex_buffer.buffer), 
+            @ptrCast([*]const vk.DeviceSize, &buffer_offsets)
+        );
+        
         ctx.vkd.cmdDraw(command_buffer, 6, 1, 0, 0);
         ctx.vkd.cmdEndRenderPass(command_buffer);
         try ctx.vkd.endCommandBuffer(command_buffer);
