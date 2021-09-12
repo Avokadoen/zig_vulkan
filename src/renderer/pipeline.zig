@@ -8,6 +8,7 @@ const glfw = @import("glfw");
 const constants = @import("consts.zig");
 const swapchain = @import("swapchain.zig");
 const vertex = @import("vertex.zig");
+const transform_buffer = @import("transform_buffer.zig");
 const utils = @import("../utils.zig");
 
 const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
@@ -36,25 +37,38 @@ pub const ApplicationGfxPipeline = struct {
 
     requested_rescale_pipeline: bool,
 
+    // TODO seperate vertex/index buffers from pipeline
     vertex_buffer: GpuBufferMemory,
     indices_buffer: GpuBufferMemory,
 
+    // TODO: seperate ubo and render pipeline
+    ubo: transform_buffer.TransformBuffer,
+    ubo_descriptor_set: vk.DescriptorSetLayout,
+    ubo_buffers: []GpuBufferMemory, // TODO: recreate when we rescale pipeline?
+    ubo_descriptor_pool: vk.DescriptorPool,
+    ubo_descriptor_sets: []vk.DescriptorSet,
+
+    // TODO: correctness if init fail, clean up resources created with errdefer
     /// initialize a graphics pipe line, caller must make sure to call deinit
     pub fn init(allocator: *Allocator, ctx: Context) !Self {
-        const swapchain_data = try swapchain.Data.init(allocator, ctx, null);
-        const pipeline_layout = blk: {
+        var self: Self = undefined; 
+        self.allocator = allocator;
+
+        self.swapchain_data = try swapchain.Data.init(allocator, ctx, null);
+        self.ubo_descriptor_set = try transform_buffer.createUniformDescriptorSetLayout(ctx);
+        self.pipeline_layout = blk: {
             const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
                 .flags = .{},
-                .set_layout_count = 0,
-                .p_set_layouts = undefined,
+                .set_layout_count = 1,
+                .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &self.ubo_descriptor_set),
                 .push_constant_range_count = 0,
                 .p_push_constant_ranges = undefined,
             };
             break :blk try ctx.createPipelineLayout(pipeline_layout_info);
         };
-        const render_pass = try ctx.createRenderPass(swapchain_data.format);
-        const view = swapchain.ViewportScissor.init(swapchain_data.extent);
-        const pipeline = blk: {
+        self.render_pass = try ctx.createRenderPass(self.swapchain_data.format);
+        self.view = swapchain.ViewportScissor.init(self.swapchain_data.extent);
+        self.pipeline = blk: {
             const self_path = try std.fs.selfExePathAlloc(allocator);
             defer ctx.allocator.destroy(self_path.ptr);
 
@@ -74,8 +88,13 @@ pub const ApplicationGfxPipeline = struct {
                 vert_code.deinit();
             }
 
-            const vert_stage = vk.PipelineShaderStageCreateInfo{ .flags = .{}, .stage = .{ .vertex_bit = true }, .module = vert_module, .p_name = "main", .p_specialization_info = null };
-
+            const vert_stage = vk.PipelineShaderStageCreateInfo{ 
+                .flags = .{}, 
+                .stage = .{ .vertex_bit = true }, 
+                .module = vert_module, 
+                .p_name = "main", 
+                .p_specialization_info = null 
+            };
             const frag_code = blk1: {
                 const path = blk2: {
                     const join_path = [_][]const u8{ self_path, "../../pass.frag.spv" };
@@ -91,7 +110,13 @@ pub const ApplicationGfxPipeline = struct {
                 frag_code.deinit();
             }
 
-            const frag_stage = vk.PipelineShaderStageCreateInfo{ .flags = .{}, .stage = .{ .fragment_bit = true }, .module = frag_module, .p_name = "main", .p_specialization_info = null };
+            const frag_stage = vk.PipelineShaderStageCreateInfo{ 
+                .flags = .{}, 
+                .stage = .{ .fragment_bit = true }, 
+                .module = frag_module, 
+                .p_name = "main", 
+                .p_specialization_info = null 
+            };
             const shader_stages_info = [_]vk.PipelineShaderStageCreateInfo{ vert_stage, frag_stage };
 
             const binding_desription = vertex.getBindingDescriptors();
@@ -111,10 +136,10 @@ pub const ApplicationGfxPipeline = struct {
             
             const viewport_info = vk.PipelineViewportStateCreateInfo{
                 .flags = .{},
-                .viewport_count = view.viewport.len,
-                .p_viewports = @ptrCast(?[*]const vk.Viewport, &view.viewport),
-                .scissor_count = view.scissor.len,
-                .p_scissors = @ptrCast(?[*]const vk.Rect2D, &view.scissor),
+                .viewport_count = self.view.viewport.len,
+                .p_viewports = @ptrCast(?[*]const vk.Viewport, &self.view.viewport),
+                .scissor_count = self.view.scissor.len,
+                .p_scissors = @ptrCast(?[*]const vk.Rect2D, &self.view.scissor),
             };
             const rasterizer_info = vk.PipelineRasterizationStateCreateInfo{
                 .flags = .{},
@@ -122,7 +147,7 @@ pub const ApplicationGfxPipeline = struct {
                 .rasterizer_discard_enable = vk.FALSE,
                 .polygon_mode = .fill,
                 .cull_mode = .{ .back_bit = true },
-                .front_face = .clockwise,
+                .front_face = .counter_clockwise,
                 .depth_bias_enable = vk.FALSE,
                 .depth_bias_constant_factor = 0.0,
                 .depth_bias_clamp = 0.0,
@@ -180,8 +205,8 @@ pub const ApplicationGfxPipeline = struct {
                 .p_depth_stencil_state = null,
                 .p_color_blend_state = &color_blend_state,
                 .p_dynamic_state = &dynamic_state_info,
-                .layout = pipeline_layout,
-                .render_pass = render_pass,
+                .layout = self.pipeline_layout,
+                .render_pass = self.render_pass,
                 .subpass = 0,
                 .base_pipeline_handle = .null_handle,
                 .base_pipeline_index = -1,
@@ -189,9 +214,10 @@ pub const ApplicationGfxPipeline = struct {
             break :blk try ctx.createGraphicsPipelines(allocator, pipeline_info);
         };
 
-        const framebuffers = try createFramebuffers(allocator, ctx, swapchain_data, render_pass);
+        self.framebuffers = try createFramebuffers(allocator, ctx, self.swapchain_data, self.render_pass);
+        errdefer self.framebuffers.deinit();
 
-        const command_pool = blk: {
+        self.command_pool = blk: {
             const pool_info = vk.CommandPoolCreateInfo{
                 .flags = .{},
                 .queue_family_index = ctx.queue_indices.graphics,
@@ -199,22 +225,34 @@ pub const ApplicationGfxPipeline = struct {
 
             break :blk try ctx.vkd.createCommandPool(ctx.logical_device, pool_info, null);
         };
-        const vertex_buffer = try vertex.createDefaultVertexBuffer(ctx, command_pool);
-        const indices_buffer = try vertex.createDefaultIndicesBuffer(ctx, command_pool);
-        const command_buffers = try createCmdBuffers(allocator, ctx, command_pool, framebuffers);
-        try recordGfxCmdBuffers(ctx, command_buffers, render_pass, framebuffers, swapchain_data, view, pipeline, vertex_buffer, indices_buffer);
+        self.vertex_buffer = try vertex.createDefaultVertexBuffer(ctx, self.command_pool);
+        errdefer self.vertex_buffer.deinit();
 
-        const images_in_flight = blk: {
-            var images_in_flight = try ArrayList(vk.Fence).initCapacity(allocator, swapchain_data.images.items.len);
+        self.indices_buffer = try vertex.createDefaultIndicesBuffer(ctx, self.command_pool);
+        errdefer self.indices_buffer.deinit();
+
+        self.command_buffers = try createCmdBuffers(allocator, ctx, self.command_pool, self.framebuffers);
+        errdefer self.command_buffers.deinit();
+
+        self.images_in_flight = blk: {
+            var images_in_flight = try ArrayList(vk.Fence).initCapacity(allocator, self.swapchain_data.images.items.len);
             var i: usize = 0;
             while(i < images_in_flight.capacity) : (i += 1) {
                 images_in_flight.appendAssumeCapacity(.null_handle);
             }
             break :blk images_in_flight;
-        };   
-        var image_available_s = try ArrayList(vk.Semaphore).initCapacity(allocator, constants.max_frames_in_flight);
-        var renderer_finished_s = try ArrayList(vk.Semaphore).initCapacity(allocator, constants.max_frames_in_flight);
-        var in_flight_fences = try ArrayList(vk.Fence).initCapacity(allocator, constants.max_frames_in_flight);
+        };
+        errdefer self.images_in_flight.deinit();
+
+        self.image_available_s = try ArrayList(vk.Semaphore).initCapacity(allocator, constants.max_frames_in_flight);
+        errdefer self.image_available_s.deinit();
+
+        self.renderer_finished_s = try ArrayList(vk.Semaphore).initCapacity(allocator, constants.max_frames_in_flight);
+        errdefer self.renderer_finished_s.deinit();
+
+        self.in_flight_fences = try ArrayList(vk.Fence).initCapacity(allocator, constants.max_frames_in_flight);
+        errdefer self.in_flight_fences.deinit();
+
         const semaphore_info = vk.SemaphoreCreateInfo{
             .flags = .{},
         };
@@ -225,33 +263,58 @@ pub const ApplicationGfxPipeline = struct {
             var i: usize = 0;
             while (i < constants.max_frames_in_flight) : (i += 1) {
                 const image_sem = try ctx.vkd.createSemaphore(ctx.logical_device, semaphore_info, null);
-                image_available_s.appendAssumeCapacity(image_sem);
+                self.image_available_s.appendAssumeCapacity(image_sem);
 
                 const finish_sem = try ctx.vkd.createSemaphore(ctx.logical_device, semaphore_info, null);
-                renderer_finished_s.appendAssumeCapacity(finish_sem);
+                self.renderer_finished_s.appendAssumeCapacity(finish_sem);
 
                 const fence = try ctx.vkd.createFence(ctx.logical_device, fence_info, null);
-                in_flight_fences.appendAssumeCapacity(fence);
+                self.in_flight_fences.appendAssumeCapacity(fence);
             }
         }
 
+        self.ubo_buffers = try transform_buffer.createUniformBuffers(allocator, ctx, self.swapchain_data.images.items.len);
+        errdefer {
+            for (self.ubo_buffers) |buffer| {
+                buffer.deinit();
+            }
+        }
+        self.ubo_descriptor_pool = try transform_buffer.createUniformDescriptorPool(ctx, self.swapchain_data.images.items.len);
+        self.ubo_descriptor_sets = try transform_buffer.createDescriptorSet(
+            allocator, 
+            ctx, 
+            self.swapchain_data.images.items.len,
+            self.ubo_descriptor_set,
+            self.ubo_descriptor_pool,
+            self.ubo_buffers
+        );
+        errdefer allocator.destroy(self.ubo_descriptor_sets.ptr);
+
+        // self is sufficiently defined to record command buffer
+        try recordGfxCmdBuffers(ctx, &self); 
+
         return Self{
-            .allocator = allocator,
-            .swapchain_data = swapchain_data,
-            .view = view,
-            .render_pass = render_pass,
-            .pipeline_layout = pipeline_layout,
-            .pipeline = pipeline,
-            .framebuffers = framebuffers,
-            .command_pool = command_pool,
-            .command_buffers = command_buffers,
-            .image_available_s = image_available_s,
-            .renderer_finished_s = renderer_finished_s,
-            .in_flight_fences = in_flight_fences,
-            .images_in_flight = images_in_flight,
+            .allocator = self.allocator,
+            .swapchain_data = self.swapchain_data,
+            .view = self.view,
+            .render_pass = self.render_pass,
+            .pipeline_layout = self.pipeline_layout,
+            .pipeline = self.pipeline,
+            .framebuffers = self.framebuffers,
+            .command_pool = self.command_pool,
+            .command_buffers = self.command_buffers,
+            .image_available_s = self.image_available_s,
+            .renderer_finished_s = self.renderer_finished_s,
+            .in_flight_fences = self.in_flight_fences,
+            .images_in_flight = self.images_in_flight,
             .requested_rescale_pipeline = false,
-            .vertex_buffer = vertex_buffer,
-            .indices_buffer = indices_buffer,
+            .vertex_buffer = self.vertex_buffer,
+            .indices_buffer = self.indices_buffer,
+            .ubo = transform_buffer.TransformBuffer.init(),
+            .ubo_descriptor_set = self.ubo_descriptor_set,
+            .ubo_buffers = self.ubo_buffers,
+            .ubo_descriptor_pool = self.ubo_descriptor_pool,
+            .ubo_descriptor_sets = self.ubo_descriptor_sets,
         };
     }
 
@@ -302,6 +365,10 @@ pub const ApplicationGfxPipeline = struct {
             _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, p_fence, vk.TRUE, max_u64);
         }
         self.images_in_flight.items[image_index] = self.in_flight_fences.items[state.current_frame];
+
+        // always update and transfer ubo, this is terrible, but currently just and experiment :)
+        var ubo_slice = [_]transform_buffer.TransformBuffer{self.ubo};
+        try self.ubo_buffers[image_index].transferData(transform_buffer.TransformBuffer, ubo_slice[0..]);
 
         const wait_stages = vk.PipelineStageFlags{ .color_attachment_output_bit = true };
         const submit_info = vk.SubmitInfo{
@@ -392,17 +459,7 @@ pub const ApplicationGfxPipeline = struct {
         self.framebuffers = try createFramebuffers(allocator, ctx, self.swapchain_data, self.render_pass);
 
         self.command_buffers = try createCmdBuffers(allocator, ctx, self.command_pool, self.framebuffers);
-        try recordGfxCmdBuffers(
-            ctx, 
-            self.command_buffers, 
-            self.render_pass, 
-            self.framebuffers, 
-            self.swapchain_data, 
-            self.view, 
-            self.pipeline, 
-            self.vertex_buffer,
-            self.indices_buffer    
-        );
+        try recordGfxCmdBuffers(ctx, self);
     }
 
     pub fn deinit(self: Self, ctx: Context) void {
@@ -415,6 +472,14 @@ pub const ApplicationGfxPipeline = struct {
                 ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fences.items[i], null);
             }
         }
+        for(self.ubo_buffers) |buffer| {
+            buffer.deinit();
+        }
+        self.allocator.destroy(self.ubo_buffers.ptr);
+        self.allocator.destroy(self.ubo_descriptor_sets.ptr);
+
+        ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.ubo_descriptor_pool, null);
+        ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.ubo_descriptor_set, null);
         self.vertex_buffer.deinit();
         self.indices_buffer.deinit();
 
@@ -494,23 +559,13 @@ inline fn createCmdBuffers(allocator: *Allocator, ctx: Context, command_pool: vk
 
 // TODO: refactor so we don't take 100000 arguments?
 /// record default commands to the command buffer
-inline fn recordGfxCmdBuffers(
-    ctx: Context, 
-    command_buffers: ArrayList(vk.CommandBuffer), 
-    render_pass: vk.RenderPass, 
-    framebuffers: ArrayList(vk.Framebuffer),
-    swapchain_data: swapchain.Data,
-    view: swapchain.ViewportScissor,
-    pipeline: *vk.Pipeline,
-    vertex_buffer: GpuBufferMemory,
-    indices_buffer: GpuBufferMemory,
-) !void {
+fn recordGfxCmdBuffers(ctx: Context, pipeline: *ApplicationGfxPipeline) !void {
     const clear_color = [_]vk.ClearColorValue{
         .{
             .float_32 = [_]f32{ 0.0, 0.0, 0.0, 1.0 },
         },
     };
-    for (command_buffers.items) |command_buffer, i| {
+    for (pipeline.command_buffers.items) |command_buffer, i| {
         const command_begin_info = vk.CommandBufferBeginInfo{
             .flags = .{},
             .p_inheritance_info = null,
@@ -518,27 +573,37 @@ inline fn recordGfxCmdBuffers(
         try ctx.vkd.beginCommandBuffer(command_buffer, command_begin_info);
 
         const render_begin_info = vk.RenderPassBeginInfo{
-            .render_pass = render_pass,
-            .framebuffer = framebuffers.items[i],
-            .render_area = .{ .offset = .{ .x = 0, .y = 0 }, .extent = swapchain_data.extent },
+            .render_pass = pipeline.render_pass,
+            .framebuffer = pipeline.framebuffers.items[i],
+            .render_area = .{ .offset = .{ .x = 0, .y = 0 }, .extent = pipeline.swapchain_data.extent },
             .clear_value_count = clear_color.len,
             .p_clear_values = @ptrCast([*]const vk.ClearValue, &clear_color),
         };
-        ctx.vkd.cmdSetViewport(command_buffer, 0, view.viewport.len, &view.viewport);
-        ctx.vkd.cmdSetScissor(command_buffer, 0, view.scissor.len, &view.scissor);
+        ctx.vkd.cmdSetViewport(command_buffer, 0, pipeline.view.viewport.len, &pipeline.view.viewport);
+        ctx.vkd.cmdSetScissor(command_buffer, 0, pipeline.view.scissor.len, &pipeline.view.scissor);
         ctx.vkd.cmdBeginRenderPass(command_buffer, render_begin_info, vk.SubpassContents.@"inline");
-        ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.graphics, pipeline.*);
+        ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.graphics, pipeline.pipeline.*);
 
         const buffer_offsets = [_]vk.DeviceSize{ 0 };
         ctx.vkd.cmdBindVertexBuffers(
             command_buffer, 
             0, 
             1, 
-            @ptrCast([*]const vk.Buffer, &vertex_buffer.buffer), 
+            @ptrCast([*]const vk.Buffer, &pipeline.vertex_buffer.buffer), 
             @ptrCast([*]const vk.DeviceSize, &buffer_offsets)
         );
-        ctx.vkd.cmdBindIndexBuffer(command_buffer, indices_buffer.buffer, 0, .uint32);
-        ctx.vkd.cmdDrawIndexed(command_buffer, indices_buffer.len, 1, 0, 0, 0);
+        ctx.vkd.cmdBindIndexBuffer(command_buffer, pipeline.indices_buffer.buffer, 0, .uint32);
+        ctx.vkd.cmdBindDescriptorSets(
+            command_buffer, 
+            .graphics, 
+            pipeline.pipeline_layout, 
+            0, 
+            1, 
+            @ptrCast([*]const vk.DescriptorSet, &pipeline.ubo_descriptor_sets[i]),
+            0,
+            undefined
+        );
+        ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, 1, 0, 0, 0);
         ctx.vkd.cmdEndRenderPass(command_buffer);
         try ctx.vkd.endCommandBuffer(command_buffer);
     }

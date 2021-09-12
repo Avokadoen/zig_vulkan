@@ -50,6 +50,7 @@ pub const GpuBufferMemory = struct {
         };
     }
 
+    // TODO: move to init
     pub inline fn bind(self: Self) !void {
         try self.ctx.vkd.bindBufferMemory(self.ctx.logical_device, self.buffer, self.memory, 0);
     }
@@ -81,7 +82,7 @@ pub const GpuBufferMemory = struct {
             ptr.* = element;
         }
         self.ctx.vkd.unmapMemory(self.ctx.logical_device, self.memory);
-        self.len += @intCast(u32, data.len);
+        self.len = @intCast(u32, data.len);
     }
 
     pub inline fn deinit(self: Self) void {

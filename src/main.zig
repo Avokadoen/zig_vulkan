@@ -27,15 +27,12 @@ pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
     const stdout = std.io.getStdOut().writer();
 
-    // TODO: use c_allocator in optimized compile mode since we have to link with libc anyways
     // create a gpa with default configuration
     var alloc = if (consts.enable_validation_layers) std.heap.GeneralPurposeAllocator(.{}){} else std.heap.c_allocator;
     defer {
         if (consts.enable_validation_layers) {
             const leak = alloc.deinit();
             if (leak) {
-                // TODO: lazy error handling can be improved
-                // If error occur here we are screwed anyways
                 stderr.print("leak detected in gpa!", .{}) catch unreachable;
             }
         }
