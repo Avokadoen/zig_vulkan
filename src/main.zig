@@ -70,7 +70,7 @@ pub fn main() anyerror!void {
     }
 
     // TODO: remove, this is just a test
-    const my_texture = try renderer.Texture.from_file(ctx, allocator, gfx_pipeline.command_pool, "assets/images/texture.jpg"[0..]);
+    const my_texture = try renderer.Texture.from_file(ctx, allocator, gfx_pipeline.command_pool, "../assets/images/texture.jpg"[0..]);
     defer my_texture.deinit(ctx);
 
     // Loop until the user closes the window

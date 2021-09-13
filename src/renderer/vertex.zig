@@ -22,10 +22,9 @@ pub inline fn createDefaultVertexBuffer(ctx: Context, command_pool: vk.CommandPo
         .{ .transfer_src_bit = true, }, 
         .{ .host_visible_bit = true, .host_coherent_bit = true, } 
     );
-    defer staging_buffer.deinit();
-    try staging_buffer.bind();
+    defer staging_buffer.deinit(ctx);
     // zig type inference is failing, so cast is needed currently
-    try staging_buffer.transferData(za.Vec2, @as([]za.Vec2, vertices[0..])); 
+    try staging_buffer.transferData(ctx, za.Vec2, @as([]za.Vec2, vertices[0..])); 
 
     var vertex_buffer = try GpuBufferMemory.init(
         ctx, 
@@ -33,8 +32,7 @@ pub inline fn createDefaultVertexBuffer(ctx: Context, command_pool: vk.CommandPo
         .{ .transfer_dst_bit = true, .vertex_buffer_bit = true, }, 
         .{ .device_local_bit = true, }
     );
-    try vertex_buffer.bind();
-    try staging_buffer.copyBuffer(&vertex_buffer, buffer_size, command_pool);
+    try staging_buffer.copyBuffer(ctx, &vertex_buffer, buffer_size, command_pool);
     return vertex_buffer;
 }
 
@@ -50,10 +48,9 @@ pub inline fn createDefaultIndicesBuffer(ctx: Context, command_pool: vk.CommandP
         .{ .transfer_src_bit = true, }, 
         .{ .host_visible_bit = true, .host_coherent_bit = true, } 
     );
-    defer staging_buffer.deinit();
-    try staging_buffer.bind();
+    defer staging_buffer.deinit(ctx);
     // zig type inference is failing, so cast is needed currently
-    try staging_buffer.transferData(Index, @as([]Index, indices[0..])); 
+    try staging_buffer.transferData(ctx, Index, @as([]Index, indices[0..])); 
 
     var index_buffer = try GpuBufferMemory.init(
         ctx, 
@@ -61,8 +58,7 @@ pub inline fn createDefaultIndicesBuffer(ctx: Context, command_pool: vk.CommandP
         .{ .transfer_dst_bit = true, .index_buffer_bit = true, }, 
         .{ .device_local_bit = true, }
     );
-    try index_buffer.bind();
-    try staging_buffer.copyBuffer(&index_buffer, buffer_size, command_pool);
+    try staging_buffer.copyBuffer(ctx, &index_buffer, buffer_size, command_pool);
     return index_buffer;
 }
 

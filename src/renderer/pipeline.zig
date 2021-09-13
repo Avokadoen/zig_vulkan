@@ -226,10 +226,10 @@ pub const ApplicationGfxPipeline = struct {
             break :blk try ctx.vkd.createCommandPool(ctx.logical_device, pool_info, null);
         };
         self.vertex_buffer = try vertex.createDefaultVertexBuffer(ctx, self.command_pool);
-        errdefer self.vertex_buffer.deinit();
+        errdefer self.vertex_buffer.deinit(ctx);
 
         self.indices_buffer = try vertex.createDefaultIndicesBuffer(ctx, self.command_pool);
-        errdefer self.indices_buffer.deinit();
+        errdefer self.indices_buffer.deinit(ctx);
 
         self.command_buffers = try createCmdBuffers(allocator, ctx, self.command_pool, self.framebuffers);
         errdefer self.command_buffers.deinit();
@@ -276,7 +276,7 @@ pub const ApplicationGfxPipeline = struct {
         self.ubo_buffers = try transform_buffer.createUniformBuffers(allocator, ctx, self.swapchain_data.images.items.len);
         errdefer {
             for (self.ubo_buffers) |buffer| {
-                buffer.deinit();
+                buffer.deinit(ctx);
             }
         }
         self.ubo_descriptor_pool = try transform_buffer.createUniformDescriptorPool(ctx, self.swapchain_data.images.items.len);
@@ -368,7 +368,7 @@ pub const ApplicationGfxPipeline = struct {
 
         // always update and transfer ubo, this is terrible, but currently just and experiment :)
         var ubo_slice = [_]transform_buffer.TransformBuffer{self.ubo};
-        try self.ubo_buffers[image_index].transferData(transform_buffer.TransformBuffer, ubo_slice[0..]);
+        try self.ubo_buffers[image_index].transferData(ctx, transform_buffer.TransformBuffer, ubo_slice[0..]);
 
         const wait_stages = vk.PipelineStageFlags{ .color_attachment_output_bit = true };
         const submit_info = vk.SubmitInfo{
@@ -473,15 +473,15 @@ pub const ApplicationGfxPipeline = struct {
             }
         }
         for(self.ubo_buffers) |buffer| {
-            buffer.deinit();
+            buffer.deinit(ctx);
         }
         self.allocator.destroy(self.ubo_buffers.ptr);
         self.allocator.destroy(self.ubo_descriptor_sets.ptr);
 
         ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.ubo_descriptor_pool, null);
         ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.ubo_descriptor_set, null);
-        self.vertex_buffer.deinit();
-        self.indices_buffer.deinit();
+        self.vertex_buffer.deinit(ctx);
+        self.indices_buffer.deinit(ctx);
 
         self.image_available_s.deinit();
         self.renderer_finished_s.deinit();

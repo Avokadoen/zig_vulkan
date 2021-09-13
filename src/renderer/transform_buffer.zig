@@ -46,7 +46,7 @@ pub inline fn createUniformDescriptorSetLayout(ctx: Context) !vk.DescriptorSetLa
 
 pub inline fn createUniformDescriptorPool(ctx: Context, swapchain_image_count: usize) !vk.DescriptorPool {
     const pool_size = vk.DescriptorPoolSize{
-        .type_ = .uniform_buffer,
+        .@"type" = .uniform_buffer,
         .descriptor_count = @intCast(u32, swapchain_image_count),
     };
     const pool_info = vk.DescriptorPoolCreateInfo{
@@ -121,7 +121,6 @@ pub fn createUniformBuffers(allocator: *Allocator, ctx: Context, swapchain_image
         var i: usize = 0;
         while (i < swapchain_image_count) : (i += 1) {
             buffers[i] = try GpuBufferMemory.init(ctx, buffer_size, .{ .uniform_buffer_bit = true, }, .{ .host_visible_bit = true, .host_coherent_bit = true, });
-            try buffers[i].bind();
             errdefer buffers[i].deinit(); // Completely useless
         }
     }
