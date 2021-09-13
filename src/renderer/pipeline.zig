@@ -310,7 +310,7 @@ pub const ApplicationGfxPipeline = struct {
             .requested_rescale_pipeline = false,
             .vertex_buffer = self.vertex_buffer,
             .indices_buffer = self.indices_buffer,
-            .ubo = transform_buffer.TransformBuffer.init(),
+            .ubo = transform_buffer.TransformBuffer.init(self.view.viewport[0]),
             .ubo_descriptor_set = self.ubo_descriptor_set,
             .ubo_buffers = self.ubo_buffers,
             .ubo_descriptor_pool = self.ubo_descriptor_pool,
@@ -346,6 +346,7 @@ pub const ApplicationGfxPipeline = struct {
             },
             .suboptimal_khr => {
                 self.requested_rescale_pipeline = true;
+                image_index = ok.image_index;
             },
             else => {
                 // TODO: handle timeout and not_ready
@@ -354,6 +355,7 @@ pub const ApplicationGfxPipeline = struct {
         } else |err| switch(err) {
             error.OutOfDateKHR => {
                 self.requested_rescale_pipeline = true;
+                return;
             },
             else => {
                 return err;
@@ -557,7 +559,7 @@ inline fn createCmdBuffers(allocator: *Allocator, ctx: Context, command_pool: vk
     return command_buffers;
 }
 
-// TODO: refactor so we don't take 100000 arguments?
+
 /// record default commands to the command buffer
 fn recordGfxCmdBuffers(ctx: Context, pipeline: *ApplicationGfxPipeline) !void {
     const clear_color = [_]vk.ClearColorValue{

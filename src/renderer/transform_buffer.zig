@@ -9,21 +9,22 @@ const Context = @import("context.zig").Context;
 const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
 
 pub const TransformBuffer = struct {
-    model: za.Mat4,
+    model: za.Mat4, 
     view: za.Mat4,
     projection: za.Mat4,
 
-    pub fn init() TransformBuffer {
-        const left: f32 = -1.0;
-        const right: f32 = 1.0;
-        const bottom: f32 = -1.0;
-        const top: f32 = 1.0;
-        const z_near: f32 = 0.01;
+    pub fn init(viewport: vk.Viewport) TransformBuffer {
+        const translate = za.Vec3.new(0.0, 0.0, 0.0);
+        const left: f32 = -1.0 * (viewport.width * 0.5);
+        const right: f32 = viewport.width  * 0.5;
+        const bottom: f32 = (viewport.height * 0.5);
+        const top: f32 = -1.0 * (viewport.height * 0.5);
+        const z_near: f32 = -1000;
         const z_far: f32 = 1000;
         return .{
-            .model = za.Mat4.identity(),
+            .model = za.Mat4.fromTranslate(translate),
             .view = za.Mat4.identity(),
-            .projection = za.Mat4.orthographic(left, right, bottom, top, z_near, z_far)
+            .projection = za.Mat4.orthographic(left, right, bottom, top, z_near, z_far),
         };
     }
 }; 
