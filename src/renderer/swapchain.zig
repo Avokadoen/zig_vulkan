@@ -231,7 +231,7 @@ pub const SupportDetails = struct {
         std.debug.assert(self.formats.items.len > 0);
 
         for (self.formats.items) |format| {
-            if (format.format == vk.Format.b8g8r8_srgb and format.color_space == vk.ColorSpaceKHR.srgb_nonlinear_khr) {
+            if (format.format == .b8g8r8a8_srgb and format.color_space == .srgb_nonlinear_khr) {
                 return format;
             }
         }
