@@ -45,7 +45,7 @@ pub const Image = struct {
         if (char_ptr == null) {
             return error.FailedToLoadImage; // Only error scenario here is failed to open file descriptor
         }
-        // TODO: acount for any channel type
+        // TODO: account for any channel type
         if (channels != 3) {
             std.debug.panic("got image with unimplemented channel count: {d}", .{channels});
         }

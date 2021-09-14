@@ -126,13 +126,13 @@ pub const Data = struct {
             const image_view_count = swapchain_images.items.len;
             var views = try ArrayList(vk.ImageView).initCapacity(allocator, image_view_count);
             const components = vk.ComponentMapping{
-                .r = vk.ComponentSwizzle.identity,
-                .g = vk.ComponentSwizzle.identity,
-                .b = vk.ComponentSwizzle.identity,
-                .a = vk.ComponentSwizzle.identity,
+                .r = .identity,
+                .g = .identity,
+                .b = .identity,
+                .a = .identity,
             };
             const subresource_range = vk.ImageSubresourceRange{
-                .aspect_mask = vk.ImageAspectFlags{ .color_bit = true },
+                .aspect_mask = .{ .color_bit = true },
                 .base_mip_level = 0,
                 .level_count = 1,
                 .base_array_layer = 0,
@@ -142,9 +142,9 @@ pub const Data = struct {
                 var i: u32 = 0;
                 while (i < image_view_count) : (i += 1) {
                     const create_info = vk.ImageViewCreateInfo{
-                        .flags = vk.ImageViewCreateFlags{},
+                        .flags = .{},
                         .image = swapchain_images.items[i],
-                        .view_type = vk.ImageViewType.@"2d",
+                        .view_type = .@"2d",
                         .format = sc_create_info.image_format,
                         .components = components,
                         .subresource_range = subresource_range,
@@ -241,12 +241,12 @@ pub const SupportDetails = struct {
 
     pub fn selectSwapchainPresentMode(self: Self) vk.PresentModeKHR {
         for (self.present_modes.items) |present_mode| {
-            if (present_mode == vk.PresentModeKHR.mailbox_khr) {
+            if (present_mode == .mailbox_khr) {
                 return present_mode;
             }
         }
 
-        return vk.PresentModeKHR.fifo_khr;
+        return .fifo_khr;
     }
 
     pub fn constructSwapChainExtent(self: Self, window: glfw.Window) glfw.Error!vk.Extent2D {

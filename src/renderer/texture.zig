@@ -30,7 +30,7 @@ pub const Texture = struct {
         try staging_buffer.transferData(ctx, stbi.Pixel, stb_image.data);
 
         const indices = ctx.queue_indices;
-        const queue_family_indices = [_]u32{ indices.present, indices.graphics, indices.compute };
+        const queue_family_indices = [_]u32{ indices.graphics };
         const format = .r8g8b8a8_srgb; // reflect stbi.DesiredChannels.STBI_rgb_alpha
 
         const image = blk: {
@@ -102,7 +102,7 @@ pub const Texture = struct {
                 .flags = .{},
                 .mag_filter = .nearest, // not sure what the application would need
                 .min_filter = .nearest, // RT should use linear, pixel sim should be nearest
-                .mipmap_mode = .linear,
+                .mipmap_mode = .nearest,
                 .address_mode_u = .repeat,
                 .address_mode_v = .repeat,
                 .address_mode_w = .repeat,
