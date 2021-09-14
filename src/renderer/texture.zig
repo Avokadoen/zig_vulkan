@@ -27,7 +27,6 @@ pub const Texture = struct {
         const texture_size: vk.DeviceSize = @intCast(vk.DeviceSize, image_size);
         var staging_buffer = try GpuBufferMemory.init(ctx, texture_size, .{ .transfer_src_bit = true, }, .{ .host_visible_bit = true, .host_coherent_bit = true, });
         defer staging_buffer.deinit(ctx);
-
         try staging_buffer.transferData(ctx, stbi.Pixel, stb_image.data);
 
         const indices = ctx.queue_indices;

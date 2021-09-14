@@ -6,16 +6,33 @@ const Context = @import("context.zig").Context;
 
 pub const Index = u32;
 
+pub const Vertex = struct {
+    pos: za.Vec2,
+    uv: za.Vec2,
+};
+
 /// caller must make sure to call deinit
 /// Create a default vertex buffer for the graphics pipeline 
 pub inline fn createDefaultVertexBuffer(ctx: Context, command_pool: vk.CommandPool) !GpuBufferMemory {
-    var vertices = [_]za.Vec2{
-        za.Vec2.new(-1.0, -1.0),
-        za.Vec2.new( 1.0, -1.0),
-        za.Vec2.new( 1.0,  1.0),
-        za.Vec2.new(-1.0,  1.0),
+    var vertices = [_]Vertex{
+        Vertex { 
+            .pos = za.Vec2.new(-0.5, -0.5), 
+            .uv = za.Vec2.new(1.0, 1.0) 
+        }, // bottom left
+        Vertex { 
+            .pos = za.Vec2.new(0.5, -0.5), 
+            .uv = za.Vec2.new(0.0, 1.0) 
+        }, // bottom right
+        Vertex { 
+            .pos = za.Vec2.new(-0.5, 0.5), 
+            .uv = za.Vec2.new(1.0, 0.0) 
+        }, // top left
+        Vertex { 
+            .pos = za.Vec2.new(0.5, 0.5), 
+            .uv = za.Vec2.new(0.0, 0.0) 
+        }, // top right
     };
-    const buffer_size = @sizeOf(za.Vec2) * vertices.len;
+    const buffer_size = @sizeOf(Vertex) * vertices.len;
     var staging_buffer = try GpuBufferMemory.init(
         ctx, 
         buffer_size, 
@@ -24,7 +41,7 @@ pub inline fn createDefaultVertexBuffer(ctx: Context, command_pool: vk.CommandPo
     );
     defer staging_buffer.deinit(ctx);
     // zig type inference is failing, so cast is needed currently
-    try staging_buffer.transferData(ctx, za.Vec2, @as([]za.Vec2, vertices[0..])); 
+    try staging_buffer.transferData(ctx, Vertex, @as([]Vertex, vertices[0..])); 
 
     var vertex_buffer = try GpuBufferMemory.init(
         ctx, 
@@ -39,7 +56,7 @@ pub inline fn createDefaultVertexBuffer(ctx: Context, command_pool: vk.CommandPo
 pub inline fn createDefaultIndicesBuffer(ctx: Context, command_pool: vk.CommandPool) !GpuBufferMemory {
     var indices = [_]Index{  
         0, 1, 2, // triangle 0
-        2, 3, 0  // triangle 1
+        2, 1, 3  // triangle 1
     };
     const buffer_size = @sizeOf(Index) * indices.len;
     var staging_buffer = try GpuBufferMemory.init(
@@ -67,19 +84,25 @@ pub inline fn getBindingDescriptors() [1]vk.VertexInputBindingDescription {
     return [_]vk.VertexInputBindingDescription{
         .{
             .binding = 0,
-            .stride = @sizeOf(za.Vec2),
+            .stride = @sizeOf(Vertex),
             .input_rate = .vertex,
         }
     };
 }
 
-pub inline fn getAttribureDescriptions() [1]vk.VertexInputAttributeDescription {
+pub inline fn getAttribureDescriptions() [2]vk.VertexInputAttributeDescription {
     return [_]vk.VertexInputAttributeDescription{
         .{
             .location = 0,
             .binding = 0,
             .format = .r32g32_sfloat,
-            .offset = @offsetOf(za.Vec2, "x"),
+            .offset = @offsetOf(Vertex, "pos"),
+        },
+        .{
+            .location = 1,
+            .binding = 0,
+            .format = .r32g32_sfloat,
+            .offset = @offsetOf(Vertex, "uv"),
         },
     };
 }

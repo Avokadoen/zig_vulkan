@@ -11,6 +11,7 @@ const vertex = @import("vertex.zig");
 const transform_buffer = @import("transform_buffer.zig");
 const utils = @import("../utils.zig");
 
+const Texture = @import("texture.zig").Texture; // TODO: remove me, just here for testing!
 const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
 const Context = @import("context.zig").Context;
 
@@ -48,6 +49,9 @@ pub const ApplicationGfxPipeline = struct {
     ubo_descriptor_pool: vk.DescriptorPool,
     ubo_descriptor_sets: []vk.DescriptorSet,
 
+    // TODO: seperate texture from pipeline
+    my_texture: Texture,
+
     // TODO: correctness if init fail, clean up resources created with errdefer
     /// initialize a graphics pipe line, caller must make sure to call deinit
     pub fn init(allocator: *Allocator, ctx: Context) !Self {
@@ -55,7 +59,7 @@ pub const ApplicationGfxPipeline = struct {
         self.allocator = allocator;
 
         self.swapchain_data = try swapchain.Data.init(allocator, ctx, null);
-        self.ubo_descriptor_set = try transform_buffer.createUniformDescriptorSetLayout(ctx);
+        self.ubo_descriptor_set = try transform_buffer.createDescriptorSetLayout(ctx);
         self.pipeline_layout = blk: {
             const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
                 .flags = .{},
@@ -146,7 +150,7 @@ pub const ApplicationGfxPipeline = struct {
                 .depth_clamp_enable = vk.FALSE,
                 .rasterizer_discard_enable = vk.FALSE,
                 .polygon_mode = .fill,
-                .cull_mode = .{ .back_bit = true },
+                .cull_mode = .{ .back_bit = false }, // we should not need culling since we are currently rendering 2D
                 .front_face = .counter_clockwise,
                 .depth_bias_enable = vk.FALSE,
                 .depth_bias_constant_factor = 0.0,
@@ -279,6 +283,9 @@ pub const ApplicationGfxPipeline = struct {
                 buffer.deinit(ctx);
             }
         }
+        // TODO: remove, this is just a test
+        self.my_texture = try Texture.from_file(ctx, allocator, self.command_pool, "../assets/images/grasstop.png"[0..]);
+
         self.ubo_descriptor_pool = try transform_buffer.createUniformDescriptorPool(ctx, self.swapchain_data.images.items.len);
         self.ubo_descriptor_sets = try transform_buffer.createDescriptorSet(
             allocator, 
@@ -286,7 +293,9 @@ pub const ApplicationGfxPipeline = struct {
             self.swapchain_data.images.items.len,
             self.ubo_descriptor_set,
             self.ubo_descriptor_pool,
-            self.ubo_buffers
+            self.ubo_buffers,
+            self.my_texture.sampler,
+            self.my_texture.image_view
         );
         errdefer allocator.destroy(self.ubo_descriptor_sets.ptr);
 
@@ -315,6 +324,7 @@ pub const ApplicationGfxPipeline = struct {
             .ubo_buffers = self.ubo_buffers,
             .ubo_descriptor_pool = self.ubo_descriptor_pool,
             .ubo_descriptor_sets = self.ubo_descriptor_sets,
+            .my_texture = self.my_texture,
         };
     }
 
@@ -474,6 +484,7 @@ pub const ApplicationGfxPipeline = struct {
                 ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fences.items[i], null);
             }
         }
+        self.my_texture.deinit(ctx);
         for(self.ubo_buffers) |buffer| {
             buffer.deinit(ctx);
         }

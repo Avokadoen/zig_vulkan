@@ -62,16 +62,13 @@ pub fn main() anyerror!void {
     const ctx = try renderer.Context.init(allocator, application_name, &window, &writers);
     defer ctx.deinit();
 
+
     gfx_pipeline = try renderer.ApplicationGfxPipeline.init(allocator, ctx);
     _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
     defer {
         _ = window.setFramebufferSizeCallback(null);
         gfx_pipeline.deinit(ctx);
     }
-
-    // TODO: remove, this is just a test
-    const my_texture = try renderer.Texture.from_file(ctx, allocator, gfx_pipeline.command_pool, "../assets/images/texture.jpg"[0..]);
-    defer my_texture.deinit(ctx);
 
     // Loop until the user closes the window
     while (!window.shouldClose()) {
