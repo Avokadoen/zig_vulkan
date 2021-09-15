@@ -5,20 +5,14 @@ const ArrayList = std.ArrayList;
 
 // Source: https://vulkan-tutorial.com
 
-const dbg = std.builtin.mode == std.builtin.Mode.Debug;
-
 const ecs = @import("ecs");
 const zalgebra = @import("zalgebra");
 const glfw = @import("glfw");
-const stbi = @import("stbi");
-
-const c = @import("c.zig"); 
-const vk = @import("vulkan");
 
 const renderer = @import("renderer/renderer.zig");
 const consts = renderer.consts;
 
-const GLFWError = error{ FailedToInit, WindowCreationFailed };
+const input = @import("input.zig");
 
 pub const application_name = "zig vulkan";
 var gfx_pipeline: renderer.ApplicationGfxPipeline = undefined;
@@ -62,13 +56,15 @@ pub fn main() anyerror!void {
     const ctx = try renderer.Context.init(allocator, application_name, &window, &writers);
     defer ctx.deinit();
 
-
     gfx_pipeline = try renderer.ApplicationGfxPipeline.init(allocator, ctx);
     _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
     defer {
         _ = window.setFramebufferSizeCallback(null);
         gfx_pipeline.deinit(ctx);
     }
+
+    _ = window.setKeyCallback(input.keyCallback); 
+    defer _ = window.setKeyCallback(null);
 
     // Loop until the user closes the window
     while (!window.shouldClose()) {
@@ -92,3 +88,4 @@ fn framebufferSizeCallbackFn(window: ?*glfw.RawWindow, width: c_int, height: c_i
     
     gfx_pipeline.requested_rescale_pipeline = true;
 }
+
