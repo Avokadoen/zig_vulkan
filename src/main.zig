@@ -10,11 +10,18 @@ const zalgebra = @import("zalgebra");
 const glfw = @import("glfw");
 
 const renderer = @import("renderer/renderer.zig");
+const swapchain = renderer.swapchain;
 const consts = renderer.consts;
 
 const input = @import("input.zig");
 
 pub const application_name = "zig vulkan";
+
+// TODO: wrap this in renderer to make main seem simpler :^)
+var allocator: *Allocator = undefined;
+var ctx: renderer.Context = undefined;
+var sc_data: swapchain.Data = undefined;
+var view: swapchain.ViewportScissor = undefined;
 var gfx_pipeline: renderer.ApplicationGfxPipeline = undefined;
 
 pub fn main() anyerror!void {
@@ -31,7 +38,7 @@ pub fn main() anyerror!void {
             }
         }
     }
-    var allocator = if (consts.enable_validation_layers) &alloc.allocator else alloc;
+    allocator = if (consts.enable_validation_layers) &alloc.allocator else alloc;
     
     // Initialize the library *
     try glfw.init();
@@ -53,10 +60,18 @@ pub fn main() anyerror!void {
 
     var writers = renderer.Writers{ .stdout = &stdout, .stderr = &stderr };
     // Construct our vulkan instance
-    const ctx = try renderer.Context.init(allocator, application_name, &window, &writers);
+    ctx = try renderer.Context.init(allocator, application_name, &window, &writers);
     defer ctx.deinit();
 
-    gfx_pipeline = try renderer.ApplicationGfxPipeline.init(allocator, ctx);
+    sc_data = try swapchain.Data.init(allocator, ctx, null);
+    defer sc_data.deinit(ctx);
+
+    view = swapchain.ViewportScissor.init(sc_data.extent);
+
+    const ubo = try renderer.UniformBuffer.init(allocator, ctx, sc_data.images.items.len, view.viewport[0]);
+    defer ubo.deinit(ctx);
+
+    gfx_pipeline = try renderer.ApplicationGfxPipeline.init(allocator, ctx, &sc_data, &view, &ubo);
     _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
     defer {
         _ = window.setFramebufferSizeCallback(null);
@@ -85,7 +100,19 @@ fn framebufferSizeCallbackFn(window: ?*glfw.RawWindow, width: c_int, height: c_i
     _ = window;
     _ = width;
     _ = height;
+
+    // recreate swapchain utilizing the old one 
+    const old_swapchain = sc_data;
+    sc_data = swapchain.Data.init(allocator, ctx, old_swapchain.swapchain) catch |err| {
+        std.debug.panic("failed to resize swapchain, err {any}", .{err}) catch unreachable;
+    };
+    old_swapchain.deinit(ctx);
+
+    // recreate view from swapchain extent
+    view = swapchain.ViewportScissor.init(sc_data.extent);
     
+    gfx_pipeline.sc_data = &sc_data;
+    gfx_pipeline.view = &view;
     gfx_pipeline.requested_rescale_pipeline = true;
 }
 

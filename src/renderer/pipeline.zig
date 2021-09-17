@@ -8,10 +8,9 @@ const glfw = @import("glfw");
 const constants = @import("consts.zig");
 const swapchain = @import("swapchain.zig");
 const vertex = @import("vertex.zig");
-const transform_buffer = @import("transform_buffer.zig");
+const tb = @import("transform_buffer.zig");
 const utils = @import("../utils.zig");
 
-const Texture = @import("texture.zig").Texture; // TODO: remove me, just here for testing!
 const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
 const Context = @import("context.zig").Context;
 
@@ -20,15 +19,11 @@ pub const ApplicationGfxPipeline = struct {
 
     allocator: *Allocator,
 
-    swapchain_data: swapchain.Data,
-    view: swapchain.ViewportScissor,
-    
     render_pass: vk.RenderPass,
     pipeline_layout: vk.PipelineLayout,
     pipeline: *vk.Pipeline,
     framebuffers: ArrayList(vk.Framebuffer),
 
-    command_pool: vk.CommandPool, // command pool with graphics index
     command_buffers: ArrayList(vk.CommandBuffer),
 
     image_available_s: ArrayList(vk.Semaphore),
@@ -42,36 +37,31 @@ pub const ApplicationGfxPipeline = struct {
     vertex_buffer: GpuBufferMemory,
     indices_buffer: GpuBufferMemory,
 
-    // TODO: seperate ubo and render pipeline
-    ubo: transform_buffer.TransformBuffer,
-    ubo_descriptor_set: vk.DescriptorSetLayout,
-    ubo_buffers: []GpuBufferMemory, // TODO: recreate when we rescale pipeline?
-    ubo_descriptor_pool: vk.DescriptorPool,
-    ubo_descriptor_sets: []vk.DescriptorSet,
-
-    // TODO: seperate texture from pipeline
-    my_texture: Texture,
+    sc_data: *const swapchain.Data,
+    view: *const swapchain.ViewportScissor,
+    ubo: *const tb.UniformBuffer,
 
     // TODO: correctness if init fail, clean up resources created with errdefer
     /// initialize a graphics pipe line, caller must make sure to call deinit
-    pub fn init(allocator: *Allocator, ctx: Context) !Self {
+    /// sc_data, view and ubo needs a lifetime that is atleast as long as created pipeline
+    pub fn init(allocator: *Allocator, ctx: Context, sc_data: *const swapchain.Data, view: *const swapchain.ViewportScissor, ubo: *const tb.UniformBuffer) !Self {
         var self: Self = undefined; 
         self.allocator = allocator;
-
-        self.swapchain_data = try swapchain.Data.init(allocator, ctx, null);
-        self.ubo_descriptor_set = try transform_buffer.createDescriptorSetLayout(ctx);
+        self.sc_data = sc_data;
+        self.view = view;
+        self.ubo = ubo;
+       
         self.pipeline_layout = blk: {
             const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
                 .flags = .{},
                 .set_layout_count = 1,
-                .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &self.ubo_descriptor_set),
+                .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &self.ubo.descriptor_set_layout),
                 .push_constant_range_count = 0,
                 .p_push_constant_ranges = undefined,
             };
             break :blk try ctx.createPipelineLayout(pipeline_layout_info);
         };
-        self.render_pass = try ctx.createRenderPass(self.swapchain_data.format);
-        self.view = swapchain.ViewportScissor.init(self.swapchain_data.extent);
+        self.render_pass = try ctx.createRenderPass(sc_data.format);
         self.pipeline = blk: {
             const self_path = try std.fs.selfExePathAlloc(allocator);
             defer ctx.allocator.destroy(self_path.ptr);
@@ -218,28 +208,20 @@ pub const ApplicationGfxPipeline = struct {
             break :blk try ctx.createGraphicsPipelines(allocator, pipeline_info);
         };
 
-        self.framebuffers = try createFramebuffers(allocator, ctx, self.swapchain_data, self.render_pass);
+        self.framebuffers = try createFramebuffers(allocator, ctx, sc_data, self.render_pass);
         errdefer self.framebuffers.deinit();
 
-        self.command_pool = blk: {
-            const pool_info = vk.CommandPoolCreateInfo{
-                .flags = .{},
-                .queue_family_index = ctx.queue_indices.graphics,
-            };
-
-            break :blk try ctx.vkd.createCommandPool(ctx.logical_device, pool_info, null);
-        };
-        self.vertex_buffer = try vertex.createDefaultVertexBuffer(ctx, self.command_pool);
+        self.vertex_buffer = try vertex.createDefaultVertexBuffer(ctx, ctx.gfx_cmd_pool);
         errdefer self.vertex_buffer.deinit(ctx);
 
-        self.indices_buffer = try vertex.createDefaultIndicesBuffer(ctx, self.command_pool);
+        self.indices_buffer = try vertex.createDefaultIndicesBuffer(ctx, ctx.gfx_cmd_pool);
         errdefer self.indices_buffer.deinit(ctx);
 
-        self.command_buffers = try createCmdBuffers(allocator, ctx, self.command_pool, self.framebuffers);
+        self.command_buffers = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers);
         errdefer self.command_buffers.deinit();
 
         self.images_in_flight = blk: {
-            var images_in_flight = try ArrayList(vk.Fence).initCapacity(allocator, self.swapchain_data.images.items.len);
+            var images_in_flight = try ArrayList(vk.Fence).initCapacity(allocator, sc_data.images.items.len);
             var i: usize = 0;
             while(i < images_in_flight.capacity) : (i += 1) {
                 images_in_flight.appendAssumeCapacity(.null_handle);
@@ -277,40 +259,16 @@ pub const ApplicationGfxPipeline = struct {
             }
         }
 
-        self.ubo_buffers = try transform_buffer.createUniformBuffers(allocator, ctx, self.swapchain_data.images.items.len);
-        errdefer {
-            for (self.ubo_buffers) |buffer| {
-                buffer.deinit(ctx);
-            }
-        }
-        // TODO: remove, this is just a test
-        self.my_texture = try Texture.from_file(ctx, allocator, self.command_pool, "../assets/images/grasstop.png"[0..]);
-
-        self.ubo_descriptor_pool = try transform_buffer.createUniformDescriptorPool(ctx, self.swapchain_data.images.items.len);
-        self.ubo_descriptor_sets = try transform_buffer.createDescriptorSet(
-            allocator, 
-            ctx, 
-            self.swapchain_data.images.items.len,
-            self.ubo_descriptor_set,
-            self.ubo_descriptor_pool,
-            self.ubo_buffers,
-            self.my_texture.sampler,
-            self.my_texture.image_view
-        );
-        errdefer allocator.destroy(self.ubo_descriptor_sets.ptr);
-
         // self is sufficiently defined to record command buffer
         try recordGfxCmdBuffers(ctx, &self); 
 
         return Self{
             .allocator = self.allocator,
-            .swapchain_data = self.swapchain_data,
             .view = self.view,
             .render_pass = self.render_pass,
             .pipeline_layout = self.pipeline_layout,
             .pipeline = self.pipeline,
             .framebuffers = self.framebuffers,
-            .command_pool = self.command_pool,
             .command_buffers = self.command_buffers,
             .image_available_s = self.image_available_s,
             .renderer_finished_s = self.renderer_finished_s,
@@ -319,12 +277,8 @@ pub const ApplicationGfxPipeline = struct {
             .requested_rescale_pipeline = false,
             .vertex_buffer = self.vertex_buffer,
             .indices_buffer = self.indices_buffer,
-            .ubo = transform_buffer.TransformBuffer.init(self.view.viewport[0]),
-            .ubo_descriptor_set = self.ubo_descriptor_set,
-            .ubo_buffers = self.ubo_buffers,
-            .ubo_descriptor_pool = self.ubo_descriptor_pool,
-            .ubo_descriptor_sets = self.ubo_descriptor_sets,
-            .my_texture = self.my_texture,
+            .sc_data = sc_data,
+            .ubo = ubo,
         };
     }
 
@@ -346,7 +300,7 @@ pub const ApplicationGfxPipeline = struct {
         var image_index: u32 = undefined;
         if (ctx.vkd.acquireNextImageKHR(
             ctx.logical_device, 
-            self.swapchain_data.swapchain, 
+            self.sc_data.swapchain, 
             max_u64, 
             self.image_available_s.items[state.current_frame],
             .null_handle
@@ -378,9 +332,9 @@ pub const ApplicationGfxPipeline = struct {
         }
         self.images_in_flight.items[image_index] = self.in_flight_fences.items[state.current_frame];
 
-        // always update and transfer ubo, this is terrible, but currently just and experiment :)
-        var ubo_slice = [_]transform_buffer.TransformBuffer{self.ubo};
-        try self.ubo_buffers[image_index].transferData(ctx, transform_buffer.TransformBuffer, ubo_slice[0..]);
+        // TODO: only transfer if "dirty", only transfer section of buffer that changed
+        var ubo_slice = [_]tb.TransformBuffer{self.ubo.data};
+        try self.ubo.buffers[image_index].transferData(ctx, tb.TransformBuffer, ubo_slice[0..]);
 
         const wait_stages = vk.PipelineStageFlags{ .color_attachment_output_bit = true };
         const submit_info = vk.SubmitInfo{
@@ -409,7 +363,7 @@ pub const ApplicationGfxPipeline = struct {
             .wait_semaphore_count = 1,
             .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s.items[state.current_frame]),
             .swapchain_count = 1,
-            .p_swapchains = @ptrCast([*]const vk.SwapchainKHR, &self.swapchain_data.swapchain),
+            .p_swapchains = @ptrCast([*]const vk.SwapchainKHR, &self.sc_data.swapchain),
             .p_image_indices = @ptrCast([*]const u32, &image_index),
             .p_results = null,
         };
@@ -450,7 +404,7 @@ pub const ApplicationGfxPipeline = struct {
         self.framebuffers.deinit();
         ctx.vkd.freeCommandBuffers(
             ctx.logical_device, 
-            self.command_pool, 
+            ctx.gfx_cmd_pool, 
             @intCast(u32, self.command_buffers.items.len), 
             @ptrCast([*]const vk.CommandBuffer, self.command_buffers.items.ptr)
         );
@@ -458,19 +412,11 @@ pub const ApplicationGfxPipeline = struct {
         self.command_buffers.deinit(); 
         ctx.destroyRenderPass(self.render_pass);
 
-        // recreate swapchain utilizing the old one 
-        const old_swapchain = self.swapchain_data;
-        self.swapchain_data = try swapchain.Data.init(allocator, ctx, old_swapchain.swapchain);
-        old_swapchain.deinit(ctx);
-
-        // recreate view from swapchain extent
-        self.view = swapchain.ViewportScissor.init(self.swapchain_data.extent);
-
         // recreate renderpass and framebuffers
-        self.render_pass = try ctx.createRenderPass(self.swapchain_data.format);
-        self.framebuffers = try createFramebuffers(allocator, ctx, self.swapchain_data, self.render_pass);
+        self.render_pass = try ctx.createRenderPass(self.sc_data.format);
+        self.framebuffers = try createFramebuffers(allocator, ctx, self.sc_data, self.render_pass);
 
-        self.command_buffers = try createCmdBuffers(allocator, ctx, self.command_pool, self.framebuffers);
+        self.command_buffers = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers);
         try recordGfxCmdBuffers(ctx, self);
     }
 
@@ -484,15 +430,7 @@ pub const ApplicationGfxPipeline = struct {
                 ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fences.items[i], null);
             }
         }
-        self.my_texture.deinit(ctx);
-        for(self.ubo_buffers) |buffer| {
-            buffer.deinit(ctx);
-        }
-        self.allocator.destroy(self.ubo_buffers.ptr);
-        self.allocator.destroy(self.ubo_descriptor_sets.ptr);
-
-        ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.ubo_descriptor_pool, null);
-        ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.ubo_descriptor_set, null);
+       
         self.vertex_buffer.deinit(ctx);
         self.indices_buffer.deinit(ctx);
 
@@ -502,7 +440,6 @@ pub const ApplicationGfxPipeline = struct {
         self.images_in_flight.deinit();
 
         self.command_buffers.deinit();
-        ctx.vkd.destroyCommandPool(ctx.logical_device, self.command_pool, null);
 
         for (self.framebuffers.items) |framebuffer| {
             ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
@@ -514,8 +451,6 @@ pub const ApplicationGfxPipeline = struct {
         ctx.destroyPipeline(self.pipeline);
 
         self.allocator.destroy(self.pipeline);
-
-        self.swapchain_data.deinit(ctx);
     }
 
     inline fn wait_idle(self: Self, ctx: Context) void {
@@ -533,7 +468,7 @@ pub const ApplicationGfxPipeline = struct {
     }
 };
 
-inline fn createFramebuffers(allocator: *Allocator, ctx: Context, swapchain_data: swapchain.Data, render_pass: vk.RenderPass) !ArrayList(vk.Framebuffer) {
+inline fn createFramebuffers(allocator: *Allocator, ctx: Context, swapchain_data: *const swapchain.Data, render_pass: vk.RenderPass) !ArrayList(vk.Framebuffer) {
     const image_views = swapchain_data.image_views;
     var framebuffers = try ArrayList(vk.Framebuffer).initCapacity(allocator, image_views.items.len);
     for (image_views.items) |view| {
@@ -588,7 +523,7 @@ fn recordGfxCmdBuffers(ctx: Context, pipeline: *ApplicationGfxPipeline) !void {
         const render_begin_info = vk.RenderPassBeginInfo{
             .render_pass = pipeline.render_pass,
             .framebuffer = pipeline.framebuffers.items[i],
-            .render_area = .{ .offset = .{ .x = 0, .y = 0 }, .extent = pipeline.swapchain_data.extent },
+            .render_area = .{ .offset = .{ .x = 0, .y = 0 }, .extent = pipeline.sc_data.extent },
             .clear_value_count = clear_color.len,
             .p_clear_values = @ptrCast([*]const vk.ClearValue, &clear_color),
         };
@@ -612,7 +547,7 @@ fn recordGfxCmdBuffers(ctx: Context, pipeline: *ApplicationGfxPipeline) !void {
             pipeline.pipeline_layout, 
             0, 
             1, 
-            @ptrCast([*]const vk.DescriptorSet, &pipeline.ubo_descriptor_sets[i]),
+            @ptrCast([*]const vk.DescriptorSet, &pipeline.ubo.descriptor_sets[i]),
             0,
             undefined
         );

@@ -14,4 +14,7 @@ pub const ApplicationGfxPipeline = @import("pipeline.zig").ApplicationGfxPipelin
 pub const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
 pub const Texture = @import("texture.zig").Texture;
 pub const Vertex = vertex.Vertex;
+const tb = @import("transform_buffer.zig");
+pub const TransformBuffer = tb.TransformBuffer;
+pub const UniformBuffer = tb.UniformBuffer;
 

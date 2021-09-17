@@ -7,8 +7,80 @@ const vk = @import("vulkan");
 
 const Context = @import("context.zig").Context;
 const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
+const Texture = @import("texture.zig").Texture; // TODO: remove me
 
 // TODO: rename file
+
+pub const UniformBuffer = struct {
+    const Self = @This();
+    
+    allocator: *Allocator,
+    data: TransformBuffer,
+    
+    descriptor_set_layout: vk.DescriptorSetLayout,
+    buffers: []GpuBufferMemory, 
+    descriptor_pool: vk.DescriptorPool,
+    descriptor_sets: []vk.DescriptorSet,
+
+    // TODO: seperate texture from UniformBuffer
+    my_texture: Texture,
+
+    pub fn init(allocator: *Allocator, ctx: Context, buffer_count: usize, viewport: vk.Viewport) !Self {
+        const data = TransformBuffer.init(viewport);
+        
+        const descriptor_set_layout = try createDescriptorSetLayout(ctx);
+        errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, descriptor_set_layout, null);
+
+        const buffers = try createUniformBuffers(allocator, ctx, buffer_count);
+        errdefer {
+            for (buffers) |buffer| {
+                buffer.deinit(ctx);
+            }
+            allocator.destroy(buffers.ptr);
+        }
+        const descriptor_pool = try createUniformDescriptorPool(ctx, buffer_count);
+        errdefer ctx.vkd.destroyDescriptorPool(ctx.logical_device, descriptor_pool, null);
+
+        // TODO: should not be a member of this struct!
+        const my_texture = try Texture.from_file(ctx, allocator, ctx.gfx_cmd_pool, "../assets/images/grasstop.png"[0..]);
+        errdefer my_texture.deinit(ctx);
+
+        const descriptor_sets = try createDescriptorSet(
+            allocator, 
+            ctx, 
+            buffer_count,
+            descriptor_set_layout,
+            descriptor_pool,
+            buffers,
+            my_texture.sampler,
+            my_texture.image_view
+        );
+        errdefer allocator.destroy(descriptor_sets.ptr);
+ 
+        return Self{
+            .allocator = allocator,
+            .data = data,
+            .descriptor_set_layout = descriptor_set_layout,
+            .buffers = buffers,
+            .descriptor_pool = descriptor_pool,
+            .descriptor_sets = descriptor_sets,
+            .my_texture = my_texture,
+        };
+    }
+
+    pub fn deinit(self: Self, ctx: Context) void {
+        self.my_texture.deinit(ctx);
+        
+        for(self.buffers) |buffer| {
+            buffer.deinit(ctx);
+        }
+        self.allocator.destroy(self.buffers.ptr);
+        self.allocator.destroy(self.descriptor_sets.ptr);
+
+        ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.descriptor_pool, null);
+        ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.descriptor_set_layout, null);
+    }
+};
 
 // TODO: multiply projection and view on CPU (model is instanced (TODO) and has to be applied on GPU)
 pub const TransformBuffer = struct {
