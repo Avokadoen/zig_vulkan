@@ -17,4 +17,5 @@ pub const Vertex = vertex.Vertex;
 const tb = @import("transform_buffer.zig");
 pub const TransformBuffer = tb.TransformBuffer;
 pub const UniformBuffer = tb.UniformBuffer;
+pub const SyncUniformBuffer = tb.SyncUniformBuffer;
 

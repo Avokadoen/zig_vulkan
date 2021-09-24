@@ -1,4 +1,5 @@
 const std = @import("std");
+const Thread = std.Thread;
 
 const glfw = @import("glfw");
 const g_key = glfw.key;
@@ -163,17 +164,23 @@ const InputEvent = struct {
 };
 
 const InputEventStream = struct {
-    mutex: std.Thread.Mutex,
+    new_input_event: Thread.ResetEvent,
+    mutex: Thread.Mutex,
     len: usize,
     buffer: [input_buffer_size]InputEvent,
 };
 
 // global input stream
-var input_stream = InputEventStream{
+pub var stream = InputEventStream{
+    .new_input_event = undefined,
     .mutex = .{},
     .len = 0,
     .buffer = undefined,
 }; 
+
+pub fn init() !void {
+    try stream.new_input_event.init();
+}
 
 // TODO: use callbacks for easier key binding
 // const int scancode = glfwGetKeyScancode(GLFW_KEY_X);
@@ -190,11 +197,11 @@ pub fn keyCallback(window: ?*glfw.RawWindow, key: c_int, scan_code: c_int, actio
     _ = window;
     _ = scan_code;
 
-    const lock = input_stream.mutex.acquire();
+    const lock = stream.mutex.acquire();
     defer lock.release();
 
     // if buffer is full
-    if (input_stream.len >= input_stream.buffer.len) {
+    if (stream.len >= stream.buffer.len) {
         return;
     }
 
@@ -205,8 +212,9 @@ pub fn keyCallback(window: ?*glfw.RawWindow, key: c_int, scan_code: c_int, actio
         .action = @intToEnum(Action, action),
         .mods = parsed_mods.*,
     };
-    input_stream.buffer[input_stream.len] = event;
-    input_stream.len += 1;
+    stream.buffer[stream.len] = event;
+    stream.len += 1;
 
-    std.debug.print("stream len: {d}", .{input_stream.len});
+    // wake up input thread(s)
+    stream.new_input_event.set();
 }

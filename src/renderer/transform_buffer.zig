@@ -11,6 +11,26 @@ const Texture = @import("texture.zig").Texture; // TODO: remove me
 
 // TODO: rename file
 
+pub const SyncUniformBuffer = struct {
+    const Self = @This();
+
+    mutex: std.Thread.Mutex,
+    ubo: UniformBuffer,
+
+    pub fn init(allocator: *Allocator, ctx: Context, buffer_count: usize, viewport: vk.Viewport) !Self {
+        const ubo = try UniformBuffer.init(allocator, ctx, buffer_count, viewport);
+
+        return Self{
+            .mutex = .{},
+            .ubo = ubo,
+        };
+    }
+
+    pub fn deinit(self: Self, ctx: Context) void {
+        self.ubo.deinit(ctx);
+    }
+};
+
 pub const UniformBuffer = struct {
     const Self = @This();
     
@@ -70,7 +90,7 @@ pub const UniformBuffer = struct {
 
     pub fn deinit(self: Self, ctx: Context) void {
         self.my_texture.deinit(ctx);
-        
+
         for(self.buffers) |buffer| {
             buffer.deinit(ctx);
         }

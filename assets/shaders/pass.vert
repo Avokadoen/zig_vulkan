@@ -14,5 +14,5 @@ layout(binding = 0) uniform UniformBufferObject {
 void main() {
     outTexCoord = inTexCoord;
     
-    gl_Position = vec4(inPosition, 0.0, 1.0) * ubo.proj * ubo.view * ubo.model;
+    gl_Position = vec4(inPosition, 0.0, 1.0) * (ubo.proj * ubo.view * ubo.model);
 }

@@ -39,23 +39,23 @@ pub const ApplicationGfxPipeline = struct {
 
     sc_data: *const swapchain.Data,
     view: *const swapchain.ViewportScissor,
-    ubo: *const tb.UniformBuffer,
+    subo: *const tb.SyncUniformBuffer,
 
     // TODO: correctness if init fail, clean up resources created with errdefer
     /// initialize a graphics pipe line, caller must make sure to call deinit
     /// sc_data, view and ubo needs a lifetime that is atleast as long as created pipeline
-    pub fn init(allocator: *Allocator, ctx: Context, sc_data: *const swapchain.Data, view: *const swapchain.ViewportScissor, ubo: *const tb.UniformBuffer) !Self {
+    pub fn init(allocator: *Allocator, ctx: Context, sc_data: *const swapchain.Data, view: *const swapchain.ViewportScissor, subo: *const tb.SyncUniformBuffer) !Self {
         var self: Self = undefined; 
         self.allocator = allocator;
         self.sc_data = sc_data;
         self.view = view;
-        self.ubo = ubo;
+        self.subo = subo;
        
         self.pipeline_layout = blk: {
             const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
                 .flags = .{},
                 .set_layout_count = 1,
-                .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &self.ubo.descriptor_set_layout),
+                .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &self.subo.ubo.descriptor_set_layout),
                 .push_constant_range_count = 0,
                 .p_push_constant_ranges = undefined,
             };
@@ -278,7 +278,7 @@ pub const ApplicationGfxPipeline = struct {
             .vertex_buffer = self.vertex_buffer,
             .indices_buffer = self.indices_buffer,
             .sc_data = sc_data,
-            .ubo = ubo,
+            .subo = subo,
         };
     }
 
@@ -333,8 +333,8 @@ pub const ApplicationGfxPipeline = struct {
         self.images_in_flight.items[image_index] = self.in_flight_fences.items[state.current_frame];
 
         // TODO: only transfer if "dirty", only transfer section of buffer that changed
-        var ubo_slice = [_]tb.TransformBuffer{self.ubo.data};
-        try self.ubo.buffers[image_index].transferData(ctx, tb.TransformBuffer, ubo_slice[0..]);
+        var ubo_slice = [_]tb.TransformBuffer{self.subo.ubo.data};
+        try self.subo.ubo.buffers[image_index].transferData(ctx, tb.TransformBuffer, ubo_slice[0..]);
 
         const wait_stages = vk.PipelineStageFlags{ .color_attachment_output_bit = true };
         const submit_info = vk.SubmitInfo{
@@ -541,13 +541,14 @@ fn recordGfxCmdBuffers(ctx: Context, pipeline: *ApplicationGfxPipeline) !void {
             @ptrCast([*]const vk.DeviceSize, &buffer_offsets)
         );
         ctx.vkd.cmdBindIndexBuffer(command_buffer, pipeline.indices_buffer.buffer, 0, .uint32);
+        // TODO: RC: subo is not synced here 
         ctx.vkd.cmdBindDescriptorSets(
             command_buffer, 
             .graphics, 
             pipeline.pipeline_layout, 
             0, 
             1, 
-            @ptrCast([*]const vk.DescriptorSet, &pipeline.ubo.descriptor_sets[i]),
+            @ptrCast([*]const vk.DescriptorSet, &pipeline.subo.ubo.descriptor_sets[i]),
             0,
             undefined
         );
