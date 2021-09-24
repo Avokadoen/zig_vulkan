@@ -82,8 +82,8 @@ pub fn main() anyerror!void {
     _ = window.setKeyCallback(input.keyCallback); 
     defer _ = window.setKeyCallback(null);
 
-    try input.init();
-    var input_thread = try std.Thread.spawn(.{}, handleInput, .{});
+    try input.init(inputFn);
+    var input_thread = try std.Thread.spawn(.{}, input.handleInput, .{} );
     defer input_thread.join(); 
     
     // Loop until the user closes the window
@@ -100,48 +100,19 @@ pub fn main() anyerror!void {
         try glfw.pollEvents();
     }
 
-    killInputThread();
+    input.deinit();
 }
 
-// TODO: all of this input logic, except the inside of inner while loop in handleInput should be in input module
-var kill_input_thread: bool = false;
-fn killInputThread() void {
-    var lock = input.stream.mutex.acquire();
-    defer lock.release();
-
-    // tell thread to kill itself, and then wake it
-    kill_input_thread = true;
-    input.stream.new_input_event.set();
-}
-
-/// Input thread reads the input buffer and applies changes to the ubo
-/// since ubo is not written to anywhere else (yet), we don't need a mutex
-fn handleInput() void {
-    // const up_vector = za.Vec3.up();
-    // const down_vector = za.Vec3.down();
-    // const left_vector = za.Vec3.left();
-    // const right_vector = za.Vec3.right();
-
-    while(kill_input_thread == false) {
-        input.stream.new_input_event.wait();
-        var lock = input.stream.mutex.acquire();
-        defer lock.release();
-
-        while(input.stream.len > 0) : (input.stream.len -= 1){
-            const event = input.stream.buffer[input.stream.len - 1];
-            // TODO: only tell ubo desired change for easier deltatime and less racy code!
-            switch(event.key) {
-                input.Key.w => subo.ubo.data.view.data[1][3] += 0.001,
-                input.Key.s => subo.ubo.data.view.data[1][3] -= 0.001,
-                input.Key.d => subo.ubo.data.view.data[0][3] -= 0.001,
-                input.Key.a => subo.ubo.data.view.data[0][3] += 0.001,
-                else => {},
-            }
-        }
-        input.stream.new_input_event.reset(); // event has to be reset in critical zone!
-    }
-}
-
+fn inputFn(event: input.Event) void {
+    // TODO: only tell ubo desired change for easier deltatime and less racy code!
+    switch(event.key) {
+        input.Key.w => subo.ubo.data.view.data[1][3] += 0.001,
+        input.Key.s => subo.ubo.data.view.data[1][3] -= 0.001,
+        input.Key.d => subo.ubo.data.view.data[0][3] -= 0.001,
+        input.Key.a => subo.ubo.data.view.data[0][3] += 0.001,
+        else => {},
+    }   
+} 
 
 /// called by glfw to message pipelines about scaling
 /// this should never be registered before pipeline init

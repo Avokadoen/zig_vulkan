@@ -157,30 +157,62 @@ pub const Mods = packed struct {
     pub usingnamespace vk.FlagsMixin(Mods, c_int);
 };
 
-const InputEvent = struct {
+pub const Event = struct {
     key: Key,
     action: Action,
     mods: Mods,
 };
 
-const InputEventStream = struct {
+const EventStream = struct {
     new_input_event: Thread.ResetEvent,
     mutex: Thread.Mutex,
     len: usize,
-    buffer: [input_buffer_size]InputEvent,
+    buffer: [input_buffer_size]Event,
 };
 
 // global input stream
-pub var stream = InputEventStream{
+pub var stream = EventStream{
     .new_input_event = undefined,
     .mutex = .{},
     .len = 0,
     .buffer = undefined,
 }; 
 
-pub fn init() !void {
+pub const HandleFn = fn(Event) void;
+var handle_fn: HandleFn = undefined;
+
+pub fn init(input_handle_fn: HandleFn) !void {
     try stream.new_input_event.init();
+
+    handle_fn = input_handle_fn;
 }
+
+var kill_input_thread: bool = false;
+/// kill input module, this will make input threads shut down
+pub fn deinit() void {
+    var lock = stream.mutex.acquire();
+    defer lock.release();
+
+    // tell thread to kill itself, and then wake it
+    kill_input_thread = true;
+    stream.new_input_event.set();
+}
+
+/// function that user can spawn threads with to handle input
+pub fn handleInput() void {
+    while(kill_input_thread == false) {
+        stream.new_input_event.wait();
+        var lock = stream.mutex.acquire();
+        defer lock.release();
+
+        while(stream.len > 0) : (stream.len -= 1){
+            const event = stream.buffer[stream.len - 1];
+            handle_fn(event);
+        }
+        stream.new_input_event.reset(); // event has to be reset in critical zone!
+    }
+}
+
 
 // TODO: use callbacks for easier key binding
 // const int scancode = glfwGetKeyScancode(GLFW_KEY_X);
@@ -207,7 +239,7 @@ pub fn keyCallback(window: ?*glfw.RawWindow, key: c_int, scan_code: c_int, actio
 
     var owned_mods = mods;
     var parsed_mods = @ptrCast(*Mods, &owned_mods);
-    const event = InputEvent{
+    const event = Event{
         .key = @intToEnum(Key, key),
         .action = @intToEnum(Action, action),
         .mods = parsed_mods.*,
