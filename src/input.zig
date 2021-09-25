@@ -46,6 +46,9 @@ var window: glfw.Window = undefined;
 /// kills all input based threads running 
 var kill_all_input_threads: bool = false;
 
+var key_input_thread: std.Thread = undefined;
+var mouse_btn_input_thread: std.Thread = undefined;
+var cursor_pos_input_thread: std.Thread = undefined;
 
 pub fn init(
     input_window: glfw.Window, 
@@ -69,6 +72,10 @@ pub fn init(
     _ = window.setKeyCallback(keyCallback); 
     _ = window.setMouseButtonCallback(mouseBtnCallback);
     _ = window.setCursorPosCallback(cursorPosCallback);
+
+    key_input_thread = try std.Thread.spawn(.{}, handleKeyboardInput, .{} );
+    mouse_btn_input_thread = try std.Thread.spawn(.{}, handleMouseButtonInput, .{} );
+    cursor_pos_input_thread = try std.Thread.spawn(.{}, handleCursorPosInput, .{} );
 }
 
 
@@ -105,6 +112,10 @@ pub fn deinit() void {
         // wake thread
         cursor_pos_stream.new_input_event.set();
     }
+
+    key_input_thread.join(); 
+    mouse_btn_input_thread.join(); 
+    cursor_pos_input_thread.join(); 
 }
 
 // TODO: generic?

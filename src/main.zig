@@ -82,18 +82,6 @@ pub fn main() anyerror!void {
 
     // spawn a thread to handle input 
     try input.init(window, keyInputFn, mouseBtnInputFn, cursorPosInputFn);
-
-    // TODO: maybe do this in input init
-    var key_input_thread = try std.Thread.spawn(.{}, input.handleKeyboardInput, .{} );
-    defer key_input_thread.join(); 
-
-    // TODO: maybe do this in input init
-    var mouse_btn_input_thread = try std.Thread.spawn(.{}, input.handleMouseButtonInput, .{} );
-    defer mouse_btn_input_thread.join(); 
-
-    // TODO: maybe do this in input init
-    var cursor_pos_input_thread = try std.Thread.spawn(.{}, input.handleCursorPosInput, .{} );
-    defer cursor_pos_input_thread.join(); 
     
     // Loop until the user closes the window
     while (!window.shouldClose()) {
