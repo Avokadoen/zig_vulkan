@@ -5,10 +5,257 @@ const glfw = @import("glfw");
 const g_key = glfw.key;
 const g_action = glfw.action;
 const g_mod = glfw.mod;
+const g_mouse_button = glfw.mouse_button;
 
 const vk = @import("vulkan");
 
-pub const input_buffer_size = 256;
+// TODO: file issues on todos instead of using todos comments
+// TODO: create a module for input so this can be multiple files
+// TODO: input logic could use a small thread pool instead of unique dynamic threads for each
+//       event type
+
+const input_buffer_size = 16;
+
+// input stream
+var key_stream = KeyEventStream{
+    .new_input_event = undefined,
+    .mutex = .{},
+    .len = 0,
+    .buffer = undefined,
+}; 
+
+var mouse_btn_stream = MouseButtonEventStream{
+    .new_input_event = undefined,
+    .mutex = .{},
+    .len = 0,
+    .buffer = undefined,
+};
+
+var cursor_pos_stream = CursorPosEventStream{
+    .new_input_event = undefined,
+    .mutex = .{},
+    .len = 0,
+    .buffer = undefined,
+};
+
+var key_handle_fn: KeyHandleFn = undefined;
+var mouse_btn_handle_fn: MouseButtonHandleFn = undefined;
+var cursor_pos_handle_fn: CursorPosHandleFn = undefined;
+
+var window: glfw.Window = undefined;
+/// kills all input based threads running 
+var kill_all_input_threads: bool = false;
+
+
+pub fn init(
+    input_window: glfw.Window, 
+    input_handle_fn: KeyHandleFn, 
+    input_mouse_btn_handle_fn: MouseButtonHandleFn,
+    input_cursor_pos_handle_fn: CursorPosHandleFn
+) !void {
+    window = input_window;
+    
+    key_handle_fn = input_handle_fn;
+    try key_stream.new_input_event.init();
+
+    mouse_btn_handle_fn = input_mouse_btn_handle_fn;
+    try mouse_btn_stream.new_input_event.init();
+
+    cursor_pos_handle_fn = input_cursor_pos_handle_fn;
+    try cursor_pos_stream.new_input_event.init();
+
+    try window.setInputMode(glfw.Window.InputMode.cursor, glfw.cursor_disabled);
+
+    _ = window.setKeyCallback(keyCallback); 
+    _ = window.setMouseButtonCallback(mouseBtnCallback);
+    _ = window.setCursorPosCallback(cursorPosCallback);
+}
+
+
+/// kill input module, this will make input threads shut down
+pub fn deinit() void {
+    // unregister callback functions
+    _ = window.setKeyCallback(null);
+    _ = window.setMouseButtonCallback(null);
+    _ = window.setCursorPosCallback(null);
+
+    // tell all threads to kill them self
+    kill_all_input_threads = true;
+
+    { // critical zone
+        var lock = key_stream.mutex.acquire();
+        defer lock.release();
+
+        // wake thread
+        key_stream.new_input_event.set();
+    }
+
+    { // critical zone 
+        var lock = mouse_btn_stream.mutex.acquire();
+        defer lock.release();
+
+        // wake thread
+        mouse_btn_stream.new_input_event.set();
+    }
+
+    { // critical zone 
+        var lock = cursor_pos_stream.mutex.acquire();
+        defer lock.release();
+
+        // wake thread
+        cursor_pos_stream.new_input_event.set();
+    }
+}
+
+// TODO: generic?
+/// function that user can spawn threads with to handle keyboard input
+pub fn handleKeyboardInput() void {
+    while(kill_all_input_threads == false) {
+        // block loop progression if stream is inactive
+        key_stream.new_input_event.wait();
+
+        { // critical zone
+            var lock = key_stream.mutex.acquire();
+            defer lock.release();
+            while(key_stream.len > 0) : (key_stream.len -= 1){
+                const event = key_stream.buffer[key_stream.len - 1];
+                key_handle_fn(event);
+            }
+            key_stream.new_input_event.reset(); // event has to be reset in critical zone!
+        }
+    }
+}
+
+// TODO: generic?
+/// function that user can spawn threads with to handle mouse button input
+pub fn handleMouseButtonInput() void {
+    while(kill_all_input_threads == false) {
+        // block loop progression if stream is inactive
+        mouse_btn_stream.new_input_event.wait();
+
+        { // critical zone
+            var lock = mouse_btn_stream.mutex.acquire();
+            defer lock.release();
+            while(mouse_btn_stream.len > 0) : (mouse_btn_stream.len -= 1){
+                const event = mouse_btn_stream.buffer[mouse_btn_stream.len - 1];
+                mouse_btn_handle_fn(event);
+            }
+            mouse_btn_stream.new_input_event.reset(); // event has to be reset in critical zone!
+        }
+    }
+}
+
+// TODO: generic?
+/// function that user can spawn threads with to handle cursor pos input
+pub fn handleCursorPosInput() void {
+    while(kill_all_input_threads == false) {
+        // block loop progression if stream is inactive
+        cursor_pos_stream.new_input_event.wait();
+
+        { // critical zone
+            var lock = cursor_pos_stream.mutex.acquire();
+            defer lock.release();
+            while(cursor_pos_stream.len > 0) : (cursor_pos_stream.len -= 1){
+                const event = cursor_pos_stream.buffer[cursor_pos_stream.len - 1];
+                cursor_pos_handle_fn(event);
+            }
+            cursor_pos_stream.new_input_event.reset(); // event has to be reset in critical zone!
+        }
+    }
+}
+
+// TODO: use callbacks for easier key binding
+// const int scancode = glfwGetKeyScancode(GLFW_KEY_X);
+// set_key_mapping(scancode, swap_weapons);
+
+// TODO: generic wrapper?
+/// sends key events to a the key event to the input stream for further handling
+/// Params:
+///     - window	    The window that received the event.
+///     - key	        The keyboard key that was pressed or released.
+///     - scan_code	    The system-specific scancode of the key.
+///     - action	    GLFW_PRESS, GLFW_RELEASE or GLFW_REPEAT. Future releases may add more actions.
+///     - mod	        Bit field describing which modifier keys were held down.
+fn keyCallback(_window: ?*glfw.RawWindow, key: c_int, scan_code: c_int, action: c_int, mods: c_int) callconv(.C) void {
+    _ = _window;
+    _ = scan_code;
+
+    // if buffer is full
+    if (key_stream.len >= key_stream.buffer.len) {
+        return;
+    }
+
+    var owned_mods = mods;
+    var parsed_mods = @ptrCast(*Mods, &owned_mods);
+    const event = KeyEvent{
+        .key = @intToEnum(Key, key),
+        .action = @intToEnum(Action, action),
+        .mods = parsed_mods.*,
+    };
+
+    { // critical zone
+        const lock = key_stream.mutex.acquire();
+        defer lock.release();
+        key_stream.buffer[key_stream.len] = event;
+        key_stream.len += 1;
+    }
+
+    // wake up input thread(s)
+    key_stream.new_input_event.set();
+}
+
+// TODO: generic wrapper?
+fn mouseBtnCallback(_window: ?*glfw.RawWindow, button: c_int, action: c_int, mods: c_int) callconv(.C) void {
+    _ = _window;
+
+      // if buffer is full
+    if (mouse_btn_stream.len >= mouse_btn_stream.buffer.len) {
+        return;
+    }
+
+    var owned_mods = mods;
+    var parsed_mods = @ptrCast(*Mods, &owned_mods);
+    const event = MouseButtonEvent{
+        .button = @intToEnum(MouseButton, button),
+        .action = @intToEnum(Action, action),
+        .mods = parsed_mods.*,
+    };
+
+   { // critical zone
+        const lock = mouse_btn_stream.mutex.acquire();
+        defer lock.release();
+        mouse_btn_stream.buffer[mouse_btn_stream.len] = event;
+        mouse_btn_stream.len += 1;
+    }
+
+    // wake up input thread(s)
+    mouse_btn_stream.new_input_event.set();
+}
+
+// TODO: generic?
+fn cursorPosCallback(_window: ?*glfw.RawWindow, x_pos: f64, y_pos: f64) callconv(.C) void {
+    _ = _window;
+
+      // if buffer is full
+    if (cursor_pos_stream.len >= cursor_pos_stream.buffer.len) {
+        return;
+    }
+
+    const event = CursorPosEvent{
+        .x = x_pos,
+        .y = y_pos,
+    };
+
+   { // critical zone
+        const lock = cursor_pos_stream.mutex.acquire();
+        defer lock.release();
+        cursor_pos_stream.buffer[cursor_pos_stream.len] = event;
+        cursor_pos_stream.len += 1;
+    }
+
+    // wake up input thread(s)
+    cursor_pos_stream.new_input_event.set();
+}
 
 pub const Key = enum(c_int) {
     unknown = g_key.unknown,
@@ -157,96 +404,63 @@ pub const Mods = packed struct {
     pub usingnamespace vk.FlagsMixin(Mods, c_int);
 };
 
-pub const Event = struct {
+pub const KeyEvent = struct {
     key: Key,
     action: Action,
     mods: Mods,
 };
 
-const EventStream = struct {
+pub const MouseButton = enum(c_int) {
+    one = g_mouse_button.one,
+    two = g_mouse_button.two,
+    three = g_mouse_button.three,
+    four = g_mouse_button.four,
+    five = g_mouse_button.five,
+    six = g_mouse_button.six,
+    seven = g_mouse_button.seven,
+    eight = g_mouse_button.eight,
+};
+pub const m_b_last = MouseButton.eight;
+pub const m_b_left = MouseButton.one;
+pub const m_b_right = MouseButton.two;
+pub const m_b_middle = MouseButton.three;
+
+pub const MouseButtonEvent = struct {
+    button: MouseButton,
+    action: Action,
+    mods: Mods,
+};
+
+pub const CursorPosEvent = struct {
+    x: f64,
+    y: f64,
+};
+
+pub const KeyHandleFn = fn(KeyEvent) void;
+pub const MouseButtonHandleFn = fn(MouseButtonEvent) void;
+pub const CursorPosHandleFn = fn(CursorPosEvent) void;
+
+// TODO: generic?
+const KeyEventStream = struct {
     new_input_event: Thread.ResetEvent,
     mutex: Thread.Mutex,
     len: usize,
-    buffer: [input_buffer_size]Event,
+    buffer: [input_buffer_size]KeyEvent,
 };
 
-// global input stream
-pub var stream = EventStream{
-    .new_input_event = undefined,
-    .mutex = .{},
-    .len = 0,
-    .buffer = undefined,
-}; 
+// TODO: generic?
+const MouseButtonEventStream = struct {
+    new_input_event: Thread.ResetEvent,
+    mutex: Thread.Mutex,
+    len: usize,
+    buffer: [input_buffer_size]MouseButtonEvent,
+};
 
-pub const HandleFn = fn(Event) void;
-var handle_fn: HandleFn = undefined;
+// TODO: generic?
+const CursorPosEventStream = struct {
+    new_input_event: Thread.ResetEvent,
+    mutex: Thread.Mutex,
+    len: usize,
+    buffer: [input_buffer_size]CursorPosEvent,
+};
 
-pub fn init(input_handle_fn: HandleFn) !void {
-    try stream.new_input_event.init();
-
-    handle_fn = input_handle_fn;
-}
-
-var kill_input_thread: bool = false;
-/// kill input module, this will make input threads shut down
-pub fn deinit() void {
-    var lock = stream.mutex.acquire();
-    defer lock.release();
-
-    // tell thread to kill itself, and then wake it
-    kill_input_thread = true;
-    stream.new_input_event.set();
-}
-
-/// function that user can spawn threads with to handle input
-pub fn handleInput() void {
-    while(kill_input_thread == false) {
-        stream.new_input_event.wait();
-        var lock = stream.mutex.acquire();
-        defer lock.release();
-
-        while(stream.len > 0) : (stream.len -= 1){
-            const event = stream.buffer[stream.len - 1];
-            handle_fn(event);
-        }
-        stream.new_input_event.reset(); // event has to be reset in critical zone!
-    }
-}
-
-
-// TODO: use callbacks for easier key binding
-// const int scancode = glfwGetKeyScancode(GLFW_KEY_X);
-// set_key_mapping(scancode, swap_weapons);
-
-/// sends key events to a the key event to the input stream for further handling
-/// Params:
-///     - window	    The window that received the event.
-///     - key	        The keyboard key that was pressed or released.
-///     - scan_code	    The system-specific scancode of the key.
-///     - action	    GLFW_PRESS, GLFW_RELEASE or GLFW_REPEAT. Future releases may add more actions.
-///     - mod	        Bit field describing which modifier keys were held down.
-pub fn keyCallback(window: ?*glfw.RawWindow, key: c_int, scan_code: c_int, action: c_int, mods: c_int) callconv(.C) void {
-    _ = window;
-    _ = scan_code;
-
-    const lock = stream.mutex.acquire();
-    defer lock.release();
-
-    // if buffer is full
-    if (stream.len >= stream.buffer.len) {
-        return;
-    }
-
-    var owned_mods = mods;
-    var parsed_mods = @ptrCast(*Mods, &owned_mods);
-    const event = Event{
-        .key = @intToEnum(Key, key),
-        .action = @intToEnum(Action, action),
-        .mods = parsed_mods.*,
-    };
-    stream.buffer[stream.len] = event;
-    stream.len += 1;
-
-    // wake up input thread(s)
-    stream.new_input_event.set();
-}

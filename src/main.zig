@@ -18,6 +18,7 @@ const input = @import("input.zig");
 pub const application_name = "zig vulkan";
 
 // TODO: wrap this in renderer to make main seem simpler :^)
+var window: glfw.Window = undefined;
 var allocator: *Allocator = undefined;
 var ctx: renderer.Context = undefined;
 var sc_data: swapchain.Data = undefined;
@@ -53,7 +54,7 @@ pub fn main() anyerror!void {
     try glfw.Window.hint(glfw.client_api, glfw.no_api);
 
     // Create a windowed mode window 
-    var window = glfw.Window.create(800, 600, application_name, null, null) catch |err| {
+    window = glfw.Window.create(800, 600, application_name, null, null) catch |err| {
         try stderr.print("failed to create window, code: {}", .{err});
         return;
     };
@@ -79,16 +80,24 @@ pub fn main() anyerror!void {
         gfx_pipeline.deinit(ctx);
     }
 
-    _ = window.setKeyCallback(input.keyCallback); 
-    defer _ = window.setKeyCallback(null);
+    // spawn a thread to handle input 
+    try input.init(window, keyInputFn, mouseBtnInputFn, cursorPosInputFn);
 
-    try input.init(inputFn);
-    var input_thread = try std.Thread.spawn(.{}, input.handleInput, .{} );
-    defer input_thread.join(); 
+    // TODO: maybe do this in input init
+    var key_input_thread = try std.Thread.spawn(.{}, input.handleKeyboardInput, .{} );
+    defer key_input_thread.join(); 
+
+    // TODO: maybe do this in input init
+    var mouse_btn_input_thread = try std.Thread.spawn(.{}, input.handleMouseButtonInput, .{} );
+    defer mouse_btn_input_thread.join(); 
+
+    // TODO: maybe do this in input init
+    var cursor_pos_input_thread = try std.Thread.spawn(.{}, input.handleCursorPosInput, .{} );
+    defer cursor_pos_input_thread.join(); 
     
     // Loop until the user closes the window
     while (!window.shouldClose()) {
-        { // TODO: these can be moved to a secondary thread
+        {
             // Render here
             try gfx_pipeline.draw(ctx);
 
@@ -103,21 +112,31 @@ pub fn main() anyerror!void {
     input.deinit();
 }
 
-fn inputFn(event: input.Event) void {
+fn keyInputFn(event: input.KeyEvent) void {
     // TODO: only tell ubo desired change for easier deltatime and less racy code!
     switch(event.key) {
         input.Key.w => subo.ubo.data.view.data[1][3] += 0.001,
         input.Key.s => subo.ubo.data.view.data[1][3] -= 0.001,
         input.Key.d => subo.ubo.data.view.data[0][3] -= 0.001,
         input.Key.a => subo.ubo.data.view.data[0][3] += 0.001,
-        else => {},
+        input.Key.escape => window.setShouldClose(true) catch unreachable,
+        else => { },
     }   
 } 
 
+// TODO: use, or remove this
+fn mouseBtnInputFn(event: input.MouseButtonEvent) void {
+    _ = event;
+}
+fn cursorPosInputFn(event: input.CursorPosEvent) void {
+    _ = event;
+    // std.debug.print("cursor pos: {s} {d}, {d} {s}\n", .{"{", event.x, event.y, "}"});
+}
+
 /// called by glfw to message pipelines about scaling
 /// this should never be registered before pipeline init
-fn framebufferSizeCallbackFn(window: ?*glfw.RawWindow, width: c_int, height: c_int) callconv(.C) void {
-    _ = window;
+fn framebufferSizeCallbackFn(_window: ?*glfw.RawWindow, width: c_int, height: c_int) callconv(.C) void {
+    _ = _window;
     _ = width;
     _ = height;
 
