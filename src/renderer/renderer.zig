@@ -10,7 +10,7 @@ pub const vertex = @import("vertex.zig");
 
 pub const Context = context.Context;
 pub const Writers = context.IoWriters;
-pub const ApplicationGfxPipeline = @import("pipeline.zig").ApplicationGfxPipeline;
+pub const GfxPipeline = @import("pipeline.zig").GfxPipeline;
 pub const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
 pub const Texture = @import("texture.zig").Texture;
 pub const Vertex = vertex.Vertex;

@@ -14,7 +14,7 @@ const utils = @import("../utils.zig");
 const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
 const Context = @import("context.zig").Context;
 
-pub const ApplicationGfxPipeline = struct {
+pub const GfxPipeline = struct {
     const Self = @This();
 
     allocator: *Allocator,
@@ -507,7 +507,7 @@ inline fn createCmdBuffers(allocator: *Allocator, ctx: Context, command_pool: vk
 
 
 /// record default commands to the command buffer
-fn recordGfxCmdBuffers(ctx: Context, pipeline: *ApplicationGfxPipeline) !void {
+fn recordGfxCmdBuffers(ctx: Context, pipeline: *GfxPipeline) !void {
     const clear_color = [_]vk.ClearColorValue{
         .{
             .float_32 = [_]f32{ 0.0, 0.0, 0.0, 1.0 },

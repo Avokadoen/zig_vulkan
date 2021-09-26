@@ -24,7 +24,7 @@ var ctx: renderer.Context = undefined;
 var sc_data: swapchain.Data = undefined;
 var view: swapchain.ViewportScissor = undefined;
 var subo: renderer.SyncUniformBuffer = undefined;
-var gfx_pipeline: renderer.ApplicationGfxPipeline = undefined;
+var gfx_pipeline: renderer.GfxPipeline = undefined;
 
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
@@ -73,7 +73,7 @@ pub fn main() anyerror!void {
     subo = try renderer.SyncUniformBuffer.init(allocator, ctx, sc_data.images.items.len, view.viewport[0]);
     defer subo.deinit(ctx);
 
-    gfx_pipeline = try renderer.ApplicationGfxPipeline.init(allocator, ctx, &sc_data, &view, &subo);
+    gfx_pipeline = try renderer.GfxPipeline.init(allocator, ctx, &sc_data, &view, &subo);
     _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
     defer {
         _ = window.setFramebufferSizeCallback(null);
