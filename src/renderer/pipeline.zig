@@ -31,7 +31,7 @@ pub const GfxPipeline = struct {
     in_flight_fences: ArrayList(vk.Fence),
     images_in_flight: ArrayList(vk.Fence),
 
-    requested_rescale_pipeline: bool,
+    requested_rescale_pipeline: bool = false,
 
     // TODO seperate vertex/index buffers from pipeline
     vertex_buffer: GpuBufferMemory,
@@ -76,11 +76,10 @@ pub const GfxPipeline = struct {
 
                 break :blk1 try utils.readFile(allocator, path);
             };
+            defer vert_code.deinit();
+
             const vert_module = try ctx.createShaderModule(vert_code.items[0..]);
-            defer {
-                ctx.destroyShaderModule(vert_module);
-                vert_code.deinit();
-            }
+            defer ctx.destroyShaderModule(vert_module);
 
             const vert_stage = vk.PipelineShaderStageCreateInfo{ 
                 .flags = .{}, 
@@ -98,11 +97,10 @@ pub const GfxPipeline = struct {
 
                 break :blk1 try utils.readFile(allocator, path);
             };
+            defer frag_code.deinit();
+
             const frag_module = try ctx.createShaderModule(frag_code.items[0..]);
-            defer {
-                ctx.destroyShaderModule(frag_module);
-                frag_code.deinit();
-            }
+            defer ctx.destroyShaderModule(frag_module);
 
             const frag_stage = vk.PipelineShaderStageCreateInfo{ 
                 .flags = .{}, 
@@ -217,7 +215,7 @@ pub const GfxPipeline = struct {
         self.indices_buffer = try vertex.createDefaultIndicesBuffer(ctx, ctx.gfx_cmd_pool);
         errdefer self.indices_buffer.deinit(ctx);
 
-        self.command_buffers = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers);
+        self.command_buffers = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers.items.len);
         errdefer self.command_buffers.deinit();
 
         self.images_in_flight = blk: {
@@ -274,7 +272,6 @@ pub const GfxPipeline = struct {
             .renderer_finished_s = self.renderer_finished_s,
             .in_flight_fences = self.in_flight_fences,
             .images_in_flight = self.images_in_flight,
-            .requested_rescale_pipeline = false,
             .vertex_buffer = self.vertex_buffer,
             .indices_buffer = self.indices_buffer,
             .sc_data = sc_data,
@@ -333,6 +330,9 @@ pub const GfxPipeline = struct {
         self.images_in_flight.items[image_index] = self.in_flight_fences.items[state.current_frame];
 
         // TODO: only transfer if "dirty", only transfer section of buffer that changed
+        // one solution in order to simplify syncing: let pipeline hold ubo data, if any ubo is marked dirty
+        // the pipeline has responsibility over transfer at this point in code. This way syncing of transfer is
+        // implicitly handled ... of course this might be suboptimal when the data is not relevant for produced frame
         var ubo_slice = [_]tb.TransformBuffer{self.subo.ubo.data};
         try self.subo.ubo.buffers[image_index].transferData(ctx, tb.TransformBuffer, ubo_slice[0..]);
 
@@ -416,7 +416,7 @@ pub const GfxPipeline = struct {
         self.render_pass = try ctx.createRenderPass(self.sc_data.format);
         self.framebuffers = try createFramebuffers(allocator, ctx, self.sc_data, self.render_pass);
 
-        self.command_buffers = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers);
+        self.command_buffers = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers.items.len);
         try recordGfxCmdBuffers(ctx, self);
     }
 
@@ -468,6 +468,8 @@ pub const GfxPipeline = struct {
     }
 };
 
+// TODO: move gfx specific functions inside the gfx scope
+
 inline fn createFramebuffers(allocator: *Allocator, ctx: Context, swapchain_data: *const swapchain.Data, render_pass: vk.RenderPass) !ArrayList(vk.Framebuffer) {
     const image_views = swapchain_data.image_views;
     var framebuffers = try ArrayList(vk.Framebuffer).initCapacity(allocator, image_views.items.len);
@@ -491,8 +493,8 @@ inline fn createFramebuffers(allocator: *Allocator, ctx: Context, swapchain_data
 }
 
 /// create a command buffer relative to the framebuffer
-inline fn createCmdBuffers(allocator: *Allocator, ctx: Context, command_pool: vk.CommandPool, framebuffers: ArrayList(vk.Framebuffer)) !ArrayList(vk.CommandBuffer) {
-    var command_buffers = try ArrayList(vk.CommandBuffer).initCapacity(allocator, framebuffers.items.len);
+inline fn createCmdBuffers(allocator: *Allocator, ctx: Context, command_pool: vk.CommandPool, buffer_count: usize) !ArrayList(vk.CommandBuffer) {
+    var command_buffers = try ArrayList(vk.CommandBuffer).initCapacity(allocator, buffer_count);
     const alloc_info = vk.CommandBufferAllocateInfo{
         .command_pool = command_pool,
         .level = vk.CommandBufferLevel.primary,
@@ -503,6 +505,16 @@ inline fn createCmdBuffers(allocator: *Allocator, ctx: Context, command_pool: vk
     command_buffers.items.len = command_buffers.capacity;
 
     return command_buffers;
+}
+
+inline fn createCmdBuffer(ctx: Context, command_pool: vk.CommandPool) !vk.CommandBuffer {
+    const alloc_info = vk.CommandBufferAllocateInfo{
+        .command_pool = command_pool,
+        .level = vk.CommandBufferLevel.primary,
+        .command_buffer_count = @intCast(u32, 1),
+    };
+
+    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, alloc_info, command_buffers.items.ptr);
 }
 
 
@@ -557,3 +569,189 @@ fn recordGfxCmdBuffers(ctx: Context, pipeline: *GfxPipeline) !void {
         try ctx.vkd.endCommandBuffer(command_buffer);
     }
 }
+
+// TODO: at this point pipelines should have their own internal module!
+
+pub const ComputePipeline = struct {
+    const Self = @This();
+
+    allocator: *Allocator,
+
+    pipeline_layout: vk.PipelineLayout,
+    pipeline: *vk.Pipeline,
+
+    command_buffer: vk.CommandBuffer,
+
+    requested_rescale_pipeline: bool = false,
+
+    // TODO: correctness if init fail, clean up resources created with errdefer
+    /// initialize a compute pipeline, caller must make sure to call deinit
+    pub fn init(allocator: *Allocator, ctx: Context, shader_path: []const u8) !Self {
+        var self: Self = undefined; 
+        self.allocator = allocator;
+       
+        self.pipeline_layout = blk: {
+            const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
+                .flags = .{},
+                .set_layout_count = 0, // TODO: see GfxPipeline
+                .p_set_layouts = undefined, 
+                .push_constant_range_count = 0,
+                .p_push_constant_ranges = undefined,
+            };
+            break :blk try ctx.createPipelineLayout(pipeline_layout_info);
+        };
+        self.pipeline = blk: {
+            const self_path = try std.fs.selfExePathAlloc(allocator);
+            defer ctx.allocator.destroy(self_path.ptr);
+
+            const code = blk1: {
+                const path = blk2: {
+                    const join_path = [_][]const u8{ self_path, shader_path};
+                    break :blk2 try std.fs.path.resolve(allocator, join_path[0..]);
+                };
+                defer allocator.destroy(path.ptr);
+
+                break :blk1 try utils.readFile(allocator, path);
+            };
+            defer code.deinit();
+
+            const module = try ctx.createShaderModule(code.items[0..]);
+            defer ctx.destroyShaderModule(module);
+
+            const stage = vk.PipelineShaderStageCreateInfo{ 
+                .flags = .{}, 
+                .stage = .{ .compute_bit = true }, 
+                .module = module, 
+                .p_name = "main", 
+                .p_specialization_info = null 
+            };
+
+            // TOOD: read on defer_compile_bit_nv
+            const pipeline_info = vk.ComputePipelineCreateInfo{
+                .flags = .{},
+                .stage = stage,
+                .layout = self.pipeline_layout,
+                .base_pipeline_handle = .null_handle, // TODO: GfxPipeline?
+                .base_pipeline_index =  -1,
+            };
+            break :blk try ctx.createComputePipeline(allocator, pipeline_info);
+        };
+
+        // TODO: data(vertex/uniform/etc) buffers! (see GfxPipeline)
+
+        // TODO: we need to rescale pipeline dispatch 
+        self.command_buffer = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers);
+        errdefer self.command_buffer.deinit();
+
+        const command_begin_info = vk.CommandBufferBeginInfo{
+            .flags = .{},
+            .p_inheritance_info = null,
+        };
+        try ctx.vkd.beginCommandBuffer(self.command_buffer, command_begin_info);
+        try ctx.vkd.cmdDispatch(self.command_buffer, 20, 20, 1); // TODO: real values
+        try ctx.vkd.endCommandBuffer(self.command_buffer);
+
+        return Self{
+            .allocator = self.allocator,
+            .pipeline_layout = self.pipeline_layout,
+            .pipeline = self.pipeline,
+            .command_buffers = self.command_buffers,
+        };
+    }
+
+    // TODO: sync
+    pub fn compute(self: *Self, ctx: Context) !void {
+        const wait_stages = vk.PipelineStageFlags{ .compute_shader_bit = true };
+        const submit_info = vk.SubmitInfo{
+            .wait_semaphore_count = 0,
+            .p_wait_semaphores = undefined,
+            .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &wait_stages),
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
+            .signal_semaphore_count = 0,
+            .p_signal_semaphores = undefined,
+        };
+        const p_submit_info = @ptrCast([*]const vk.SubmitInfo, &submit_info);
+        // _ = try ctx.vkd.resetFences(
+        //     ctx.logical_device, 
+        //     1, 
+        //     in_flight_fence_p
+        // );
+        try ctx.vkd.queueSubmit(
+            ctx.compute_queue, 
+            1, 
+            p_submit_info, 
+            self.in_flight_fences.items[state.current_frame]
+        );
+    }
+
+    /// Used to update the pipeline according to changes in the window spec
+    /// This functions should only be called from the main thread (see glfwGetFramebufferSize)
+    fn rescalePipeline(self: *Self, allocator: *Allocator, ctx: Context) !void {
+        var window_size = try ctx.window_ptr.*.getFramebufferSize();
+        while (window_size.width == 0 or window_size.height == 0) {
+            window_size = try ctx.window_ptr.*.getFramebufferSize();
+            try glfw.waitEvents();
+        }
+
+        self.requested_rescale_pipeline = false;
+        // TODO: swapchain can be recreated without waiting and so waiting in the top of the 
+        //       functions is wasteful
+        // Wait for pipeline to become idle 
+        self.wait_idle(ctx);
+
+        // destroy outdated pipeline state
+        for (self.framebuffers.items) |framebuffer| {
+            ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
+        }
+        // TODO: this container can be reused in createFramebuffers!
+        self.framebuffers.deinit();
+        ctx.vkd.freeCommandBuffers(
+            ctx.logical_device, 
+            ctx.gfx_cmd_pool, 
+            @intCast(u32, self.command_buffers.items.len), 
+            @ptrCast([*]const vk.CommandBuffer, self.command_buffers.items.ptr)
+        );
+        // TODO: this container can be reused in createCmdBuffers!
+        self.command_buffers.deinit(); 
+        ctx.destroyRenderPass(self.render_pass);
+
+        // recreate renderpass and framebuffers
+        self.render_pass = try ctx.createRenderPass(self.sc_data.format);
+        self.framebuffers = try createFramebuffers(allocator, ctx, self.sc_data, self.render_pass);
+
+        self.command_buffers = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers);
+        try recordGfxCmdBuffers(ctx, self);
+    }
+
+    pub fn deinit(self: Self, ctx: Context) void {
+        self.wait_idle(ctx);
+
+        self.command_buffers.deinit();
+
+        for (self.framebuffers.items) |framebuffer| {
+            ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
+        }
+        self.framebuffers.deinit();
+
+        ctx.destroyPipelineLayout(self.pipeline_layout);
+        ctx.destroyRenderPass(self.render_pass);
+        ctx.destroyPipeline(self.pipeline);
+
+        self.allocator.destroy(self.pipeline);
+    }
+
+    inline fn wait_idle(self: Self, ctx: Context) void {
+        _ = ctx.vkd.waitForFences(
+            ctx.logical_device, 
+            @intCast(u32, self.in_flight_fences.items.len),
+            self.in_flight_fences.items.ptr,
+            vk.TRUE,
+            std.math.maxInt(u64) 
+        ) catch |err| {
+            ctx.writers.stderr.print("waiting for fence failed: {}", .{err}) catch |e| switch (e) {
+                else => {}, // Discard print errors ...
+            };
+        };
+    }
+};
