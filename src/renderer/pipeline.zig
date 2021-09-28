@@ -580,6 +580,7 @@ pub const ComputePipeline = struct {
     pipeline_layout: vk.PipelineLayout,
     pipeline: *vk.Pipeline,
 
+    in_flight_fence: vk.Fence,
     command_buffer: vk.CommandBuffer,
 
     requested_rescale_pipeline: bool = false,
@@ -639,10 +640,16 @@ pub const ComputePipeline = struct {
 
         // TODO: data(vertex/uniform/etc) buffers! (see GfxPipeline)
 
+        const fence_info = vk.FenceCreateInfo{
+            .flags = .{ .signaled_bit = true, },
+        };
+        self.in_flight_fence = try ctx.vkd.createFence(ctx.logical_device, fence_info, null);
+
         // TODO: we need to rescale pipeline dispatch 
         self.command_buffer = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers);
         errdefer self.command_buffer.deinit();
 
+        // TODO: move to function
         const command_begin_info = vk.CommandBufferBeginInfo{
             .flags = .{},
             .p_inheritance_info = null,
@@ -655,6 +662,7 @@ pub const ComputePipeline = struct {
             .allocator = self.allocator,
             .pipeline_layout = self.pipeline_layout,
             .pipeline = self.pipeline,
+            .in_flight_fence = self.in_flight_fence,
             .command_buffers = self.command_buffers,
         };
     }
@@ -672,16 +680,16 @@ pub const ComputePipeline = struct {
             .p_signal_semaphores = undefined,
         };
         const p_submit_info = @ptrCast([*]const vk.SubmitInfo, &submit_info);
-        // _ = try ctx.vkd.resetFences(
-        //     ctx.logical_device, 
-        //     1, 
-        //     in_flight_fence_p
-        // );
+        _ = try ctx.vkd.resetFences(
+            ctx.logical_device, 
+            1, 
+            self.in_flight_fence
+        );
         try ctx.vkd.queueSubmit(
             ctx.compute_queue, 
             1, 
             p_submit_info, 
-            self.in_flight_fences.items[state.current_frame]
+            self.in_flight_fence,
         );
     }
 
@@ -700,39 +708,30 @@ pub const ComputePipeline = struct {
         // Wait for pipeline to become idle 
         self.wait_idle(ctx);
 
-        // destroy outdated pipeline state
-        for (self.framebuffers.items) |framebuffer| {
-            ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
-        }
-        // TODO: this container can be reused in createFramebuffers!
-        self.framebuffers.deinit();
         ctx.vkd.freeCommandBuffers(
             ctx.logical_device, 
             ctx.gfx_cmd_pool, 
-            @intCast(u32, self.command_buffers.items.len), 
-            @ptrCast([*]const vk.CommandBuffer, self.command_buffers.items.ptr)
+            1, 
+            @ptrCast([*]const vk.CommandBuffer, &self.command_buffer)
         );
-        // TODO: this container can be reused in createCmdBuffers!
-        self.command_buffers.deinit(); 
-        ctx.destroyRenderPass(self.render_pass);
 
-        // recreate renderpass and framebuffers
-        self.render_pass = try ctx.createRenderPass(self.sc_data.format);
-        self.framebuffers = try createFramebuffers(allocator, ctx, self.sc_data, self.render_pass);
+        self.command_buffer = try createCmdBuffer(ctx, ctx.gfx_cmd_pool);
 
-        self.command_buffers = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers);
-        try recordGfxCmdBuffers(ctx, self);
+        const command_begin_info = vk.CommandBufferBeginInfo{
+            .flags = .{},
+            .p_inheritance_info = null,
+        };
+        try ctx.vkd.beginCommandBuffer(self.command_buffer, command_begin_info);
+        try ctx.vkd.cmdDispatch(self.command_buffer, 20, 20, 1); // TODO: real values
+        try ctx.vkd.endCommandBuffer(self.command_buffer);
+
     }
 
     pub fn deinit(self: Self, ctx: Context) void {
         self.wait_idle(ctx);
 
+        ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fence, null);
         self.command_buffers.deinit();
-
-        for (self.framebuffers.items) |framebuffer| {
-            ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
-        }
-        self.framebuffers.deinit();
 
         ctx.destroyPipelineLayout(self.pipeline_layout);
         ctx.destroyRenderPass(self.render_pass);
@@ -741,11 +740,12 @@ pub const ComputePipeline = struct {
         self.allocator.destroy(self.pipeline);
     }
 
+    /// Wait for fence to signal complete 
     inline fn wait_idle(self: Self, ctx: Context) void {
         _ = ctx.vkd.waitForFences(
             ctx.logical_device, 
-            @intCast(u32, self.in_flight_fences.items.len),
-            self.in_flight_fences.items.ptr,
+            1,
+            @ptrCast([*]vk.Fence, &self.in_flight_fence),
             vk.TRUE,
             std.math.maxInt(u64) 
         ) catch |err| {
