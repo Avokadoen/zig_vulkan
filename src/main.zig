@@ -74,18 +74,24 @@ pub fn main() anyerror!void {
     defer subo.deinit(ctx);
 
     gfx_pipeline = try renderer.GfxPipeline.init(allocator, ctx, &sc_data, &view, &subo);
-    _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
-    defer {
-        _ = window.setFramebufferSizeCallback(null);
-        gfx_pipeline.deinit(ctx);
-    }
+    defer gfx_pipeline.deinit(ctx);
 
-    // spawn a thread to handle input 
+    _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
+    defer _ = window.setFramebufferSizeCallback(null);
+
+    // TODO: reenable
+    const comp_pipeline = try renderer.ComputePipeline.init(allocator, ctx, "../../comp.comp.spv", &subo.ubo.my_texture);
+    defer comp_pipeline.deinit(ctx);
+
+    // init input module with iput handler functions
     try input.init(window, keyInputFn, mouseBtnInputFn, cursorPosInputFn);
     
     // Loop until the user closes the window
     while (!window.shouldClose()) {
         {
+            // Test compute
+            try comp_pipeline.compute(ctx);
+
             // Render here
             try gfx_pipeline.draw(ctx);
 

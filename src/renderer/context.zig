@@ -44,6 +44,7 @@ pub const Context = struct {
     queue_indices: QueueFamilyIndices,
 
     gfx_cmd_pool: vk.CommandPool, 
+    comp_cmd_pool: vk.CommandPool, 
 
     // TODO: utilize comptime for this (emit from struct if we are in release mode)
     messenger: ?vk.DebugUtilsMessengerEXT,
@@ -158,6 +159,15 @@ pub const Context = struct {
             break :blk try self.vkd.createCommandPool(self.logical_device, pool_info, null);
         };
 
+        self.comp_cmd_pool = blk: {
+            const pool_info = vk.CommandPoolCreateInfo{
+                .flags = .{},
+                .queue_family_index = self.queue_indices.compute,
+            };
+
+            break :blk try self.vkd.createCommandPool(self.logical_device, pool_info, null);
+        };
+
         // possibly a bit wasteful, but to get compile errors when forgetting to
         // init a variable the partial context variables are moved to a new context which we return
         return Context{
@@ -173,7 +183,8 @@ pub const Context = struct {
             .present_queue = self.present_queue,
             .surface = self.surface,
             .queue_indices = self.queue_indices,
-            .gfx_cmd_pool  = self.gfx_cmd_pool ,
+            .gfx_cmd_pool  = self.gfx_cmd_pool,
+            .comp_cmd_pool  = self.comp_cmd_pool,
             .messenger = self.messenger,
             .writers = self.writers,
             .window_ptr = window,
@@ -309,6 +320,7 @@ pub const Context = struct {
 
     pub fn deinit(self: Context) void {
         self.vkd.destroyCommandPool(self.logical_device, self.gfx_cmd_pool, null);
+        self.vkd.destroyCommandPool(self.logical_device, self.comp_cmd_pool, null);
 
         self.vki.destroySurfaceKHR(self.instance, self.surface, null);
         self.vkd.destroyDevice(self.logical_device, null);

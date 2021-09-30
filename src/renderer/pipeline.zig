@@ -10,8 +10,10 @@ const swapchain = @import("swapchain.zig");
 const vertex = @import("vertex.zig");
 const tb = @import("transform_buffer.zig");
 const utils = @import("../utils.zig");
+const texture = @import("texture.zig");
 
 const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
+const Texture = texture.Texture;
 const Context = @import("context.zig").Context;
 
 pub const GfxPipeline = struct {
@@ -24,6 +26,7 @@ pub const GfxPipeline = struct {
     pipeline: *vk.Pipeline,
     framebuffers: ArrayList(vk.Framebuffer),
 
+    // TODO: command buffers should be according to what we draw, and not directly related to pipeline?
     command_buffers: ArrayList(vk.CommandBuffer),
 
     image_available_s: ArrayList(vk.Semaphore),
@@ -203,7 +206,7 @@ pub const GfxPipeline = struct {
                 .base_pipeline_handle = .null_handle,
                 .base_pipeline_index = -1,
             };
-            break :blk try ctx.createGraphicsPipelines(allocator, pipeline_info);
+            break :blk try ctx.createGraphicsPipeline(allocator, pipeline_info);
         };
 
         self.framebuffers = try createFramebuffers(allocator, ctx, sc_data, self.render_pass);
@@ -492,7 +495,7 @@ inline fn createFramebuffers(allocator: *Allocator, ctx: Context, swapchain_data
     return framebuffers;
 }
 
-/// create a command buffer relative to the framebuffer
+/// create a command buffers with sizeof buffer_count, caller must deinit returned list
 inline fn createCmdBuffers(allocator: *Allocator, ctx: Context, command_pool: vk.CommandPool, buffer_count: usize) !ArrayList(vk.CommandBuffer) {
     var command_buffers = try ArrayList(vk.CommandBuffer).initCapacity(allocator, buffer_count);
     const alloc_info = vk.CommandBufferAllocateInfo{
@@ -507,19 +510,24 @@ inline fn createCmdBuffers(allocator: *Allocator, ctx: Context, command_pool: vk
     return command_buffers;
 }
 
+/// create a command buffers with sizeof buffer_count, caller must destroy returned buffer with allocator
 inline fn createCmdBuffer(ctx: Context, command_pool: vk.CommandPool) !vk.CommandBuffer {
     const alloc_info = vk.CommandBufferAllocateInfo{
         .command_pool = command_pool,
         .level = vk.CommandBufferLevel.primary,
         .command_buffer_count = @intCast(u32, 1),
     };
+    var command_buffer: vk.CommandBuffer = undefined;
+    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, alloc_info, @ptrCast([*]vk.CommandBuffer, &command_buffer));
 
-    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, alloc_info, command_buffers.items.ptr);
+    return command_buffer;
 }
 
 
 /// record default commands to the command buffer
 fn recordGfxCmdBuffers(ctx: Context, pipeline: *GfxPipeline) !void {
+    const image = pipeline.subo.ubo.my_texture.image;
+    const image_use = texture.getImageTransitionBarrier(image, .general, .general);
     const clear_color = [_]vk.ClearColorValue{
         .{
             .float_32 = [_]f32{ 0.0, 0.0, 0.0, 1.0 },
@@ -532,6 +540,19 @@ fn recordGfxCmdBuffers(ctx: Context, pipeline: *GfxPipeline) !void {
         };
         try ctx.vkd.beginCommandBuffer(command_buffer, command_begin_info);
 
+        // make sure compute shader complet writer before beginning render pass
+        ctx.vkd.cmdPipelineBarrier(
+            command_buffer,
+            image_use.transition.src_stage,
+            image_use.transition.dst_stage,
+            vk.DependencyFlags{}, 
+            0,
+            undefined,
+            0,
+            undefined,
+            1,
+            @ptrCast([*]const vk.ImageMemoryBarrier, &image_use.barrier)
+        );
         const render_begin_info = vk.RenderPassBeginInfo{
             .render_pass = pipeline.render_pass,
             .framebuffer = pipeline.framebuffers.items[i],
@@ -541,8 +562,8 @@ fn recordGfxCmdBuffers(ctx: Context, pipeline: *GfxPipeline) !void {
         };
         ctx.vkd.cmdSetViewport(command_buffer, 0, pipeline.view.viewport.len, &pipeline.view.viewport);
         ctx.vkd.cmdSetScissor(command_buffer, 0, pipeline.view.scissor.len, &pipeline.view.scissor);
-        ctx.vkd.cmdBeginRenderPass(command_buffer, render_begin_info, vk.SubpassContents.@"inline");
         ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.graphics, pipeline.pipeline.*);
+        ctx.vkd.cmdBeginRenderPass(command_buffer, render_begin_info, vk.SubpassContents.@"inline");
 
         const buffer_offsets = [_]vk.DeviceSize{ 0 };
         ctx.vkd.cmdBindVertexBuffers(
@@ -553,7 +574,7 @@ fn recordGfxCmdBuffers(ctx: Context, pipeline: *GfxPipeline) !void {
             @ptrCast([*]const vk.DeviceSize, &buffer_offsets)
         );
         ctx.vkd.cmdBindIndexBuffer(command_buffer, pipeline.indices_buffer.buffer, 0, .uint32);
-        // TODO: RC: subo is not synced here 
+        // TODO: Race Condition: subo is not synced here 
         ctx.vkd.cmdBindDescriptorSets(
             command_buffer, 
             .graphics, 
@@ -583,19 +604,92 @@ pub const ComputePipeline = struct {
     in_flight_fence: vk.Fence,
     command_buffer: vk.CommandBuffer,
 
+    // TODO: move this out?
+    // compute pipelines *currently* should write to a texture
+    target_texture: *Texture,
+    target_descriptor_layout: vk.DescriptorSetLayout,
+    target_descriptor_pool: vk.DescriptorPool,
+    target_descriptor_set: vk.DescriptorSet,
+
     requested_rescale_pipeline: bool = false,
 
     // TODO: correctness if init fail, clean up resources created with errdefer
-    /// initialize a compute pipeline, caller must make sure to call deinit
-    pub fn init(allocator: *Allocator, ctx: Context, shader_path: []const u8) !Self {
+    /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
+    /// texture should have a lifetime atleast the lenght of comptute pipeline
+    pub fn init(allocator: *Allocator, ctx: Context, shader_path: []const u8, target_texture: *Texture) !Self {
         var self: Self = undefined; 
         self.allocator = allocator;
-       
+        self.target_texture = target_texture;
+
+        self.target_descriptor_layout = blk: {
+            const sampler_layout_binding = vk.DescriptorSetLayoutBinding{
+                .binding = 1,
+                .descriptor_type = .storage_image, // TODO: validate correct type
+                .descriptor_count = 1,
+                .stage_flags = .{ .compute_bit = true, },
+                .p_immutable_samplers = null,
+            };
+            const layout_bindings = [_]vk.DescriptorSetLayoutBinding{ sampler_layout_binding };
+            const layout_info = vk.DescriptorSetLayoutCreateInfo{
+                .flags = .{},
+                .binding_count = layout_bindings.len,
+                .p_bindings = @ptrCast([*]const vk.DescriptorSetLayoutBinding, &layout_bindings),
+            };
+            break :blk try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, layout_info, null);
+        };
+        errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
+
+        self.target_descriptor_pool = blk: {
+            const sampler_pool_size = vk.DescriptorPoolSize{
+                .@"type" = .storage_image,
+                .descriptor_count = 1,
+            };
+            const pool_info = vk.DescriptorPoolCreateInfo{
+                .flags = .{},
+                .max_sets = 1,
+                .pool_size_count = 1,
+                .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, &sampler_pool_size),
+            };
+            break :blk try ctx.vkd.createDescriptorPool(ctx.logical_device, pool_info, null);
+        };
+        errdefer ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.target_descriptor_pool, null);
+
+        const descriptor_set_alloc_info = vk.DescriptorSetAllocateInfo{
+            .descriptor_pool = self.target_descriptor_pool,
+            .descriptor_set_count = 1,
+            .p_set_layouts = @ptrCast([*]vk.DescriptorSetLayout, &self.target_descriptor_layout),
+        };
+        try ctx.vkd.allocateDescriptorSets(ctx.logical_device, descriptor_set_alloc_info, @ptrCast([*]vk.DescriptorSet, &self.target_descriptor_set));
+        {
+            const image_info = vk.DescriptorImageInfo{
+                .sampler = self.target_texture.sampler,
+                .image_view = self.target_texture.image_view,
+                .image_layout = .general,
+            };
+            const image_write_descriptor_set = vk.WriteDescriptorSet{
+                .dst_set = self.target_descriptor_set,
+                .dst_binding = 1,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_image,
+                .p_image_info = @ptrCast([*]const vk.DescriptorImageInfo, &image_info),
+                .p_buffer_info = undefined,
+                .p_texel_buffer_view = undefined,
+            };
+            ctx.vkd.updateDescriptorSets(
+                ctx.logical_device, 
+                1, 
+                @ptrCast([*]const vk.WriteDescriptorSet, &image_write_descriptor_set), 
+                0, 
+                undefined
+            );
+        }
+
         self.pipeline_layout = blk: {
             const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
                 .flags = .{},
-                .set_layout_count = 0, // TODO: see GfxPipeline
-                .p_set_layouts = undefined, 
+                .set_layout_count = 1, // TODO: see GfxPipeline
+                .p_set_layouts = @ptrCast([*]vk.DescriptorSetLayout, &self.target_descriptor_layout), 
                 .push_constant_range_count = 0,
                 .p_push_constant_ranges = undefined,
             };
@@ -646,29 +740,28 @@ pub const ComputePipeline = struct {
         self.in_flight_fence = try ctx.vkd.createFence(ctx.logical_device, fence_info, null);
 
         // TODO: we need to rescale pipeline dispatch 
-        self.command_buffer = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers);
-        errdefer self.command_buffer.deinit();
+        self.command_buffer = try createCmdBuffer(ctx, ctx.comp_cmd_pool);
+        errdefer ctx.vkd.freeCommandBuffers(ctx.logical_device, ctx.comp_cmd_pool, 1, @ptrCast([*]vk.CommandBuffer, &self.command_buffer));
 
-        // TODO: move to function
-        const command_begin_info = vk.CommandBufferBeginInfo{
-            .flags = .{},
-            .p_inheritance_info = null,
-        };
-        try ctx.vkd.beginCommandBuffer(self.command_buffer, command_begin_info);
-        try ctx.vkd.cmdDispatch(self.command_buffer, 20, 20, 1); // TODO: real values
-        try ctx.vkd.endCommandBuffer(self.command_buffer);
+        try self.recordCommands(ctx);
 
         return Self{
             .allocator = self.allocator,
             .pipeline_layout = self.pipeline_layout,
             .pipeline = self.pipeline,
             .in_flight_fence = self.in_flight_fence,
-            .command_buffers = self.command_buffers,
+            .command_buffer = self.command_buffer,
+            .target_texture = self.target_texture,
+            .target_descriptor_layout = self.target_descriptor_layout,
+            .target_descriptor_pool = self.target_descriptor_pool,
+            .target_descriptor_set = self.target_descriptor_set,
         };
     }
 
     // TODO: sync
-    pub fn compute(self: *Self, ctx: Context) !void {
+    pub fn compute(self: Self, ctx: Context) !void {
+        self.wait_idle(ctx);
+
         const wait_stages = vk.PipelineStageFlags{ .compute_shader_bit = true };
         const submit_info = vk.SubmitInfo{
             .wait_semaphore_count = 0,
@@ -683,7 +776,7 @@ pub const ComputePipeline = struct {
         _ = try ctx.vkd.resetFences(
             ctx.logical_device, 
             1, 
-            self.in_flight_fence
+            @ptrCast([*]const vk.Fence, &self.in_flight_fence)
         );
         try ctx.vkd.queueSubmit(
             ctx.compute_queue, 
@@ -695,7 +788,7 @@ pub const ComputePipeline = struct {
 
     /// Used to update the pipeline according to changes in the window spec
     /// This functions should only be called from the main thread (see glfwGetFramebufferSize)
-    fn rescalePipeline(self: *Self, allocator: *Allocator, ctx: Context) !void {
+    fn rescalePipeline(self: *Self, ctx: Context) !void {
         var window_size = try ctx.window_ptr.*.getFramebufferSize();
         while (window_size.width == 0 or window_size.height == 0) {
             window_size = try ctx.window_ptr.*.getFramebufferSize();
@@ -710,42 +803,37 @@ pub const ComputePipeline = struct {
 
         ctx.vkd.freeCommandBuffers(
             ctx.logical_device, 
-            ctx.gfx_cmd_pool, 
+            ctx.comp_cmd_pool, 
             1, 
             @ptrCast([*]const vk.CommandBuffer, &self.command_buffer)
         );
 
-        self.command_buffer = try createCmdBuffer(ctx, ctx.gfx_cmd_pool);
+        self.command_buffer = try createCmdBuffer(ctx, ctx.comp_cmd_pool);
 
-        const command_begin_info = vk.CommandBufferBeginInfo{
-            .flags = .{},
-            .p_inheritance_info = null,
-        };
-        try ctx.vkd.beginCommandBuffer(self.command_buffer, command_begin_info);
-        try ctx.vkd.cmdDispatch(self.command_buffer, 20, 20, 1); // TODO: real values
-        try ctx.vkd.endCommandBuffer(self.command_buffer);
-
+        try self.recordCommands(ctx);
     }
 
     pub fn deinit(self: Self, ctx: Context) void {
         self.wait_idle(ctx);
 
         ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fence, null);
-        self.command_buffers.deinit();
+        
+        ctx.vkd.freeCommandBuffers(ctx.logical_device, ctx.comp_cmd_pool, 1, @ptrCast([*]const vk.CommandBuffer, &self.command_buffer));
+        ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
+        ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.target_descriptor_pool, null);
 
         ctx.destroyPipelineLayout(self.pipeline_layout);
-        ctx.destroyRenderPass(self.render_pass);
         ctx.destroyPipeline(self.pipeline);
 
         self.allocator.destroy(self.pipeline);
     }
 
     /// Wait for fence to signal complete 
-    inline fn wait_idle(self: Self, ctx: Context) void {
+    pub inline fn wait_idle(self: Self, ctx: Context) void {
         _ = ctx.vkd.waitForFences(
             ctx.logical_device, 
             1,
-            @ptrCast([*]vk.Fence, &self.in_flight_fence),
+            @ptrCast([*]const vk.Fence, &self.in_flight_fence),
             vk.TRUE,
             std.math.maxInt(u64) 
         ) catch |err| {
@@ -753,5 +841,40 @@ pub const ComputePipeline = struct {
                 else => {}, // Discard print errors ...
             };
         };
+    }
+
+    inline fn recordCommands(self: Self, ctx: Context) !void {
+        const image_use = texture.getImageTransitionBarrier(self.target_texture.image, .general, .general);
+        const command_begin_info = vk.CommandBufferBeginInfo{
+            .flags = .{},
+            .p_inheritance_info = null,
+        };
+        try ctx.vkd.beginCommandBuffer(self.command_buffer, command_begin_info);
+        ctx.vkd.cmdBindPipeline(self.command_buffer, vk.PipelineBindPoint.compute, self.pipeline.*);
+        ctx.vkd.cmdPipelineBarrier(
+            self.command_buffer,
+            image_use.transition.src_stage,
+            image_use.transition.dst_stage,
+            vk.DependencyFlags{}, 
+            0,
+            undefined,
+            0,
+            undefined,
+            1,
+            @ptrCast([*]const vk.ImageMemoryBarrier, &image_use.barrier)
+        );
+        // bind target texture
+        ctx.vkd.cmdBindDescriptorSets(
+            self.command_buffer,
+            .compute,
+            self.pipeline_layout,
+            0, 
+            1,
+            @ptrCast([*]const vk.DescriptorSet, &self.target_descriptor_set),
+            0,
+            undefined
+        );
+        ctx.vkd.cmdDispatch(self.command_buffer, 20, 20, 1); // TODO: real values
+        try ctx.vkd.endCommandBuffer(self.command_buffer);
     }
 };

@@ -34,8 +34,7 @@ pub const Image = struct {
         defer allocator.destroy(use_path.ptr);
         // TODO: acount for any channel type
         if(desired_channels != DesiredChannels.STBI_rgb_alpha) {
-            const error_msg = std.fmt.comptimePrint("unimplemented channel type, expected {d}, found {d}", .{DesiredChannels.STBI_rgb_alpha, desired_channels});
-            @compileError(error_msg);
+            @compileError("unimplemented channel type, expected " ++ @tagName(DesiredChannels.STBI_rgb_alpha) ++ ", found " ++ @tagName(desired_channels));
         }
 
         var width: i32 = undefined;

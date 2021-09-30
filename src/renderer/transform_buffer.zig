@@ -5,9 +5,13 @@ const Allocator = std.mem.Allocator;
 const za = @import("zalgebra");
 const vk = @import("vulkan");
 
+const stbi = @import("stbi");
+
+const texture = @import("texture.zig");
+
 const Context = @import("context.zig").Context;
 const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
-const Texture = @import("texture.zig").Texture; // TODO: remove me
+const Texture = texture.Texture; // TODO: remove me
 
 // TODO: rename file
 
@@ -62,12 +66,33 @@ pub const UniformBuffer = struct {
         errdefer ctx.vkd.destroyDescriptorPool(ctx.logical_device, descriptor_pool, null);
 
         // TODO: should not be a member of this struct!
-        const my_texture = try Texture.from_file(ctx, allocator, ctx.gfx_cmd_pool, "../assets/images/grasstop.png"[0..]);
+        const stb_image = try stbi.Image.init(allocator, "../assets/images/grasstop.png"[0..], stbi.DesiredChannels.STBI_rgb_alpha);
+        defer stb_image.deinit();
+
+        // use graphics and compute index
+        // if they are the same, the we use that index
+        const indices = [_]u32{ ctx.queue_indices.graphics, ctx.queue_indices.compute };
+        const indices_len: usize = if (ctx.queue_indices.graphics == ctx.queue_indices.compute) 1 else 2;
+       
+        const PixelType = stbi.Pixel;
+        const TextureConfig = texture.Config(PixelType);
+        const texture_config = TextureConfig{
+            .data = stb_image.data, 
+            .width = @intCast(u32, stb_image.width),
+            .height = @intCast(u32, stb_image.height),
+            .usage = .{ .transfer_dst_bit = true, .sampled_bit = true, .storage_bit = true  },
+            .queue_family_indices = indices[0..indices_len],
+            // TODO: this format is a storage format, but causes loaded texture to become lighter,
+            // for compute texture we dont care about loading (transfer), so as long as computed output
+            // account for unorm we should be good. Remove transfer functionality when we dont need it!
+            .format = .r8g8b8a8_unorm, 
+        };
+        const my_texture = try Texture.init(ctx, ctx.gfx_cmd_pool, .general, PixelType, texture_config);
         errdefer my_texture.deinit(ctx);
 
         const descriptor_sets = try createDescriptorSet(
-            allocator, 
-            ctx, 
+            allocator,
+            ctx,
             buffer_count,
             descriptor_set_layout,
             descriptor_pool,
@@ -76,7 +101,7 @@ pub const UniformBuffer = struct {
             my_texture.image_view
         );
         errdefer allocator.destroy(descriptor_sets.ptr);
- 
+
         return Self{
             .allocator = allocator,
             .data = data,
@@ -226,7 +251,7 @@ pub inline fn createDescriptorSet(
             const image_info = vk.DescriptorImageInfo{
                 .sampler = sampler,
                 .image_view = image_view,
-                .image_layout = .shader_read_only_optimal,
+                .image_layout = .general, // TODO: support swapping between general and readonly optimal
             };
             const image_write_descriptor_set = vk.WriteDescriptorSet{
                 .dst_set = sets[i],
