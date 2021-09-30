@@ -5,5 +5,5 @@ layout(rgba32f, binding = 1) uniform image2D image;
 
 void main() {	
     // If we can get a white image to render, then we are set for now ...
-	imageStore(image, ivec2(gl_GlobalInvocationID.xy), vec4(sin(gl_GlobalInvocationID.x), cos(gl_GlobalInvocationID.y), 0, 0));
+	imageStore(image, ivec2(gl_GlobalInvocationID.xy), vec4(gl_GlobalInvocationID.x / 256.0, gl_GlobalInvocationID.y / 256.0, 0, 0));
 }

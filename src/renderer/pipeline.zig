@@ -874,7 +874,12 @@ pub const ComputePipeline = struct {
             0,
             undefined
         );
-        ctx.vkd.cmdDispatch(self.command_buffer, 20, 20, 1); // TODO: real values
+        // TODO: allow varying local thread size, error if x_ or y_ dispatch have decimal values
+        // compute shader has 16 thread in x and y, we calculate inverse at compile time 
+        const local_thread_factor: f32 = comptime blk: { break :blk 1.0 / 16.0; };
+        const x_dispatch = @intToFloat(f32, self.target_texture.image_extent.width) * local_thread_factor;
+        const y_dispatch = @intToFloat(f32, self.target_texture.image_extent.height) * local_thread_factor;
+        ctx.vkd.cmdDispatch(self.command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
         try ctx.vkd.endCommandBuffer(self.command_buffer);
     }
 };

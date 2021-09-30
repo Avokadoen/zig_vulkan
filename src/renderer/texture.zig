@@ -21,7 +21,9 @@ pub fn Config(comptime T: type) type {
 // TODO: send a texture
 pub const Texture = struct {
 
-    texture_size: vk.DeviceSize,
+    image_size: vk.DeviceSize,
+    image_extent: vk.Extent2D,
+
     image: vk.Image,
     image_view: vk.ImageView,
     image_memory: vk.DeviceMemory,
@@ -29,9 +31,14 @@ pub const Texture = struct {
     sampler: vk.Sampler,
 
     pub fn init(ctx: Context, command_pool: vk.CommandPool, comptime layout: vk.ImageLayout, comptime T: type, config: Config(T)) !Texture {
+
+        const image_extent = vk.Extent2D{ 
+            .width = config.width,
+            .height = config.height,
+        };
         // transfer texture data to gpu
-        const texture_size: vk.DeviceSize = @intCast(vk.DeviceSize, config.data.len * @sizeOf(T));
-        var staging_buffer = try GpuBufferMemory.init(ctx, texture_size, .{ .transfer_src_bit = true, }, .{ .host_visible_bit = true, .host_coherent_bit = true, });
+        const image_size: vk.DeviceSize = @intCast(vk.DeviceSize, config.data.len * @sizeOf(T));
+        var staging_buffer = try GpuBufferMemory.init(ctx, image_size, .{ .transfer_src_bit = true, }, .{ .host_visible_bit = true, .host_coherent_bit = true, });
         defer staging_buffer.deinit(ctx);
         try staging_buffer.transferData(ctx, T, config.data);
 
@@ -71,7 +78,7 @@ pub const Texture = struct {
         
         try ctx.vkd.bindImageMemory(ctx.logical_device, image, image_memory, 0);
         try transitionImageLayout(ctx, command_pool, image, .@"undefined", .transfer_dst_optimal);
-        try copyImageToBuffer(ctx, command_pool, image, staging_buffer.buffer, config.width, config.height);
+        try copyImageToBuffer(ctx, command_pool, image, staging_buffer.buffer, image_extent);
 
         try transitionImageLayout(ctx, command_pool, image, .transfer_dst_optimal, layout);
 
@@ -123,7 +130,8 @@ pub const Texture = struct {
         };
 
         return Texture {
-            .texture_size = texture_size,
+            .image_size = image_size,
+            .image_extent = image_extent,
             .image = image,
             .image_view = image_view,
             .image_memory = image_memory,
@@ -255,7 +263,7 @@ inline fn transitionImageLayout(ctx: Context, command_pool: vk.CommandPool, imag
 }
 
 // TODO: find a suitable location for this functio 
-inline fn copyImageToBuffer(ctx: Context, command_pool: vk.CommandPool, image: vk.Image, buffer: vk.Buffer, width: u32, height: u32) !void {
+inline fn copyImageToBuffer(ctx: Context, command_pool: vk.CommandPool, image: vk.Image, buffer: vk.Buffer, image_extent: vk.Extent2D) !void {
     const command_buffer = try vk_utils.beginOneTimeCommandBuffer(ctx, command_pool);
     {
         const region = vk.BufferImageCopy{
@@ -274,8 +282,8 @@ inline fn copyImageToBuffer(ctx: Context, command_pool: vk.CommandPool, image: v
                 .z = 0,
             },
             .image_extent = .{
-                .width = width,
-                .height = height,
+                .width = image_extent.width,
+                .height = image_extent.height,
                 .depth = 1,
             },
         };
