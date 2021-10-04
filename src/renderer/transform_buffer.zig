@@ -2,10 +2,13 @@ const std = @import("std");
 
 const Allocator = std.mem.Allocator;
 
-const za = @import("zalgebra");
 const vk = @import("vulkan");
 
 const stbi = @import("stbi");
+
+const zlm = @import("zlm");
+const Vec3 = zlm.specializeOn(f32).Vec3;
+const Mat4 = zlm.specializeOn(f32).Mat4;
 
 const texture = @import("texture.zig");
 
@@ -129,18 +132,16 @@ pub const UniformBuffer = struct {
 
 // TODO: multiply projection and view on CPU (model is instanced (TODO) and has to be applied on GPU)
 pub const TransformBuffer = struct {
-    model: za.Mat4, 
-    view: za.Mat4,
-    projection: za.Mat4,
+    model: Mat4, 
+    view: Mat4,
+    projection: Mat4,
 
     pub fn init(viewport: vk.Viewport) TransformBuffer {
         return .{
             .model = blk: {
-                const translate = za.Vec3.new(0.0, 0.0, 0.0);
-                const scale = za.Vec3.new(viewport.height, viewport.height, 0.0);
-                break :blk za.Mat4.fromTranslate(translate).scale(scale);
+                break :blk Mat4.createScale(viewport.height, viewport.height, 0.0);
             },
-            .view = za.Mat4.identity(),
+            .view = Mat4.identity,
             .projection = blk: {
                 const half_width  =  viewport.width  * 0.5;
                 const half_height =  viewport.height * 0.5;
@@ -150,7 +151,7 @@ pub const TransformBuffer = struct {
                 const top:    f32 = -half_height;
                 const z_near: f32 = -1000;
                 const z_far:  f32 =  1000;
-                break :blk za.Mat4.orthographic(left, right, bottom, top, z_near, z_far);
+                break :blk Mat4.createOrthogonal(left, right, bottom, top, z_near, z_far);
             },
         };
     }

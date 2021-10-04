@@ -1,14 +1,17 @@
 const vk = @import("vulkan");
-const za = @import("zalgebra");
+const zlm = @import("zlm");
+
+const Vec2 = zlm.specializeOn(f32).Vec2;
 
 const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
 const Context = @import("context.zig").Context;
 
+
 pub const Index = u32;
 
 pub const Vertex = struct {
-    pos: za.Vec2,
-    uv: za.Vec2,
+    pos: zlm.Vec2,
+    uv: zlm.Vec2,
 };
 
 /// caller must make sure to call deinit
@@ -16,20 +19,20 @@ pub const Vertex = struct {
 pub inline fn createDefaultVertexBuffer(ctx: Context, command_pool: vk.CommandPool) !GpuBufferMemory {
     var vertices = [_]Vertex{
         Vertex { 
-            .pos = za.Vec2.new(-0.5, -0.5), 
-            .uv = za.Vec2.new(0.0, 1.0) 
+            .pos = Vec2.new(-0.5, -0.5), 
+            .uv = Vec2.new(0.0, 1.0) 
         }, // bottom left
         Vertex { 
-            .pos = za.Vec2.new(0.5, -0.5), 
-            .uv = za.Vec2.new(1.0, 1.0) 
+            .pos = Vec2.new(0.5, -0.5), 
+            .uv = Vec2.new(1.0, 1.0) 
         }, // bottom right
         Vertex { 
-            .pos = za.Vec2.new(-0.5, 0.5), 
-            .uv = za.Vec2.new(0.0, 0.0) 
+            .pos = Vec2.new(-0.5, 0.5), 
+            .uv = Vec2.new(0.0, 0.0) 
         }, // top left
         Vertex { 
-            .pos = za.Vec2.new(0.5, 0.5), 
-            .uv = za.Vec2.new(1.0, 0.0) 
+            .pos = Vec2.new(0.5, 0.5), 
+            .uv = Vec2.new(1.0, 0.0) 
         }, // top right
     };
     const buffer_size = @sizeOf(Vertex) * vertices.len;

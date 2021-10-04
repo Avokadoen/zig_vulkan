@@ -6,7 +6,6 @@ const ArrayList = std.ArrayList;
 // Source: https://vulkan-tutorial.com
 
 const ecs = @import("ecs");
-const za = @import("zalgebra");
 const glfw = @import("glfw");
 
 const renderer = @import("renderer/renderer.zig");
@@ -109,10 +108,10 @@ pub fn main() anyerror!void {
 fn keyInputFn(event: input.KeyEvent) void {
     // TODO: only tell ubo desired change for easier deltatime and less racy code!
     switch(event.key) {
-        input.Key.w => subo.ubo.data.view.data[1][3] += 0.001,
-        input.Key.s => subo.ubo.data.view.data[1][3] -= 0.001,
-        input.Key.d => subo.ubo.data.view.data[0][3] -= 0.001,
-        input.Key.a => subo.ubo.data.view.data[0][3] += 0.001,
+        input.Key.w => subo.ubo.data.view.fields[1][3] += 0.001,
+        input.Key.s => subo.ubo.data.view.fields[1][3] -= 0.001,
+        input.Key.d => subo.ubo.data.view.fields[0][3] -= 0.001,
+        input.Key.a => subo.ubo.data.view.fields[0][3] += 0.001,
         input.Key.escape => window.setShouldClose(true) catch unreachable,
         else => { },
     }   

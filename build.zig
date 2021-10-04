@@ -188,7 +188,7 @@ pub fn build(b: *Builder) void {
     exe.addPackagePath("glfw", "deps/mach/glfw/src/main.zig");
 
     exe.addPackagePath("ecs", "deps/zig-ecs/src/ecs.zig");
-    exe.addPackagePath("zalgebra", "deps/zalgebra/src/main.zig");
+    exe.addPackagePath("zlm", "deps/zlm/zlm.zig");
     
     stbi.linkStep(b, exe);
 
