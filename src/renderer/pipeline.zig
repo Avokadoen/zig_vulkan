@@ -16,460 +16,474 @@ const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
 const Texture = texture.Texture;
 const Context = @import("context.zig").Context;
 
-pub const GfxPipeline = struct {
-    const Self = @This();
+pub fn Pipeline2D(comptime StorageType: type) type {
+    const SyncUniformBuffer = tb.SyncUniformBuffer(StorageType);
 
-    allocator: *Allocator,
+    return struct {
+        const Self = @This();
 
-    render_pass: vk.RenderPass,
-    pipeline_layout: vk.PipelineLayout,
-    pipeline: *vk.Pipeline,
-    framebuffers: ArrayList(vk.Framebuffer),
+        allocator: *Allocator,
 
-    // TODO: command buffers should be according to what we draw, and not directly related to pipeline?
-    command_buffers: ArrayList(vk.CommandBuffer),
+        render_pass: vk.RenderPass,
+        pipeline_layout: vk.PipelineLayout,
+        pipeline: *vk.Pipeline,
+        framebuffers: ArrayList(vk.Framebuffer),
 
-    image_available_s: ArrayList(vk.Semaphore),
-    renderer_finished_s: ArrayList(vk.Semaphore),
-    in_flight_fences: ArrayList(vk.Fence),
-    images_in_flight: ArrayList(vk.Fence),
+        // TODO: command buffers should be according to what we draw, and not directly related to pipeline?
+        command_buffers: ArrayList(vk.CommandBuffer),
 
-    requested_rescale_pipeline: bool = false,
+        image_available_s: ArrayList(vk.Semaphore),
+        renderer_finished_s: ArrayList(vk.Semaphore),
+        in_flight_fences: ArrayList(vk.Fence),
+        images_in_flight: ArrayList(vk.Fence),
 
-    // TODO seperate vertex/index buffers from pipeline
-    vertex_buffer: GpuBufferMemory,
-    indices_buffer: GpuBufferMemory,
+        requested_rescale_pipeline: bool = false,
 
-    sc_data: *const swapchain.Data,
-    view: *const swapchain.ViewportScissor,
-    subo: *const tb.SyncUniformBuffer,
+        // TODO seperate vertex/index buffers from pipeline
+        vertex_buffer: GpuBufferMemory,
+        indices_buffer: GpuBufferMemory,
 
-    // TODO: correctness if init fail, clean up resources created with errdefer
-    /// initialize a graphics pipe line, caller must make sure to call deinit
-    /// sc_data, view and ubo needs a lifetime that is atleast as long as created pipeline
-    pub fn init(allocator: *Allocator, ctx: Context, sc_data: *const swapchain.Data, view: *const swapchain.ViewportScissor, subo: *const tb.SyncUniformBuffer) !Self {
-        var self: Self = undefined; 
-        self.allocator = allocator;
-        self.sc_data = sc_data;
-        self.view = view;
-        self.subo = subo;
-       
-        self.pipeline_layout = blk: {
-            const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
-                .flags = .{},
-                .set_layout_count = 1,
-                .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &self.subo.ubo.descriptor_set_layout),
-                .push_constant_range_count = 0,
-                .p_push_constant_ranges = undefined,
-            };
-            break :blk try ctx.createPipelineLayout(pipeline_layout_info);
-        };
-        self.render_pass = try ctx.createRenderPass(sc_data.format);
-        self.pipeline = blk: {
-            const self_path = try std.fs.selfExePathAlloc(allocator);
-            defer ctx.allocator.destroy(self_path.ptr);
+        sc_data: *const swapchain.Data,
+        view: *const swapchain.ViewportScissor,
 
-            // TODO: function in context for shader stage creation?
-            const vert_code = blk1: {
-                const path = blk2: {
-                    const join_path = [_][]const u8{ self_path, "../../pass.vert.spv" };
-                    break :blk2 try std.fs.path.resolve(allocator, join_path[0..]);
+        subo: *SyncUniformBuffer,
+
+        // TODO: correctness if init fail, clean up resources created with errdefer
+        /// initialize a graphics pipe line, caller must make sure to call deinit
+        /// sc_data, view and ubo needs a lifetime that is atleast as long as created pipeline
+        pub fn init(allocator: *Allocator, ctx: Context, sc_data: *const swapchain.Data, view: *const swapchain.ViewportScissor, subo: *SyncUniformBuffer) !Self {
+            var self: Self = undefined; 
+            self.allocator = allocator;
+            self.sc_data = sc_data;
+            self.view = view;
+            self.subo = subo;
+        
+            self.pipeline_layout = blk: {
+                const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
+                    .flags = .{},
+                    .set_layout_count = 1,
+                    .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &self.subo.ubo.descriptor_set_layout),
+                    .push_constant_range_count = 0,
+                    .p_push_constant_ranges = undefined,
                 };
-                defer allocator.destroy(path.ptr);
-
-                break :blk1 try utils.readFile(allocator, path);
+                break :blk try ctx.createPipelineLayout(pipeline_layout_info);
             };
-            defer vert_code.deinit();
+            self.render_pass = try ctx.createRenderPass(sc_data.format);
+            self.pipeline = blk: {
+                const self_path = try std.fs.selfExePathAlloc(allocator);
+                defer ctx.allocator.destroy(self_path.ptr);
 
-            const vert_module = try ctx.createShaderModule(vert_code.items[0..]);
-            defer ctx.destroyShaderModule(vert_module);
+                // TODO: function in context for shader stage creation?
+                const vert_code = blk1: {
+                    const path = blk2: {
+                        const join_path = [_][]const u8{ self_path, "../../pass.vert.spv" };
+                        break :blk2 try std.fs.path.resolve(allocator, join_path[0..]);
+                    };
+                    defer allocator.destroy(path.ptr);
 
-            const vert_stage = vk.PipelineShaderStageCreateInfo{ 
-                .flags = .{}, 
-                .stage = .{ .vertex_bit = true }, 
-                .module = vert_module, 
-                .p_name = "main", 
-                .p_specialization_info = null 
-            };
-            const frag_code = blk1: {
-                const path = blk2: {
-                    const join_path = [_][]const u8{ self_path, "../../pass.frag.spv" };
-                    break :blk2 try std.fs.path.resolve(allocator, join_path[0..]);
+                    break :blk1 try utils.readFile(allocator, path);
                 };
-                defer allocator.destroy(path.ptr);
+                defer vert_code.deinit();
 
-                break :blk1 try utils.readFile(allocator, path);
+                const vert_module = try ctx.createShaderModule(vert_code.items[0..]);
+                defer ctx.destroyShaderModule(vert_module);
+
+                const vert_stage = vk.PipelineShaderStageCreateInfo{ 
+                    .flags = .{}, 
+                    .stage = .{ .vertex_bit = true }, 
+                    .module = vert_module, 
+                    .p_name = "main", 
+                    .p_specialization_info = null 
+                };
+                const frag_code = blk1: {
+                    const path = blk2: {
+                        const join_path = [_][]const u8{ self_path, "../../pass.frag.spv" };
+                        break :blk2 try std.fs.path.resolve(allocator, join_path[0..]);
+                    };
+                    defer allocator.destroy(path.ptr);
+
+                    break :blk1 try utils.readFile(allocator, path);
+                };
+                defer frag_code.deinit();
+
+                const frag_module = try ctx.createShaderModule(frag_code.items[0..]);
+                defer ctx.destroyShaderModule(frag_module);
+
+                const frag_stage = vk.PipelineShaderStageCreateInfo{ 
+                    .flags = .{}, 
+                    .stage = .{ .fragment_bit = true }, 
+                    .module = frag_module, 
+                    .p_name = "main", 
+                    .p_specialization_info = null 
+                };
+                const shader_stages_info = [_]vk.PipelineShaderStageCreateInfo{ vert_stage, frag_stage };
+
+                const binding_desription = vertex.getBindingDescriptors();
+                const attrib_desriptions = vertex.getAttribureDescriptions();
+                const vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
+                    .flags = .{},
+                    .vertex_binding_description_count = binding_desription.len,
+                    .p_vertex_binding_descriptions = &binding_desription,
+                    .vertex_attribute_description_count = attrib_desriptions.len,
+                    .p_vertex_attribute_descriptions = &attrib_desriptions,
+                };
+                const input_assembley_info = vk.PipelineInputAssemblyStateCreateInfo{
+                    .flags = .{},
+                    .topology = vk.PrimitiveTopology.triangle_list,
+                    .primitive_restart_enable = vk.FALSE,
+                };
+                
+                const viewport_info = vk.PipelineViewportStateCreateInfo{
+                    .flags = .{},
+                    .viewport_count = self.view.viewport.len,
+                    .p_viewports = @ptrCast(?[*]const vk.Viewport, &self.view.viewport),
+                    .scissor_count = self.view.scissor.len,
+                    .p_scissors = @ptrCast(?[*]const vk.Rect2D, &self.view.scissor),
+                };
+                const rasterizer_info = vk.PipelineRasterizationStateCreateInfo{
+                    .flags = .{},
+                    .depth_clamp_enable = vk.FALSE,
+                    .rasterizer_discard_enable = vk.FALSE,
+                    .polygon_mode = .fill,
+                    .cull_mode = .{ .back_bit = false }, // we should not need culling since we are currently rendering 2D
+                    .front_face = .counter_clockwise,
+                    .depth_bias_enable = vk.FALSE,
+                    .depth_bias_constant_factor = 0.0,
+                    .depth_bias_clamp = 0.0,
+                    .depth_bias_slope_factor = 0.0,
+                    .line_width = 1.0,
+                };
+                const multisample_info = vk.PipelineMultisampleStateCreateInfo{
+                    .flags = .{},
+                    .rasterization_samples = .{ .@"1_bit" = true },
+                    .sample_shading_enable = vk.FALSE,
+                    .min_sample_shading = 1.0,
+                    .p_sample_mask = null,
+                    .alpha_to_coverage_enable = vk.FALSE,
+                    .alpha_to_one_enable = vk.FALSE,
+                };
+                const color_blend_attachments = [_]vk.PipelineColorBlendAttachmentState{
+                    .{
+                        .blend_enable = vk.FALSE,
+                        .src_color_blend_factor = .one,
+                        .dst_color_blend_factor = .zero,
+                        .color_blend_op = .add,
+                        .src_alpha_blend_factor = .one,
+                        .dst_alpha_blend_factor = .zero,
+                        .alpha_blend_op = .add,
+                        .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
+                    },
+                };
+                const color_blend_state = vk.PipelineColorBlendStateCreateInfo{
+                    .flags = .{},
+                    .logic_op_enable = vk.FALSE,
+                    .logic_op = .copy,
+                    .attachment_count = color_blend_attachments.len,
+                    .p_attachments = @ptrCast([*]const vk.PipelineColorBlendAttachmentState, &color_blend_attachments),
+                    .blend_constants = [_]f32{0.0} ** 4,
+                };
+                const dynamic_states = [_]vk.DynamicState{
+                    .viewport,
+                    .scissor,
+                };
+                const dynamic_state_info = vk.PipelineDynamicStateCreateInfo{
+                    .flags = .{},
+                    .dynamic_state_count = dynamic_states.len,
+                    .p_dynamic_states = @ptrCast([*]const vk.DynamicState, &dynamic_states),
+                };
+                const pipeline_info = vk.GraphicsPipelineCreateInfo{
+                    .flags = .{},
+                    .stage_count = shader_stages_info.len,
+                    .p_stages = @ptrCast([*]const vk.PipelineShaderStageCreateInfo, &shader_stages_info),
+                    .p_vertex_input_state = &vertex_input_info,
+                    .p_input_assembly_state = &input_assembley_info,
+                    .p_tessellation_state = null,
+                    .p_viewport_state = &viewport_info,
+                    .p_rasterization_state = &rasterizer_info,
+                    .p_multisample_state = &multisample_info,
+                    .p_depth_stencil_state = null,
+                    .p_color_blend_state = &color_blend_state,
+                    .p_dynamic_state = &dynamic_state_info,
+                    .layout = self.pipeline_layout,
+                    .render_pass = self.render_pass,
+                    .subpass = 0,
+                    .base_pipeline_handle = .null_handle,
+                    .base_pipeline_index = -1,
+                };
+                break :blk try ctx.createGraphicsPipeline(allocator, pipeline_info);
             };
-            defer frag_code.deinit();
 
-            const frag_module = try ctx.createShaderModule(frag_code.items[0..]);
-            defer ctx.destroyShaderModule(frag_module);
+            self.framebuffers = try createFramebuffers(allocator, ctx, sc_data, self.render_pass);
+            errdefer self.framebuffers.deinit();
 
-            const frag_stage = vk.PipelineShaderStageCreateInfo{ 
-                .flags = .{}, 
-                .stage = .{ .fragment_bit = true }, 
-                .module = frag_module, 
-                .p_name = "main", 
-                .p_specialization_info = null 
+            self.vertex_buffer = try vertex.createDefaultVertexBuffer(ctx, ctx.gfx_cmd_pool);
+            errdefer self.vertex_buffer.deinit(ctx);
+
+            self.indices_buffer = try vertex.createDefaultIndicesBuffer(ctx, ctx.gfx_cmd_pool);
+            errdefer self.indices_buffer.deinit(ctx);
+
+            self.command_buffers = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers.items.len);
+            errdefer self.command_buffers.deinit();
+
+            self.images_in_flight = blk: {
+                var images_in_flight = try ArrayList(vk.Fence).initCapacity(allocator, sc_data.images.items.len);
+                var i: usize = 0;
+                while(i < images_in_flight.capacity) : (i += 1) {
+                    images_in_flight.appendAssumeCapacity(.null_handle);
+                }
+                break :blk images_in_flight;
             };
-            const shader_stages_info = [_]vk.PipelineShaderStageCreateInfo{ vert_stage, frag_stage };
+            errdefer self.images_in_flight.deinit();
 
-            const binding_desription = vertex.getBindingDescriptors();
-            const attrib_desriptions = vertex.getAttribureDescriptions();
-            const vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
+            self.image_available_s = try ArrayList(vk.Semaphore).initCapacity(allocator, constants.max_frames_in_flight);
+            errdefer self.image_available_s.deinit();
+
+            self.renderer_finished_s = try ArrayList(vk.Semaphore).initCapacity(allocator, constants.max_frames_in_flight);
+            errdefer self.renderer_finished_s.deinit();
+
+            self.in_flight_fences = try ArrayList(vk.Fence).initCapacity(allocator, constants.max_frames_in_flight);
+            errdefer self.in_flight_fences.deinit();
+
+            const semaphore_info = vk.SemaphoreCreateInfo{
                 .flags = .{},
-                .vertex_binding_description_count = binding_desription.len,
-                .p_vertex_binding_descriptions = &binding_desription,
-                .vertex_attribute_description_count = attrib_desriptions.len,
-                .p_vertex_attribute_descriptions = &attrib_desriptions,
             };
-            const input_assembley_info = vk.PipelineInputAssemblyStateCreateInfo{
-                .flags = .{},
-                .topology = vk.PrimitiveTopology.triangle_list,
-                .primitive_restart_enable = vk.FALSE,
+            const fence_info = vk.FenceCreateInfo{
+                .flags = .{ .signaled_bit = true, },
+            };
+            {
+                var i: usize = 0;
+                while (i < constants.max_frames_in_flight) : (i += 1) {
+                    const image_sem = try ctx.vkd.createSemaphore(ctx.logical_device, semaphore_info, null);
+                    self.image_available_s.appendAssumeCapacity(image_sem);
+
+                    const finish_sem = try ctx.vkd.createSemaphore(ctx.logical_device, semaphore_info, null);
+                    self.renderer_finished_s.appendAssumeCapacity(finish_sem);
+
+                    const fence = try ctx.vkd.createFence(ctx.logical_device, fence_info, null);
+                    self.in_flight_fences.appendAssumeCapacity(fence);
+                }
+            }
+
+            // self is sufficiently defined to record command buffer
+            try recordGfxCmdBuffers(ctx, StorageType, &self); 
+
+            return Self{
+                .allocator = self.allocator,
+                .view = self.view,
+                .render_pass = self.render_pass,
+                .pipeline_layout = self.pipeline_layout,
+                .pipeline = self.pipeline,
+                .framebuffers = self.framebuffers,
+                .command_buffers = self.command_buffers,
+                .image_available_s = self.image_available_s,
+                .renderer_finished_s = self.renderer_finished_s,
+                .in_flight_fences = self.in_flight_fences,
+                .images_in_flight = self.images_in_flight,
+                .vertex_buffer = self.vertex_buffer,
+                .indices_buffer = self.indices_buffer,
+                .sc_data = sc_data,
+                .subo = subo,
+            };
+        }
+
+        pub fn draw(self: *Self, ctx: Context) !void {
+            const state = struct {
+                var current_frame: usize = 0;
+            };
+            const max_u64 = std.math.maxInt(u64); 
+
+            const in_flight_fence_p = @ptrCast([*]const vk.Fence, &self.in_flight_fences.items[state.current_frame]);
+            _ = try ctx.vkd.waitForFences(
+                ctx.logical_device, 
+                1, 
+                in_flight_fence_p, 
+                vk.TRUE, 
+                max_u64
+            );
+
+            var image_index: u32 = undefined;
+            if (ctx.vkd.acquireNextImageKHR(
+                ctx.logical_device, 
+                self.sc_data.swapchain, 
+                max_u64, 
+                self.image_available_s.items[state.current_frame],
+                .null_handle
+            )) |ok| switch(ok.result) {
+                .success => {
+                    image_index = ok.image_index;
+                },
+                .suboptimal_khr => {
+                    self.requested_rescale_pipeline = true;
+                    image_index = ok.image_index;
+                },
+                else => {
+                    // TODO: handle timeout and not_ready
+                    return error.UnhandledAcquireResult;
+                }
+            } else |err| switch(err) {
+                error.OutOfDateKHR => {
+                    self.requested_rescale_pipeline = true;
+                    return;
+                },
+                else => {
+                    return err;
+                },
+            }
+            
+            if (self.images_in_flight.items[image_index] != .null_handle) {
+                const p_fence = @ptrCast([*]const vk.Fence, &self.images_in_flight.items[image_index]);
+                _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, p_fence, vk.TRUE, max_u64);
+            }
+            self.images_in_flight.items[image_index] = self.in_flight_fences.items[state.current_frame];
+
+            // if ubo is dirty
+            if (self.subo.ubo.is_dirty[image_index]) {
+                std.debug.print("transfer dirty data\n", .{});
+                // transfer data to gpu
+                var ubo_arr = [_]tb.UniformBuffer{self.subo.ubo.uniform_data};
+                // TODO: only transfer dirty part of data
+                try self.subo.ubo.uniform_buffers[image_index].transferData(ctx, tb.UniformBuffer, ubo_arr[0..]);
+                self.subo.ubo.is_dirty[image_index] = false;
+            }
+
+            {
+                const zlm = @import("zlm");
+                try self.subo.ubo.storage_buffers[image_index][0].transferData(ctx, zlm.Vec2, self.subo.ubo.storage_data.member_0[0..]);
+                try self.subo.ubo.storage_buffers[image_index][1].transferData(ctx, i32, self.subo.ubo.storage_data.member_1[0..]);
+            }
+        
+            const wait_stages = vk.PipelineStageFlags{ .color_attachment_output_bit = true };
+            const submit_info = vk.SubmitInfo{
+                .wait_semaphore_count = 1,
+                .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.image_available_s.items[state.current_frame]),
+                .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &wait_stages),
+                .command_buffer_count = 1,
+                .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers.items[image_index]),
+                .signal_semaphore_count = 1,
+                .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s.items[state.current_frame]),
+            };
+            const p_submit_info = @ptrCast([*]const vk.SubmitInfo, &submit_info);
+            _ = try ctx.vkd.resetFences(
+                ctx.logical_device, 
+                1, 
+                in_flight_fence_p
+            );
+            try ctx.vkd.queueSubmit(
+                ctx.graphics_queue, 
+                1, 
+                p_submit_info, 
+                self.in_flight_fences.items[state.current_frame]
+            );
+
+            const present_info = vk.PresentInfoKHR{
+                .wait_semaphore_count = 1,
+                .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s.items[state.current_frame]),
+                .swapchain_count = 1,
+                .p_swapchains = @ptrCast([*]const vk.SwapchainKHR, &self.sc_data.swapchain),
+                .p_image_indices = @ptrCast([*]const u32, &image_index),
+                .p_results = null,
             };
             
-            const viewport_info = vk.PipelineViewportStateCreateInfo{
-                .flags = .{},
-                .viewport_count = self.view.viewport.len,
-                .p_viewports = @ptrCast(?[*]const vk.Viewport, &self.view.viewport),
-                .scissor_count = self.view.scissor.len,
-                .p_scissors = @ptrCast(?[*]const vk.Rect2D, &self.view.scissor),
-            };
-            const rasterizer_info = vk.PipelineRasterizationStateCreateInfo{
-                .flags = .{},
-                .depth_clamp_enable = vk.FALSE,
-                .rasterizer_discard_enable = vk.FALSE,
-                .polygon_mode = .fill,
-                .cull_mode = .{ .back_bit = false }, // we should not need culling since we are currently rendering 2D
-                .front_face = .counter_clockwise,
-                .depth_bias_enable = vk.FALSE,
-                .depth_bias_constant_factor = 0.0,
-                .depth_bias_clamp = 0.0,
-                .depth_bias_slope_factor = 0.0,
-                .line_width = 1.0,
-            };
-            const multisample_info = vk.PipelineMultisampleStateCreateInfo{
-                .flags = .{},
-                .rasterization_samples = .{ .@"1_bit" = true },
-                .sample_shading_enable = vk.FALSE,
-                .min_sample_shading = 1.0,
-                .p_sample_mask = null,
-                .alpha_to_coverage_enable = vk.FALSE,
-                .alpha_to_one_enable = vk.FALSE,
-            };
-            const color_blend_attachments = [_]vk.PipelineColorBlendAttachmentState{
-                .{
-                    .blend_enable = vk.FALSE,
-                    .src_color_blend_factor = .one,
-                    .dst_color_blend_factor = .zero,
-                    .color_blend_op = .add,
-                    .src_alpha_blend_factor = .one,
-                    .dst_alpha_blend_factor = .zero,
-                    .alpha_blend_op = .add,
-                    .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
-                },
-            };
-            const color_blend_state = vk.PipelineColorBlendStateCreateInfo{
-                .flags = .{},
-                .logic_op_enable = vk.FALSE,
-                .logic_op = .copy,
-                .attachment_count = color_blend_attachments.len,
-                .p_attachments = @ptrCast([*]const vk.PipelineColorBlendAttachmentState, &color_blend_attachments),
-                .blend_constants = [_]f32{0.0} ** 4,
-            };
-            const dynamic_states = [_]vk.DynamicState{
-                .viewport,
-                .scissor,
-            };
-            const dynamic_state_info = vk.PipelineDynamicStateCreateInfo{
-                .flags = .{},
-                .dynamic_state_count = dynamic_states.len,
-                .p_dynamic_states = @ptrCast([*]const vk.DynamicState, &dynamic_states),
-            };
-            const pipeline_info = vk.GraphicsPipelineCreateInfo{
-                .flags = .{},
-                .stage_count = shader_stages_info.len,
-                .p_stages = @ptrCast([*]const vk.PipelineShaderStageCreateInfo, &shader_stages_info),
-                .p_vertex_input_state = &vertex_input_info,
-                .p_input_assembly_state = &input_assembley_info,
-                .p_tessellation_state = null,
-                .p_viewport_state = &viewport_info,
-                .p_rasterization_state = &rasterizer_info,
-                .p_multisample_state = &multisample_info,
-                .p_depth_stencil_state = null,
-                .p_color_blend_state = &color_blend_state,
-                .p_dynamic_state = &dynamic_state_info,
-                .layout = self.pipeline_layout,
-                .render_pass = self.render_pass,
-                .subpass = 0,
-                .base_pipeline_handle = .null_handle,
-                .base_pipeline_index = -1,
-            };
-            break :blk try ctx.createGraphicsPipeline(allocator, pipeline_info);
-        };
-
-        self.framebuffers = try createFramebuffers(allocator, ctx, sc_data, self.render_pass);
-        errdefer self.framebuffers.deinit();
-
-        self.vertex_buffer = try vertex.createDefaultVertexBuffer(ctx, ctx.gfx_cmd_pool);
-        errdefer self.vertex_buffer.deinit(ctx);
-
-        self.indices_buffer = try vertex.createDefaultIndicesBuffer(ctx, ctx.gfx_cmd_pool);
-        errdefer self.indices_buffer.deinit(ctx);
-
-        self.command_buffers = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers.items.len);
-        errdefer self.command_buffers.deinit();
-
-        self.images_in_flight = blk: {
-            var images_in_flight = try ArrayList(vk.Fence).initCapacity(allocator, sc_data.images.items.len);
-            var i: usize = 0;
-            while(i < images_in_flight.capacity) : (i += 1) {
-                images_in_flight.appendAssumeCapacity(.null_handle);
+            if (ctx.vkd.queuePresentKHR(ctx.present_queue, present_info)) |_| {
+                // TODO:
+            } else |_| {
+                // TODO:
             }
-            break :blk images_in_flight;
-        };
-        errdefer self.images_in_flight.deinit();
 
-        self.image_available_s = try ArrayList(vk.Semaphore).initCapacity(allocator, constants.max_frames_in_flight);
-        errdefer self.image_available_s.deinit();
-
-        self.renderer_finished_s = try ArrayList(vk.Semaphore).initCapacity(allocator, constants.max_frames_in_flight);
-        errdefer self.renderer_finished_s.deinit();
-
-        self.in_flight_fences = try ArrayList(vk.Fence).initCapacity(allocator, constants.max_frames_in_flight);
-        errdefer self.in_flight_fences.deinit();
-
-        const semaphore_info = vk.SemaphoreCreateInfo{
-            .flags = .{},
-        };
-        const fence_info = vk.FenceCreateInfo{
-            .flags = .{ .signaled_bit = true, },
-        };
-        {
-            var i: usize = 0;
-            while (i < constants.max_frames_in_flight) : (i += 1) {
-                const image_sem = try ctx.vkd.createSemaphore(ctx.logical_device, semaphore_info, null);
-                self.image_available_s.appendAssumeCapacity(image_sem);
-
-                const finish_sem = try ctx.vkd.createSemaphore(ctx.logical_device, semaphore_info, null);
-                self.renderer_finished_s.appendAssumeCapacity(finish_sem);
-
-                const fence = try ctx.vkd.createFence(ctx.logical_device, fence_info, null);
-                self.in_flight_fences.appendAssumeCapacity(fence);
+            if (self.requested_rescale_pipeline == true) {
+                try self.rescalePipeline(self.allocator, ctx);
             }
+
+            state.current_frame = (state.current_frame + 1) % constants.max_frames_in_flight;
         }
 
-        // self is sufficiently defined to record command buffer
-        try recordGfxCmdBuffers(ctx, &self); 
-
-        return Self{
-            .allocator = self.allocator,
-            .view = self.view,
-            .render_pass = self.render_pass,
-            .pipeline_layout = self.pipeline_layout,
-            .pipeline = self.pipeline,
-            .framebuffers = self.framebuffers,
-            .command_buffers = self.command_buffers,
-            .image_available_s = self.image_available_s,
-            .renderer_finished_s = self.renderer_finished_s,
-            .in_flight_fences = self.in_flight_fences,
-            .images_in_flight = self.images_in_flight,
-            .vertex_buffer = self.vertex_buffer,
-            .indices_buffer = self.indices_buffer,
-            .sc_data = sc_data,
-            .subo = subo,
-        };
-    }
-
-    pub fn draw(self: *Self, ctx: Context) !void {
-        const state = struct {
-            var current_frame: usize = 0;
-        };
-        const max_u64 = std.math.maxInt(u64); 
-
-        const in_flight_fence_p = @ptrCast([*]const vk.Fence, &self.in_flight_fences.items[state.current_frame]);
-        _ = try ctx.vkd.waitForFences(
-            ctx.logical_device, 
-            1, 
-            in_flight_fence_p, 
-            vk.TRUE, 
-            max_u64
-        );
-
-        var image_index: u32 = undefined;
-        if (ctx.vkd.acquireNextImageKHR(
-            ctx.logical_device, 
-            self.sc_data.swapchain, 
-            max_u64, 
-            self.image_available_s.items[state.current_frame],
-            .null_handle
-        )) |ok| switch(ok.result) {
-            .success => {
-                image_index = ok.image_index;
-            },
-            .suboptimal_khr => {
-                self.requested_rescale_pipeline = true;
-                image_index = ok.image_index;
-            },
-            else => {
-                // TODO: handle timeout and not_ready
-                return error.UnhandledAcquireResult;
+        /// Used to update the pipeline according to changes in the window spec
+        /// This functions should only be called from the main thread (see glfwGetFramebufferSize)
+        fn rescalePipeline(self: *Self, allocator: *Allocator, ctx: Context) !void {
+            var window_size = try ctx.window_ptr.*.getFramebufferSize();
+            while (window_size.width == 0 or window_size.height == 0) {
+                window_size = try ctx.window_ptr.*.getFramebufferSize();
+                try glfw.waitEvents();
             }
-        } else |err| switch(err) {
-            error.OutOfDateKHR => {
-                self.requested_rescale_pipeline = true;
-                return;
-            },
-            else => {
-                return err;
-            },
+
+            self.requested_rescale_pipeline = false;
+            // TODO: swapchain can be recreated without waiting and so waiting in the top of the 
+            //       functions is wasteful
+            // Wait for pipeline to become idle 
+            self.wait_idle(ctx);
+
+            // destroy outdated pipeline state
+            for (self.framebuffers.items) |framebuffer| {
+                ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
+            }
+            // TODO: this container can be reused in createFramebuffers!
+            self.framebuffers.deinit();
+            ctx.vkd.freeCommandBuffers(
+                ctx.logical_device, 
+                ctx.gfx_cmd_pool, 
+                @intCast(u32, self.command_buffers.items.len), 
+                @ptrCast([*]const vk.CommandBuffer, self.command_buffers.items.ptr)
+            );
+            // TODO: this container can be reused in createCmdBuffers!
+            self.command_buffers.deinit(); 
+            ctx.destroyRenderPass(self.render_pass);
+
+            // recreate renderpass and framebuffers
+            self.render_pass = try ctx.createRenderPass(self.sc_data.format);
+            self.framebuffers = try createFramebuffers(allocator, ctx, self.sc_data, self.render_pass);
+
+            self.command_buffers = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers.items.len);
+            try recordGfxCmdBuffers(ctx, StorageType, self);
         }
+
+        pub fn deinit(self: Self, ctx: Context) void {
+            self.wait_idle(ctx);
+            {
+                var i: usize = 0;
+                while (i < constants.max_frames_in_flight) : (i += 1) {
+                    ctx.vkd.destroySemaphore(ctx.logical_device, self.image_available_s.items[i], null);
+                    ctx.vkd.destroySemaphore(ctx.logical_device, self.renderer_finished_s.items[i], null);
+                    ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fences.items[i], null);
+                }
+            }
         
-        if (self.images_in_flight.items[image_index] != .null_handle) {
-            const p_fence = @ptrCast([*]const vk.Fence, &self.images_in_flight.items[image_index]);
-            _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, p_fence, vk.TRUE, max_u64);
-        }
-        self.images_in_flight.items[image_index] = self.in_flight_fences.items[state.current_frame];
+            self.vertex_buffer.deinit(ctx);
+            self.indices_buffer.deinit(ctx);
 
-        // TODO: only transfer if "dirty", only transfer section of buffer that changed
-        // one solution in order to simplify syncing: let pipeline hold ubo data, if any ubo is marked dirty
-        // the pipeline has responsibility over transfer at this point in code. This way syncing of transfer is
-        // implicitly handled ... of course this might be suboptimal when the data is not relevant for produced frame
-        var ubo_slice = [_]tb.TransformBuffer{self.subo.ubo.data};
-        try self.subo.ubo.buffers[image_index].transferData(ctx, tb.TransformBuffer, ubo_slice[0..]);
+            self.image_available_s.deinit();
+            self.renderer_finished_s.deinit();
+            self.in_flight_fences.deinit();
+            self.images_in_flight.deinit();
 
-        const wait_stages = vk.PipelineStageFlags{ .color_attachment_output_bit = true };
-        const submit_info = vk.SubmitInfo{
-            .wait_semaphore_count = 1,
-            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.image_available_s.items[state.current_frame]),
-            .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &wait_stages),
-            .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers.items[image_index]),
-            .signal_semaphore_count = 1,
-            .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s.items[state.current_frame]),
-        };
-        const p_submit_info = @ptrCast([*]const vk.SubmitInfo, &submit_info);
-        _ = try ctx.vkd.resetFences(
-            ctx.logical_device, 
-            1, 
-            in_flight_fence_p
-        );
-        try ctx.vkd.queueSubmit(
-            ctx.graphics_queue, 
-            1, 
-            p_submit_info, 
-            self.in_flight_fences.items[state.current_frame]
-        );
+            self.command_buffers.deinit();
 
-        const present_info = vk.PresentInfoKHR{
-            .wait_semaphore_count = 1,
-            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s.items[state.current_frame]),
-            .swapchain_count = 1,
-            .p_swapchains = @ptrCast([*]const vk.SwapchainKHR, &self.sc_data.swapchain),
-            .p_image_indices = @ptrCast([*]const u32, &image_index),
-            .p_results = null,
-        };
-        
-        if (ctx.vkd.queuePresentKHR(ctx.present_queue, present_info)) |_| {
-            // TODO:
-        } else |_| {
-            // TODO:
-        }
-
-        if (self.requested_rescale_pipeline == true) {
-            try self.rescalePipeline(self.allocator, ctx);
-        }
-
-        state.current_frame = (state.current_frame + 1) % constants.max_frames_in_flight;
-    }
-
-    /// Used to update the pipeline according to changes in the window spec
-    /// This functions should only be called from the main thread (see glfwGetFramebufferSize)
-    fn rescalePipeline(self: *Self, allocator: *Allocator, ctx: Context) !void {
-        var window_size = try ctx.window_ptr.*.getFramebufferSize();
-        while (window_size.width == 0 or window_size.height == 0) {
-            window_size = try ctx.window_ptr.*.getFramebufferSize();
-            try glfw.waitEvents();
-        }
-
-        self.requested_rescale_pipeline = false;
-        // TODO: swapchain can be recreated without waiting and so waiting in the top of the 
-        //       functions is wasteful
-        // Wait for pipeline to become idle 
-        self.wait_idle(ctx);
-
-        // destroy outdated pipeline state
-        for (self.framebuffers.items) |framebuffer| {
-            ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
-        }
-        // TODO: this container can be reused in createFramebuffers!
-        self.framebuffers.deinit();
-        ctx.vkd.freeCommandBuffers(
-            ctx.logical_device, 
-            ctx.gfx_cmd_pool, 
-            @intCast(u32, self.command_buffers.items.len), 
-            @ptrCast([*]const vk.CommandBuffer, self.command_buffers.items.ptr)
-        );
-        // TODO: this container can be reused in createCmdBuffers!
-        self.command_buffers.deinit(); 
-        ctx.destroyRenderPass(self.render_pass);
-
-        // recreate renderpass and framebuffers
-        self.render_pass = try ctx.createRenderPass(self.sc_data.format);
-        self.framebuffers = try createFramebuffers(allocator, ctx, self.sc_data, self.render_pass);
-
-        self.command_buffers = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers.items.len);
-        try recordGfxCmdBuffers(ctx, self);
-    }
-
-    pub fn deinit(self: Self, ctx: Context) void {
-        self.wait_idle(ctx);
-        {
-            var i: usize = 0;
-            while (i < constants.max_frames_in_flight) : (i += 1) {
-                ctx.vkd.destroySemaphore(ctx.logical_device, self.image_available_s.items[i], null);
-                ctx.vkd.destroySemaphore(ctx.logical_device, self.renderer_finished_s.items[i], null);
-                ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fences.items[i], null);
+            for (self.framebuffers.items) |framebuffer| {
+                ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
             }
+            self.framebuffers.deinit();
+
+            ctx.destroyPipelineLayout(self.pipeline_layout);
+            ctx.destroyRenderPass(self.render_pass);
+            ctx.destroyPipeline(self.pipeline);
+
+            self.allocator.destroy(self.pipeline);
         }
-       
-        self.vertex_buffer.deinit(ctx);
-        self.indices_buffer.deinit(ctx);
 
-        self.image_available_s.deinit();
-        self.renderer_finished_s.deinit();
-        self.in_flight_fences.deinit();
-        self.images_in_flight.deinit();
-
-        self.command_buffers.deinit();
-
-        for (self.framebuffers.items) |framebuffer| {
-            ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
-        }
-        self.framebuffers.deinit();
-
-        ctx.destroyPipelineLayout(self.pipeline_layout);
-        ctx.destroyRenderPass(self.render_pass);
-        ctx.destroyPipeline(self.pipeline);
-
-        self.allocator.destroy(self.pipeline);
-    }
-
-    inline fn wait_idle(self: Self, ctx: Context) void {
-        _ = ctx.vkd.waitForFences(
-            ctx.logical_device, 
-            @intCast(u32, self.in_flight_fences.items.len),
-            self.in_flight_fences.items.ptr,
-            vk.TRUE,
-            std.math.maxInt(u64) 
-        ) catch |err| {
-            ctx.writers.stderr.print("waiting for fence failed: {}", .{err}) catch |e| switch (e) {
-                else => {}, // Discard print errors ...
+        inline fn wait_idle(self: Self, ctx: Context) void {
+            _ = ctx.vkd.waitForFences(
+                ctx.logical_device, 
+                @intCast(u32, self.in_flight_fences.items.len),
+                self.in_flight_fences.items.ptr,
+                vk.TRUE,
+                std.math.maxInt(u64) 
+            ) catch |err| {
+                ctx.writers.stderr.print("waiting for fence failed: {}", .{err}) catch |e| switch (e) {
+                    else => {}, // Discard print errors ...
+                };
             };
-        };
-    }
-};
+        }
+    };
+}
 
 // TODO: move gfx specific functions inside the gfx scope
 
@@ -525,7 +539,7 @@ inline fn createCmdBuffer(ctx: Context, command_pool: vk.CommandPool) !vk.Comman
 
 
 /// record default commands to the command buffer
-fn recordGfxCmdBuffers(ctx: Context, pipeline: *GfxPipeline) !void {
+fn recordGfxCmdBuffers(ctx: Context, comptime StorageType: type, pipeline: *Pipeline2D(StorageType)) !void {
     const image = pipeline.subo.ubo.my_texture.image;
     const image_use = texture.getImageTransitionBarrier(image, .general, .general);
     const clear_color = [_]vk.ClearColorValue{

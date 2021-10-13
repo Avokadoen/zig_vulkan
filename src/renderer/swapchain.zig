@@ -52,7 +52,7 @@ pub const Data = struct {
     extent: vk.Extent2D,
     support_details: SupportDetails,
     
-
+    // create a swapchain data struct, caller must make sure to call deinit
     pub fn init(allocator: *Allocator, ctx: Context, old_swapchain: ?vk.SwapchainKHR) !Data {
         const support_details = try SupportDetails.init(allocator, ctx.vki, ctx.physical_device, ctx.surface);
         errdefer support_details.deinit();

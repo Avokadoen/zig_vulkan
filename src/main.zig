@@ -13,17 +13,12 @@ const swapchain = renderer.swapchain;
 const consts = renderer.consts;
 
 const input = @import("input.zig");
+const sprite = @import("sprite/sprite.zig");
 
 pub const application_name = "zig vulkan";
 
 // TODO: wrap this in renderer to make main seem simpler :^)
 var window: glfw.Window = undefined;
-var allocator: *Allocator = undefined;
-var ctx: renderer.Context = undefined;
-var sc_data: swapchain.Data = undefined;
-var view: swapchain.ViewportScissor = undefined;
-var subo: renderer.SyncUniformBuffer = undefined;
-var gfx_pipeline: renderer.GfxPipeline = undefined;
 
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
@@ -39,7 +34,7 @@ pub fn main() anyerror!void {
             }
         }
     }
-    allocator = if (consts.enable_validation_layers) &alloc.allocator else alloc;
+    const allocator = if (consts.enable_validation_layers) &alloc.allocator else alloc;
     
     // Initialize the library *
     try glfw.init();
@@ -61,38 +56,39 @@ pub fn main() anyerror!void {
 
     var writers = renderer.Writers{ .stdout = &stdout, .stderr = &stderr };
     // Construct our vulkan instance
-    ctx = try renderer.Context.init(allocator, application_name, &window, &writers);
+    const ctx = try renderer.Context.init(allocator, application_name, &window, &writers);
     defer ctx.deinit();
 
-    sc_data = try swapchain.Data.init(allocator, ctx, null);
-    defer sc_data.deinit(ctx);
+    // _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
+    // defer _ = window.setFramebufferSizeCallback(null);
 
-    view = swapchain.ViewportScissor.init(sc_data.extent);
-
-    subo = try renderer.SyncUniformBuffer.init(allocator, ctx, sc_data.images.items.len, view.viewport[0]);
-    defer subo.deinit(ctx);
-
-    gfx_pipeline = try renderer.GfxPipeline.init(allocator, ctx, &sc_data, &view, &subo);
-    defer gfx_pipeline.deinit(ctx);
-
-    _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
-    defer _ = window.setFramebufferSizeCallback(null);
-
-    // TODO: reenable
-    const comp_pipeline = try renderer.ComputePipeline.init(allocator, ctx, "../../comp.comp.spv", &subo.ubo.my_texture);
-    defer comp_pipeline.deinit(ctx);
+    // const comp_pipeline = try renderer.ComputePipeline.init(allocator, ctx, "../../comp.comp.spv", &subo.ubo.my_texture);
+    // defer comp_pipeline.deinit(ctx);
 
     // init input module with iput handler functions
     try input.init(window, keyInputFn, mouseBtnInputFn, cursorPosInputFn);
-    
+    defer input.deinit();
+
+
+    try sprite.init(allocator, ctx);
+    defer sprite.deinit();
+
+    const my_id = try sprite.loadTexture("../assets/images/grasstop.png"[0..]);
+    const my_id2 = try sprite.loadTexture("../assets/images/grasstop.png"[0..]);
+    const my_id3 = try sprite.loadTexture("../assets/images/texture.jpg"[0..]);
+    std.debug.print("TODO: REMOVE ME :) {d}, {d}, {d}\n", .{my_id, my_id2, my_id3});
+
+    try sprite.prepareDraw(2, 256 + 512, 512);
+
     // Loop until the user closes the window
     while (!window.shouldClose()) {
         {
             // Test compute
-            try comp_pipeline.compute(ctx);
+            // try comp_pipeline.compute(ctx);
 
             // Render here
-            try gfx_pipeline.draw(ctx);
+            // try gfx_pipeline.draw(ctx);
+            try sprite.draw();
 
             // Swap front and back buffers
             window.swapBuffers();
@@ -101,17 +97,15 @@ pub fn main() anyerror!void {
         // Poll for and process events
         try glfw.pollEvents();
     }
-
-    input.deinit();
 }
 
 fn keyInputFn(event: input.KeyEvent) void {
     // TODO: only tell ubo desired change for easier deltatime and less racy code!
     switch(event.key) {
-        input.Key.w => subo.ubo.data.view.fields[1][3] += 0.001,
-        input.Key.s => subo.ubo.data.view.fields[1][3] -= 0.001,
-        input.Key.d => subo.ubo.data.view.fields[0][3] -= 0.001,
-        input.Key.a => subo.ubo.data.view.fields[0][3] += 0.001,
+        input.Key.w => sprite.subo.ubo.translate_vertical(0.001),
+        input.Key.s => sprite.subo.ubo.translate_vertical(-0.001),
+        input.Key.d => sprite.subo.ubo.translate_horizontal(-0.001),
+        input.Key.a => sprite.subo.ubo.translate_horizontal(0.001),
         input.Key.escape => window.setShouldClose(true) catch unreachable,
         else => { },
     }   
@@ -126,25 +120,29 @@ fn cursorPosInputFn(event: input.CursorPosEvent) void {
     // std.debug.print("cursor pos: {s} {d}, {d} {s}\n", .{"{", event.x, event.y, "}"});
 }
 
-/// called by glfw to message pipelines about scaling
-/// this should never be registered before pipeline init
-fn framebufferSizeCallbackFn(_window: ?*glfw.RawWindow, width: c_int, height: c_int) callconv(.C) void {
-    _ = _window;
-    _ = width;
-    _ = height;
+// TODO: move to internal of pipeline
+// var sc_data: swapchain.Data = undefined;
+// var view: swapchain.ViewportScissor = undefined;
 
-    // recreate swapchain utilizing the old one 
-    const old_swapchain = sc_data;
-    sc_data = swapchain.Data.init(allocator, ctx, old_swapchain.swapchain) catch |err| {
-        std.debug.panic("failed to resize swapchain, err {any}", .{err}) catch unreachable;
-    };
-    old_swapchain.deinit(ctx);
+// /// called by glfw to message pipelines about scaling
+// /// this should never be registered before pipeline init
+// fn framebufferSizeCallbackFn(_window: ?*glfw.RawWindow, width: c_int, height: c_int) callconv(.C) void {
+//     _ = _window;
+//     _ = width;
+//     _ = height;
 
-    // recreate view from swapchain extent
-    view = swapchain.ViewportScissor.init(sc_data.extent);
+//     // recreate swapchain utilizing the old one 
+//     const old_swapchain = sc_data;
+//     sc_data = swapchain.Data.init(allocator, ctx, old_swapchain.swapchain) catch |err| {
+//         std.debug.panic("failed to resize swapchain, err {any}", .{err}) catch unreachable;
+//     };
+//     old_swapchain.deinit(ctx);
+
+//     // recreate view from swapchain extent
+//     view = swapchain.ViewportScissor.init(sc_data.extent);
     
-    gfx_pipeline.sc_data = &sc_data;
-    gfx_pipeline.view = &view;
-    gfx_pipeline.requested_rescale_pipeline = true;
-}
+//     gfx_pipeline.sc_data = &sc_data;
+//     gfx_pipeline.view = &view;
+//     gfx_pipeline.requested_rescale_pipeline = true;
+// }
 

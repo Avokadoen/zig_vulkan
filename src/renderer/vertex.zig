@@ -1,8 +1,6 @@
 const vk = @import("vulkan");
 const zlm = @import("zlm");
 
-const Vec2 = zlm.specializeOn(f32).Vec2;
-
 const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
 const Context = @import("context.zig").Context;
 
@@ -11,7 +9,6 @@ pub const Index = u32;
 
 pub const Vertex = struct {
     pos: zlm.Vec2,
-    uv: zlm.Vec2,
 };
 
 /// caller must make sure to call deinit
@@ -19,20 +16,16 @@ pub const Vertex = struct {
 pub inline fn createDefaultVertexBuffer(ctx: Context, command_pool: vk.CommandPool) !GpuBufferMemory {
     var vertices = [_]Vertex{
         Vertex { 
-            .pos = Vec2.new(-0.5, -0.5), 
-            .uv = Vec2.new(0.0, 1.0) 
+            .pos = zlm.Vec2.new(-0.5, -0.5), 
         }, // bottom left
         Vertex { 
-            .pos = Vec2.new(0.5, -0.5), 
-            .uv = Vec2.new(1.0, 1.0) 
+            .pos = zlm.Vec2.new(0.5, -0.5), 
         }, // bottom right
         Vertex { 
-            .pos = Vec2.new(-0.5, 0.5), 
-            .uv = Vec2.new(0.0, 0.0) 
+            .pos = zlm.Vec2.new(-0.5, 0.5), 
         }, // top left
         Vertex { 
-            .pos = Vec2.new(0.5, 0.5), 
-            .uv = Vec2.new(1.0, 0.0) 
+            .pos = zlm.Vec2.new(0.5, 0.5), 
         }, // top right
     };
     const buffer_size = @sizeOf(Vertex) * vertices.len;
@@ -93,19 +86,13 @@ pub inline fn getBindingDescriptors() [1]vk.VertexInputBindingDescription {
     };
 }
 
-pub inline fn getAttribureDescriptions() [2]vk.VertexInputAttributeDescription {
+pub inline fn getAttribureDescriptions() [1]vk.VertexInputAttributeDescription {
     return [_]vk.VertexInputAttributeDescription{
         .{
             .location = 0,
             .binding = 0,
             .format = .r32g32_sfloat,
             .offset = @offsetOf(Vertex, "pos"),
-        },
-        .{
-            .location = 1,
-            .binding = 0,
-            .format = .r32g32_sfloat,
-            .offset = @offsetOf(Vertex, "uv"),
         },
     };
 }
