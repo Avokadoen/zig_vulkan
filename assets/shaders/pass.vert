@@ -16,16 +16,16 @@ layout(binding = 2) buffer InstanstancePositionBuffer {
     vec2 data[];
 } ipos;
 
-layout(binding = 3) buffer InstanstanceUVBuffer {
+layout(binding = 3) buffer InstanstanceUVIndexBuffer {
     int data[];
 } iuv_index;
 
-layout(binding = 4) buffer UVBuffer {
+layout(binding = 4) buffer InstanstanceUVBuffer {
     vec2 data[];
-} uvb;
+} iuv;
 
 void main() {
-    outTexCoord = uvb.data[iuv_index.data[gl_InstanceIndex] * 4 + gl_VertexIndex % 4];
+    outTexCoord = iuv.data[iuv_index.data[gl_InstanceIndex] * 4 + gl_VertexIndex % 4];
 
     gl_Position = vec4(inPosition + ipos.data[gl_InstanceIndex], 0.0, 1.0) * (ubo.model * ubo.view * ubo.proj);
 }

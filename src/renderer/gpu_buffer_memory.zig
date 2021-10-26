@@ -65,7 +65,7 @@ pub const GpuBufferMemory = struct {
         into.len += self.len;
     }
 
-    pub fn transferData(self: *Self, ctx: Context, comptime T: type, data: []T) !void {
+    pub fn transferData(self: *Self, ctx: Context, comptime T: type, data: []const T) !void {
         const size = data.len * @sizeOf(T);
         if (self.size < size) {
             return error.InsufficentBufferSize; // size of buffer is less than data being transfered

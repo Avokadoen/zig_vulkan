@@ -7,6 +7,7 @@ const stbi = @import("stbi");
 
 const render = @import("../renderer/renderer.zig");
 const sc = render.swapchain;
+const descriptor = render.descriptor;
 
 const rectangle_pack = @import("rectangle_pack.zig");
 const Rectangle = rectangle_pack.Rectangle;
@@ -20,14 +21,7 @@ const pixelScanPack = rectangle_pack.pixelScanPack;
 //     screen_dimentions: za.Vec2,
 // };
 
-const MegaTexture = struct {
-    // TODO: consts
-    uvs: []render.UV,
-    image: stbi.Image
-};
-
 pub const TextureHandle = usize;
-
 
 // State/Variable declarations
 
@@ -40,40 +34,33 @@ const CallStateTypes = enum {
 /// used to verify correct use of the API
 fn CallState() type {
     comptime var state: CallStateTypes = .Dormant;
-    // TODO: comptime textures loaded
 
     return struct {
         const Self = @This();
 
-        pub fn get(self: Self) CallStateTypes {
+        pub fn getState(self: Self) CallStateTypes {
             _ = self;
             return state;
         }
 
-        pub fn require_init(self: Self) void {
+        pub fn requireInit(self: Self) void {
             _ = self;
             if (@enumToInt(state) <= @enumToInt(CallStateTypes.Dormant)) {
                 @compileError("sprite library not initialized");
             }
         }
 
-        pub fn init(self: Self) void {
+        pub fn setInit(self: Self) void {
             _ = self;
             state = .Initialized;
         }
 
-        pub fn prepare_draw(self: Self) void {
+        pub fn prepareDraw(self: Self) void {
             _ = self;
             state = .PreparedForDraw;
         }
     };
 }
-
-const BufferConfigType = render.UniformBufferDescriptorConfig(3, [_]type {[2]zlm.Vec2, [2]i32, [2*4]zlm.Vec2});
-const BufferStorage = BufferConfigType.GetStorageType();
-
-const Pipeline2D = render.Pipeline2D(BufferStorage); 
-const SyncUniformBuffer = render.SyncUniformBuffer(BufferStorage);
 
 var api_state: CallState() = .{};
 
@@ -82,14 +69,14 @@ var alloc: *Allocator = undefined;
 var images: std.ArrayList(stbi.Image) = undefined;
 var image_paths: std.StringArrayHashMap(TextureHandle) = undefined;
 
-var mega_texure: MegaTexture = undefined;
+var mega_image: stbi.Image = undefined;
 var uv_buffer: []zlm.Vec2 = undefined;
 
 var ctx: render.Context = undefined;
 var swapchain: sc.Data = undefined;
 var view: sc.ViewportScissor = undefined;
-pub var subo: SyncUniformBuffer = undefined; // TODO: not pub!!
-var pipeline: Pipeline2D = undefined;
+pub var subo: descriptor.SyncDescriptor = undefined; // TODO: not pub!!
+var pipeline: render.Pipeline2D = undefined;
 
 // End State/Variable declarations
 
@@ -98,10 +85,10 @@ var pipeline: Pipeline2D = undefined;
 /// initialize the sprite library, caller must make sure to call deinit
 pub fn init(allocator: *Allocator, context: render.Context) !void {
     comptime {
-        if (api_state.get() != CallStateTypes.Dormant) {
+        if (api_state.getState() != CallStateTypes.Dormant) {
             @compileError("sprite library already initialized");
         }
-        api_state.init();
+        api_state.setInit();
     } 
 
     alloc = allocator;
@@ -115,13 +102,13 @@ pub fn init(allocator: *Allocator, context: render.Context) !void {
 
 // deinitialize sprite library
 pub fn deinit() void {
-    comptime api_state.require_init();
+    comptime api_state.requireInit();
 
     pipeline.deinit(ctx);
     swapchain.deinit(ctx);
     subo.deinit(ctx);
 
-    switch (api_state.get()) {
+    switch (api_state.getState()) {
         .Dormant => unreachable, // see first line in function
         .Initialized => {
             // prepareDraw removes the image data, so we only have to clean it if we did not call prepareDraw
@@ -129,16 +116,16 @@ pub fn deinit() void {
             images.deinit();
         },
         .PreparedForDraw => {
-            // since sprite package made pixels, we manually destroy them instead of calling deinit
-            alloc.free(mega_texure.image.data);
-            alloc.free(mega_texure.uvs);
+            // since sprite package made pixels, we manually free them instead of calling mega_image.deinit()
+            alloc.free(mega_image.data);
+            alloc.free(uv_buffer);
         }
     }
 }
  
 /// loads a given texture using path relative to executable location. In the event of a success the returned value is an texture ID 
 pub fn loadTexture(path: []const u8) !TextureHandle {
-    comptime api_state.require_init();
+    comptime api_state.requireInit();
 
     if (image_paths.get(path)) |some| {
         return some;
@@ -157,10 +144,10 @@ pub fn loadTexture(path: []const u8) !TextureHandle {
 ///     - max_sprites:      max sprite instances
 ///     - mega_width:       the width of the resulting mega texture
 ///     - mega_height:      the height of the resulting mega texture
-pub fn prepareDraw(max_sprites: usize, mega_width: u32, mega_height: u32) !void {
+pub fn prepareDraw(sprite_pool_size: usize, mega_width: u32, mega_height: u32) !void {
     comptime {
-        api_state.require_init();
-        api_state.prepare_draw();
+        api_state.requireInit();
+        api_state.prepareDraw();
     }
 
     // calculate position of each image registered
@@ -174,7 +161,13 @@ pub fn prepareDraw(max_sprites: usize, mega_width: u32, mega_height: u32) !void 
 
     // place each image in the mega texture
     var mega_data = try alloc.alloc(stbi.Pixel, mega_width * mega_height);
-    var mega_uvs = try alloc.alloc(render.UV, images.items.len);
+    
+    const UV = struct {
+        min: zlm.Vec2,
+        max: zlm.Vec2,
+    };
+    var mega_uvs = try alloc.alloc(UV, images.items.len);
+    defer alloc.free(mega_uvs);
 
     for (rectangles) |rect| {
         // the max image index components 
@@ -216,46 +209,50 @@ pub fn prepareDraw(max_sprites: usize, mega_width: u32, mega_height: u32) !void 
     image_paths.deinit();
     images.deinit();
 
-    mega_texure.uvs = mega_uvs;
-    mega_texure.image = stbi.Image{
+    mega_image = stbi.Image{
         .width = @intCast(i32, mega_width),
         .height = @intCast(i32, mega_height),
         .channels = 3,
         .data = mega_data,
     };
-
     
-    // test config
-    var config = BufferConfigType{
-        .shader_data = .{
-            .member_0 = .{ zlm.Vec2.new(0, 0), zlm.Vec2.new(3, 4) },
-            .member_1 = .{ 1, 0 },
-            .member_2 = undefined,
-        },
+    // TODO: because of a ?bug? in zig, we can't send stack memory into a stack memory struct
+    // so we alloc some temp memory instead. Change this to a simply stack definition when that works
+    const buffer_sizes = try alloc.alloc(u64, 3);
+    defer alloc.free(buffer_sizes);
+    buffer_sizes[0] = @sizeOf(zlm.Vec2) * sprite_pool_size;
+    buffer_sizes[1] = @sizeOf(c_int) * sprite_pool_size;
+    buffer_sizes[2] = @sizeOf(zlm.Vec2) * 4 * sprite_pool_size;
+    
+    const desc_config = render.descriptor.Config{
         .allocator = alloc,
         .ctx = ctx, 
-        .image = mega_texure.image, 
-        .uvs = mega_texure.uvs, 
-        .buffer_count = swapchain.images.items.len, 
+        .image = mega_image, 
         .viewport = view.viewport[0],
+        .buffer_count = swapchain.images.items.len, 
+        .buffer_sizes = buffer_sizes,
     };
-    _ = max_sprites; // TODO: instead of making user define this, use comptime to count unique textures loaded here
+    subo = try descriptor.SyncDescriptor.init(desc_config);
+    pipeline = try render.Pipeline2D.init(alloc, ctx, &swapchain, &view, &subo);
+
+    uv_buffer = try alloc.alloc(zlm.Vec2, 4 * images.items.len);
     for (mega_uvs) |uv, i| {
         const index = i * 4;
-        config.shader_data.member_2[index]   = zlm.Vec2.new(uv.min.x, uv.max.y);
-        config.shader_data.member_2[index+1] = uv.max;
-        config.shader_data.member_2[index+2] = uv.min;
-        config.shader_data.member_2[index+3] = zlm.Vec2.new(uv.max.x, uv.min.y);
+        uv_buffer[index]   = zlm.Vec2.new(uv.min.x, uv.max.y);
+        uv_buffer[index+1] = uv.max;
+        uv_buffer[index+2] = uv.min;
+        uv_buffer[index+3] = zlm.Vec2.new(uv.max.x, uv.min.y);
     }
 
-    // prepare pipeline for rendering
-    subo = try SyncUniformBuffer.init(config);
-    pipeline = try Pipeline2D.init(alloc, ctx, &swapchain, &view, &subo);
-
-    // transfer uv pool to GPU
+    // initialize GPU test data
+    var test_pos = [_]zlm.Vec2{ zlm.Vec2.new(0, 0), zlm.Vec2.new(0.5, 0.2) };
+    var test_uv_index = [_]c_int{ 0, 1 };
     var i: usize = 0;
+    const wat = uv_buffer;
     while (i < swapchain.images.items.len) : (i += 1) {
-        try subo.ubo.storage_buffers[i][2].transferData(ctx, zlm.Vec2, subo.ubo.storage_data.member_2[0..]);
+        try subo.ubo.storage_buffers[i][0].transferData(ctx, zlm.Vec2, test_pos[0..]);
+        try subo.ubo.storage_buffers[i][1].transferData(ctx, c_int, test_uv_index[0..]);
+        try subo.ubo.storage_buffers[i][2].transferData(ctx, zlm.Vec2, wat[0..]);
     }
 }
 

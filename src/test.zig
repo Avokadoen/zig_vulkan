@@ -1,3 +1,3 @@
 test {
-    _ = @import("sprite/image_merge.zig");
+    _ = @import("sprite/rectangle_pack.zig");
 }
