@@ -1,4 +1,6 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+
 const testing = std.testing;
 const c = @import("c.zig");
 
@@ -18,19 +20,8 @@ pub const Image = struct {
 
     // TODO: remove comptime keyword -> // TODO: acount for any channel type
     /// Caller must call deinit to free created memory
-    pub fn init(allocator: *std.mem.Allocator, path: []const u8, comptime desired_channels: DesiredChannels) !Image {
-        var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-        const exe_path = try std.fs.selfExeDirPath(buf[0..]);
-        const path_segments = [_][]const u8{exe_path, path};
-
-        var zig_use_path = try std.fs.path.join(allocator, path_segments[0..]);
-        defer allocator.destroy(zig_use_path.ptr);
-
-        const sep = [_]u8{ std.fs.path.sep };
-        _ = std.mem.replace(u8, zig_use_path, "\\", sep[0..], zig_use_path);
-        _ = std.mem.replace(u8, zig_use_path, "/", sep[0..], zig_use_path);
-
-        const use_path = try std.cstr.addNullByte(allocator, zig_use_path);
+    pub fn from_file(allocator: *Allocator, path: []const u8, comptime desired_channels: DesiredChannels) !Image {
+        const use_path = try buildPath(allocator, path);
         defer allocator.destroy(use_path.ptr);
         // TODO: acount for any channel type
         if(desired_channels != DesiredChannels.STBI_rgb_alpha) {
@@ -51,6 +42,10 @@ pub const Image = struct {
 
         const char_slice = std.mem.span(char_ptr);
         const aligned_char_ptr = std.mem.alignPointer(char_slice.ptr, 8);
+        if (aligned_char_ptr == null) {
+            return error.PtrNotAligned; // failed to align char pointer as a pixel pointer 
+        }
+
         const pixel_ptr = @ptrCast([*]Pixel, aligned_char_ptr);
 
         const pixel_count = @intCast(usize, width * height);
@@ -60,6 +55,18 @@ pub const Image = struct {
             .channels = channels,
             .data = pixel_ptr[0..pixel_count],
         };
+    }
+
+    pub fn save_write_png(self: Image, allocator: *Allocator, path: []const u8) !void {
+        const use_path = try buildPath(allocator, path);
+        defer allocator.destroy(use_path.ptr);
+
+        const char_ptr = std.mem.alignPointer(self.data.ptr, 2);
+        
+        const error_code = c.stbi_write_png(use_path.ptr, self.width, self.height, self.channels + 1, char_ptr, self.width * (self.channels + 1));
+        if (error_code == 0) {
+            return error.StbiFailedWrite; // error scenarios are not specified :(
+        }
     }
 
     pub fn deinit(self: Image) void {
@@ -76,6 +83,21 @@ pub const DesiredChannels = enum(c_int) {
     STBI_rgb        = 3,
     STBI_rgb_alpha  = 4
 };
+
+inline fn buildPath(allocator: *Allocator, path: []const u8) ![:0]u8 {
+    var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const exe_path = try std.fs.selfExeDirPath(buf[0..]);
+    const path_segments = [_][]const u8{exe_path, path};
+
+    var zig_use_path = try std.fs.path.join(allocator, path_segments[0..]);
+    defer allocator.destroy(zig_use_path.ptr);
+
+    const sep = [_]u8{ std.fs.path.sep };
+    _ = std.mem.replace(u8, zig_use_path, "\\", sep[0..], zig_use_path);
+    _ = std.mem.replace(u8, zig_use_path, "/", sep[0..], zig_use_path);
+
+    return try std.cstr.addNullByte(allocator, zig_use_path);
+}
 
 // TODO: TESTING!
 // test "basic add functionality" {

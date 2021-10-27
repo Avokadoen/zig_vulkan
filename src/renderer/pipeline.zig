@@ -8,7 +8,7 @@ const glfw = @import("glfw");
 const constants = @import("consts.zig");
 const swapchain = @import("swapchain.zig");
 const vertex = @import("vertex.zig");
-const tb = @import("transform_buffer.zig");
+const descriptor = @import("descriptor.zig");
 const utils = @import("../utils.zig");
 const texture = @import("texture.zig");
 
@@ -16,7 +16,7 @@ const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
 const Texture = texture.Texture;
 const Context = @import("context.zig").Context;
 
-pub const GfxPipeline = struct {
+pub const Pipeline2D = struct {
     const Self = @This();
 
     allocator: *Allocator,
@@ -42,23 +42,27 @@ pub const GfxPipeline = struct {
 
     sc_data: *const swapchain.Data,
     view: *const swapchain.ViewportScissor,
-    subo: *const tb.SyncUniformBuffer,
+
+    sync_descript: *descriptor.SyncDescriptor,
+
+    instance_count: u32,
 
     // TODO: correctness if init fail, clean up resources created with errdefer
     /// initialize a graphics pipe line, caller must make sure to call deinit
     /// sc_data, view and ubo needs a lifetime that is atleast as long as created pipeline
-    pub fn init(allocator: *Allocator, ctx: Context, sc_data: *const swapchain.Data, view: *const swapchain.ViewportScissor, subo: *const tb.SyncUniformBuffer) !Self {
+    pub fn init(allocator: *Allocator, ctx: Context, sc_data: *const swapchain.Data, instance_count: u32, view: *const swapchain.ViewportScissor, sync_descript: *descriptor.SyncDescriptor) !Self {
         var self: Self = undefined; 
         self.allocator = allocator;
         self.sc_data = sc_data;
         self.view = view;
-        self.subo = subo;
-       
+        self.sync_descript = sync_descript;
+        self.instance_count = instance_count;
+    
         self.pipeline_layout = blk: {
             const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
                 .flags = .{},
                 .set_layout_count = 1,
-                .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &self.subo.ubo.descriptor_set_layout),
+                .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &self.sync_descript.ubo.descriptor_set_layout),
                 .push_constant_range_count = 0,
                 .p_push_constant_ranges = undefined,
             };
@@ -278,11 +282,14 @@ pub const GfxPipeline = struct {
             .vertex_buffer = self.vertex_buffer,
             .indices_buffer = self.indices_buffer,
             .sc_data = sc_data,
-            .subo = subo,
+            .sync_descript = sync_descript,
+            .instance_count = self.instance_count,
         };
     }
 
-    pub fn draw(self: *Self, ctx: Context) !void {
+    /// Draw using pipeline
+    /// transfer_fn can be used to update any relevant storage buffers or other data that are timing critical according to rendering
+    pub fn draw(self: *Self, ctx: Context, transfer_fn: fn(image_index: usize) void) !void {
         const state = struct {
             var current_frame: usize = 0;
         };
@@ -332,13 +339,17 @@ pub const GfxPipeline = struct {
         }
         self.images_in_flight.items[image_index] = self.in_flight_fences.items[state.current_frame];
 
-        // TODO: only transfer if "dirty", only transfer section of buffer that changed
-        // one solution in order to simplify syncing: let pipeline hold ubo data, if any ubo is marked dirty
-        // the pipeline has responsibility over transfer at this point in code. This way syncing of transfer is
-        // implicitly handled ... of course this might be suboptimal when the data is not relevant for produced frame
-        var ubo_slice = [_]tb.TransformBuffer{self.subo.ubo.data};
-        try self.subo.ubo.buffers[image_index].transferData(ctx, tb.TransformBuffer, ubo_slice[0..]);
+        // if ubo is dirty
+        if (self.sync_descript.ubo.is_dirty[image_index]) {
+            // transfer data to gpu
+            var ubo_arr = [_]descriptor.Uniform{self.sync_descript.ubo.uniform_data};
+            // TODO: only transfer dirty part of data
+            try self.sync_descript.ubo.uniform_buffers[image_index].transferData(ctx, descriptor.Uniform, ubo_arr[0..]);
+            self.sync_descript.ubo.is_dirty[image_index] = false;
+        }
 
+        transfer_fn(image_index);
+    
         const wait_stages = vk.PipelineStageFlags{ .color_attachment_output_bit = true };
         const submit_info = vk.SubmitInfo{
             .wait_semaphore_count = 1,
@@ -433,7 +444,7 @@ pub const GfxPipeline = struct {
                 ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fences.items[i], null);
             }
         }
-       
+    
         self.vertex_buffer.deinit(ctx);
         self.indices_buffer.deinit(ctx);
 
@@ -453,22 +464,22 @@ pub const GfxPipeline = struct {
         ctx.destroyRenderPass(self.render_pass);
         ctx.destroyPipeline(self.pipeline);
 
-        self.allocator.destroy(self.pipeline);
-    }
+            self.allocator.destroy(self.pipeline);
+        }
 
-    inline fn wait_idle(self: Self, ctx: Context) void {
-        _ = ctx.vkd.waitForFences(
-            ctx.logical_device, 
-            @intCast(u32, self.in_flight_fences.items.len),
-            self.in_flight_fences.items.ptr,
-            vk.TRUE,
-            std.math.maxInt(u64) 
-        ) catch |err| {
-            ctx.writers.stderr.print("waiting for fence failed: {}", .{err}) catch |e| switch (e) {
-                else => {}, // Discard print errors ...
+        inline fn wait_idle(self: Self, ctx: Context) void {
+            _ = ctx.vkd.waitForFences(
+                ctx.logical_device, 
+                @intCast(u32, self.in_flight_fences.items.len),
+                self.in_flight_fences.items.ptr,
+                vk.TRUE,
+                std.math.maxInt(u64) 
+            ) catch |err| {
+                ctx.writers.stderr.print("waiting for fence failed: {}", .{err}) catch |e| switch (e) {
+                    else => {}, // Discard print errors
+                };
             };
-        };
-    }
+        }
 };
 
 // TODO: move gfx specific functions inside the gfx scope
@@ -525,8 +536,8 @@ inline fn createCmdBuffer(ctx: Context, command_pool: vk.CommandPool) !vk.Comman
 
 
 /// record default commands to the command buffer
-fn recordGfxCmdBuffers(ctx: Context, pipeline: *GfxPipeline) !void {
-    const image = pipeline.subo.ubo.my_texture.image;
+fn recordGfxCmdBuffers(ctx: Context, pipeline: *Pipeline2D) !void {
+    const image = pipeline.sync_descript.ubo.my_texture.image;
     const image_use = texture.getImageTransitionBarrier(image, .general, .general);
     const clear_color = [_]vk.ClearColorValue{
         .{
@@ -574,18 +585,24 @@ fn recordGfxCmdBuffers(ctx: Context, pipeline: *GfxPipeline) !void {
             @ptrCast([*]const vk.DeviceSize, &buffer_offsets)
         );
         ctx.vkd.cmdBindIndexBuffer(command_buffer, pipeline.indices_buffer.buffer, 0, .uint32);
-        // TODO: Race Condition: subo is not synced here 
+        // TODO: Race Condition: sync_descript is not synced here 
         ctx.vkd.cmdBindDescriptorSets(
             command_buffer, 
             .graphics, 
             pipeline.pipeline_layout, 
             0, 
             1, 
-            @ptrCast([*]const vk.DescriptorSet, &pipeline.subo.ubo.descriptor_sets[i]),
+            @ptrCast([*]const vk.DescriptorSet, &pipeline.sync_descript.ubo.descriptor_sets[i]),
             0,
             undefined
         );
-        ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, 1, 0, 0, 0);
+        
+        // TODO temp solution: call draw for each instance, should be cheap since this is a cmd buffer ?
+        //                     alternative solution: fill indices buffer with duplicate data according to instance_count
+        var j: u32 = 0;
+        while (j < pipeline.instance_count) : (j += 1) {
+            ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, 1, 0, 0, j);
+        }
         ctx.vkd.cmdEndRenderPass(command_buffer);
         try ctx.vkd.endCommandBuffer(command_buffer);
     }

@@ -7,23 +7,19 @@ const ArrayList = std.ArrayList;
 
 const ecs = @import("ecs");
 const glfw = @import("glfw");
+const zlm = @import("zlm");
 
 const renderer = @import("renderer/renderer.zig");
 const swapchain = renderer.swapchain;
 const consts = renderer.consts;
 
 const input = @import("input.zig");
+const sprite = @import("sprite/sprite.zig");
 
 pub const application_name = "zig vulkan";
 
 // TODO: wrap this in renderer to make main seem simpler :^)
 var window: glfw.Window = undefined;
-var allocator: *Allocator = undefined;
-var ctx: renderer.Context = undefined;
-var sc_data: swapchain.Data = undefined;
-var view: swapchain.ViewportScissor = undefined;
-var subo: renderer.SyncUniformBuffer = undefined;
-var gfx_pipeline: renderer.GfxPipeline = undefined;
 
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
@@ -39,7 +35,7 @@ pub fn main() anyerror!void {
             }
         }
     }
-    allocator = if (consts.enable_validation_layers) &alloc.allocator else alloc;
+    const allocator = if (consts.enable_validation_layers) &alloc.allocator else alloc;
     
     // Initialize the library *
     try glfw.init();
@@ -53,7 +49,7 @@ pub fn main() anyerror!void {
     try glfw.Window.hint(glfw.client_api, glfw.no_api);
 
     // Create a windowed mode window 
-    window = glfw.Window.create(800, 600, application_name, null, null) catch |err| {
+    window = glfw.Window.create(1200, 800, application_name, null, null) catch |err| {
         try stderr.print("failed to create window, code: {}", .{err});
         return;
     };
@@ -61,38 +57,86 @@ pub fn main() anyerror!void {
 
     var writers = renderer.Writers{ .stdout = &stdout, .stderr = &stderr };
     // Construct our vulkan instance
-    ctx = try renderer.Context.init(allocator, application_name, &window, &writers);
+    const ctx = try renderer.Context.init(allocator, application_name, &window, &writers);
     defer ctx.deinit();
 
-    sc_data = try swapchain.Data.init(allocator, ctx, null);
-    defer sc_data.deinit(ctx);
+    // _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
+    // defer _ = window.setFramebufferSizeCallback(null);
 
-    view = swapchain.ViewportScissor.init(sc_data.extent);
-
-    subo = try renderer.SyncUniformBuffer.init(allocator, ctx, sc_data.images.items.len, view.viewport[0]);
-    defer subo.deinit(ctx);
-
-    gfx_pipeline = try renderer.GfxPipeline.init(allocator, ctx, &sc_data, &view, &subo);
-    defer gfx_pipeline.deinit(ctx);
-
-    _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
-    defer _ = window.setFramebufferSizeCallback(null);
-
-    // TODO: reenable
-    const comp_pipeline = try renderer.ComputePipeline.init(allocator, ctx, "../../comp.comp.spv", &subo.ubo.my_texture);
-    defer comp_pipeline.deinit(ctx);
+    // const comp_pipeline = try renderer.ComputePipeline.init(allocator, ctx, "../../comp.comp.spv", &subo.ubo.my_texture);
+    // defer comp_pipeline.deinit(ctx);
 
     // init input module with iput handler functions
     try input.init(window, keyInputFn, mouseBtnInputFn, cursorPosInputFn);
-    
+    defer input.deinit();
+
+    try sprite.init(allocator, ctx);
+    defer sprite.deinit();
+
+    var my_textures: [4]sprite.TextureHandle = undefined;
+    my_textures[0] = try sprite.loadTexture("../assets/images/grasstop.png"[0..]);
+    my_textures[1] = try sprite.loadTexture("../assets/images/texture.jpg"[0..]);
+    my_textures[2] = try sprite.loadTexture("../assets/images/bern_burger.jpg"[0..]);
+    my_textures[3] = try sprite.loadTexture("../assets/images/tiger.jpg"[0..]);
+
+    var my_sprites: [1024]sprite.Sprite = undefined; 
+    {   
+        const window_size = try window.getSize();
+        const windowf = @intToFloat(f32, window_size.height);
+        const size = @intToFloat(f32, window_size.height) / @as(f32, 32);
+        const scale = zlm.Vec2.new(size, size);
+
+        const pos_offset_x = (windowf - scale.x) * 0.5;
+        const pos_offset_y = (windowf - scale.y) * 0.5;
+
+        var rotation: f32 = 0;
+        var i: f32 = 0;
+        while (i < 32) : (i += 1) {
+            var j: f32 = 0;
+            while (j < 32) : (j += 1) {
+                const index = i * 32 + j;
+                const texture_handle = my_textures[@floatToInt(usize, @mod(index, 4))];
+                const pos = zlm.Vec2.new(
+                    j * scale.x - pos_offset_x,
+                    i * scale.y - pos_offset_y
+                );
+                my_sprites[@floatToInt(usize, index)] = try sprite.createSprite(texture_handle, pos, rotation, scale);
+                rotation += 10;
+                rotation = @mod(rotation, 360);
+            }
+        }
+    }
+
+    try sprite.prepareDraw();
+
+    var sin_wave: f32 = 0;
+    var sin_dir: f32 = 1;
+
+    var prev_frame = std.time.milliTimestamp();
     // Loop until the user closes the window
     while (!window.shouldClose()) {
+        const current_frame = std.time.milliTimestamp();
+        const delta_time = @intToFloat(f64, current_frame - prev_frame) / @as(f64, std.time.ms_per_s);
+
+        sin_wave += @floatCast(f32, delta_time);
+        sin_dir = if (@mod(sin_wave, 2) < 1) 1 else -1;
+        const offset = std.math.sin(sin_wave);
+        for(my_sprites) |my_sprite| {
+            var pos = my_sprite.getPosition();
+            pos.x += offset * sin_dir * 0.2;
+            my_sprite.setPosition(pos);
+
+            var rot = my_sprite.getRotation();
+            rot += @floatCast(f32, 60 * delta_time);
+            my_sprite.setRotation(rot);
+        }
         {
             // Test compute
-            try comp_pipeline.compute(ctx);
+            // try comp_pipeline.compute(ctx);
 
             // Render here
-            try gfx_pipeline.draw(ctx);
+            // try gfx_pipeline.draw(ctx);
+            try sprite.draw();
 
             // Swap front and back buffers
             window.swapBuffers();
@@ -100,18 +144,17 @@ pub fn main() anyerror!void {
 
         // Poll for and process events
         try glfw.pollEvents();
+        prev_frame = current_frame;
     }
-
-    input.deinit();
 }
 
 fn keyInputFn(event: input.KeyEvent) void {
     // TODO: only tell ubo desired change for easier deltatime and less racy code!
     switch(event.key) {
-        input.Key.w => subo.ubo.data.view.fields[1][3] += 0.001,
-        input.Key.s => subo.ubo.data.view.fields[1][3] -= 0.001,
-        input.Key.d => subo.ubo.data.view.fields[0][3] -= 0.001,
-        input.Key.a => subo.ubo.data.view.fields[0][3] += 0.001,
+        input.Key.w => sprite.subo.?.ubo.translate_vertical(0.001),
+        input.Key.s => sprite.subo.?.ubo.translate_vertical(-0.001),
+        input.Key.d => sprite.subo.?.ubo.translate_horizontal(-0.001),
+        input.Key.a => sprite.subo.?.ubo.translate_horizontal(0.001),
         input.Key.escape => window.setShouldClose(true) catch unreachable,
         else => { },
     }   
@@ -126,25 +169,29 @@ fn cursorPosInputFn(event: input.CursorPosEvent) void {
     // std.debug.print("cursor pos: {s} {d}, {d} {s}\n", .{"{", event.x, event.y, "}"});
 }
 
-/// called by glfw to message pipelines about scaling
-/// this should never be registered before pipeline init
-fn framebufferSizeCallbackFn(_window: ?*glfw.RawWindow, width: c_int, height: c_int) callconv(.C) void {
-    _ = _window;
-    _ = width;
-    _ = height;
+// TODO: move to internal of pipeline
+// var sc_data: swapchain.Data = undefined;
+// var view: swapchain.ViewportScissor = undefined;
 
-    // recreate swapchain utilizing the old one 
-    const old_swapchain = sc_data;
-    sc_data = swapchain.Data.init(allocator, ctx, old_swapchain.swapchain) catch |err| {
-        std.debug.panic("failed to resize swapchain, err {any}", .{err}) catch unreachable;
-    };
-    old_swapchain.deinit(ctx);
+// /// called by glfw to message pipelines about scaling
+// /// this should never be registered before pipeline init
+// fn framebufferSizeCallbackFn(_window: ?*glfw.RawWindow, width: c_int, height: c_int) callconv(.C) void {
+//     _ = _window;
+//     _ = width;
+//     _ = height;
 
-    // recreate view from swapchain extent
-    view = swapchain.ViewportScissor.init(sc_data.extent);
+//     // recreate swapchain utilizing the old one 
+//     const old_swapchain = sc_data;
+//     sc_data = swapchain.Data.init(allocator, ctx, old_swapchain.swapchain) catch |err| {
+//         std.debug.panic("failed to resize swapchain, err {any}", .{err}) catch unreachable;
+//     };
+//     old_swapchain.deinit(ctx);
+
+//     // recreate view from swapchain extent
+//     view = swapchain.ViewportScissor.init(sc_data.extent);
     
-    gfx_pipeline.sc_data = &sc_data;
-    gfx_pipeline.view = &view;
-    gfx_pipeline.requested_rescale_pipeline = true;
-}
+//     gfx_pipeline.sc_data = &sc_data;
+//     gfx_pipeline.view = &view;
+//     gfx_pipeline.requested_rescale_pipeline = true;
+// }
 

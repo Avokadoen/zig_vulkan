@@ -65,15 +65,16 @@ pub const GpuBufferMemory = struct {
         into.len += self.len;
     }
 
-    pub fn transferData(self: *Self, ctx: Context, comptime T: type, data: []T) !void {
+    pub fn transferData(self: *Self, ctx: Context, comptime T: type, data: []const T) !void {
+        // transfer empty data slice is NOP
+        if (data.len <= 0) return;
+    
         const size = data.len * @sizeOf(T);
         if (self.size < size) {
             return error.InsufficentBufferSize; // size of buffer is less than data being transfered
         }
         var gpu_mem = try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, size, .{});
         const gpu_mem_start = @ptrToInt(gpu_mem);
-        // YOLO
-        @setRuntimeSafety(false);
         for (data) |element, i| {
             const mem_location = gpu_mem_start + i * @sizeOf(T);
             var ptr = @intToPtr(*T, mem_location);
