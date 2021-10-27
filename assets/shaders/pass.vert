@@ -29,6 +29,6 @@ layout(binding = 5) buffer InstanstanceUVBuffer {
 
 void main() {
     outTexCoord = iuv.data[iuv_index.data[gl_InstanceIndex] * 4 + gl_VertexIndex % 4];
-    vec2 position = (inPosition + ipos.data[gl_InstanceIndex]) * iscale.data[gl_InstanceIndex];
+    vec2 position = inPosition * iscale.data[gl_InstanceIndex] + ipos.data[gl_InstanceIndex];
     gl_Position = vec4(position, 0.0, 1.0) * (ubo.view * ubo.proj);
 }
