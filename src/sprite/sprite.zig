@@ -12,7 +12,6 @@ const descriptor = render.descriptor;
 
 const rectangle_pack = @import("rectangle_pack.zig");
 
-
 // Type declarations
 
 // const Camera = struct {
@@ -65,7 +64,7 @@ const SpriteDB = struct {
 
         try self.positions.append(zlm.Vec2.zero);
         try self.scales.append(zlm.Vec2.zero);
-        try self.uv_indices.append(zlm.Vec2.zero);
+        try self.uv_indices.append(0);
 
         self.len += 1;
         return newId;
@@ -233,9 +232,14 @@ pub fn loadTexture(path: []const u8) !TextureHandle {
 
 /// Create a new sprite 
 pub fn createSprite(texture: TextureHandle, pos: zlm.Vec2, size: zlm.Vec2) !Sprite {
-    comptime api_state.requireInit();
+    comptime {
+        api_state.requireInit();
+        if (api_state.getState() == .PreparedForDraw) {
+            @compileError("can't create sprite after prepare"); // a temporary restriction :(
+        }
+    }
 
-    const new_sprite = try Sprite.init(sprite_db);
+    const new_sprite = try Sprite.init(&sprite_db);
     new_sprite.setPos(pos);
     new_sprite.setSize(size);
     new_sprite.setTexture(texture);
@@ -273,8 +277,7 @@ pub fn deinit() void {
 }
 
 /// Prepare API to do draw calls 
-pub fn prepareDraw(extra_sprite_pool: usize) !void {
-    _ = extra_sprite_pool;  // TODO: use!
+pub fn prepareDraw() !void {
     comptime {
         api_state.requireInit();
         api_state.prepareDraw();
@@ -363,7 +366,7 @@ pub fn prepareDraw(extra_sprite_pool: usize) !void {
         .buffer_sizes = buffer_sizes[0..],
     };
     subo = try descriptor.SyncDescriptor.init(desc_config);
-    pipeline = try render.Pipeline2D.init(alloc, ctx, &swapchain, &view, &subo.?);
+    pipeline = try render.Pipeline2D.init(alloc, ctx, &swapchain, @intCast(u32, sprite_db.len), &view, &subo.?);
 
     try sprite_db.generateUvBuffer(mega_uvs);
   

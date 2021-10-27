@@ -7,6 +7,7 @@ const ArrayList = std.ArrayList;
 
 const ecs = @import("ecs");
 const glfw = @import("glfw");
+const zlm = @import("zlm");
 
 const renderer = @import("renderer/renderer.zig");
 const swapchain = renderer.swapchain;
@@ -48,7 +49,7 @@ pub fn main() anyerror!void {
     try glfw.Window.hint(glfw.client_api, glfw.no_api);
 
     // Create a windowed mode window 
-    window = glfw.Window.create(800, 600, application_name, null, null) catch |err| {
+    window = glfw.Window.create(1200, 800, application_name, null, null) catch |err| {
         try stderr.print("failed to create window, code: {}", .{err});
         return;
     };
@@ -72,14 +73,36 @@ pub fn main() anyerror!void {
     try sprite.init(allocator, ctx);
     defer sprite.deinit();
 
-    const my_id1 = try sprite.loadTexture("../assets/images/grasstop.png"[0..]);
-    const my_id2 = try sprite.loadTexture("../assets/images/grasstop.png"[0..]);
-    const my_id3 = try sprite.loadTexture("../assets/images/texture.jpg"[0..]);
-    const my_id4 = try sprite.loadTexture("../assets/images/bern_burger.jpg"[0..]);
-    const my_id5 = try sprite.loadTexture("../assets/images/tiger.jpg"[0..]);
-    std.debug.print("TODO: REMOVE ME :) {d}, {d}, {d}, {d}, {d}\n", .{my_id1, my_id2, my_id3, my_id4, my_id5});
+    var my_textures: [4]sprite.TextureHandle = undefined;
+    my_textures[0] = try sprite.loadTexture("../assets/images/grasstop.png"[0..]);
+    my_textures[1] = try sprite.loadTexture("../assets/images/texture.jpg"[0..]);
+    my_textures[2] = try sprite.loadTexture("../assets/images/bern_burger.jpg"[0..]);
+    my_textures[3] = try sprite.loadTexture("../assets/images/tiger.jpg"[0..]);
 
-    try sprite.prepareDraw(6);
+    var my_sprites: [1024]sprite.Sprite = undefined; 
+    {   
+        const window_size = try window.getSize();
+        const windowf = @intToFloat(f32, window_size.height);
+        const size = @intToFloat(f32, window_size.height) / @as(f32, 32);
+        const scale = zlm.Vec2.new(size, size);
+
+        var i: f32 = 0;
+        while (i < 32) : (i += 1) {
+            var j: f32 = 0;
+            while (j < 32) : (j += 1) {
+                const index = i * 32 + j;
+                const texture_handle = my_textures[@floatToInt(usize, @mod(index, 4))];
+                const pos = zlm.Vec2.new(
+                    j * scale.x - (windowf - scale.x) * 0.5,
+                    i * scale.y - (windowf - scale.y) * 0.5
+                );
+                std.debug.print("pox: {d}, {d}\n", .{pos.x, pos.y});
+                my_sprites[@floatToInt(usize, index)] = try sprite.createSprite(texture_handle, pos, scale);
+            }
+        }
+    }
+
+    try sprite.prepareDraw();
 
     // Loop until the user closes the window
     while (!window.shouldClose()) {

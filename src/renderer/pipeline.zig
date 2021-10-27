@@ -45,15 +45,18 @@ pub const Pipeline2D = struct {
 
     sync_descript: *descriptor.SyncDescriptor,
 
+    instance_count: u32,
+
     // TODO: correctness if init fail, clean up resources created with errdefer
     /// initialize a graphics pipe line, caller must make sure to call deinit
     /// sc_data, view and ubo needs a lifetime that is atleast as long as created pipeline
-    pub fn init(allocator: *Allocator, ctx: Context, sc_data: *const swapchain.Data, view: *const swapchain.ViewportScissor, sync_descript: *descriptor.SyncDescriptor) !Self {
+    pub fn init(allocator: *Allocator, ctx: Context, sc_data: *const swapchain.Data, instance_count: u32, view: *const swapchain.ViewportScissor, sync_descript: *descriptor.SyncDescriptor) !Self {
         var self: Self = undefined; 
         self.allocator = allocator;
         self.sc_data = sc_data;
         self.view = view;
         self.sync_descript = sync_descript;
+        self.instance_count = instance_count;
     
         self.pipeline_layout = blk: {
             const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
@@ -280,6 +283,7 @@ pub const Pipeline2D = struct {
             .indices_buffer = self.indices_buffer,
             .sc_data = sc_data,
             .sync_descript = sync_descript,
+            .instance_count = self.instance_count,
         };
     }
 
@@ -595,8 +599,13 @@ fn recordGfxCmdBuffers(ctx: Context, pipeline: *Pipeline2D) !void {
             0,
             undefined
         );
-        ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, 1, 0, 0, 1);
-        ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, 1, 0, 0, 0);
+        
+        // TODO temp solution: call draw for each instance, should be cheap since this is a cmd buffer ?
+        //                     alternative solution: fill indices buffer with duplicate data according to instance_count
+        var j: u32 = 0;
+        while (j < pipeline.instance_count) : (j += 1) {
+            ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, 1, 0, 0, j);
+        }
         ctx.vkd.cmdEndRenderPass(command_buffer);
         try ctx.vkd.endCommandBuffer(command_buffer);
     }
