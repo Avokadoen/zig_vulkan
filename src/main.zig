@@ -76,9 +76,11 @@ pub fn main() anyerror!void {
     const my_id = try sprite.loadTexture("../assets/images/grasstop.png"[0..]);
     const my_id2 = try sprite.loadTexture("../assets/images/grasstop.png"[0..]);
     const my_id3 = try sprite.loadTexture("../assets/images/texture.jpg"[0..]);
-    std.debug.print("TODO: REMOVE ME :) {d}, {d}, {d}\n", .{my_id, my_id2, my_id3});
+    const my_id4 = try sprite.loadTexture("../assets/images/bern_burger.jpg"[0..]);
+    const my_id5 = try sprite.loadTexture("../assets/images/tiger.jpg"[0..]);
+    std.debug.print("TODO: REMOVE ME :) {d}, {d}, {d}, {d}, {d}\n", .{my_id, my_id2, my_id3, my_id4, my_id5});
 
-    try sprite.prepareDraw(2, 256 + 512, 512);
+    try sprite.prepareDraw(6);
 
     // Loop until the user closes the window
     while (!window.shouldClose()) {
@@ -102,10 +104,10 @@ pub fn main() anyerror!void {
 fn keyInputFn(event: input.KeyEvent) void {
     // TODO: only tell ubo desired change for easier deltatime and less racy code!
     switch(event.key) {
-        input.Key.w => sprite.subo.ubo.translate_vertical(0.001),
-        input.Key.s => sprite.subo.ubo.translate_vertical(-0.001),
-        input.Key.d => sprite.subo.ubo.translate_horizontal(-0.001),
-        input.Key.a => sprite.subo.ubo.translate_horizontal(0.001),
+        input.Key.w => sprite.subo.?.ubo.translate_vertical(0.001),
+        input.Key.s => sprite.subo.?.ubo.translate_vertical(-0.001),
+        input.Key.d => sprite.subo.?.ubo.translate_horizontal(-0.001),
+        input.Key.a => sprite.subo.?.ubo.translate_horizontal(0.001),
         input.Key.escape => window.setShouldClose(true) catch unreachable,
         else => { },
     }   

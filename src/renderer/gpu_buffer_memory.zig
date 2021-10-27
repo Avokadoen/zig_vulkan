@@ -66,6 +66,9 @@ pub const GpuBufferMemory = struct {
     }
 
     pub fn transferData(self: *Self, ctx: Context, comptime T: type, data: []const T) !void {
+        // transfer empty data slice is NOP
+        if (data.len <= 0) return;
+    
         const size = data.len * @sizeOf(T);
         if (self.size < size) {
             return error.InsufficentBufferSize; // size of buffer is less than data being transfered
