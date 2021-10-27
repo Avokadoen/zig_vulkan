@@ -89,7 +89,7 @@ pub const Descriptor = struct {
         var is_dirty = try config.allocator.alloc(bool, config.buffer_count);
         std.mem.set(bool, is_dirty, true);
 
-        const descriptor_pool = try createUniformDescriptorPool(config.ctx, config.allocator, owned_buffer_sizes.len, config.buffer_count);
+        const descriptor_pool = try createDescriptorPool(config.ctx, config.allocator, owned_buffer_sizes.len, config.buffer_count);
         errdefer config.ctx.vkd.destroyDescriptorPool(config.ctx.logical_device, descriptor_pool, null);
 
         // use graphics and compute index
@@ -125,7 +125,7 @@ pub const Descriptor = struct {
             config.allocator.free(uniform_buffers);
         }
 
-        var storage_buffers = try config.allocator.alloc([]GpuBufferMemory, owned_buffer_sizes.len);
+        var storage_buffers = try config.allocator.alloc([]GpuBufferMemory, config.buffer_count);
         errdefer config.allocator.free(storage_buffers);
 
         for (storage_buffers) |*buffers| {
@@ -216,13 +216,11 @@ pub const Descriptor = struct {
 // TODO: multiply projection and view on CPU (model is instanced (TODO) and has to be applied on GPU)
 // TODO: push constant instead?
 pub const Uniform = extern struct { 
-    model: zlm.Mat4, // TODO: remove
     view: zlm.Mat4,
     projection: zlm.Mat4,
 
     pub fn init(viewport: vk.Viewport) Uniform {
         return .{
-            .model = zlm.Mat4.createScale(viewport.height, viewport.height, 0.0),
             .view = zlm.Mat4.identity,
             .projection = blk: {
                 const half_width  =  viewport.width  * 0.5;
@@ -279,7 +277,7 @@ fn createDescriptorSetLayout(ctx: Context, allocator: *Allocator, buffer_sizes_l
 }
 
 /// No external memory management needed
-inline fn createUniformDescriptorPool(ctx: Context, allocator: *Allocator, buffer_sizes_len: usize, swapchain_image_count: usize) !vk.DescriptorPool {
+inline fn createDescriptorPool(ctx: Context, allocator: *Allocator, buffer_sizes_len: usize, swapchain_image_count: usize) !vk.DescriptorPool {
     const image_count = @intCast(u32, swapchain_image_count);
     const ubo_pool_size = vk.DescriptorPoolSize{
         .@"type" = .uniform_buffer,
