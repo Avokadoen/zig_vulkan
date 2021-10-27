@@ -15,8 +15,13 @@ pub const Rectangle = struct {
     y: usize,
 };
 
-pub const PackError = error {
+pub const PackError = Allocator.Error || error {
     InsufficentSpace,
+};
+
+pub const BrutePackError = PackError || error {
+    InsufficentWidth,
+    InsufficentHeight,
 };
 
 fn sortByHeight(context: void, lhs: Rectangle, rhs: Rectangle) bool {
@@ -26,10 +31,101 @@ fn sortByHeight(context: void, lhs: Rectangle, rhs: Rectangle) bool {
 
 // TODO: pixelScanPack() might be viable to optimize depending on the load time 
 
+pub const CalculatedImageSize = struct {
+    width: u64,
+    height: u64,
+};
+
+/// Brute force to find *functional* width and height (not optimal)
+pub fn InitBruteForceWidthHeightFn(comptime use_restrictions: bool) type {
+    comptime var Validator: type = undefined;
+    if (use_restrictions) {
+        Validator = struct {
+            pub inline fn validate(max: u32, value: u32, rtr_error: BrutePackError) BrutePackError!void {
+                if (max < value) {
+                    return rtr_error;
+                }
+            }
+        };
+    } else {
+        Validator = struct {
+             pub inline fn validate(max: u32, value: u32, rtr_error: BrutePackError) BrutePackError!void {
+                _ = max;
+                _ = value;
+                rtr_error catch {};
+                return;
+            }
+        };
+    }
+    const BruteForcer = struct {
+        pub fn bruteForceWidthHeight(allocator: *Allocator, rectangles: []Rectangle, max_image_width: u32, max_image_height: u32) BrutePackError!CalculatedImageSize {
+            var image_height: u32 = 0;
+            var max_height_index: usize = 0;
+
+            var image_width: u32 = 0;
+            var max_width_index: usize = 0;
+
+            for (rectangles) |rectangle, i| {
+                if (image_width < rectangle.width) {
+                    image_width = rectangle.width;
+                    max_width_index = i;
+                }
+                if (image_height < rectangle.height) {
+                    image_height = rectangle.height;
+                    max_height_index = i;
+                }
+            }
+
+            try Validator.validate(max_image_width, image_width, BrutePackError.InsufficentWidth);
+            try Validator.validate(max_image_height, image_height, BrutePackError.InsufficentHeight);
+
+            var solved = false;
+            var add_width = true;
+            var add_width_index: usize = if (max_width_index != 0) 0 else 1;
+            var add_height_index: usize = if (max_height_index != 0) 0 else 1;
+            while(!solved) {
+                if (pixelScanPack(allocator, image_width, image_height, rectangles)) |_| {
+                    solved = true;
+                } else |err| {
+                    switch (err) {
+                        PackError.InsufficentSpace => {
+                            if (add_width) {
+                                image_width += rectangles[add_width_index].width; 
+                                add_width_index += if (add_width_index+1 != max_width_index) @as(usize, 1) else @as(usize, 2);
+                                try Validator.validate(max_image_width, image_width, BrutePackError.InsufficentWidth);
+                            } else {
+                                image_height += rectangles[add_height_index].height; 
+                                add_height_index += if (add_height_index+1 != max_height_index) @as(usize, 1) else @as(usize, 2);
+                                try Validator.validate(max_image_height, image_height, BrutePackError.InsufficentHeight);
+                            }
+                            add_width = !add_width;
+                        },
+                        PackError.OutOfMemory => return BrutePackError.OutOfMemory,
+                    }
+                }
+            }
+            return CalculatedImageSize{
+                .width = image_width,
+                .height = image_height,
+            };
+        }
+    };
+
+    if(use_restrictions) {
+        return BruteForcer.bruteForceWidthHeight;
+    } else {
+        return struct {
+            pub inline fn bruteForceWidthHeight(allocator: *Allocator, rectangles: []Rectangle) BrutePackError!CalculatedImageSize {
+                return BruteForcer.bruteForceWidthHeight(allocator, rectangles, 0, 0);
+            }
+        };
+    }
+}
+
 /// attempts to pack a slice of rectangles through brute force. This method is slower than others, but should have the best 
 /// packing efficeny
 /// !caller should note that parameter slice will mutate!
-pub fn pixelScanPack(allocator: *Allocator, image_width: u32, image_height: u32, rectangles: []Rectangle) !void {
+pub fn pixelScanPack(allocator: *Allocator, image_width: u32, image_height: u32, rectangles: []Rectangle) PackError!void {
 
     // sort rectangles by height
     std.sort.sort(Rectangle, rectangles, {}, sortByHeight);
