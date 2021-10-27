@@ -69,16 +69,15 @@ pub fn main() anyerror!void {
     try input.init(window, keyInputFn, mouseBtnInputFn, cursorPosInputFn);
     defer input.deinit();
 
-
     try sprite.init(allocator, ctx);
     defer sprite.deinit();
 
-    const my_id = try sprite.loadTexture("../assets/images/grasstop.png"[0..]);
+    const my_id1 = try sprite.loadTexture("../assets/images/grasstop.png"[0..]);
     const my_id2 = try sprite.loadTexture("../assets/images/grasstop.png"[0..]);
     const my_id3 = try sprite.loadTexture("../assets/images/texture.jpg"[0..]);
     const my_id4 = try sprite.loadTexture("../assets/images/bern_burger.jpg"[0..]);
     const my_id5 = try sprite.loadTexture("../assets/images/tiger.jpg"[0..]);
-    std.debug.print("TODO: REMOVE ME :) {d}, {d}, {d}, {d}, {d}\n", .{my_id, my_id2, my_id3, my_id4, my_id5});
+    std.debug.print("TODO: REMOVE ME :) {d}, {d}, {d}, {d}, {d}\n", .{my_id1, my_id2, my_id3, my_id4, my_id5});
 
     try sprite.prepareDraw(6);
 

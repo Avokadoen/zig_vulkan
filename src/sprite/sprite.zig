@@ -11,7 +11,6 @@ const sc = render.swapchain;
 const descriptor = render.descriptor;
 
 const rectangle_pack = @import("rectangle_pack.zig");
-const Rectangle = rectangle_pack.Rectangle;
 
 
 // Type declarations
@@ -21,13 +20,18 @@ const Rectangle = rectangle_pack.Rectangle;
 //     screen_dimentions: za.Vec2,
 // };
 
-pub const TextureHandle = usize;
+pub const TextureHandle = c_int;
 
 // State/Variable declarations
 
 const UV = struct {
     min: zlm.Vec2,
     max: zlm.Vec2,
+};
+
+const Rectangle = struct {
+    pos: zlm.Vec2,
+    bounds: zlm.Vec2,
 };
 
 const SpriteDB = struct {
@@ -52,6 +56,7 @@ const SpriteDB = struct {
         };
     }
 
+    /// get a new sprite id
     pub fn getNewId(self: *SpriteDB) !usize {
         const newId = self.len;
         if (newId < self.sprite_pool_size) {
@@ -76,16 +81,6 @@ const SpriteDB = struct {
         }
     }
 
-    /// Scale all sprites to screen height while maintaing original sprite ratio
-    // while (i < self.scales.capacity) : (i += 1) {
-    //     const rect_index = @intCast(usize, self.uv_indices.items[i]);
-    //     const ratio = @intToFloat(f32, rectangles[rect_index].height) / @intToFloat(f32, rectangles[rect_index].width);
-    //     self.scales.items[i] = zlm.Vec2{
-    //         .x = window_height * ratio,
-    //         .y = window_height,
-    //     };
-    // }
-
     pub fn deinit(self: *SpriteDB) void {
         self.positions.deinit();
         self.scales.deinit();
@@ -96,11 +91,47 @@ const SpriteDB = struct {
 
 /// A opaque sprite handle, can be used to manipulate a given sprite
 pub const Sprite = struct {
+    db_ptr: *SpriteDB,
     db_id: usize,
 
-    fn init(db: *SpriteDB) Sprite {
+    fn init(db: *SpriteDB) !Sprite {
         return Sprite {
-            .db_id = db.getNewId(),
+            .db_ptr = db,
+            .db_id = try db.getNewId(),
+        };
+    }
+
+    /// set sprite position
+    pub inline fn setPos(self: Sprite, pos: zlm.Vec2) void {
+        self.db_ptr.positions.items[self.db_id] = pos;
+    }
+
+    /// set sprite size in pixels
+    pub inline fn setSize(self: Sprite, scale: zlm.Vec2) void {
+        self.db_ptr.scales.items[self.db_id] = scale;
+    }
+
+    /// Update sprite image to a new handle
+    pub inline fn setTexture(self: Sprite, new_handle: TextureHandle) void {
+        self.db_ptr.uv_indices.items[self.db_id] = new_handle;
+    }
+
+    pub inline fn getRect(self: Sprite) Rectangle {
+        const position = self.db_ptr.positions.items[self.db_id];
+        const scale = self.db_ptr.scales.items[self.db_id];
+        return Rectangle{
+            .pos = position,
+            .bounds = scale,
+        };
+    }
+
+    /// Scale sprite to a given height while preserving ratio
+    pub fn scaleToHeight(self: Sprite, height: f32) void {
+        const rect = self.getRect();
+        const ratio = @intToFloat(f32, rect.height) / @intToFloat(f32, rect.width);
+        self.scales.items[self.db_id] = zlm.Vec2{
+            .x = height * ratio,
+            .y = height,
         };
     }
 };
@@ -194,23 +225,27 @@ pub fn loadTexture(path: []const u8) !TextureHandle {
     const image = try stbi.Image.from_file(alloc, path, stbi.DesiredChannels.STBI_rgb_alpha);
     try images.append(image);
 
-    const handle: TextureHandle = images.items.len - 1;
+    const handle: TextureHandle = @intCast(c_int, images.items.len - 1);
     try image_paths.put(path, handle);
     return handle;
 }
 
 
 /// Create a new sprite 
-// pub fn createSprite(texture: TextureHandle, pos: zlm.Vec2, size: zlm.Vec2) !Sprite {
-//     Sprite.init(sprite_db)
-// }
+pub fn createSprite(texture: TextureHandle, pos: zlm.Vec2, size: zlm.Vec2) !Sprite {
+    comptime api_state.requireInit();
+
+    const new_sprite = try Sprite.init(sprite_db);
+    new_sprite.setPos(pos);
+    new_sprite.setSize(size);
+    new_sprite.setTexture(texture);
+
+    return new_sprite;
+}
 
 // deinitialize sprite library
 pub fn deinit() void {
     comptime api_state.requireInit();
-
-    swapchain.deinit(ctx);
-    sprite_db.deinit();
 
     switch (api_state.getState()) {
         .Dormant => unreachable, // see first line in function
@@ -232,6 +267,9 @@ pub fn deinit() void {
             }
         }
     }
+
+    sprite_db.deinit();
+    swapchain.deinit(ctx);
 }
 
 /// Prepare API to do draw calls 
@@ -243,7 +281,7 @@ pub fn prepareDraw(extra_sprite_pool: usize) !void {
     }
 
     // calculate position of each image registered
-    const rectangles = try alloc.alloc(Rectangle, images.items.len);
+    const rectangles = try alloc.alloc(rectangle_pack.Rectangle, images.items.len);
     defer alloc.free(rectangles);
 
     for (images.items) |image, i| {
