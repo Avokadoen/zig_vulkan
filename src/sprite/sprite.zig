@@ -42,6 +42,7 @@ const SpriteDB = struct {
     // instance data
     positions: ArrayList(zlm.Vec2),
     scales: ArrayList(zlm.Vec2),
+    rotations: ArrayList(f32),
     uv_indices: ArrayList(c_int),
 
     pub fn initCapacity(allocator: *Allocator, capacity: usize) !SpriteDB {
@@ -51,6 +52,7 @@ const SpriteDB = struct {
             .uv_buffer  = try ArrayList(zlm.Vec2).initCapacity(allocator, 10 * 4 * 2), // TODO: allow configure
             .positions  = try ArrayList(zlm.Vec2).initCapacity(allocator, capacity),
             .scales     = try ArrayList(zlm.Vec2).initCapacity(allocator, capacity),
+            .rotations  = try ArrayList(f32).initCapacity(allocator, capacity),
             .uv_indices = try ArrayList(c_int).initCapacity(allocator, capacity),
         };
     }
@@ -64,6 +66,7 @@ const SpriteDB = struct {
 
         try self.positions.append(zlm.Vec2.zero);
         try self.scales.append(zlm.Vec2.zero);
+        try self.rotations.append(0);
         try self.uv_indices.append(0);
 
         self.len += 1;
@@ -83,6 +86,7 @@ const SpriteDB = struct {
     pub fn deinit(self: *SpriteDB) void {
         self.positions.deinit();
         self.scales.deinit();
+        self.rotations.deinit();
         self.uv_indices.deinit();
         self.uv_buffer.deinit();
     }
@@ -101,8 +105,12 @@ pub const Sprite = struct {
     }
 
     /// set sprite position
-    pub inline fn setPos(self: Sprite, pos: zlm.Vec2) void {
+    pub inline fn setPosition(self: Sprite, pos: zlm.Vec2) void {
         self.db_ptr.positions.items[self.db_id] = pos;
+    }
+
+    pub inline fn getPosition(self: Sprite) zlm.Vec2 {
+        return self.db_ptr.positions.items[self.db_id];
     }
 
     /// set sprite size in pixels
@@ -110,9 +118,26 @@ pub const Sprite = struct {
         self.db_ptr.scales.items[self.db_id] = scale;
     }
 
+    pub inline fn getSize(self: Sprite) zlm.Vec2 {
+        return self.db_ptr.scales.items[self.db_id];
+    }
+
+    /// set sprite rotation
+    pub inline fn setRotation(self: Sprite, rotation: f32) void {
+        self.db_ptr.rotations.items[self.db_id] = zlm.toRadians(rotation);
+    }
+
+    pub inline fn getRotation(self: Sprite) f32 {
+        return zlm.toDegrees(self.db_ptr.rotations.items[self.db_id]);
+    }
+
     /// Update sprite image to a new handle
     pub inline fn setTexture(self: Sprite, new_handle: TextureHandle) void {
         self.db_ptr.uv_indices.items[self.db_id] = new_handle;
+    }
+
+    pub inline fn getTexture(self: Sprite) TextureHandle {
+        return self.db_ptr.uv_indices.items[self.db_id];
     }
 
     pub inline fn getRect(self: Sprite) Rectangle {
@@ -215,7 +240,12 @@ pub fn init(allocator: *Allocator, context: render.Context) !void {
 
 /// loads a given texture using path relative to executable location. In the event of a success the returned value is an texture ID 
 pub fn loadTexture(path: []const u8) !TextureHandle {
-    comptime api_state.requireInit();
+    comptime {
+        api_state.requireInit();
+        if (api_state.getState() == .PreparedForDraw) {
+            @compileError("can't load texture after prepareDraw is called"); // a temporary restriction :(
+        }
+    }
 
     if (image_paths.get(path)) |some| {
         return some;
@@ -231,18 +261,19 @@ pub fn loadTexture(path: []const u8) !TextureHandle {
 
 
 /// Create a new sprite 
-pub fn createSprite(texture: TextureHandle, pos: zlm.Vec2, size: zlm.Vec2) !Sprite {
+pub fn createSprite(texture: TextureHandle, position: zlm.Vec2, rotation: f32, size: zlm.Vec2) !Sprite {
     comptime {
         api_state.requireInit();
         if (api_state.getState() == .PreparedForDraw) {
-            @compileError("can't create sprite after prepare"); // a temporary restriction :(
+            @compileError("can't create sprite after prepareDraw is called"); // a temporary restriction :(
         }
     }
 
     const new_sprite = try Sprite.init(&sprite_db);
-    new_sprite.setPos(pos);
-    new_sprite.setSize(size);
-    new_sprite.setTexture(texture);
+    sprite_db.positions.items[new_sprite.db_id] = position;
+    sprite_db.scales.items[new_sprite.db_id] = size;
+    sprite_db.rotations.items[new_sprite.db_id] = zlm.toRadians(rotation);
+    sprite_db.uv_indices.items[new_sprite.db_id] = texture;
 
     return new_sprite;
 }
@@ -349,11 +380,10 @@ pub fn prepareDraw() !void {
         .data = mega_data,
     };
     
-    // TODO: because of a ?bug? in zig, we can't send stack memory into a stack memory struct
-    // so we alloc some temp memory instead. Change this to a simply stack definition when that works
     const buffer_sizes = [_]u64{
         @sizeOf(zlm.Vec2) * sprite_db.sprite_pool_size,
         @sizeOf(zlm.Vec2) * sprite_db.sprite_pool_size,
+        @sizeOf(f32)      * sprite_db.sprite_pool_size,
         @sizeOf(c_int)    * sprite_db.sprite_pool_size,
         @sizeOf(zlm.Vec2) * mega_uvs.len * 4,
     };
@@ -372,15 +402,22 @@ pub fn prepareDraw() !void {
   
     var i: usize = 0;
     while (i < swapchain.images.items.len) : (i += 1) {
-        try subo.?.ubo.storage_buffers[i][0].transferData(ctx, zlm.Vec2, sprite_db.positions.items);
-        try subo.?.ubo.storage_buffers[i][1].transferData(ctx, zlm.Vec2, sprite_db.scales.items);
-        try subo.?.ubo.storage_buffers[i][2].transferData(ctx, c_int,    sprite_db.uv_indices.items);
-        try subo.?.ubo.storage_buffers[i][3].transferData(ctx, zlm.Vec2, sprite_db.uv_buffer.items);
+        updateBuffers(i);
     }
 }
 
 pub inline fn draw() !void {
-    try pipeline.?.draw(ctx);
+    try pipeline.?.draw(ctx, updateBuffers);
+}
+
+// TODO: only send dirty data arrays, 
+// TODO: only send dirty data slices of array
+fn updateBuffers(image_index: usize) void {
+    subo.?.ubo.storage_buffers[image_index][0].transferData(ctx, zlm.Vec2, sprite_db.positions.items) catch {};
+    subo.?.ubo.storage_buffers[image_index][1].transferData(ctx, zlm.Vec2, sprite_db.scales.items) catch {};
+    subo.?.ubo.storage_buffers[image_index][2].transferData(ctx, f32,      sprite_db.rotations.items) catch {};
+    subo.?.ubo.storage_buffers[image_index][3].transferData(ctx, c_int,    sprite_db.uv_indices.items) catch {};
+    subo.?.ubo.storage_buffers[image_index][4].transferData(ctx, zlm.Vec2, sprite_db.uv_buffer.items) catch {};
 }
 
 // Private functions

@@ -86,6 +86,10 @@ pub fn main() anyerror!void {
         const size = @intToFloat(f32, window_size.height) / @as(f32, 32);
         const scale = zlm.Vec2.new(size, size);
 
+        const pos_offset_x = (windowf - scale.x) * 0.5;
+        const pos_offset_y = (windowf - scale.y) * 0.5;
+
+        var rotation: f32 = 0;
         var i: f32 = 0;
         while (i < 32) : (i += 1) {
             var j: f32 = 0;
@@ -93,19 +97,39 @@ pub fn main() anyerror!void {
                 const index = i * 32 + j;
                 const texture_handle = my_textures[@floatToInt(usize, @mod(index, 4))];
                 const pos = zlm.Vec2.new(
-                    j * scale.x - (windowf - scale.x) * 0.5,
-                    i * scale.y - (windowf - scale.y) * 0.5
+                    j * scale.x - pos_offset_x,
+                    i * scale.y - pos_offset_y
                 );
-                std.debug.print("pox: {d}, {d}\n", .{pos.x, pos.y});
-                my_sprites[@floatToInt(usize, index)] = try sprite.createSprite(texture_handle, pos, scale);
+                my_sprites[@floatToInt(usize, index)] = try sprite.createSprite(texture_handle, pos, rotation, scale);
+                rotation += 10;
+                rotation = @mod(rotation, 360);
             }
         }
     }
 
     try sprite.prepareDraw();
 
+    var sin_wave: f32 = 0;
+    var sin_dir: f32 = 1;
+
+    var prev_frame = std.time.milliTimestamp();
     // Loop until the user closes the window
     while (!window.shouldClose()) {
+        const current_frame = std.time.milliTimestamp();
+        const delta_time = @intToFloat(f64, current_frame - prev_frame) / @as(f64, std.time.ms_per_s);
+
+        sin_wave += @floatCast(f32, delta_time);
+        sin_dir = if (@mod(sin_wave, 2) < 1) 1 else -1;
+        const offset = std.math.sin(sin_wave);
+        for(my_sprites) |my_sprite| {
+            var pos = my_sprite.getPosition();
+            pos.x += offset * sin_dir * 0.2;
+            my_sprite.setPosition(pos);
+
+            var rot = my_sprite.getRotation();
+            rot += @floatCast(f32, 60 * delta_time);
+            my_sprite.setRotation(rot);
+        }
         {
             // Test compute
             // try comp_pipeline.compute(ctx);
@@ -120,6 +144,7 @@ pub fn main() anyerror!void {
 
         // Poll for and process events
         try glfw.pollEvents();
+        prev_frame = current_frame;
     }
 }
 

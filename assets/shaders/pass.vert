@@ -19,16 +19,27 @@ layout(binding = 3) buffer InstanstanceScaleBuffer {
     vec2 data[];
 } iscale;
 
-layout(binding = 4) buffer InstanstanceUVIndexBuffer {
+layout(binding = 4) buffer InstanstanceRotationBuffer {
+    float data[];
+} irot;
+
+layout(binding = 5) buffer InstanstanceUVIndexBuffer {
     int data[];
 } iuv_index;
 
-layout(binding = 5) buffer InstanstanceUVBuffer {
+layout(binding = 6) buffer UVBuffer {
     vec2 data[];
-} iuv;
+} uvs;
+
 
 void main() {
-    outTexCoord = iuv.data[iuv_index.data[gl_InstanceIndex] * 4 + gl_VertexIndex % 4];
-    vec2 position = inPosition * iscale.data[gl_InstanceIndex] + ipos.data[gl_InstanceIndex];
+    outTexCoord = uvs.data[iuv_index.data[gl_InstanceIndex] * 4 + gl_VertexIndex % 4];
+
+    float cos_ = cos(irot.data[gl_InstanceIndex]);
+    float sin_ = sin(irot.data[gl_InstanceIndex]);
+    vec2 scale_pos = inPosition * iscale.data[gl_InstanceIndex];
+    vec2 position = vec2(scale_pos.x * cos_ - scale_pos.y * sin_, scale_pos.x * sin_ + scale_pos.y * cos_);
+    position = position + ipos.data[gl_InstanceIndex];
+
     gl_Position = vec4(position, 0.0, 1.0) * (ubo.view * ubo.proj);
 }

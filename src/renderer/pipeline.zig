@@ -287,7 +287,9 @@ pub const Pipeline2D = struct {
         };
     }
 
-    pub fn draw(self: *Self, ctx: Context) !void {
+    /// Draw using pipeline
+    /// transfer_fn can be used to update any relevant storage buffers or other data that are timing critical according to rendering
+    pub fn draw(self: *Self, ctx: Context, transfer_fn: fn(image_index: usize) void) !void {
         const state = struct {
             var current_frame: usize = 0;
         };
@@ -346,12 +348,7 @@ pub const Pipeline2D = struct {
             self.sync_descript.ubo.is_dirty[image_index] = false;
         }
 
-        // TODO: we might used dynamic dispatch for this part (currently hardcoded sprite transfer ...)
-        // {
-        //     const zlm = @import("zlm");
-        //     try self.sync_descript.ubo.storage_buffers[image_index][0].transferData(ctx, zlm.Vec2, self.sync_descript.ubo.storage_data.member_0[0..]);
-        //     try self.sync_descript.ubo.storage_buffers[image_index][1].transferData(ctx, i32, self.sync_descript.ubo.storage_data.member_1[0..]);
-        // }
+        transfer_fn(image_index);
     
         const wait_stages = vk.PipelineStageFlags{ .color_attachment_output_bit = true };
         const submit_info = vk.SubmitInfo{
