@@ -9,3 +9,5 @@ deps/docs/*
 
 # Ignore any generated zig vulkan header (usually moved to root for zls) 
 vk.zig
+
+*.spv
