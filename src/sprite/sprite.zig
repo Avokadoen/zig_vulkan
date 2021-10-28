@@ -15,8 +15,8 @@ const rectangle_pack = @import("rectangle_pack.zig");
 // Type declarations
 
 // const Camera = struct {
-//     pos: za.Vec2,
-//     screen_dimentions: za.Vec2,
+//     pos: zlm.Vec2,
+//     screen_dimentions: zlm.Vec2,
 // };
 
 pub const TextureHandle = c_int;
@@ -140,7 +140,8 @@ pub const Sprite = struct {
         return self.db_ptr.uv_indices.items[self.db_id];
     }
 
-    pub inline fn getRect(self: Sprite) Rectangle {
+    /// get the bounding rectangle of the sprite
+    pub inline fn getRectangle(self: Sprite) Rectangle {
         const position = self.db_ptr.positions.items[self.db_id];
         const scale = self.db_ptr.scales.items[self.db_id];
         return Rectangle{
@@ -161,9 +162,10 @@ pub const Sprite = struct {
 };
 
 const CallStateTypes = enum {
-    Dormant, // library not initialized
-    Initialized,
-    PreparedForDraw,
+    Dormant,            // library not initialized
+    Initialized,        // libray has initialized most of the library memory 
+    // CameraInitialized, // library has a defined camera handle 
+    PreparedForDraw,    // library is capable of doing drawing operations
 };
 
 /// used to verify correct use of the API
@@ -220,7 +222,8 @@ var sprite_db: SpriteDB = undefined;
 // Public functions
 
 /// initialize the sprite library, caller must make sure to call deinit
-pub fn init(allocator: *Allocator, context: render.Context) !void {
+/// - init_capacity: how many sprites should be preallocated 
+pub fn init(allocator: *Allocator, context: render.Context, init_capacity: usize) !void {
     comptime {
         if (api_state.getState() != CallStateTypes.Dormant) {
             @compileError("sprite library already initialized");
@@ -235,7 +238,7 @@ pub fn init(allocator: *Allocator, context: render.Context) !void {
     ctx = context;
     swapchain = try sc.Data.init(alloc, ctx, null);
     view = sc.ViewportScissor.init(swapchain.extent);
-    sprite_db = try SpriteDB.initCapacity(alloc, 1024);
+    sprite_db = try SpriteDB.initCapacity(alloc, init_capacity);
 }
 
 /// loads a given texture using path relative to executable location. In the event of a success the returned value is an texture ID 
@@ -258,7 +261,6 @@ pub fn loadTexture(path: []const u8) !TextureHandle {
     try image_paths.put(path, handle);
     return handle;
 }
-
 
 /// Create a new sprite 
 pub fn createSprite(texture: TextureHandle, position: zlm.Vec2, rotation: f32, size: zlm.Vec2) !Sprite {

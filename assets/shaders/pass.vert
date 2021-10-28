@@ -1,11 +1,9 @@
 #version 450
 
-// TODO: vec3 for affine transforms
 layout(location = 0) in vec2 inPosition;
 
 layout(location = 1) out vec2 outTexCoord;
 
-// TODO: set 0
 layout(binding = 0) uniform UniformBuffer {
     layout(offset =  0) mat4 view;
     layout(offset = 64) mat4 proj;

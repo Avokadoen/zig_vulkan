@@ -70,7 +70,7 @@ pub fn main() anyerror!void {
     try input.init(window, keyInputFn, mouseBtnInputFn, cursorPosInputFn);
     defer input.deinit();
 
-    try sprite.init(allocator, ctx);
+    try sprite.init(allocator, ctx, 32768);
     defer sprite.deinit();
 
     var my_textures: [4]sprite.TextureHandle = undefined;
