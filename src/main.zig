@@ -79,11 +79,11 @@ pub fn main() anyerror!void {
     my_textures[2] = try sprite.loadTexture("../assets/images/bern_burger.jpg"[0..]);
     my_textures[3] = try sprite.loadTexture("../assets/images/tiger.jpg"[0..]);
 
-    var my_sprites: [1024]sprite.Sprite = undefined; 
+    var my_sprites: [32768]sprite.Sprite = undefined; 
     {   
         const window_size = try window.getSize();
         const windowf = @intToFloat(f32, window_size.height);
-        const size = @intToFloat(f32, window_size.height) / @as(f32, 32);
+        const size = @intToFloat(f32, window_size.height) / @as(f32, 181);
         const scale = zlm.Vec2.new(size, size);
 
         const pos_offset_x = (windowf - scale.x) * 0.5;
@@ -91,10 +91,12 @@ pub fn main() anyerror!void {
 
         var rotation: f32 = 0;
         var i: f32 = 0;
-        while (i < 32) : (i += 1) {
+        outer: while (i < 182) : (i += 1) {
             var j: f32 = 0;
-            while (j < 32) : (j += 1) {
-                const index = i * 32 + j;
+            while (j < 182) : (j += 1) {
+                const index = i * 182 + j;
+                if (index >= 32768) break :outer;
+
                 const texture_handle = my_textures[@floatToInt(usize, @mod(index, 4))];
                 const pos = zlm.Vec2.new(
                     j * scale.x - pos_offset_x,
