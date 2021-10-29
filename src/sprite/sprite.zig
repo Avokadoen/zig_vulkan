@@ -14,10 +14,40 @@ const rectangle_pack = @import("rectangle_pack.zig");
 
 // Type declarations
 
-// const Camera = struct {
-//     pos: zlm.Vec2,
-//     screen_dimentions: zlm.Vec2,
-// };
+const Camera = struct {
+    zoom_speed: f32,
+    move_speed: f32,
+
+    view: sc.ViewportScissor,
+
+    sync_desc_ptr: *descriptor.SyncDescriptor,
+
+    pub fn zoom_in(self: *Camera, delta_time: f32) void {
+        const dt = delta_time;
+        const fields = &self.sync_desc_ptr.*.ubo.uniform_data.view.fields;
+        fields.*[0][0] += (fields.*[0][0] * (self.zoom_speed * dt)) + dt;
+        fields.*[1][1] += (fields.*[1][1] * (self.zoom_speed * dt)) + dt;
+        fields.*[2][2] += (fields.*[2][2] * (self.zoom_speed * dt)) + dt;
+        self.sync_desc_ptr.ubo.mark_dirty();
+    }
+
+    pub fn zoom_out(self: *Camera, delta_time: f32) void {
+        const dt = delta_time;
+        const fields = &self.sync_desc_ptr.*.ubo.uniform_data.view.fields;
+        fields.*[0][0] -= (fields.*[0][0] * (self.zoom_speed * dt)) + dt;
+        fields.*[1][1] -= (fields.*[1][1] * (self.zoom_speed * dt)) + dt;
+        fields.*[2][2] -= (fields.*[2][2] * (self.zoom_speed * dt)) + dt;
+        self.sync_desc_ptr.ubo.mark_dirty();
+    }
+
+    pub fn translate(self: *Camera, delta_time: f32, dir: zlm.Vec2) void {
+        const velocity = dir.normalize().scale(self.move_speed * delta_time);
+        const fields = &self.sync_desc_ptr.*.ubo.uniform_data.view.fields;
+        fields.*[3][0] += velocity.x;
+        fields.*[3][1] += velocity.y;
+        self.sync_desc_ptr.ubo.mark_dirty();
+    }
+};
 
 pub const TextureHandle = c_int;
 
@@ -164,7 +194,6 @@ pub const Sprite = struct {
 const CallStateTypes = enum {
     Dormant,            // library not initialized
     Initialized,        // libray has initialized most of the library memory 
-    // CameraInitialized, // library has a defined camera handle 
     PreparedForDraw,    // library is capable of doing drawing operations
 };
 
@@ -182,7 +211,14 @@ fn CallState() type {
 
         pub fn requireInit(self: Self) void {
             _ = self;
-            if (@enumToInt(state) <= @enumToInt(CallStateTypes.Dormant)) {
+            if (@enumToInt(state) < @enumToInt(CallStateTypes.Initialized)) {
+                @compileError("sprite library not initialized");
+            }
+        }
+
+        pub fn requirePrepareToDraw(self: Self) void {
+             _ = self;
+            if (@enumToInt(state) < @enumToInt(CallStateTypes.PreparedForDraw)) {
                 @compileError("sprite library not initialized");
             }
         }
@@ -211,7 +247,7 @@ var uv_buffer: []zlm.Vec2 = undefined;
 
 var ctx: render.Context = undefined;
 var swapchain: sc.Data = undefined;
-var view: sc.ViewportScissor = undefined;
+pub var camera: Camera = undefined; // TODO: not pub!!
 pub var subo: ?descriptor.SyncDescriptor = null; // TODO: not pub!!
 var pipeline: ?render.Pipeline2D = null;
 
@@ -237,8 +273,22 @@ pub fn init(allocator: *Allocator, context: render.Context, init_capacity: usize
 
     ctx = context;
     swapchain = try sc.Data.init(alloc, ctx, null);
-    view = sc.ViewportScissor.init(swapchain.extent);
+    camera = Camera{
+        .zoom_speed = undefined,
+        .move_speed = undefined,
+        .view = sc.ViewportScissor.init(swapchain.extent),
+        .sync_desc_ptr = undefined,
+    };
     sprite_db = try SpriteDB.initCapacity(alloc, init_capacity);
+}
+
+/// get a handle to the sprite camera, require that library is prepared to draw
+pub fn createCamera(move_speed: f32, zoom_speed: f32) Camera {
+    comptime api_state.requirePrepareToDraw();
+
+    camera.move_speed = move_speed;
+    camera.zoom_speed = zoom_speed;
+    return camera;
 }
 
 /// loads a given texture using path relative to executable location. In the event of a success the returned value is an texture ID 
@@ -393,13 +443,14 @@ pub fn prepareDraw() !void {
         .allocator = alloc,
         .ctx = ctx, 
         .image = mega_image, 
-        .viewport = view.viewport[0],
+        .viewport = camera.view.viewport[0],
         .buffer_count = swapchain.images.items.len, 
         .buffer_sizes = buffer_sizes[0..],
     };
     subo = try descriptor.SyncDescriptor.init(desc_config);
-    pipeline = try render.Pipeline2D.init(alloc, ctx, &swapchain, @intCast(u32, sprite_db.len), &view, &subo.?);
-
+    pipeline = try render.Pipeline2D.init(alloc, ctx, &swapchain, @intCast(u32, sprite_db.len), &camera.view, &subo.?);
+    camera.sync_desc_ptr = &subo.?;
+    
     try sprite_db.generateUvBuffer(mega_uvs);
   
     var i: usize = 0;

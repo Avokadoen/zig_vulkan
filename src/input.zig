@@ -430,11 +430,25 @@ pub const MouseButton = enum(c_int) {
     six = g_mouse_button.six,
     seven = g_mouse_button.seven,
     eight = g_mouse_button.eight,
+
+    
+    pub inline fn last() MouseButton {
+        return MouseButton.eight;
+    }
+
+    pub inline fn left() MouseButton {
+        return MouseButton.one;
+    }
+
+    pub inline fn right() MouseButton {
+        return MouseButton.two;
+    }
+
+    pub inline fn middle() MouseButton {
+        return MouseButton.three;
+    }
+
 };
-pub const m_b_last = MouseButton.eight;
-pub const m_b_left = MouseButton.one;
-pub const m_b_right = MouseButton.two;
-pub const m_b_middle = MouseButton.three;
 
 pub const MouseButtonEvent = struct {
     button: MouseButton,

@@ -20,6 +20,14 @@ pub const application_name = "zig vulkan";
 
 // TODO: wrap this in renderer to make main seem simpler :^)
 var window: glfw.Window = undefined;
+var delta_time: f64 = 0;
+
+var zoom_in  = false;
+var zoom_out = false;
+var move_up = false;
+var move_left = false;
+var move_right = false;
+var move_down = false;
 
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
@@ -111,14 +119,49 @@ pub fn main() anyerror!void {
 
     try sprite.prepareDraw();
 
+    var camera = sprite.createCamera(500, 2);
+    var camera_translate = zlm.Vec2.zero;
+
     var sin_wave: f32 = 0;
     var sin_dir: f32 = 1;
 
     var prev_frame = std.time.milliTimestamp();
+
     // Loop until the user closes the window
     while (!window.shouldClose()) {
         const current_frame = std.time.milliTimestamp();
-        const delta_time = @intToFloat(f64, current_frame - prev_frame) / @as(f64, std.time.ms_per_s);
+        delta_time = @intToFloat(f64, current_frame - prev_frame) / @as(f64, std.time.ms_per_s);
+        // f32 variant of delta_time
+        const dt = @floatCast(f32, delta_time);
+
+        if (zoom_in) {
+            camera.zoom_in(dt);
+        }
+        if (zoom_out) {
+            camera.zoom_out(dt);
+        }
+
+        var call_translate = false;
+        if (move_up) {
+            camera_translate.y -= 1;
+            call_translate = true;
+        }
+        if (move_down) {
+            camera_translate.y += 1;
+            call_translate = true;
+        }
+        if (move_right) {
+            camera_translate.x += 1;
+            call_translate = true;
+        }
+        if (move_left) {
+            camera_translate.x -= 1;
+            call_translate = true;
+        }
+        if (call_translate) {
+            camera.translate(dt, camera_translate);
+            camera_translate = zlm.Vec2.zero;
+        }
 
         sin_wave += @floatCast(f32, delta_time);
         sin_dir = if (@mod(sin_wave, 2) < 1) 1 else -1;
@@ -151,20 +194,41 @@ pub fn main() anyerror!void {
 }
 
 fn keyInputFn(event: input.KeyEvent) void {
-    // TODO: only tell ubo desired change for easier deltatime and less racy code!
-    switch(event.key) {
-        input.Key.w => sprite.subo.?.ubo.translate_vertical(0.001),
-        input.Key.s => sprite.subo.?.ubo.translate_vertical(-0.001),
-        input.Key.d => sprite.subo.?.ubo.translate_horizontal(-0.001),
-        input.Key.a => sprite.subo.?.ubo.translate_horizontal(0.001),
-        input.Key.escape => window.setShouldClose(true) catch unreachable,
-        else => { },
+    if (event.action == .press) {
+        switch(event.key) {
+            input.Key.w => move_up = true,
+            input.Key.s => move_down = true,
+            input.Key.d => move_left = true,
+            input.Key.a => move_right = true,
+            input.Key.escape => window.setShouldClose(true) catch unreachable,
+            else => { },
+        }   
+    } else if (event.action == .release) {
+        switch(event.key) {
+            input.Key.w => move_up = false,
+            input.Key.s => move_down = false,
+            input.Key.d => move_left = false,
+            input.Key.a => move_right = false,
+            else => { },
+        }
     }   
-} 
+}
 
-// TODO: use, or remove this
 fn mouseBtnInputFn(event: input.MouseButtonEvent) void {
-    _ = event;
+    if (event.action == input.Action.press) {
+        if (event.button == input.MouseButton.left()) {   
+            zoom_in = true;    
+        } else if (event.button == input.MouseButton.right()) {  
+            zoom_out = true;
+        }
+    }
+    if (event.action == input.Action.release) {
+        if (event.button == input.MouseButton.left()) {   
+            zoom_in = false;    
+        } else if (event.button == input.MouseButton.right()) {  
+            zoom_out = false;
+        }
+    }
 }
 fn cursorPosInputFn(event: input.CursorPosEvent) void {
     _ = event;

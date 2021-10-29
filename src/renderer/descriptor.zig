@@ -172,15 +172,19 @@ pub const Descriptor = struct {
     }
 
     pub inline fn translate_horizontal(self: *Self, value: f32) void {
-        _ = value;
-        // TODO: translate a distinct model instance instead?
         self.uniform_data.view.fields[0][3] += value;
         self.mark_dirty();
     }
 
     pub inline fn translate_vertical(self: *Self, value: f32) void {
-        _ = value;
         self.uniform_data.view.fields[1][3] += value;
+        self.mark_dirty();
+    }
+
+    pub inline fn scale(self: *Self, factor: f32) void {
+        self.uniform_data.view.fields[0][0] += factor;
+        self.uniform_data.view.fields[1][1] += factor;
+        self.uniform_data.view.fields[2][2] += factor;
         self.mark_dirty();
     }
 

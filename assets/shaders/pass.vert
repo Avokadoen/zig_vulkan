@@ -36,8 +36,12 @@ void main() {
     float cos_ = cos(irot.data[gl_InstanceIndex]);
     float sin_ = sin(irot.data[gl_InstanceIndex]);
     vec2 scale_pos = inPosition * iscale.data[gl_InstanceIndex];
-    vec2 position = vec2(scale_pos.x * cos_ - scale_pos.y * sin_, scale_pos.x * sin_ + scale_pos.y * cos_);
-    position = position + ipos.data[gl_InstanceIndex];
-
-    gl_Position = vec4(position, 0.0, 1.0) * (ubo.view * ubo.proj);
+    vec2 position = vec2(
+        scale_pos.x * cos_ - scale_pos.y * sin_, 
+        scale_pos.x * sin_ + scale_pos.y * cos_
+    );
+    gl_Position = vec4(position, 0.0, 1.0);
+    gl_Position.x += ipos.data[gl_InstanceIndex].x;
+    gl_Position.y += ipos.data[gl_InstanceIndex].y;
+    gl_Position = ubo.proj * (ubo.view * gl_Position);
 }
