@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
@@ -6,7 +7,7 @@ const ArrayList = std.ArrayList;
 const zlm = @import("zlm");
 const stbi = @import("stbi");
 
-const render = @import("../renderer/renderer.zig");
+const render = @import("../render/render.zig");
 const sc = render.swapchain;
 const descriptor = render.descriptor;
 
@@ -24,30 +25,36 @@ pub const Sprite = @import("Sprite.zig");
 
 // State/Variable declarations
 
-pub const ApiStateError = error {
-    AlreadyInitialized,     // can't call init twice
-    NotInitialized,         // api state must be atleast initialized
-    MustBeInitialized,      // api state has to be initialized 
-    NotPreparedForDraw,     // api state must be atleast prepare for draw
-};
-const ApiState = enum {
+const ApiValidation = enum {
     Dormant,            // library not initialized
     Initialized,        // libray has initialized most of the library memory 
     PreparedForDraw,    // library is capable of doing drawing operations
 
-    pub inline fn requireInit(state: CallState) ApiStateError!void {
-        if (@enumToInt(state) < @enumToInt(.Initialized)) {
-            return ApiStateError.NotInitialized;
+    pub inline fn assertEqual(state: ApiValidation, other: ApiValidation) void {
+        comptime {
+            if(builtin.mode != .Debug) {
+                return;
+            }
         }
-    }
 
-    pub inline fn requirePreparedForDraw(state: CallState) ApiStateError!void {
-        if (@enumToInt(state) < @enumToInt(.PreparedForDraw)) {
-            return ApiStateError.NotInitialized;
+        if (@enumToInt(state) != @enumToInt(other)) {
+            std.debug.panic("expected api to be in state {any}, was {any}", .{other, state});
         }
-    }
+    } 
+
+    pub inline fn assertLessThan(state: ApiValidation, other: ApiValidation) void {
+        comptime {
+            if(builtin.mode != .Debug) {
+                return;
+            }
+        }
+
+        if (@enumToInt(state) < @enumToInt(other)) {
+            std.debug.panic("expected api to be less than {any}, was {any}", .{other, state}); // TODO: format proper message
+        }
+    } 
 };
-var api_state: CallState = .Dormant;
+var api_state: ApiValidation = .Dormant;
 
 // image container, used to compile a mega texture 
 var alloc: *Allocator = undefined;
@@ -72,9 +79,7 @@ var sprite_db: DB = undefined;
 /// initialize the sprite library, caller must make sure to call deinit
 /// - init_capacity: how many sprites should be preallocated 
 pub fn init(allocator: *Allocator, context: render.Context, init_capacity: usize) !void {
-    if (@enumToInt(api_state) > .Dormant) {
-        return ApiStateError.AlreadyInitialized;
-    }
+    api_state.assertEqual(.Dormant);
 
     alloc = allocator;
     images = std.ArrayList(stbi.Image).init(alloc);
@@ -89,22 +94,13 @@ pub fn init(allocator: *Allocator, context: render.Context, init_capacity: usize
         .sync_desc_ptr = undefined,
     };
     sprite_db = try DB.initCapacity(alloc, init_capacity);
-}
 
-/// get a handle to the sprite camera, require that library is prepared to draw
-pub fn createCamera(move_speed: f32, zoom_speed: f32) !Camera {
-    try api_state.requirePrepareToDraw();
-
-    camera.move_speed = move_speed;
-    camera.zoom_speed = zoom_speed;
-    return camera;
+    api_state = .Initialized;
 }
 
 /// loads a given texture using path relative to executable location. In the event of a success the returned value is an texture ID 
 pub fn loadTexture(path: []const u8) !TextureHandle {
-    if (api_state != .Initialized) {
-        return ApiStateError.MustBeInitialized; // can't load a new texture before init, or after prepare for draw 
-    }
+    api_state.assertEqual(.Initialized);
 
     if (image_paths.get(path)) |some| {
         return some;
@@ -120,11 +116,12 @@ pub fn loadTexture(path: []const u8) !TextureHandle {
 
 /// Create a new sprite 
 pub fn createSprite(texture: TextureHandle, position: zlm.Vec2, rotation: f32, size: zlm.Vec2) !Sprite {
-    if (api_state != .Initialized) {
-        return ApiStateError.MustBeInitialized; // can't load a new texture before init, or after prepare for draw 
-    }
+    api_state.assertEqual(.Initialized);
 
-    const new_sprite = try Sprite.init(&sprite_db);
+    const new_sprite = Sprite {
+        .db_ptr = &sprite_db,
+        .db_id = try sprite_db.getNewId(),
+    };
     sprite_db.positions.items[new_sprite.db_id] = position;
     sprite_db.scales.items[new_sprite.db_id] = size;
     sprite_db.rotations.items[new_sprite.db_id] = zlm.toRadians(rotation);
@@ -133,41 +130,19 @@ pub fn createSprite(texture: TextureHandle, position: zlm.Vec2, rotation: f32, s
     return new_sprite;
 }
 
-// deinitialize sprite library
-pub fn deinit() void {
-    api_state.requireInit();
+/// get a handle to the sprite camera, require that library is prepared to draw
+pub fn createCamera(move_speed: f32, zoom_speed: f32) Camera {
+    api_state.assertEqual(.PreparedForDraw);
 
-    switch (api_state) {
-        .Dormant => unreachable, // see first line in function
-        .Initialized => {
-            // prepareDraw removes the image data, so we only have to clean it if we did not call prepareDraw
-            image_paths.deinit();
-            images.deinit();
-        },
-        .PreparedForDraw => {
-            // since sprite package made pixels, we manually free them instead of calling mega_image.deinit()
-            alloc.free(mega_image.data);
-            alloc.free(uv_buffer);
-            
-            if (pipeline) |some| {
-                some.deinit(ctx);
-            }
-            if (subo) |some| {
-                some.deinit(ctx);
-            }
-        }
-    }
-
-    sprite_db.deinit();
-    swapchain.deinit(ctx);
+    camera.move_speed = move_speed;
+    camera.zoom_speed = zoom_speed;
+    return camera;
 }
 
 /// Prepare API to do draw calls 
 pub fn prepareDraw() !void {
-    if (api_state != .Initialized) {
-        ApiStateError.MustBeInitialized; // can't prepare for draw if api is not initialized
-    } 
-
+    api_state.assertEqual(.Initialized);
+    
     // calculate position of each image registered
     const packjobs = try alloc.alloc(knapsack.PackJob, images.items.len);
     defer alloc.free(packjobs);
@@ -260,12 +235,42 @@ pub fn prepareDraw() !void {
         updateBuffers(i);
         subo.?.ubo.storage_buffers[i][1].transferData(ctx, zlm.Vec2, sprite_db.scales.items) catch {};
     }
+
+    api_state = .PreparedForDraw;
 }
 
 /// draw with sprite api, requires prepare for draw
 pub inline fn draw() !void {
     try pipeline.?.draw(ctx, updateBuffers);
 }
+
+// deinitialize sprite library
+pub fn deinit() void {
+    switch (api_state) {
+        .Dormant => return, 
+        .Initialized => {
+            // prepareDraw removes the image data, so we only have to clean it if we did not call prepareDraw
+            image_paths.deinit();
+            images.deinit();
+        },
+        .PreparedForDraw => {
+            // since sprite package made pixels, we manually free them instead of calling mega_image.deinit()
+            alloc.free(mega_image.data);
+            alloc.free(uv_buffer);
+            
+            if (pipeline) |some| {
+                some.deinit(ctx);
+            }
+            if (subo) |some| {
+                some.deinit(ctx);
+            }
+        }
+    }
+
+    sprite_db.deinit();
+    swapchain.deinit(ctx);
+}
+
 
 // TODO: move to db
 // TODO: only send dirty data arrays, 

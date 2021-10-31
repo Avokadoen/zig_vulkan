@@ -4,8 +4,6 @@ const ArrayList = std.ArrayList;
 
 const vk = @import("vulkan");
 const glfw = @import("glfw");
-// TODO: problematic to have c in outer scope if it is used here ...
-const c = @import("../c.zig");
 
 const consts = @import("consts.zig");
 const dispatch = @import("dispatch.zig");
@@ -81,7 +79,7 @@ pub const Context = struct {
         };
 
         const extensions = blk: {
-            const glfw_extensions_slice = try glfw.vulkan.getRequiredInstanceExtensions();
+            const glfw_extensions_slice = try glfw.getRequiredInstanceExtensions();
             var extensions = try ArrayList([*:0]const u8).initCapacity(allocator, glfw_extensions_slice.len + application_extensions.len);
             for (glfw_extensions_slice) |extension| {
                 extensions.appendAssumeCapacity(extension);
@@ -98,7 +96,8 @@ pub const Context = struct {
         self.allocator = allocator;
 
         // load base dispatch wrapper
-        self.vkb = try dispatch.Base.load(c.glfwGetInstanceProcAddress);
+        const vk_proc = @ptrCast(fn(instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction, glfw.getInstanceProcAddress);
+        self.vkb = try dispatch.Base.load(vk_proc);
         if (!(try vk_utils.isInstanceExtensionsPresent(allocator, self.vkb, extensions.items))) {
             return error.InstanceExtensionNotPresent;
         }
@@ -125,10 +124,10 @@ pub const Context = struct {
             break :blk try self.vkb.createInstance(instanceInfo, null);
         };
 
-        self.vki = try dispatch.Instance.load(self.instance, c.glfwGetInstanceProcAddress);
+        self.vki = try dispatch.Instance.load(self.instance, vk_proc);
         errdefer self.vki.destroyInstance(self.instance, null);
 
-        if (c.glfwCreateWindowSurface(self.instance, window.handle, null, &self.surface) != .success) {
+        if ((try glfw.createWindowSurface(self.instance, window.*, null, &self.surface)) != @enumToInt(vk.Result.success)) {
             return error.SurfaceInitFailed;
         }
         errdefer self.vki.destroySurfaceKHR(self.instance, self.surface, null);

@@ -9,16 +9,16 @@ const ecs = @import("ecs");
 const glfw = @import("glfw");
 const zlm = @import("zlm");
 
-const renderer = @import("renderer/renderer.zig");
-const swapchain = renderer.swapchain;
-const consts = renderer.consts;
+const render = @import("render/render.zig");
+const swapchain = render.swapchain;
+const consts = render.consts;
 
 const input = @import("input.zig");
-const sprite = @import("sprite/sprite.zig");
+const render2d = @import("render2d/render2d.zig");
 
 pub const application_name = "zig vulkan";
 
-// TODO: wrap this in renderer to make main seem simpler :^)
+// TODO: wrap this in render to make main seem simpler :^)
 var window: glfw.Window = undefined;
 var delta_time: f64 = 0;
 
@@ -49,12 +49,12 @@ pub fn main() anyerror!void {
     try glfw.init();
     defer glfw.terminate();
 
-    if (!glfw.vulkanSupported()) {
+    if (!try glfw.vulkanSupported()) {
         std.debug.panic("vulkan not supported on device (glfw)", .{});
     }
 
     // Tell glfw that we are planning to use a custom API (not opengl)
-    try glfw.Window.hint(glfw.client_api, glfw.no_api);
+    try glfw.Window.hint(glfw.Window.Hint.client_api, glfw.no_api);
 
     // Create a windowed mode window 
     window = glfw.Window.create(2560, 1440, application_name, null, null) catch |err| {
@@ -63,9 +63,9 @@ pub fn main() anyerror!void {
     };
     defer window.destroy();
 
-    var writers = renderer.Writers{ .stdout = &stdout, .stderr = &stderr };
+    var writers = render.Writers{ .stdout = &stdout, .stderr = &stderr };
     // Construct our vulkan instance
-    const ctx = try renderer.Context.init(allocator, application_name, &window, &writers);
+    const ctx = try render.Context.init(allocator, application_name, &window, &writers);
     defer ctx.deinit();
 
     // _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
@@ -78,16 +78,16 @@ pub fn main() anyerror!void {
     try input.init(window, keyInputFn, mouseBtnInputFn, cursorPosInputFn);
     defer input.deinit();
 
-    try sprite.init(allocator, ctx, 32768);
-    defer sprite.deinit();
+    try render2d.init(allocator, ctx, 32768);
+    defer render2d.deinit();
 
-    var my_textures: [4]sprite.TextureHandle = undefined;
-    my_textures[0] = try sprite.loadTexture("../assets/images/grasstop.png"[0..]);
-    my_textures[1] = try sprite.loadTexture("../assets/images/texture.jpg"[0..]);
-    my_textures[2] = try sprite.loadTexture("../assets/images/bern_burger.jpg"[0..]);
-    my_textures[3] = try sprite.loadTexture("../assets/images/tiger.jpg"[0..]);
+    var my_textures: [4]render2d.TextureHandle = undefined;
+    my_textures[0] = try render2d.loadTexture("../assets/images/grasstop.png"[0..]);
+    my_textures[1] = try render2d.loadTexture("../assets/images/texture.jpg"[0..]);
+    my_textures[2] = try render2d.loadTexture("../assets/images/bern_burger.jpg"[0..]);
+    my_textures[3] = try render2d.loadTexture("../assets/images/tiger.jpg"[0..]);
 
-    var my_sprites: [32768]sprite.Sprite = undefined; 
+    var my_sprites: [32768]render2d.Sprite = undefined; 
     {   
         const window_size = try window.getSize();
         const windowf = @intToFloat(f32, window_size.height);
@@ -110,16 +110,16 @@ pub fn main() anyerror!void {
                     j * scale.x - pos_offset_x,
                     i * scale.y - pos_offset_y
                 );
-                my_sprites[@floatToInt(usize, index)] = try sprite.createSprite(texture_handle, pos, rotation, scale);
+                my_sprites[@floatToInt(usize, index)] = try render2d.createSprite(texture_handle, pos, rotation, scale);
                 rotation += 10;
                 rotation = @mod(rotation, 360);
             }
         }
     }
 
-    try sprite.prepareDraw();
+    try render2d.prepareDraw();
 
-    var camera = sprite.createCamera(500, 2);
+    var camera = render2d.createCamera(500, 2);
     var camera_translate = zlm.Vec2.zero;
 
     var sin_wave: f32 = 0;
@@ -181,10 +181,7 @@ pub fn main() anyerror!void {
 
             // Render here
             // try gfx_pipeline.draw(ctx);
-            try sprite.draw();
-
-            // Swap front and back buffers
-            window.swapBuffers();
+            try render2d.draw();
         }
 
         // Poll for and process events
@@ -216,16 +213,16 @@ fn keyInputFn(event: input.KeyEvent) void {
 
 fn mouseBtnInputFn(event: input.MouseButtonEvent) void {
     if (event.action == input.Action.press) {
-        if (event.button == input.MouseButton.left()) {   
+        if (event.button == input.MouseButton.left) {   
             zoom_in = true;    
-        } else if (event.button == input.MouseButton.right()) {  
+        } else if (event.button == input.MouseButton.right) {  
             zoom_out = true;
         }
     }
     if (event.action == input.Action.release) {
-        if (event.button == input.MouseButton.left()) {   
+        if (event.button == input.MouseButton.left) {   
             zoom_in = false;    
-        } else if (event.button == input.MouseButton.right()) {  
+        } else if (event.button == input.MouseButton.right) {  
             zoom_out = false;
         }
     }

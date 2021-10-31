@@ -1,7 +1,9 @@
 const zlm = @import("zlm");
 
 const DB = @import("DB.zig");
-const Rectangle = @import("util_types.zig").Rectangle;
+const types = @import("util_types.zig");
+const Rectangle = types.Rectangle;
+const TextureHandle = types.TextureHandle;
 
 /// A opaque sprite handle, can be used to manipulate a given sprite
 const Sprite = @This();
@@ -9,11 +11,8 @@ const Sprite = @This();
 db_ptr: *DB,
 db_id: usize,
 
-fn init(db: *DB) !Sprite {
-    return Sprite {
-        .db_ptr = db,
-        .db_id = try db.getNewId(),
-    };
+pub inline fn init() void {
+    @compileError("call render2d.createSprite() instead");
 }
 
 /// set sprite position

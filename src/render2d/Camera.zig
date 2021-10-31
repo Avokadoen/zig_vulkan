@@ -1,4 +1,4 @@
-const render = @import("../renderer/renderer.zig");
+const render = @import("../render/render.zig");
 const sc = render.swapchain;
 const descriptor = render.descriptor;
 

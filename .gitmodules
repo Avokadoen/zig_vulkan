@@ -4,10 +4,9 @@
 [submodule "deps/zig-ecs"]
 	path = deps/zig-ecs
 	url = https://github.com/prime31/zig-ecs.git
-[submodule "deps/mach"]
-	path = deps/mach
-	url = git@github.com:Avokadoen/mach.git
-	branch = ext-glfw
 [submodule "deps/zlm"]
 	path = deps/zlm
 	url = https://github.com/ziglibs/zlm.git
+[submodule "deps/mach-glfw"]
+	path = deps/mach-glfw
+	url = git@github.com:hexops/mach-glfw.git

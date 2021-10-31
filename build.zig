@@ -8,7 +8,7 @@ const Step = std.build.Step;
 const ArrayList = std.ArrayList;
 
 const vkgen = @import("deps/vulkan-zig/generator/index.zig");
-const glfw = @import("deps/mach/glfw/build.zig");
+const glfw = @import("deps/mach-glfw/build.zig");
 const stbi = @import("deps/stb_image/build.zig");
 
 // TODO: this file could use a refactor pass or atleast some comments to make it more readable
@@ -184,8 +184,8 @@ pub fn build(b: *Builder) void {
     exe.linkLibC();
     
     // compile and link with glfw statically
-    glfw.linkStep(b, exe, .{});
-    exe.addPackagePath("glfw", "deps/mach/glfw/src/main.zig");
+    glfw.link(b, exe, .{});
+    exe.addPackagePath("glfw", "deps/mach-glfw/src/main.zig");
 
     exe.addPackagePath("ecs", "deps/zig-ecs/src/ecs.zig");
     exe.addPackagePath("zlm", "deps/zlm/zlm.zig");
