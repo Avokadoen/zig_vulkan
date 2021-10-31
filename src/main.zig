@@ -57,7 +57,7 @@ pub fn main() anyerror!void {
     try glfw.Window.hint(glfw.client_api, glfw.no_api);
 
     // Create a windowed mode window 
-    window = glfw.Window.create(1200, 800, application_name, null, null) catch |err| {
+    window = glfw.Window.create(2560, 1440, application_name, null, null) catch |err| {
         try stderr.print("failed to create window, code: {}", .{err});
         return;
     };
@@ -135,10 +135,10 @@ pub fn main() anyerror!void {
         const dt = @floatCast(f32, delta_time);
 
         if (zoom_in) {
-            camera.zoom_in(dt);
+            camera.zoomIn(dt);
         }
         if (zoom_out) {
-            camera.zoom_out(dt);
+            camera.zoomOut(dt);
         }
 
         var call_translate = false;

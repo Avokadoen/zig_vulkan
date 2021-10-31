@@ -3,28 +3,19 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Rectangle = @import("util_types.zig").Rectangle;
 
-pub const Rectangle = struct {
+pub const PackJob = struct {
     // set by caller of pack function
     id: usize, 
-    width: u32, 
+    x: u32,
+    y: u32,
+    width: u32,
     height: u32,
-
-    // set by pack function
-    x: usize,    
-    y: usize,
 };
 
-pub const PackError = Allocator.Error || error {
-    InsufficentSpace,
-};
 
-pub const BrutePackError = PackError || error {
-    InsufficentWidth,
-    InsufficentHeight,
-};
-
-fn sortByHeight(context: void, lhs: Rectangle, rhs: Rectangle) bool {
+fn sortByHeight(context: void, lhs: PackJob, rhs: PackJob) bool {
     _ = context;
     return lhs.height < rhs.height;
 }
@@ -35,8 +26,12 @@ pub const CalculatedImageSize = struct {
     width: u64,
     height: u64,
 };
-
+pub const BrutePackError = PackError || error {
+    InsufficentWidth,
+    InsufficentHeight,
+};
 /// Brute force to find *functional* width and height (not optimal)
+/// return type of produced function is BrutePackError!CalculatedImageSize
 pub fn InitBruteForceWidthHeightFn(comptime use_restrictions: bool) type {
     comptime var Validator: type = undefined;
     if (use_restrictions) {
@@ -58,20 +53,20 @@ pub fn InitBruteForceWidthHeightFn(comptime use_restrictions: bool) type {
         };
     }
     const BruteForcer = struct {
-        pub fn bruteForceWidthHeight(allocator: *Allocator, rectangles: []Rectangle, max_image_width: u32, max_image_height: u32) BrutePackError!CalculatedImageSize {
+        pub fn bruteForceWidthHeight(allocator: *Allocator, packages: []PackJob, max_image_width: u32, max_image_height: u32) BrutePackError!CalculatedImageSize {
             var image_height: u32 = 0;
             var max_height_index: usize = 0;
 
             var image_width: u32 = 0;
             var max_width_index: usize = 0;
 
-            for (rectangles) |rectangle, i| {
-                if (image_width < rectangle.width) {
-                    image_width = rectangle.width;
+            for (packages) |package, i| {
+                if (image_width < package.width) {
+                    image_width = package.width;
                     max_width_index = i;
                 }
-                if (image_height < rectangle.height) {
-                    image_height = rectangle.height;
+                if (image_height < package.height) {
+                    image_height = package.height;
                     max_height_index = i;
                 }
             }
@@ -84,17 +79,17 @@ pub fn InitBruteForceWidthHeightFn(comptime use_restrictions: bool) type {
             var add_width_index: usize = if (max_width_index != 0) 0 else 1;
             var add_height_index: usize = if (max_height_index != 0) 0 else 1;
             while(!solved) {
-                if (pixelScanPack(allocator, image_width, image_height, rectangles)) |_| {
+                if (pixelScanPack(allocator, image_width, image_height, packages)) |_| {
                     solved = true;
                 } else |err| {
                     switch (err) {
                         PackError.InsufficentSpace => {
                             if (add_width) {
-                                image_width += rectangles[add_width_index].width; 
+                                image_width += packages[add_width_index].width; 
                                 add_width_index += if (add_width_index+1 != max_width_index) @as(usize, 1) else @as(usize, 2);
                                 try Validator.validate(max_image_width, image_width, BrutePackError.InsufficentWidth);
                             } else {
-                                image_height += rectangles[add_height_index].height; 
+                                image_height += packages[add_height_index].height; 
                                 add_height_index += if (add_height_index+1 != max_height_index) @as(usize, 1) else @as(usize, 2);
                                 try Validator.validate(max_image_height, image_height, BrutePackError.InsufficentHeight);
                             }
@@ -115,20 +110,24 @@ pub fn InitBruteForceWidthHeightFn(comptime use_restrictions: bool) type {
         return BruteForcer.bruteForceWidthHeight;
     } else {
         return struct {
-            pub inline fn bruteForceWidthHeight(allocator: *Allocator, rectangles: []Rectangle) BrutePackError!CalculatedImageSize {
-                return BruteForcer.bruteForceWidthHeight(allocator, rectangles, 0, 0);
+            pub inline fn bruteForceWidthHeight(allocator: *Allocator, packages: []PackJob) BrutePackError!CalculatedImageSize {
+                return BruteForcer.bruteForceWidthHeight(allocator, packages, 0, 0);
             }
         };
     }
 }
 
+
+pub const PackError = Allocator.Error || error {
+    InsufficentSpace,
+};
 /// attempts to pack a slice of rectangles through brute force. This method is slower than others, but should have the best 
 /// packing efficeny
 /// !caller should note that parameter slice will mutate!
-pub fn pixelScanPack(allocator: *Allocator, image_width: u32, image_height: u32, rectangles: []Rectangle) PackError!void {
+pub fn pixelScanPack(allocator: *Allocator, image_width: u32, image_height: u32, packjobs: []PackJob) PackError!void {
 
     // sort rectangles by height
-    std.sort.sort(Rectangle, rectangles, {}, sortByHeight);
+    std.sort.sort(PackJob, packjobs, {}, sortByHeight);
 
     const image_size = image_width * image_height;
 
@@ -141,15 +140,15 @@ pub fn pixelScanPack(allocator: *Allocator, image_width: u32, image_height: u32,
     image_map.items.len = image_size;
 
     // loop rectangles
-    for (rectangles) |*rect| {
+    for (packjobs) |*packjob| {
         var was_packed = false;
         // loop mega texture pixels
         im_loop: for (image_map.items) |pixel, i| {
             const x = i % image_width; 
             const y = i / image_width; 
 
-            const x_bound = x + (rect.width - 1);
-            const y_bound = y + (rect.height - 1);
+            const x_bound = x + (packjob.width - 1);
+            const y_bound = y + (packjob.height - 1);
             
             // Check if rectangle doesn't go over the edge of the boundary
             if (x_bound >= image_width or y_bound >= image_height) {
@@ -178,8 +177,8 @@ pub fn pixelScanPack(allocator: *Allocator, image_width: u32, image_height: u32,
             }
 
             // All pixels were cleared so we can place current rectangle
-            rect.x = x;
-            rect.y = y;
+            packjob.x = @intCast(u32, x);
+            packjob.y = @intCast(u32, y);
             was_packed = true;
 
             // update image map to mark pixels as occupied
@@ -207,7 +206,7 @@ pub fn pixelScanPack(allocator: *Allocator, image_width: u32, image_height: u32,
 
 test "symmetric square pixelScanPack" {
     const allocator = std.testing.allocator;
-    const rectangles = try allocator.alloc(Rectangle, 4);
+    const rectangles = try allocator.alloc(PackJob, 4);
     defer allocator.free(rectangles);
 
     for (rectangles) |*rect| {
@@ -232,7 +231,7 @@ test "symmetric square pixelScanPack" {
 
 test "asymmetric square pixelScanPack" {
     const allocator = std.testing.allocator;
-    const rectangles = try allocator.alloc(Rectangle, 2);
+    const rectangles = try allocator.alloc(PackJob, 2);
     defer allocator.free(rectangles);
 
     rectangles[0].width = 1;
@@ -251,7 +250,7 @@ test "asymmetric square pixelScanPack" {
 
 test "asymmetric square full pixelScanPack" {
     const allocator = std.testing.allocator;
-    const rectangles = try allocator.alloc(Rectangle, 3);
+    const rectangles = try allocator.alloc(PackJob, 3);
     defer allocator.free(rectangles);
 
     rectangles[0].width = 3;
@@ -275,7 +274,7 @@ test "asymmetric square full pixelScanPack" {
 
 test "InsufficentSpace error in event of insufficent space" {
     const allocator = std.testing.allocator;
-    const rectangles = try allocator.alloc(Rectangle, 2);
+    const rectangles = try allocator.alloc(PackJob, 2);
     defer allocator.free(rectangles);
 
     rectangles[0].width = 1;

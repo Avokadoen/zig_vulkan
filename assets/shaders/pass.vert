@@ -33,6 +33,7 @@ layout(binding = 6) buffer UVBuffer {
 void main() {
     outTexCoord = uvs.data[iuv_index.data[gl_InstanceIndex] * 4 + gl_VertexIndex % 4];
 
+    // TODO: test adding to the view to create a mvp instead of mutating position variable gradually
     float cos_ = cos(irot.data[gl_InstanceIndex]);
     float sin_ = sin(irot.data[gl_InstanceIndex]);
     vec2 scale_pos = inPosition * iscale.data[gl_InstanceIndex];
@@ -43,5 +44,5 @@ void main() {
     gl_Position = vec4(position, 0.0, 1.0);
     gl_Position.x += ipos.data[gl_InstanceIndex].x;
     gl_Position.y += ipos.data[gl_InstanceIndex].y;
-    gl_Position = ubo.proj * (ubo.view * gl_Position);
+    gl_Position = (ubo.proj * ubo.view) * gl_Position;
 }
