@@ -12,3 +12,12 @@ pub const Rectangle = struct {
     width: f32,
     height: f32,
 };
+
+const BufferUpdateRateEnum = enum {
+    always,
+    every_ms,
+};
+pub const BufferUpdateRate = union(BufferUpdateRateEnum) {
+    always: void,
+    every_ms: u32,
+};

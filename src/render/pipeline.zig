@@ -289,7 +289,7 @@ pub const Pipeline2D = struct {
 
     /// Draw using pipeline
     /// transfer_fn can be used to update any relevant storage buffers or other data that are timing critical according to rendering
-    pub fn draw(self: *Self, ctx: Context, transfer_fn: fn(image_index: usize) void) !void {
+    pub fn draw(self: *Self, ctx: Context, transfer_fn: fn(image_index: usize, image_count: usize) void) !void {
         const state = struct {
             var current_frame: usize = 0;
         };
@@ -348,7 +348,7 @@ pub const Pipeline2D = struct {
             self.sync_descript.ubo.is_dirty[image_index] = false;
         }
 
-        transfer_fn(image_index);
+        transfer_fn(image_index, self.images_in_flight.items.len);
     
         const wait_stages = vk.PipelineStageFlags{ .color_attachment_output_bit = true };
         const submit_info = vk.SubmitInfo{

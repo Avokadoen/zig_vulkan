@@ -111,7 +111,7 @@ pub fn main() anyerror!void {
         }
     }
 
-    try render2d.prepareDraw();
+    try render2d.prepareDraw(.{ .every_ms = 14 });
 
     var camera = render2d.createCamera(500, 2);
     var camera_translate = zlm.Vec2.zero;
@@ -174,7 +174,6 @@ pub fn main() anyerror!void {
             // try comp_pipeline.compute(ctx);
 
             // Render here
-            // try gfx_pipeline.draw(ctx);
             try render2d.draw();
         }
 

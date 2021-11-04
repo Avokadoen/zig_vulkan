@@ -15,15 +15,14 @@ const knapsack = @import("knapsack.zig");
 const DB = @import("DB.zig");
 const util_types = @import("util_types.zig");
 
+// Exterior public types
 pub const Rectangle = util_types.Rectangle;
 pub const UV = util_types.UV;
 pub const TextureHandle = util_types.TextureHandle;
+pub const BufferUpdateRate = util_types.BufferUpdateRate;
 pub const Camera = @import("Camera.zig");
 pub const Sprite = @import("Sprite.zig");
 
-// Type declarations
-
-// State/Variable declarations
 
 const ApiValidation = enum {
     Dormant,            // library not initialized
@@ -56,6 +55,20 @@ const ApiValidation = enum {
 };
 var api_state: ApiValidation = .Dormant;
 
+// render specific state
+var ctx: render.Context = undefined;
+var swapchain: sc.Data = undefined;
+var subo: ?descriptor.SyncDescriptor = null;
+var pipeline: ?render.Pipeline2D = null;
+
+// render2d specific state
+var camera: Camera = undefined;
+var sprite_db: DB = undefined;
+
+var update_fn: fn(image_index: usize, image_count: usize) void = undefined;
+var last_update_counter: i64 = 0; 
+var prev_frame: i64 = 0;
+
 // image container, used to compile a mega texture 
 var alloc: *Allocator = undefined;
 var images: std.ArrayList(stbi.Image) = undefined;
@@ -64,17 +77,6 @@ var image_paths: std.StringArrayHashMap(TextureHandle) = undefined;
 var mega_image: stbi.Image = undefined;
 var uv_buffer: []zlm.Vec2 = undefined;
 
-var ctx: render.Context = undefined;
-var swapchain: sc.Data = undefined;
-var camera: Camera = undefined; // TODO: not pub!!
-var subo: ?descriptor.SyncDescriptor = null; // TODO: not pub!!
-var pipeline: ?render.Pipeline2D = null;
-
-var sprite_db: DB = undefined;
-
-// End State/Variable declarations
-
-// Public functions
 
 /// initialize the sprite library, caller must make sure to call deinit
 /// - init_capacity: how many sprites should be preallocated 
@@ -140,8 +142,11 @@ pub fn createCamera(move_speed: f32, zoom_speed: f32) Camera {
 }
 
 /// Prepare API to do draw calls 
-pub fn prepareDraw() !void {
+///  - update_rate: dictate how often the API should push buffers to the GPU
+pub fn prepareDraw(comptime gpu_update_rate: BufferUpdateRate) !void {
     api_state.assertEqual(.Initialized);
+    
+    update_fn = UpdateFn(gpu_update_rate).updateBuffers;
     
     // calculate position of each image registered
     const packjobs = try alloc.alloc(knapsack.PackJob, images.items.len);
@@ -229,19 +234,13 @@ pub fn prepareDraw() !void {
     camera.sync_desc_ptr = &subo.?;
     
     try sprite_db.generateUvBuffer(mega_uvs);
-  
-    var i: usize = 0;
-    while (i < swapchain.images.items.len) : (i += 1) {
-        updateBuffers(i);
-        subo.?.ubo.storage_buffers[i][1].transferData(ctx, zlm.Vec2, sprite_db.scales.items) catch {};
-    }
 
     api_state = .PreparedForDraw;
 }
 
 /// draw with sprite api, requires prepare for draw
 pub inline fn draw() !void {
-    try pipeline.?.draw(ctx, updateBuffers);
+    try pipeline.?.draw(ctx, update_fn);
 }
 
 // deinitialize sprite library
@@ -272,16 +271,49 @@ pub fn deinit() void {
 }
 
 
-// TODO: move to db
-// TODO: only send dirty data arrays, 
-// TODO: only send dirty data slices of array
-fn updateBuffers(image_index: usize) void {
-    subo.?.ubo.storage_buffers[image_index][0].transferData(ctx, zlm.Vec2, sprite_db.positions.items) catch {};
-    // subo.?.ubo.storage_buffers[image_index][1].transferData(ctx, zlm.Vec2, sprite_db.scales.items) catch {};
-    subo.?.ubo.storage_buffers[image_index][2].transferData(ctx, f32,      sprite_db.rotations.items) catch {};
-    subo.?.ubo.storage_buffers[image_index][3].transferData(ctx, c_int,    sprite_db.uv_indices.items) catch {};
-    subo.?.ubo.storage_buffers[image_index][4].transferData(ctx, zlm.Vec2, sprite_db.uv_buffer.items) catch {};
+fn UpdateFn(comptime rate: BufferUpdateRate) type {
+    switch (rate) {
+        .always => {
+            return struct {
+                fn updateBuffers(image_index: usize, image_count: usize) void {
+                    _ = image_count;
+                    subo.?.ubo.storage_buffers[image_index][0].transferData(ctx, zlm.Vec2, sprite_db.positions.items) catch {};
+                    subo.?.ubo.storage_buffers[image_index][1].transferData(ctx, zlm.Vec2, sprite_db.scales.items) catch {};
+                    subo.?.ubo.storage_buffers[image_index][2].transferData(ctx, f32,      sprite_db.rotations.items) catch {};
+                    subo.?.ubo.storage_buffers[image_index][3].transferData(ctx, c_int,    sprite_db.uv_indices.items) catch {};
+                    subo.?.ubo.storage_buffers[image_index][4].transferData(ctx, zlm.Vec2, sprite_db.uv_buffer.items) catch {};
+                }
+            };
+        },
+        .every_ms => |ms| {
+            return struct {
+                const internal_rate: u32 = ms;
+                var update_frame_count: usize = 0;
+
+                fn updateBuffers(image_index: usize, image_count: usize) void {
+                    const current_frame = std.time.milliTimestamp();
+                    last_update_counter += (current_frame - prev_frame);
+
+                    if (last_update_counter >= internal_rate) {
+                        update_frame_count = 0;
+                    }
+
+                    if (update_frame_count < image_count) {
+                        subo.?.ubo.storage_buffers[image_index][0].transferData(ctx, zlm.Vec2, sprite_db.positions.items) catch {};
+                        subo.?.ubo.storage_buffers[image_index][1].transferData(ctx, zlm.Vec2, sprite_db.scales.items) catch {};
+                        subo.?.ubo.storage_buffers[image_index][2].transferData(ctx, f32,      sprite_db.rotations.items) catch {};
+                        subo.?.ubo.storage_buffers[image_index][3].transferData(ctx, c_int,    sprite_db.uv_indices.items) catch {};
+                        subo.?.ubo.storage_buffers[image_index][4].transferData(ctx, zlm.Vec2, sprite_db.uv_buffer.items) catch {};
+                        
+                        update_frame_count += 1;
+                        last_update_counter = 0;
+                    }
+
+                    prev_frame = current_frame;
+                }
+            };
+        }
+    }
 }
 
-// Private functions
 
