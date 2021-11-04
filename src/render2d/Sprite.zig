@@ -33,7 +33,7 @@ pub inline fn getSize(self: Sprite) zlm.Vec2 {
     return self.db_ptr.scales.items[self.db_id];
 }
 
-/// set sprite rotation
+/// set sprite rotation, counter clockwise degrees
 pub inline fn setRotation(self: Sprite, rotation: f32) void {
     self.db_ptr.rotations.items[self.db_id] = zlm.toRadians(rotation);
 }

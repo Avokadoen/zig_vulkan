@@ -165,7 +165,7 @@ pub fn main() anyerror!void {
             my_sprite.setPosition(pos);
 
             var rot = my_sprite.getRotation();
-            rot += @floatCast(f32, 60 * delta_time);
+            rot -= @floatCast(f32, 60 * delta_time);
             my_sprite.setRotation(rot);
         }
         {
