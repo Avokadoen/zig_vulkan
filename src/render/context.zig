@@ -15,6 +15,7 @@ const vk_utils = @import("vk_utils.zig");
 
 // TODO: mutex protection before prints
 pub const IoWriters = struct {
+    made_in_ctx: bool = false, // should only be set to true by Context
     stdout: *const std.fs.File.Writer,
     stderr: *const std.fs.File.Writer,
 };
@@ -52,7 +53,7 @@ pub const Context = struct {
     window_ptr: *glfw.Window,
 
     // Caller should make sure to call deinit, context takes ownership of IoWriters
-    pub fn init(allocator: *Allocator, application_name: []const u8, window: *glfw.Window, writers: *IoWriters) !Context {
+    pub fn init(allocator: *Allocator, application_name: []const u8, window: *glfw.Window, io_writers: ?*IoWriters) !Context {
         const app_name = try std.cstr.addNullByte(allocator, application_name);
         defer allocator.destroy(app_name.ptr);
         
@@ -95,6 +96,21 @@ pub const Context = struct {
         var self: Context = undefined;
         self.allocator = allocator;
 
+        // use supplied writers, or make our own
+        self.writers = blk: {
+            if (io_writers) |write| {
+                break :blk write;
+            }
+            var heap_writers = try allocator.alloc(std.fs.File.Writer, 2);
+            heap_writers[0] = std.io.getStdErr().writer();
+            heap_writers[1] = std.io.getStdOut().writer();
+            var writers_struct = try allocator.alloc(IoWriters, 1);
+            writers_struct[0].made_in_ctx = true;
+            writers_struct[0].stderr = &heap_writers[0];
+            writers_struct[0].stdout = &heap_writers[1];
+            break :blk @ptrCast(*IoWriters, writers_struct.ptr);
+        };
+
         // load base dispatch wrapper
         const vk_proc = @ptrCast(fn(instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction, glfw.getInstanceProcAddress);
         self.vkb = try dispatch.Base.load(vk_proc);
@@ -107,7 +123,7 @@ pub const Context = struct {
         var create_p_next: ?*c_void = null;
         if (consts.enable_validation_layers) {
             comptime { std.debug.assert(consts.enable_validation_layers); }
-            var debug_create_info = createDefaultDebugCreateInfo(writers);
+            var debug_create_info = createDefaultDebugCreateInfo(self.writers);
             create_p_next = @ptrCast(?*c_void, &debug_create_info);
         }
 
@@ -137,7 +153,7 @@ pub const Context = struct {
 
         self.messenger = blk: {
             if (!consts.enable_validation_layers) break :blk null;
-            const create_info = createDefaultDebugCreateInfo(writers);
+            const create_info = createDefaultDebugCreateInfo(self.writers);
             break :blk self.vki.createDebugUtilsMessengerEXT(self.instance, create_info, null) catch {
                 std.debug.panic("failed to create debug messenger", .{});
             };
@@ -328,6 +344,12 @@ pub const Context = struct {
             self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.messenger.?, null);
         }
         self.vki.destroyInstance(self.instance, null);
+
+        if (self.writers.*.made_in_ctx) {
+            self.allocator.free(@ptrCast(*const [2]std.fs.File.Writer, self.writers.stderr));
+            self.allocator.free(@ptrCast(*const [1]IoWriters, self.writers));
+        }
+  
     }
 };
 

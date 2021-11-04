@@ -3,8 +3,6 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-// Source: https://vulkan-tutorial.com
-
 const ecs = @import("ecs");
 const glfw = @import("glfw");
 const zlm = @import("zlm");
@@ -30,16 +28,13 @@ var move_right = false;
 var move_down = false;
 
 pub fn main() anyerror!void {
-    const stderr = std.io.getStdErr().writer();
-    const stdout = std.io.getStdOut().writer();
-
     // create a gpa with default configuration
     var alloc = if (consts.enable_validation_layers) std.heap.GeneralPurposeAllocator(.{}){} else std.heap.c_allocator;
     defer {
         if (consts.enable_validation_layers) {
             const leak = alloc.deinit();
             if (leak) {
-                stderr.print("leak detected in gpa!", .{}) catch unreachable;
+                // stderr.print("leak detected in gpa!", .{}) catch unreachable;
             }
         }
     }
@@ -57,15 +52,13 @@ pub fn main() anyerror!void {
     try glfw.Window.hint(glfw.Window.Hint.client_api, glfw.no_api);
 
     // Create a windowed mode window 
-    window = glfw.Window.create(2560, 1440, application_name, null, null) catch |err| {
-        try stderr.print("failed to create window, code: {}", .{err});
+    window = glfw.Window.create(800, 800, application_name, null, null) catch {
+        // try stderr.print("failed to create window, code: {}", .{err});
         return;
     };
     defer window.destroy();
 
-    var writers = render.Writers{ .stdout = &stdout, .stderr = &stderr };
-    // Construct our vulkan instance
-    const ctx = try render.Context.init(allocator, application_name, &window, &writers);
+    const ctx = try render.Context.init(allocator, application_name, &window, null);
     defer ctx.deinit();
 
     // _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
