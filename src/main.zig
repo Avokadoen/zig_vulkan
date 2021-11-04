@@ -163,11 +163,11 @@ pub fn main() anyerror!void {
         for(my_sprites) |my_sprite| {
             var pos = my_sprite.getPosition();
             pos.x += offset * sin_dir * 0.2;
-            my_sprite.setPosition(pos);
+            try my_sprite.setPosition(pos);
 
             var rot = my_sprite.getRotation();
             rot -= @floatCast(f32, 60 * delta_time);
-            my_sprite.setRotation(rot);
+            try my_sprite.setRotation(rot);
         }
         {
             // Test compute

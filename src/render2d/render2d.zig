@@ -124,10 +124,10 @@ pub fn createSprite(texture: TextureHandle, position: zlm.Vec2, rotation: f32, s
         .db_ptr = &sprite_db,
         .db_id = try sprite_db.getNewId(),
     };
-    sprite_db.positions.items[new_sprite.db_id] = position;
-    sprite_db.scales.items[new_sprite.db_id] = size;
-    sprite_db.rotations.items[new_sprite.db_id] = zlm.toRadians(rotation);
-    sprite_db.uv_indices.items[new_sprite.db_id] = texture;
+    try sprite_db.positions.updateAt(new_sprite.db_id, position);
+    try sprite_db.scales.updateAt(new_sprite.db_id, size);
+    try sprite_db.rotations.updateAt(new_sprite.db_id, zlm.toRadians(rotation));
+    try sprite_db.uv_indices.updateAt(new_sprite.db_id, texture);
 
     return new_sprite;
 }
@@ -235,6 +235,11 @@ pub fn prepareDraw(comptime gpu_update_rate: BufferUpdateRate) !void {
     
     try sprite_db.generateUvBuffer(mega_uvs);
 
+    for (swapchain.images.items) |_, i| {
+        const buffer = subo.?.ubo.storage_buffers[i];
+        try sprite_db.uv_buffer.handleDeviceTransfer(ctx, &buffer[4]);
+    }
+
     api_state = .PreparedForDraw;
 }
 
@@ -277,11 +282,11 @@ fn UpdateFn(comptime rate: BufferUpdateRate) type {
                 fn updateBuffers(image_index: usize, image_count: usize) void {
                     _ = image_count;
                     const buffers = subo.?.ubo.storage_buffers[image_index];
-                    buffers[0].transfer(ctx, zlm.Vec2, sprite_db.positions.items) catch {};
-                    buffers[1].transfer(ctx, zlm.Vec2, sprite_db.scales.items) catch {};
-                    buffers[2].transfer(ctx, f32,      sprite_db.rotations.items) catch {};
-                    buffers[3].transfer(ctx, c_int,    sprite_db.uv_indices.items) catch {};
-                    buffers[4].transfer(ctx, zlm.Vec2, sprite_db.uv_buffer.items) catch {};
+                    sprite_db.positions.handleDeviceTransfer(ctx, &buffers[0]) catch {};
+                    sprite_db.scales.handleDeviceTransfer(ctx, &buffers[1]) catch {};
+                    sprite_db.rotations.handleDeviceTransfer(ctx, &buffers[2]) catch {};
+                    sprite_db.uv_indices.handleDeviceTransfer(ctx, &buffers[3]) catch {};
+                    sprite_db.flush() catch {};
                 }
             };
         },
@@ -300,17 +305,17 @@ fn UpdateFn(comptime rate: BufferUpdateRate) type {
 
                     if (update_frame_count < image_count) {
                         const buffers = subo.?.ubo.storage_buffers[image_index];
-                        const posit = sprite_db.positions.items;
-                        var pos = [1][]zlm.Vec2{ posit[20000..] };
-                        var offsets = [_]usize{ 20000 };
-                        buffers[0].batchTransfer(ctx, zlm.Vec2, offsets[0..], pos[0..]) catch {};
-                        buffers[1].transfer(ctx, zlm.Vec2, sprite_db.scales.items) catch {};
-                        buffers[2].transfer(ctx, f32,      sprite_db.rotations.items) catch {};
-                        buffers[3].transfer(ctx, c_int,    sprite_db.uv_indices.items) catch {};
-                        buffers[4].transfer(ctx, zlm.Vec2, sprite_db.uv_buffer.items) catch {};
+                        sprite_db.positions.handleDeviceTransfer(ctx, &buffers[0]) catch {};
+                        sprite_db.scales.handleDeviceTransfer(ctx, &buffers[1]) catch {};
+                        sprite_db.rotations.handleDeviceTransfer(ctx, &buffers[2]) catch {};
+                        sprite_db.uv_indices.handleDeviceTransfer(ctx, &buffers[3]) catch {};
                         
                         update_frame_count += 1;
                         last_update_counter = 0;
+
+                        if (update_frame_count >= image_count) {
+                            sprite_db.flush() catch {};
+                        }
                     }
 
                     prev_frame = current_frame;

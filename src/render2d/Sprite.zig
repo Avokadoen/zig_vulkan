@@ -16,45 +16,45 @@ pub inline fn init() void {
 }
 
 /// set sprite position
-pub inline fn setPosition(self: Sprite, pos: zlm.Vec2) void {
-    self.db_ptr.positions.items[self.db_id] = pos;
+pub inline fn setPosition(self: Sprite, pos: zlm.Vec2) !void {
+    try self.db_ptr.positions.updateAt(self.db_id, pos);
 }
 
 pub inline fn getPosition(self: Sprite) zlm.Vec2 {
-    return self.db_ptr.positions.items[self.db_id];
+    return self.db_ptr.positions.storage.items[self.db_id];
 }
 
 /// set sprite size in pixels
-pub inline fn setSize(self: Sprite, scale: zlm.Vec2) void {
-    self.db_ptr.scales.items[self.db_id] = scale;
+pub inline fn setSize(self: Sprite, scale: zlm.Vec2) !void {
+    try self.db_ptr.scales.updateAt(self.db_id, scale);
 }
 
 pub inline fn getSize(self: Sprite) zlm.Vec2 {
-    return self.db_ptr.scales.items[self.db_id];
+    return self.db_ptr.scales.storage.items[self.db_id];
 }
 
 /// set sprite rotation, counter clockwise degrees
-pub inline fn setRotation(self: Sprite, rotation: f32) void {
-    self.db_ptr.rotations.items[self.db_id] = zlm.toRadians(rotation);
+pub inline fn setRotation(self: Sprite, rotation: f32) !void {
+    try self.db_ptr.rotations.updateAt(self.db_id, zlm.toRadians(rotation));
 }
 
 pub inline fn getRotation(self: Sprite) f32 {
-    return zlm.toDegrees(self.db_ptr.rotations.items[self.db_id]);
+    return zlm.toDegrees(self.db_ptr.rotations.storage.items[self.db_id]);
 }
 
 /// Update sprite image to a new handle
-pub inline fn setTexture(self: Sprite, new_handle: TextureHandle) void {
-    self.db_ptr.uv_indices.items[self.db_id] = new_handle;
+pub inline fn setTexture(self: Sprite, new_handle: TextureHandle) !void {
+    try self.db_ptr.uv_indices.updateAt(self.db_id, new_handle);
 }
 
 pub inline fn getTexture(self: Sprite) TextureHandle {
-    return self.db_ptr.uv_indices.items[self.db_id];
+    return self.db_ptr.uv_indices.storage.items[self.db_id];
 }
 
 /// get the bounding rectangle of the sprite
 pub inline fn getRectangle(self: Sprite) Rectangle {
-    const position = self.db_ptr.positions.items[self.db_id];
-    const scale = self.db_ptr.scales.items[self.db_id];
+    const position = self.getPosition();
+    const scale = self.getSize();
     return Rectangle{
         .pos = position,
         .width = scale.x,
