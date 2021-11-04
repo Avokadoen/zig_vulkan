@@ -37,7 +37,7 @@ pub inline fn createDefaultVertexBuffer(ctx: Context, command_pool: vk.CommandPo
     );
     defer staging_buffer.deinit(ctx);
     // zig type inference is failing, so cast is needed currently
-    try staging_buffer.transferData(ctx, Vertex, @as([]Vertex, vertices[0..])); 
+    try staging_buffer.transfer(ctx, Vertex, @as([]Vertex, vertices[0..])); 
 
     var vertex_buffer = try GpuBufferMemory.init(
         ctx, 
@@ -45,7 +45,7 @@ pub inline fn createDefaultVertexBuffer(ctx: Context, command_pool: vk.CommandPo
         .{ .transfer_dst_bit = true, .vertex_buffer_bit = true, }, 
         .{ .device_local_bit = true, }
     );
-    try staging_buffer.copyBuffer(ctx, &vertex_buffer, buffer_size, command_pool);
+    try staging_buffer.copy(ctx, &vertex_buffer, buffer_size, command_pool);
     return vertex_buffer;
 }
 
@@ -63,7 +63,7 @@ pub inline fn createDefaultIndicesBuffer(ctx: Context, command_pool: vk.CommandP
     );
     defer staging_buffer.deinit(ctx);
     // zig type inference is failing, so cast is needed currently
-    try staging_buffer.transferData(ctx, Index, @as([]Index, indices[0..])); 
+    try staging_buffer.transfer(ctx, Index, @as([]Index, indices[0..])); 
 
     var index_buffer = try GpuBufferMemory.init(
         ctx, 
@@ -71,7 +71,7 @@ pub inline fn createDefaultIndicesBuffer(ctx: Context, command_pool: vk.CommandP
         .{ .transfer_dst_bit = true, .index_buffer_bit = true, }, 
         .{ .device_local_bit = true, }
     );
-    try staging_buffer.copyBuffer(ctx, &index_buffer, buffer_size, command_pool);
+    try staging_buffer.copy(ctx, &index_buffer, buffer_size, command_pool);
     return index_buffer;
 }
 

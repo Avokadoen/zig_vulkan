@@ -344,7 +344,7 @@ pub const Pipeline2D = struct {
             // transfer data to gpu
             var ubo_arr = [_]descriptor.Uniform{self.sync_descript.ubo.uniform_data};
             // TODO: only transfer dirty part of data
-            try self.sync_descript.ubo.uniform_buffers[image_index].transferData(ctx, descriptor.Uniform, ubo_arr[0..]);
+            try self.sync_descript.ubo.uniform_buffers[image_index].transfer(ctx, descriptor.Uniform, ubo_arr[0..]);
             self.sync_descript.ubo.is_dirty[image_index] = false;
         }
 

@@ -53,7 +53,7 @@ pub const GpuBufferMemory = struct {
         };
     }
 
-    pub fn copyBuffer(self: Self, ctx: Context, into: *GpuBufferMemory, size: vk.DeviceSize, command_pool: vk.CommandPool) !void {
+    pub fn copy(self: Self, ctx: Context, into: *GpuBufferMemory, size: vk.DeviceSize, command_pool: vk.CommandPool) !void {
         const command_buffer = try vk_utils.beginOneTimeCommandBuffer(ctx, command_pool);
         var copy_region = vk.BufferCopy{
             .src_offset = 0,
@@ -65,7 +65,7 @@ pub const GpuBufferMemory = struct {
         into.len += self.len;
     }
 
-    pub fn transferData(self: *Self, ctx: Context, comptime T: type, data: []const T) !void {
+    pub fn transfer(self: *Self, ctx: Context, comptime T: type, data: []const T) !void {
         // transfer empty data slice is NOP
         if (data.len <= 0) return;
     

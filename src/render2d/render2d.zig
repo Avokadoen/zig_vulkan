@@ -277,11 +277,12 @@ fn UpdateFn(comptime rate: BufferUpdateRate) type {
             return struct {
                 fn updateBuffers(image_index: usize, image_count: usize) void {
                     _ = image_count;
-                    subo.?.ubo.storage_buffers[image_index][0].transferData(ctx, zlm.Vec2, sprite_db.positions.items) catch {};
-                    subo.?.ubo.storage_buffers[image_index][1].transferData(ctx, zlm.Vec2, sprite_db.scales.items) catch {};
-                    subo.?.ubo.storage_buffers[image_index][2].transferData(ctx, f32,      sprite_db.rotations.items) catch {};
-                    subo.?.ubo.storage_buffers[image_index][3].transferData(ctx, c_int,    sprite_db.uv_indices.items) catch {};
-                    subo.?.ubo.storage_buffers[image_index][4].transferData(ctx, zlm.Vec2, sprite_db.uv_buffer.items) catch {};
+                    const buffers = subo.?.ubo.storage_buffers[image_index];
+                    buffers[0].transfer(ctx, zlm.Vec2, sprite_db.positions.items) catch {};
+                    buffers[1].transfer(ctx, zlm.Vec2, sprite_db.scales.items) catch {};
+                    buffers[2].transfer(ctx, f32,      sprite_db.rotations.items) catch {};
+                    buffers[3].transfer(ctx, c_int,    sprite_db.uv_indices.items) catch {};
+                    buffers[4].transfer(ctx, zlm.Vec2, sprite_db.uv_buffer.items) catch {};
                 }
             };
         },
@@ -299,11 +300,12 @@ fn UpdateFn(comptime rate: BufferUpdateRate) type {
                     }
 
                     if (update_frame_count < image_count) {
-                        subo.?.ubo.storage_buffers[image_index][0].transferData(ctx, zlm.Vec2, sprite_db.positions.items) catch {};
-                        subo.?.ubo.storage_buffers[image_index][1].transferData(ctx, zlm.Vec2, sprite_db.scales.items) catch {};
-                        subo.?.ubo.storage_buffers[image_index][2].transferData(ctx, f32,      sprite_db.rotations.items) catch {};
-                        subo.?.ubo.storage_buffers[image_index][3].transferData(ctx, c_int,    sprite_db.uv_indices.items) catch {};
-                        subo.?.ubo.storage_buffers[image_index][4].transferData(ctx, zlm.Vec2, sprite_db.uv_buffer.items) catch {};
+                        const buffers = subo.?.ubo.storage_buffers[image_index];
+                        buffers[0].transfer(ctx, zlm.Vec2, sprite_db.positions.items) catch {};
+                        buffers[1].transfer(ctx, zlm.Vec2, sprite_db.scales.items) catch {};
+                        buffers[2].transfer(ctx, f32,      sprite_db.rotations.items) catch {};
+                        buffers[3].transfer(ctx, c_int,    sprite_db.uv_indices.items) catch {};
+                        buffers[4].transfer(ctx, zlm.Vec2, sprite_db.uv_buffer.items) catch {};
                         
                         update_frame_count += 1;
                         last_update_counter = 0;

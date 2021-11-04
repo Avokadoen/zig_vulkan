@@ -40,7 +40,7 @@ pub const Texture = struct {
         const image_size: vk.DeviceSize = @intCast(vk.DeviceSize, config.data.len * @sizeOf(T));
         var staging_buffer = try GpuBufferMemory.init(ctx, image_size, .{ .transfer_src_bit = true, }, .{ .host_visible_bit = true, .host_coherent_bit = true, });
         defer staging_buffer.deinit(ctx);
-        try staging_buffer.transferData(ctx, T, config.data);
+        try staging_buffer.transfer(ctx, T, config.data);
 
         const image = blk: {
             // TODO: make sure we use correct usage bits https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkImageUsageFlagBits.html
