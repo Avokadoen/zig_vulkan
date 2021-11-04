@@ -28,13 +28,14 @@ var move_right = false;
 var move_down = false;
 
 pub fn main() anyerror!void {
+    const stderr = std.io.getStdErr().writer();
     // create a gpa with default configuration
     var alloc = if (consts.enable_validation_layers) std.heap.GeneralPurposeAllocator(.{}){} else std.heap.c_allocator;
     defer {
         if (consts.enable_validation_layers) {
             const leak = alloc.deinit();
             if (leak) {
-                // stderr.print("leak detected in gpa!", .{}) catch unreachable;
+                stderr.print("leak detected in gpa!", .{}) catch unreachable;
             }
         }
     }
@@ -52,8 +53,8 @@ pub fn main() anyerror!void {
     try glfw.Window.hint(glfw.Window.Hint.client_api, glfw.no_api);
 
     // Create a windowed mode window 
-    window = glfw.Window.create(800, 800, application_name, null, null) catch {
-        // try stderr.print("failed to create window, code: {}", .{err});
+    window = glfw.Window.create(800, 800, application_name, null, null) catch |err| {
+        try stderr.print("failed to create window, code: {}", .{err});
         return;
     };
     defer window.destroy();
