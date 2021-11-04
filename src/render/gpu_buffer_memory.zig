@@ -65,6 +65,7 @@ pub const GpuBufferMemory = struct {
         into.len += self.len;
     }
 
+    /// Transfer data from host to device
     pub fn transfer(self: *Self, ctx: Context, comptime T: type, data: []const T) !void {
         // transfer empty data slice is NOP
         if (data.len <= 0) return;
@@ -82,6 +83,36 @@ pub const GpuBufferMemory = struct {
         }
         ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
         self.len = @intCast(u32, data.len);
+    }
+
+    /// Transfer data from host to device, allows you to send multiple chunks of data in the same buffer.
+    /// offsets are index offsets, not byte offsets
+    pub fn batchTransfer(self: *Self, ctx: Context, comptime T: type, offsets: []usize, datas: [][]const T) !void {
+        if (offsets.len == 0) return;
+
+        if (offsets.len != datas.len) {
+            return error.OffsetDataMismatch; // inconsistent offset and data size indicate a programatic error
+        }
+
+        // calculate how far in the memory location we are going
+        const size = datas[datas.len-1].len * @sizeOf(T) + offsets[offsets.len-1] * @sizeOf(T);
+        if (self.size < size) {
+            return error.InsufficentBufferSize; // size of buffer is less than data being transfered
+        }
+
+        var gpu_mem = try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, size, .{});
+        const gpu_mem_start = @ptrToInt(gpu_mem);
+        for (offsets) |offset, i| {
+            const byte_offset = offset * @sizeOf(T);
+            for (datas[i]) |element, j| {
+                const mem_location = gpu_mem_start + byte_offset + j * @sizeOf(T);
+                var ptr = @intToPtr(*T, mem_location);
+                ptr.* = element;
+            }
+        }
+        ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
+
+        self.len = std.math.max(self.len, @intCast(u32, datas[datas.len-1].len + offsets[offsets.len-1]));
     }
 
     pub inline fn deinit(self: Self, ctx: Context) void {

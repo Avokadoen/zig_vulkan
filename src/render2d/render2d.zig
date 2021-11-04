@@ -270,7 +270,6 @@ pub fn deinit() void {
     swapchain.deinit(ctx);
 }
 
-
 fn UpdateFn(comptime rate: BufferUpdateRate) type {
     switch (rate) {
         .always => {
@@ -301,7 +300,10 @@ fn UpdateFn(comptime rate: BufferUpdateRate) type {
 
                     if (update_frame_count < image_count) {
                         const buffers = subo.?.ubo.storage_buffers[image_index];
-                        buffers[0].transfer(ctx, zlm.Vec2, sprite_db.positions.items) catch {};
+                        const posit = sprite_db.positions.items;
+                        var pos = [1][]zlm.Vec2{ posit[20000..] };
+                        var offsets = [_]usize{ 20000 };
+                        buffers[0].batchTransfer(ctx, zlm.Vec2, offsets[0..], pos[0..]) catch {};
                         buffers[1].transfer(ctx, zlm.Vec2, sprite_db.scales.items) catch {};
                         buffers[2].transfer(ctx, f32,      sprite_db.rotations.items) catch {};
                         buffers[3].transfer(ctx, c_int,    sprite_db.uv_indices.items) catch {};
@@ -317,5 +319,3 @@ fn UpdateFn(comptime rate: BufferUpdateRate) type {
         }
     }
 }
-
-
