@@ -597,12 +597,7 @@ fn recordGfxCmdBuffers(ctx: Context, pipeline: *Pipeline2D) !void {
             undefined
         );
         
-        // TODO temp solution: call draw for each instance, should be cheap since this is a cmd buffer ?
-        //                     alternative solution: fill indices buffer with duplicate data according to instance_count
-        var j: u32 = 0;
-        while (j < pipeline.instance_count) : (j += 1) {
-            ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, 1, 0, 0, j);
-        }
+        ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, pipeline.instance_count, 0, 0, 0);
         ctx.vkd.cmdEndRenderPass(command_buffer);
         try ctx.vkd.endCommandBuffer(command_buffer);
     }
