@@ -17,38 +17,46 @@ pub inline fn init() void {
 
 /// set sprite position
 pub inline fn setPosition(self: Sprite, pos: zlm.Vec2) !void {
-    try self.db_ptr.positions.updateAt(self.db_id, pos);
+    const index = self.db_ptr.getIndex(self.db_id);
+    try self.db_ptr.positions.updateAt(index, pos);
 }
 
 pub inline fn getPosition(self: Sprite) zlm.Vec2 {
-    return self.db_ptr.positions.storage.items[self.db_id];
+    const index = self.db_ptr.getIndex(self.db_id);
+    return self.db_ptr.positions.storage.items[index];
 }
 
 /// set sprite size in pixels
 pub inline fn setSize(self: Sprite, scale: zlm.Vec2) !void {
-    try self.db_ptr.scales.updateAt(self.db_id, scale);
+    const index = self.db_ptr.getIndex(self.db_id);
+    try self.db_ptr.scales.updateAt(index, scale);
 }
 
 pub inline fn getSize(self: Sprite) zlm.Vec2 {
-    return self.db_ptr.scales.storage.items[self.db_id];
+    const index = self.db_ptr.getIndex(self.db_id);
+    return self.db_ptr.scales.storage.items[index];
 }
 
 /// set sprite rotation, counter clockwise degrees
 pub inline fn setRotation(self: Sprite, rotation: f32) !void {
-    try self.db_ptr.rotations.updateAt(self.db_id, zlm.toRadians(rotation));
+    const index = self.db_ptr.getIndex(self.db_id);
+    try self.db_ptr.rotations.updateAt(index, zlm.toRadians(rotation));
 }
 
 pub inline fn getRotation(self: Sprite) f32 {
-    return zlm.toDegrees(self.db_ptr.rotations.storage.items[self.db_id]);
+    const index = self.db_ptr.getIndex(self.db_id);
+    return zlm.toDegrees(self.db_ptr.rotations.storage.items[index]);
 }
 
 /// Update sprite image to a new handle
 pub inline fn setTexture(self: Sprite, new_handle: TextureHandle) !void {
-    try self.db_ptr.uv_indices.updateAt(self.db_id, new_handle);
+    const index = self.db_ptr.getIndex(self.db_id);
+    try self.db_ptr.uv_indices.updateAt(index, new_handle);
 }
 
 pub inline fn getTexture(self: Sprite) TextureHandle {
-    return self.db_ptr.uv_indices.storage.items[self.db_id];
+    const index = self.db_ptr.getIndex(self.db_id);
+    return self.db_ptr.uv_indices.storage.items[index];
 }
 
 /// get the bounding rectangle of the sprite
@@ -66,7 +74,8 @@ pub inline fn getRectangle(self: Sprite) Rectangle {
 pub fn scaleToHeight(self: Sprite, height: f32) void {
     const rect = self.getRectangle();
     const ratio = @intToFloat(f32, rect.height) / @intToFloat(f32, rect.width);
-    self.scales.items[self.db_id] = zlm.Vec2{
+    const index = self.db_ptr.getIndex(self.db_id);
+    self.scales.items[index] = zlm.Vec2{
         .x = height * ratio,
         .y = height,
     };

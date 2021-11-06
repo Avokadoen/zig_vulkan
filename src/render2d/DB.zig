@@ -11,10 +11,14 @@ const UV = @import("util_types.zig").UV;
 
 const DB = @This();
 
+pub const Index = usize;
+
 // global data
 len: usize,
 sprite_pool_size: usize,
 uv_buffer: StorageType(zlm.Vec2),
+
+sprite_index: ArrayList(Index),
 
 // instance data
 positions: StorageType(zlm.Vec2),
@@ -26,21 +30,24 @@ pub fn initCapacity(allocator: *Allocator, capacity: usize) !DB {
     return DB{
         .len = 0,
         .sprite_pool_size = capacity,
-        .uv_buffer  = try StorageType(zlm.Vec2).initCapacity(allocator, 10 * 4 * 2), // TODO: allow configure
-        .positions  = try StorageType(zlm.Vec2).initCapacity(allocator, capacity),
-        .scales     = try StorageType(zlm.Vec2).initCapacity(allocator, capacity),
-        .rotations  = try StorageType(f32).initCapacity(allocator, capacity),
-        .uv_indices = try StorageType(c_int).initCapacity(allocator, capacity),
+        .uv_buffer      = try StorageType(zlm.Vec2).initCapacity(allocator, 10 * 4 * 2), // TODO: allow configure
+        .sprite_index   = try ArrayList(Index).initCapacity(allocator, capacity),
+        .positions      = try StorageType(zlm.Vec2).initCapacity(allocator, capacity),
+        .scales         = try StorageType(zlm.Vec2).initCapacity(allocator, capacity),
+        .rotations      = try StorageType(f32).initCapacity(allocator, capacity),
+        .uv_indices     = try StorageType(c_int).initCapacity(allocator, capacity),
     };
 }
 
 /// get a new sprite id
 pub fn getNewId(self: *DB) !usize {
     const newId = self.len;
+    
     if (newId < self.sprite_pool_size) {
         self.sprite_pool_size += 1;
     }
 
+    try self.sprite_index.append(newId);
     try self.positions.append(zlm.Vec2.zero);
     try self.scales.append(zlm.Vec2.zero);
     try self.rotations.append(0);
@@ -48,6 +55,10 @@ pub fn getNewId(self: *DB) !usize {
 
     self.len += 1;
     return newId;
+}
+
+pub inline fn getIndex(self: *DB, sprite_id: usize) Index {
+    return self.sprite_index.items[sprite_id];
 }
 
 pub fn flush(self: *DB) !void {
@@ -71,6 +82,7 @@ pub inline fn generateUvBuffer(self: *DB, mega_uvs: []UV) !void {
 }
 
 pub fn deinit(self: *DB) void {
+    self.sprite_index.deinit();
     self.positions.deinit();
     self.scales.deinit();
     self.rotations.deinit();
@@ -103,7 +115,7 @@ fn StorageType(comptime T: type) type {
             try self.storage.append(item);
         }
 
-        pub inline fn updateAt(self: *Self, at: usize, new_value: T) !void {
+        pub inline fn updateAt(self: *Self, at: Index, new_value: T) !void {
             // update value
             self.storage.items[at] = new_value;
 

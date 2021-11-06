@@ -124,10 +124,11 @@ pub fn createSprite(texture: TextureHandle, position: zlm.Vec2, rotation: f32, s
         .db_ptr = &sprite_db,
         .db_id = try sprite_db.getNewId(),
     };
-    try sprite_db.positions.updateAt(new_sprite.db_id, position);
-    try sprite_db.scales.updateAt(new_sprite.db_id, size);
-    try sprite_db.rotations.updateAt(new_sprite.db_id, zlm.toRadians(rotation));
-    try sprite_db.uv_indices.updateAt(new_sprite.db_id, texture);
+    const index = sprite_db.getIndex(new_sprite.db_id);
+    try sprite_db.positions.updateAt(index, position);
+    try sprite_db.scales.updateAt(index, size);
+    try sprite_db.rotations.updateAt(index, zlm.toRadians(rotation));
+    try sprite_db.uv_indices.updateAt(index, texture);
 
     return new_sprite;
 }
@@ -236,8 +237,8 @@ pub fn prepareDraw(comptime gpu_update_rate: BufferUpdateRate) !void {
     try sprite_db.generateUvBuffer(mega_uvs);
 
     for (swapchain.images.items) |_, i| {
-        const buffer = subo.?.ubo.storage_buffers[i];
-        try sprite_db.uv_buffer.handleDeviceTransfer(ctx, &buffer[4]);
+        const buffers = subo.?.ubo.storage_buffers[i];
+        try sprite_db.uv_buffer.handleDeviceTransfer(ctx, &buffers[4]);
     }
 
     api_state = .PreparedForDraw;
