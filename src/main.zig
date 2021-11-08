@@ -72,7 +72,7 @@ pub fn main() anyerror!void {
     try input.init(window, keyInputFn, mouseBtnInputFn, cursorPosInputFn);
     defer input.deinit();
 
-    try render2d.init(allocator, ctx, 32768);
+    try render2d.init(allocator, ctx, 25);
     defer render2d.deinit();
 
     var my_textures: [4]render2d.TextureHandle = undefined;
@@ -81,11 +81,11 @@ pub fn main() anyerror!void {
     my_textures[2] = try render2d.loadTexture("../assets/images/bern_burger.jpg"[0..]);
     my_textures[3] = try render2d.loadTexture("../assets/images/tiger.jpg"[0..]);
 
-    var my_sprites: [32768]render2d.Sprite = undefined; 
+    var my_sprites: [25]render2d.Sprite = undefined; 
     {   
         const window_size = try window.getSize();
         const windowf = @intToFloat(f32, window_size.height);
-        const size = @intToFloat(f32, window_size.height) / @as(f32, 181);
+        const size = @intToFloat(f32, window_size.height) / @as(f32, 5);
         const scale = zlm.Vec2.new(size, size);
 
         const pos_offset_x = (windowf - scale.x) * 0.5;
@@ -93,11 +93,11 @@ pub fn main() anyerror!void {
 
         var rotation: f32 = 0;
         var i: f32 = 0;
-        outer: while (i < 182) : (i += 1) {
+        outer: while (i < 5) : (i += 1) {
             var j: f32 = 0;
-            while (j < 182) : (j += 1) {
-                const index = i * 182 + j;
-                if (index >= 32768) break :outer;
+            while (j < 5) : (j += 1) {
+                const index = i * 5 + j;
+                if (index > 24) break :outer;
 
                 const texture_handle = my_textures[@floatToInt(usize, @mod(index, 4))];
                 const pos = zlm.Vec2.new(
@@ -120,6 +120,16 @@ pub fn main() anyerror!void {
     var sin_dir: f32 = 1;
 
     var prev_frame = std.time.milliTimestamp();
+
+    try my_sprites[1].setLayer(1);
+    try my_sprites[1].setSize(zlm.Vec2.new(500, 500));
+    try my_sprites[1].setPosition(zlm.Vec2.new(150, 150));
+
+    try my_sprites[0].setLayer(2);
+    try my_sprites[0].setSize(zlm.Vec2.new(500, 500));
+    try my_sprites[0].setPosition(zlm.Vec2.new(0, 0));
+    
+    try my_sprites[0].setLayer(0);
 
     // Loop until the user closes the window
     while (!window.shouldClose()) {
@@ -160,7 +170,7 @@ pub fn main() anyerror!void {
         sin_wave += @floatCast(f32, delta_time);
         sin_dir = if (@mod(sin_wave, 2) < 1) 1 else -1;
         const offset = std.math.sin(sin_wave);
-        for(my_sprites) |my_sprite| {
+        for(my_sprites[2..]) |*my_sprite| {
             var pos = my_sprite.getPosition();
             pos.x += offset * sin_dir * 0.2;
             try my_sprite.setPosition(pos);

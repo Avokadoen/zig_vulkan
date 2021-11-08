@@ -120,11 +120,15 @@ pub fn loadTexture(path: []const u8) !TextureHandle {
 pub fn createSprite(texture: TextureHandle, position: zlm.Vec2, rotation: f32, size: zlm.Vec2) !Sprite {
     api_state.assertEqual(.Initialized);
 
-    const new_sprite = Sprite {
+    var new_sprite = Sprite {
         .db_ptr = &sprite_db,
         .db_id = try sprite_db.getNewId(),
+        // a new sprite will by default be in the top layer 
+        .layer = sprite_db.layer_data.items[sprite_db.layer_data.items.len-1].id,
     };
-    const index = sprite_db.getIndex(new_sprite.db_id);
+    sprite_db.layer_data.items[sprite_db.layer_data.items.len-1].len += 1;
+
+    const index = sprite_db.getIndex(&new_sprite.db_id);
     try sprite_db.positions.updateAt(index, position);
     try sprite_db.scales.updateAt(index, size);
     try sprite_db.rotations.updateAt(index, zlm.toRadians(rotation));
