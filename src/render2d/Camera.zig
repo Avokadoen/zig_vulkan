@@ -6,8 +6,8 @@ const zlm = @import("zlm");
 
 const Camera = @This();
 
-zoom_speed: f32,
 move_speed: f32,
+zoom_speed: f32,
 
 view: sc.ViewportScissor,
 

@@ -14,6 +14,7 @@ pub const PackJob = struct {
     height: u32,
 };
 
+pub const BruteForceFunction = fn(*Allocator, []PackJob, u32, u32) BrutePackError!CalculatedImageSize;
 
 fn sortByHeight(context: void, lhs: PackJob, rhs: PackJob) bool {
     _ = context;

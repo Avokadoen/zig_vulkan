@@ -3,7 +3,6 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const ecs = @import("ecs");
 const glfw = @import("glfw");
 const zlm = @import("zlm");
 
@@ -72,48 +71,49 @@ pub fn main() anyerror!void {
     try input.init(window, keyInputFn, mouseBtnInputFn, cursorPosInputFn);
     defer input.deinit();
 
-    try render2d.init(allocator, ctx, 25);
-    defer render2d.deinit();
-
     var my_textures: [4]render2d.TextureHandle = undefined;
-    my_textures[0] = try render2d.loadTexture("../assets/images/grasstop.png"[0..]);
-    my_textures[1] = try render2d.loadTexture("../assets/images/texture.jpg"[0..]);
-    my_textures[2] = try render2d.loadTexture("../assets/images/bern_burger.jpg"[0..]);
-    my_textures[3] = try render2d.loadTexture("../assets/images/tiger.jpg"[0..]);
-
     var my_sprites: [25]render2d.Sprite = undefined; 
-    {   
-        const window_size = try window.getSize();
-        const windowf = @intToFloat(f32, window_size.height);
-        const size = @intToFloat(f32, window_size.height) / @as(f32, 5);
-        const scale = zlm.Vec2.new(size, size);
+    var draw_api = blk: {
+        var init_api = try render2d.init(allocator, ctx, 25);
 
-        const pos_offset_x = (windowf - scale.x) * 0.5;
-        const pos_offset_y = (windowf - scale.y) * 0.5;
+        my_textures[0] = try init_api.loadTexture("../assets/images/grasstop.png"[0..]);
+        my_textures[1] = try init_api.loadTexture("../assets/images/texture.jpg"[0..]);
+        my_textures[2] = try init_api.loadTexture("../assets/images/bern_burger.jpg"[0..]);
+        my_textures[3] = try init_api.loadTexture("../assets/images/tiger.jpg"[0..]);
 
-        var rotation: f32 = 0;
-        var i: f32 = 0;
-        outer: while (i < 5) : (i += 1) {
-            var j: f32 = 0;
-            while (j < 5) : (j += 1) {
-                const index = i * 5 + j;
-                if (index > 24) break :outer;
+        {   
+            const window_size = try window.getSize();
+            const windowf = @intToFloat(f32, window_size.height);
+            const size = @intToFloat(f32, window_size.height) / @as(f32, 5);
+            const scale = zlm.Vec2.new(size, size);
 
-                const texture_handle = my_textures[@floatToInt(usize, @mod(index, 4))];
-                const pos = zlm.Vec2.new(
-                    j * scale.x - pos_offset_x,
-                    i * scale.y - pos_offset_y
-                );
-                my_sprites[@floatToInt(usize, index)] = try render2d.createSprite(texture_handle, pos, rotation, scale);
-                rotation += 10;
-                rotation = @mod(rotation, 360);
+            const pos_offset_x = (windowf - scale.x) * 0.5;
+            const pos_offset_y = (windowf - scale.y) * 0.5;
+
+            var rotation: f32 = 0;
+            var i: f32 = 0;
+            outer: while (i < 5) : (i += 1) {
+                var j: f32 = 0;
+                while (j < 5) : (j += 1) {
+                    const index = i * 5 + j;
+                    if (index > 24) break :outer;
+
+                    const texture_handle = my_textures[@floatToInt(usize, @mod(index, 4))];
+                    const pos = zlm.Vec2.new(
+                        j * scale.x - pos_offset_x,
+                        i * scale.y - pos_offset_y
+                    );
+                    my_sprites[@floatToInt(usize, index)] = try init_api.createSprite(texture_handle, pos, rotation, scale);
+                    rotation += 10;
+                    rotation = @mod(rotation, 360);
+                }
             }
         }
-    }
+        break :blk try init_api.initDrawApi(.{ .every_ms = 14 });
+    };
+    defer draw_api.deinit();
 
-    try render2d.prepareDraw(.{ .every_ms = 14 });
-
-    var camera = render2d.createCamera(500, 2);
+    var camera = draw_api.createCamera(500, 2);
     var camera_translate = zlm.Vec2.zero;
 
     var sin_wave: f32 = 0;
@@ -121,15 +121,17 @@ pub fn main() anyerror!void {
 
     var prev_frame = std.time.milliTimestamp();
 
-    try my_sprites[1].setLayer(1);
+    try my_sprites[1].setLayer(2);
     try my_sprites[1].setSize(zlm.Vec2.new(500, 500));
     try my_sprites[1].setPosition(zlm.Vec2.new(150, 150));
 
-    try my_sprites[0].setLayer(2);
+    try my_sprites[0].setLayer(3);
     try my_sprites[0].setSize(zlm.Vec2.new(500, 500));
     try my_sprites[0].setPosition(zlm.Vec2.new(0, 0));
     
-    try my_sprites[0].setLayer(0);
+    try my_sprites[0].setLayer(1);
+    try my_sprites[12].setLayer(4);
+    try my_sprites[12].setSize(zlm.Vec2.new(100, 100));
 
     // Loop until the user closes the window
     while (!window.shouldClose()) {
@@ -184,7 +186,7 @@ pub fn main() anyerror!void {
             // try comp_pipeline.compute(ctx);
 
             // Render here
-            try render2d.draw();
+            try draw_api.draw();
         }
 
         // Poll for and process events

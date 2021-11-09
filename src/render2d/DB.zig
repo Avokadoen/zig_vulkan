@@ -239,7 +239,7 @@ pub inline fn generateUvBuffer(self: *DB, mega_uvs: []UV) !void {
     self.uv_buffer.delta.has_changes = true;
 }
 
-pub fn deinit(self: *DB) void {
+pub fn deinit(self: DB) void {
     self.shift_events.deinit();
     self.layer_data.deinit();
     self.positions.deinit();
@@ -293,7 +293,7 @@ fn StorageType(comptime T: type) type {
             self.storage.deinit();
         }
 
-        pub inline fn handleDeviceTransfer(self: *Self, ctx: Context, buffer: *GpuBufferMemory) !void {
+        pub fn handleDeviceTransfer(self: *Self, ctx: Context, buffer: *GpuBufferMemory) !void {
             if (self.delta.has_changes == false) return;
 
             var offset = [1]usize{ self.delta.from };
