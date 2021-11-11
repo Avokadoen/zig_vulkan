@@ -1,3 +1,3 @@
 test {
-    _ = @import("sprite/rectangle_pack.zig");
+    _ = @import("render2d/knapsack.zig");
 }
