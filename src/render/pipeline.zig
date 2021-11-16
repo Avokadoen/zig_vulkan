@@ -164,9 +164,9 @@ pub const Pipeline2D = struct {
             };
             const color_blend_attachments = [_]vk.PipelineColorBlendAttachmentState{
                 .{
-                    .blend_enable = vk.FALSE,
-                    .src_color_blend_factor = .one,
-                    .dst_color_blend_factor = .zero,
+                    .blend_enable = vk.TRUE,
+                    .src_color_blend_factor = .src_alpha,
+                    .dst_color_blend_factor = .one_minus_src_alpha,
                     .color_blend_op = .add,
                     .src_alpha_blend_factor = .one,
                     .dst_alpha_blend_factor = .zero,

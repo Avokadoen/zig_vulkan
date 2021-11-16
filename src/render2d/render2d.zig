@@ -84,7 +84,13 @@ pub const InitializedApi = struct {
         const image = try stbi.Image.from_file(self.allocator, path, stbi.DesiredChannels.STBI_rgb_alpha);
         try self.images.append(image);
 
-        const handle: TextureHandle = @intCast(c_int, self.images.items.len - 1);
+        const handle = TextureHandle{
+            .id = @intCast(c_int, self.images.items.len - 1),
+            .width = @intToFloat(f32, image.width),
+            .height = @intToFloat(f32, image.height),
+        };
+        try self.db_ptr.*.uv_meta.append(handle);
+
         try self.image_paths.put(path, handle);
         return handle;
     }
@@ -104,10 +110,10 @@ pub const InitializedApi = struct {
         self.db_ptr.*.layer_data.items[self.db_ptr.*.layer_data.items.len-1].len += 1;
 
         const index = self.db_ptr.*.getIndex(&new_sprite.db_id);
-        try self.db_ptr.*.positions.updateAt(index, position);
-        try self.db_ptr.*.scales.updateAt(index, size);
-        try self.db_ptr.*.rotations.updateAt(index, zlm.toRadians(rotation));
-        try self.db_ptr.*.uv_indices.updateAt(index, texture);
+        self.db_ptr.*.positions.updateAt(index, position);
+        self.db_ptr.*.scales.updateAt(index, size);
+        self.db_ptr.*.rotations.updateAt(index, zlm.toRadians(rotation));
+        self.db_ptr.*.uv_indices.updateAt(index, texture.id);
 
         return new_sprite;
     }
@@ -181,7 +187,7 @@ pub const InitializedApi = struct {
         const mega_image = stbi.Image{
             .width = @intCast(i32, mega_size.width),
             .height = @intCast(i32, mega_size.height),
-            .channels = 3,
+            .channels = 4,
             .data = mega_data,
         };
         
@@ -215,7 +221,7 @@ pub const InitializedApi = struct {
         api.subo.* = try descriptor.SyncDescriptor.init(desc_config);
         api.pipeline = try render.Pipeline2D.init(self.allocator, self.ctx, &self.swapchain, @intCast(u32, self.db_ptr.*.len), &self.view, api.subo);
         
-        try api.db_ptr.*.generateUvBuffer(mega_uvs);
+        try api.db_ptr.generateUvBuffer(mega_uvs);
 
         for (api.swapchain.images.items) |_, i| {
             const buffers = api.subo.*.ubo.storage_buffers[i];
@@ -361,7 +367,7 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
                         user_ctx.*.last_update_counter = 0;
 
                         if (user_ctx.*.update_frame_count >= image_count) {
-                            user_ctx.*.db_ptr.*.flush() catch {};
+                            user_ctx.*.db_ptr.*.flush();
                         }
                     }
 

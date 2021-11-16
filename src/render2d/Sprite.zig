@@ -17,9 +17,9 @@ pub inline fn init() void {
 }
 
 /// set sprite position
-pub inline fn setPosition(self: *Sprite, pos: zlm.Vec2) !void {
+pub inline fn setPosition(self: *Sprite, pos: zlm.Vec2) void {
     const index = self.db_ptr.getIndex(&self.db_id);
-    try self.db_ptr.positions.updateAt(index, pos);
+    self.db_ptr.positions.updateAt(index, pos);
 }
 
 pub inline fn getPosition(self: *Sprite) zlm.Vec2 {
@@ -28,9 +28,9 @@ pub inline fn getPosition(self: *Sprite) zlm.Vec2 {
 }
 
 /// set sprite size in pixels
-pub fn setSize(self: *Sprite, scale: zlm.Vec2) !void {
+pub fn setSize(self: *Sprite, scale: zlm.Vec2) void {
     const index = self.db_ptr.getIndex(&self.db_id);
-    try self.db_ptr.scales.updateAt(index, scale);
+    self.db_ptr.scales.updateAt(index, scale);
 }
 
 pub inline fn getSize(self: *Sprite) zlm.Vec2 {
@@ -39,9 +39,9 @@ pub inline fn getSize(self: *Sprite) zlm.Vec2 {
 }
 
 /// set sprite rotation, counter clockwise degrees
-pub inline fn setRotation(self: *Sprite, rotation: f32) !void {
+pub inline fn setRotation(self: *Sprite, rotation: f32) void {
     const index = self.db_ptr.getIndex(&self.db_id);
-    try self.db_ptr.rotations.updateAt(index, zlm.toRadians(rotation));
+    self.db_ptr.rotations.updateAt(index, zlm.toRadians(rotation));
 }
 
 pub inline fn getRotation(self: *Sprite) f32 {
@@ -50,14 +50,16 @@ pub inline fn getRotation(self: *Sprite) f32 {
 }
 
 /// Update sprite image to a new handle
-pub inline fn setTexture(self: *Sprite, new_handle: TextureHandle) !void {
+pub inline fn setTexture(self: *Sprite, new_handle: TextureHandle) void {
     const index = self.db_ptr.getIndex(&self.db_id);
-    try self.db_ptr.uv_indices.updateAt(index, new_handle);
+    self.db_ptr.uv_indices.updateAt(index, new_handle.id);
+    self.db_ptr.uv_meta.items[@intCast(usize, new_handle.id)] = new_handle;
 }
 
 pub inline fn getTexture(self: *Sprite) TextureHandle {
     const index = self.db_ptr.getIndex(&self.db_id);
-    return self.db_ptr.uv_indices.storage.items[index];
+    const uv_index = self.db_ptr.uv_indices.storage.items[index];
+    return self.db_ptr.uv_meta.items[uv_index];
 }
 
 /// Update the sprite layer

@@ -7,7 +7,9 @@ const Context = render.Context;
 const GpuBufferMemory = render.GpuBufferMemory;
 
 const zlm = @import("zlm");
-const UV = @import("util_types.zig").UV;
+const util_types = @import("util_types.zig");
+const UV = util_types.UV;
+const TextureHandle = util_types.TextureHandle;
 
 const DB = @This();
 
@@ -43,6 +45,7 @@ const ShiftEvent = union(ShiftEnum) {
 len: usize,
 sprite_pool_size: usize,
 uv_buffer: StorageType(zlm.Vec2),
+uv_meta: ArrayList(TextureHandle), 
 
 // used to lookup index of sprite in array's using ID
 layer_data: ArrayList(Layer),
@@ -63,6 +66,7 @@ pub fn initCapacity(allocator: *Allocator, capacity: usize) !DB {
         .len = 0,
         .sprite_pool_size = capacity,
         .uv_buffer      = try StorageType(zlm.Vec2).initCapacity(allocator, 10 * 4 * 2), // TODO: allow configure
+        .uv_meta        = try ArrayList(TextureHandle).initCapacity(allocator, capacity),
         .layer_data     = layers,
         .shift_events   = ArrayList(ShiftEvent).init(allocator),
         .positions      = try StorageType(zlm.Vec2).initCapacity(allocator, capacity),
@@ -219,11 +223,11 @@ pub fn getIndex(self: *DB, sprite_id: *Id) Index {
     return @as(Index, sprite_id.value);
 }
 
-pub fn flush(self: *DB) !void {
-    try self.positions.signalChangesPushed();
-    try self.scales.signalChangesPushed();
-    try self.rotations.signalChangesPushed();
-    try self.uv_indices.signalChangesPushed();
+pub fn flush(self: *DB) void {
+    self.positions.signalChangesPushed();
+    self.scales.signalChangesPushed();
+    self.rotations.signalChangesPushed();
+    self.uv_indices.signalChangesPushed();
 }
 
 /// generate uv buffer based on 
@@ -274,7 +278,7 @@ fn StorageType(comptime T: type) type {
             try self.storage.append(item);
         }
 
-        pub inline fn updateAt(self: *Self, at: Index, new_value: T) !void {
+        pub inline fn updateAt(self: *Self, at: Index, new_value: T) void {
             // update value
             self.storage.items[at] = new_value;
 
@@ -283,7 +287,7 @@ fn StorageType(comptime T: type) type {
             self.delta.has_changes = true;
         }
 
-        pub inline fn signalChangesPushed(self: *Self) !void {
+        pub inline fn signalChangesPushed(self: *Self) void {
             self.delta.from = 0;
             self.delta.to   = 0;
             self.delta.has_changes = false;

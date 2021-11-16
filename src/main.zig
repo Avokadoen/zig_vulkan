@@ -41,18 +41,15 @@ pub fn main() anyerror!void {
     const allocator = if (consts.enable_validation_layers) &alloc.allocator else alloc;
     
     // Initialize the library *
-    try glfw.init();
+    try glfw.init(.{});
     defer glfw.terminate();
 
     if (!try glfw.vulkanSupported()) {
         std.debug.panic("vulkan not supported on device (glfw)", .{});
     }
 
-    // Tell glfw that we are planning to use a custom API (not opengl)
-    try glfw.Window.hint(glfw.Window.Hint.client_api, glfw.no_api);
-
     // Create a windowed mode window 
-    window = glfw.Window.create(800, 800, application_name, null, null) catch |err| {
+    window = glfw.Window.create(800, 800, application_name, null, null, .{ .client_api = .no_api }) catch |err| {
         try stderr.print("failed to create window, code: {}", .{err});
         return;
     };
@@ -122,16 +119,17 @@ pub fn main() anyerror!void {
     var prev_frame = std.time.milliTimestamp();
 
     try my_sprites[1].setLayer(2);
-    try my_sprites[1].setSize(zlm.Vec2.new(500, 500));
-    try my_sprites[1].setPosition(zlm.Vec2.new(150, 150));
+    my_sprites[1].setSize(zlm.Vec2.new(500, 500));
+    my_sprites[1].setPosition(zlm.Vec2.new(150, 150));
 
     try my_sprites[0].setLayer(3);
-    try my_sprites[0].setSize(zlm.Vec2.new(500, 500));
-    try my_sprites[0].setPosition(zlm.Vec2.new(0, 0));
+    my_sprites[0].setSize(zlm.Vec2.new(500, 500));
+    my_sprites[0].setPosition(zlm.Vec2.new(0, 0));
+    my_sprites[0].setTexture(my_textures[2]);
     
     try my_sprites[0].setLayer(1);
     try my_sprites[12].setLayer(4);
-    try my_sprites[12].setSize(zlm.Vec2.new(100, 100));
+    my_sprites[12].setSize(zlm.Vec2.new(100, 100));
 
     // Loop until the user closes the window
     while (!window.shouldClose()) {
@@ -175,11 +173,11 @@ pub fn main() anyerror!void {
         for(my_sprites[2..]) |*my_sprite| {
             var pos = my_sprite.getPosition();
             pos.x += offset * sin_dir * 0.2;
-            try my_sprite.setPosition(pos);
+            my_sprite.setPosition(pos);
 
             var rot = my_sprite.getRotation();
             rot -= @floatCast(f32, 60 * delta_time);
-            try my_sprite.setRotation(rot);
+            my_sprite.setRotation(rot);
         }
         {
             // Test compute
