@@ -69,7 +69,7 @@ pub fn init(
     cursor_pos_handle_fn = input_cursor_pos_handle_fn;
     try cursor_pos_stream.new_input_event.init();
 
-    try window.setInputMode(glfw.Window.InputMode.cursor, glfw.Window.InputModeCursor.disabled);
+    try window.setInputMode(glfw.Window.InputMode.cursor, glfw.Window.InputModeCursor.normal);
 
     _ = window.setKeyCallback(keyCallback); 
     _ = window.setMouseButtonCallback(mouseBtnCallback);
@@ -92,24 +92,24 @@ pub fn deinit() void {
     kill_all_input_threads = true;
 
     { // critical zone
-        var lock = key_stream.mutex.acquire();
-        defer lock.release();
+        key_stream.mutex.lock();
+        defer key_stream.mutex.unlock();
 
         // wake thread
         key_stream.new_input_event.set();
     }
 
     { // critical zone 
-        var lock = mouse_btn_stream.mutex.acquire();
-        defer lock.release();
+        mouse_btn_stream.mutex.lock();
+        defer mouse_btn_stream.mutex.unlock();
 
         // wake thread
         mouse_btn_stream.new_input_event.set();
     }
 
     { // critical zone 
-        var lock = cursor_pos_stream.mutex.acquire();
-        defer lock.release();
+        cursor_pos_stream.mutex.lock();
+        defer cursor_pos_stream.mutex.unlock(); 
 
         // wake thread
         cursor_pos_stream.new_input_event.set();
@@ -128,8 +128,9 @@ pub fn handleKeyboardInput() void {
         key_stream.new_input_event.wait();
 
         { // critical zone
-            var lock = key_stream.mutex.acquire();
-            defer lock.release();
+            key_stream.mutex.lock();
+            defer key_stream.mutex.unlock();
+
             while(key_stream.len > 0) : (key_stream.len -= 1){
                 const event = key_stream.buffer[key_stream.len - 1];
                 key_handle_fn(event);
@@ -147,8 +148,9 @@ pub fn handleMouseButtonInput() void {
         mouse_btn_stream.new_input_event.wait();
 
         { // critical zone
-            var lock = mouse_btn_stream.mutex.acquire();
-            defer lock.release();
+            mouse_btn_stream.mutex.lock();
+            defer mouse_btn_stream.mutex.unlock();
+
             while(mouse_btn_stream.len > 0) : (mouse_btn_stream.len -= 1){
                 const event = mouse_btn_stream.buffer[mouse_btn_stream.len - 1];
                 mouse_btn_handle_fn(event);
@@ -166,8 +168,9 @@ pub fn handleCursorPosInput() void {
         cursor_pos_stream.new_input_event.wait();
 
         { // critical zone
-            var lock = cursor_pos_stream.mutex.acquire();
-            defer lock.release();
+            cursor_pos_stream.mutex.lock();
+            defer cursor_pos_stream.mutex.unlock();
+
             while(cursor_pos_stream.len > 0) : (cursor_pos_stream.len -= 1){
                 const event = cursor_pos_stream.buffer[cursor_pos_stream.len - 1];
                 cursor_pos_handle_fn(event);
@@ -207,8 +210,8 @@ fn keyCallback(_window: glfw.Window, key: Key, scan_code: isize, action: Action,
     };
 
     { // critical zone
-        const lock = key_stream.mutex.acquire();
-        defer lock.release();
+        key_stream.mutex.lock();
+        defer key_stream.mutex.unlock();
         key_stream.buffer[key_stream.len] = event;
         key_stream.len += 1;
     }
@@ -235,8 +238,9 @@ fn mouseBtnCallback(_window: glfw.Window, button: MouseButton, action: Action, m
     };
 
    { // critical zone
-        const lock = mouse_btn_stream.mutex.acquire();
-        defer lock.release();
+        mouse_btn_stream.mutex.lock();
+        defer mouse_btn_stream.mutex.unlock();
+
         mouse_btn_stream.buffer[mouse_btn_stream.len] = event;
         mouse_btn_stream.len += 1;
     }
@@ -260,8 +264,8 @@ fn cursorPosCallback(_window: glfw.Window, x_pos: f64, y_pos: f64) void {
     };
 
    { // critical zone
-        const lock = cursor_pos_stream.mutex.acquire();
-        defer lock.release();
+        cursor_pos_stream.mutex.lock();
+        defer cursor_pos_stream.mutex.unlock();
         cursor_pos_stream.buffer[cursor_pos_stream.len] = event;
         cursor_pos_stream.len += 1;
     }
