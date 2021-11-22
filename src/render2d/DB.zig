@@ -251,6 +251,7 @@ pub fn deinit(self: DB) void {
     self.rotations.deinit();
     self.uv_indices.deinit();
     self.uv_buffer.deinit();
+    self.uv_meta.deinit();
 }
 
 const DeltaRange = struct {
