@@ -91,7 +91,7 @@ pub fn messageCallback(
         };
     };
     const is_severe = error_mask.toInt() & message_severity > 0;
-    const writer = if (is_severe) writers.stderr.* else writers.stdout.*;
+    const writer = if (is_severe) writers.stderr else writers.stdout;
 
     writer.print("validation layer: {s}\n", .{p_callback_data.p_message}) catch {
         std.debug.print("error from stdout print in message callback", .{});

@@ -15,9 +15,8 @@ const vk_utils = @import("vk_utils.zig");
 
 // TODO: mutex protection before prints
 pub const IoWriters = struct {
-    made_in_ctx: bool = false, // should only be set to true by Context
-    stdout: *const std.fs.File.Writer,
-    stderr: *const std.fs.File.Writer,
+    stdout: std.fs.File.Writer,
+    stderr: std.fs.File.Writer,
 };
 
 // TODO: move command pool to context? 
@@ -81,16 +80,17 @@ pub const Context = struct {
 
         const extensions = blk: {
             const glfw_extensions_slice = try glfw.getRequiredInstanceExtensions();
-            var extensions = try ArrayList([*:0]const u8).initCapacity(allocator, glfw_extensions_slice.len + application_extensions.len);
-            for (glfw_extensions_slice) |extension| {
-                extensions.appendAssumeCapacity(extension);
+            var extensions = try allocator.alloc([*:0]const u8, glfw_extensions_slice.len + application_extensions.len);
+            for (glfw_extensions_slice) |extension, i| {
+                extensions[i] = extension;
             }
-            for (application_extensions) |extension| {
-                extensions.appendAssumeCapacity(extension);
+            for (application_extensions) |extension, i| {
+                const index = i + glfw_extensions_slice.len;
+                extensions[index] = extension;
             }
             break :blk extensions;
         };
-        defer extensions.deinit();
+        defer allocator.free(extensions);
 
         // Partially init a context so that we can use "self" even in init 
         var self: Context = undefined;
@@ -101,20 +101,17 @@ pub const Context = struct {
             if (io_writers) |write| {
                 break :blk write;
             }
-            var heap_writers = try allocator.alloc(std.fs.File.Writer, 2);
-            heap_writers[0] = std.io.getStdErr().writer();
-            heap_writers[1] = std.io.getStdOut().writer();
-            var writers_struct = try allocator.alloc(IoWriters, 1);
-            writers_struct[0].made_in_ctx = true;
-            writers_struct[0].stderr = &heap_writers[0];
-            writers_struct[0].stdout = &heap_writers[1];
-            break :blk @ptrCast(*IoWriters, writers_struct.ptr);
+            const writes: *IoWriters = try self.allocator.create(IoWriters);
+            writes.stderr = std.io.getStdErr().writer();
+            writes.stdout = std.io.getStdOut().writer();
+                
+            break :blk writes;
         };
 
         // load base dispatch wrapper
         const vk_proc = @ptrCast(fn(instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction, glfw.getInstanceProcAddress);
         self.vkb = try dispatch.Base.load(vk_proc);
-        if (!(try vk_utils.isInstanceExtensionsPresent(allocator, self.vkb, extensions.items))) {
+        if (!(try vk_utils.isInstanceExtensionsPresent(allocator, self.vkb, extensions))) {
             return error.InstanceExtensionNotPresent;
         }
 
@@ -134,8 +131,8 @@ pub const Context = struct {
                 .p_application_info = &app_info,
                 .enabled_layer_count = validation_layer_info.enabled_layer_count,
                 .pp_enabled_layer_names = validation_layer_info.enabled_layer_names,
-                .enabled_extension_count = @intCast(u32, extensions.items.len),
-                .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, extensions.items.ptr),
+                .enabled_extension_count = @intCast(u32, extensions.len),
+                .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, extensions.ptr),
             };
             break :blk try self.vkb.createInstance(instanceInfo, null);
         };
@@ -345,11 +342,7 @@ pub const Context = struct {
         }
         self.vki.destroyInstance(self.instance, null);
 
-        if (self.writers.*.made_in_ctx) {
-            self.allocator.free(@ptrCast(*const [2]std.fs.File.Writer, self.writers.stderr));
-            self.allocator.free(@ptrCast(*const [1]IoWriters, self.writers));
-        }
-  
+        self.allocator.destroy(self.writers);
     }
 };
 
