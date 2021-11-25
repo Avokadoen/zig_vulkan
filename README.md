@@ -11,7 +11,9 @@ To build simply ``git pull`` followed by a ``zig build run`` in the root of the 
 Currently the code base is not really well tested, but you can run the few tests by doin ``zig build test``
 
 # 2D API
-Currently there is a basic 2D sprite API. This API offers high performance (citation needed :)). Here is a minimal program that draws to the screen:
+Currently there is a basic 2D sprite API. This API offers high performance (citation needed :)). A simple tech demo was made as a game jam and can be found [here](https://github.com/Avokadoen/gamejam-zig-vulkan)
+
+Here is a minimal program that draws to the screen:
 
 ```zig
 const std = @import("std");
