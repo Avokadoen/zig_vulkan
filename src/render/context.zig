@@ -90,7 +90,7 @@ pub const Context = struct {
         self.allocator = allocator;
        
         // load base dispatch wrapper
-        const vk_proc = @ptrCast(fn(instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction, glfw.getInstanceProcAddress);
+        const vk_proc = @ptrCast(vk.PfnGetInstanceProcAddr, glfw.getInstanceProcAddress);
         self.vkb = try dispatch.Base.load(vk_proc);
         if (!(try vk_utils.isInstanceExtensionsPresent(allocator, self.vkb, extensions))) {
             return error.InstanceExtensionNotPresent;
