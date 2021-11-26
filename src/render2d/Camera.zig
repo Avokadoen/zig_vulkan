@@ -38,3 +38,13 @@ pub fn translate(self: *Camera, delta_time: f32, dir: zlm.Vec2) void {
     fields.*[3][1] += velocity.y;
     self.sync_desc_ptr.ubo.mark_dirty();
 }
+
+pub fn getPosition(self: Camera) zlm.Vec2 {
+    const fields = self.sync_desc_ptr.*.ubo.uniform_data.view.fields;
+    return zlm.Vec2.new(fields[3][0], fields[3][1]);
+}
+
+pub fn getZoom(self: Camera) zlm.Vec2 {
+    const fields = self.sync_desc_ptr.*.ubo.uniform_data.view.fields;
+    return zlm.Vec2.new(fields[0][0], fields[1][1]);
+}
