@@ -77,8 +77,8 @@ pub fn InitBruteForceWidthHeightFn(comptime use_restrictions: bool) type {
 
             var solved = false;
             var add_width = true;
-            var add_width_index: usize = if (max_width_index != 0) 0 else 1;
-            var add_height_index: usize = if (max_height_index != 0) 0 else 1;
+            var add_width_index: usize = if (max_width_index != packages.len - 1) max_width_index + 1 else 0;
+            var add_height_index: usize = if (max_height_index != packages.len - 1) max_image_height + 1 else 0;
             while(!solved) {
                 if (pixelScanPack(allocator, image_width, image_height, packages)) |_| {
                     solved = true;
@@ -87,11 +87,11 @@ pub fn InitBruteForceWidthHeightFn(comptime use_restrictions: bool) type {
                         PackError.InsufficentSpace => {
                             if (add_width) {
                                 image_width += packages[add_width_index].width; 
-                                add_width_index += if (add_width_index+1 != max_width_index) @as(usize, 1) else @as(usize, 2);
+                                add_width_index = (add_width_index + 1) % packages.len;
                                 try Validator.validate(max_image_width, image_width, BrutePackError.InsufficentWidth);
                             } else {
                                 image_height += packages[add_height_index].height; 
-                                add_height_index += if (add_height_index+1 != max_height_index) @as(usize, 1) else @as(usize, 2);
+                                add_height_index = (add_height_index + 1) % packages.len;
                                 try Validator.validate(max_image_height, image_height, BrutePackError.InsufficentHeight);
                             }
                             add_width = !add_width;
@@ -132,19 +132,18 @@ pub fn pixelScanPack(allocator: *Allocator, image_width: u32, image_height: u32,
 
     const image_size = image_width * image_height;
 
-    var image_map = try std.ArrayList(bool).initCapacity(allocator, image_size);
-    defer image_map.deinit();
+    var image_map = try allocator.alloc(bool, image_size);
+    defer allocator.free(image_map);
 
-    // we have a image of empty pixels (false), this might technically be UB since each
-    // entries can be set to undefined, but from testing zig seems to set them to false 
-    // so in current zig version we are good :)
-    image_map.items.len = image_size;
+    image_map.len = image_size;
+    std.mem.set(bool, image_map, false);
 
     // loop rectangles
     for (packjobs) |*packjob| {
         var was_packed = false;
+
         // loop mega texture pixels
-        im_loop: for (image_map.items) |pixel, i| {
+        im_loop: for (image_map) |pixel, i| {
             const x = i % image_width; 
             const y = i / image_width; 
 
@@ -158,7 +157,7 @@ pub fn pixelScanPack(allocator: *Allocator, image_width: u32, image_height: u32,
 
             // For every coordinate, check top left and bottom right, if set, skip
             const end_index = y_bound * image_width + x_bound;
-            if (pixel or image_map.items[end_index]) {
+            if (pixel or image_map[end_index]) {
                 continue :im_loop;
             }
 
@@ -170,7 +169,7 @@ pub fn pixelScanPack(allocator: *Allocator, image_width: u32, image_height: u32,
                     var ix = x;
                     while (ix <= x_bound) : (ix += 1) {
                         const index = y_element + ix;
-                        if (image_map.items[index]) {
+                        if (image_map[index]) {
                             continue :im_loop; // skip, occupied 
                         }
                     }
@@ -190,7 +189,7 @@ pub fn pixelScanPack(allocator: *Allocator, image_width: u32, image_height: u32,
                 var ix = x;
                 while (ix <= x_bound) : (ix += 1) {
                     const index = y_element + ix;
-                    image_map.items[index] = true;
+                    image_map[index] = true;
                 }
             }
 
