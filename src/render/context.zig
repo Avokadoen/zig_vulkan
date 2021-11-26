@@ -57,10 +57,10 @@ pub const Context = struct {
             .engine_version = consts.engine_version,
             .api_version = vk.API_VERSION_1_2,
         };
-
+        
         // TODO: move to global scope (currently crashes the zig compiler :') )
+        const common_extensions = [_][*:0]const u8{vk.extension_info.khr_surface.name};
         const application_extensions = blk: {
-            const common_extensions = [_][*:0]const u8{vk.extension_info.khr_surface.name};
             if (consts.enable_validation_layers) {
                 const debug_extensions = [_][*:0]const u8{
                     vk.extension_info.ext_debug_report.name,
@@ -71,20 +71,19 @@ pub const Context = struct {
             break :blk common_extensions[0..];
         };
 
-        const extensions = blk: {
-            const glfw_extensions_slice = try glfw.getRequiredInstanceExtensions();
-            var extensions = try allocator.alloc([*:0]const u8, glfw_extensions_slice.len + application_extensions.len);
-            for (glfw_extensions_slice) |extension, i| {
-                extensions[i] = extension;
-            }
-            for (application_extensions) |extension, i| {
-                const index = i + glfw_extensions_slice.len;
-                extensions[index] = extension;
-            }
-            break :blk extensions;
-        };
-        defer allocator.free(extensions);
+        const glfw_extensions_slice = try glfw.getRequiredInstanceExtensions();
+        // Due to a zig bug we need arraylist to append instead of preallocate slice
+        // in release it fails and lenght turnes out to be 1
+        var extensions = try ArrayList([*:0]const u8).initCapacity(allocator, glfw_extensions_slice.len + application_extensions.len);
+        defer extensions.deinit();
 
+        for (glfw_extensions_slice) |extension| {
+            try extensions.append(extension);
+        }
+        for (application_extensions) |extension| {
+            try extensions.append(extension);
+        }
+        
         // Partially init a context so that we can use "self" even in init 
         var self: Context = undefined;
         self.allocator = allocator;
@@ -92,7 +91,7 @@ pub const Context = struct {
         // load base dispatch wrapper
         const vk_proc = @ptrCast(vk.PfnGetInstanceProcAddr, glfw.getInstanceProcAddress);
         self.vkb = try dispatch.Base.load(vk_proc);
-        if (!(try vk_utils.isInstanceExtensionsPresent(allocator, self.vkb, extensions))) {
+        if (!(try vk_utils.isInstanceExtensionsPresent(allocator, self.vkb, extensions.items))) {
             return error.InstanceExtensionNotPresent;
         }
 
@@ -112,12 +111,12 @@ pub const Context = struct {
                 .p_application_info = &app_info,
                 .enabled_layer_count = validation_layer_info.enabled_layer_count,
                 .pp_enabled_layer_names = validation_layer_info.enabled_layer_names,
-                .enabled_extension_count = @intCast(u32, extensions.len),
-                .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, extensions.ptr),
+                .enabled_extension_count = @intCast(u32, extensions.items.len),
+                .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, extensions.items.ptr),
             };
             break :blk try self.vkb.createInstance(instanceInfo, null);
         };
-
+       
         self.vki = try dispatch.Instance.load(self.instance, vk_proc);
         errdefer self.vki.destroyInstance(self.instance, null);
 

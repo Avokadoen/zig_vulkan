@@ -21,16 +21,17 @@ pub const QueueFamilyIndices = struct {
     graphics: u32,
     present: u32,
 
+    // TODO: use internal allocator that is suitable
     /// Initialize a QueueFamilyIndices instance, internal allocation is handled by QueueFamilyIndices (no manuall cleanup)
     pub fn init(allocator: *Allocator, vki: dispatch.Instance, physical_device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !QueueFamilyIndices {
         var queue_family_count: u32 = 0;
         vki.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, null);
 
-        var queue_families = try ArrayList(vk.QueueFamilyProperties).initCapacity(allocator, queue_family_count);
-        defer queue_families.deinit();
+        var queue_families = try allocator.alloc(vk.QueueFamilyProperties, queue_family_count);
+        defer allocator.free(queue_families);
 
-        vki.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families.items.ptr);
-        queue_families.items.len = queue_family_count;
+        vki.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families.ptr);
+        queue_families.len = queue_family_count;
 
         const compute_bit = vk.QueueFlags{
             .compute_bit = true,
@@ -42,7 +43,7 @@ pub const QueueFamilyIndices = struct {
         var compute_index: ?u32 = null;
         var graphics_index: ?u32 = null;
         var present_index: ?u32 = null;
-        for (queue_families.items) |queue_family, i| {
+        for (queue_families) |queue_family, i| {
             const index = @intCast(u32, i);
             if (compute_index == null and queue_family.queue_flags.contains(compute_bit)) {
                 compute_index = index;
@@ -101,6 +102,7 @@ pub fn isDeviceExtensionsPresent(allocator: *Allocator, vki: dispatch.Instance, 
     return matches == target_extensions.len;
 }
 
+// TODO: use internal allocator that is suitable
 /// select primary physical device in init
 pub fn selectPrimary(allocator: *Allocator, vki: dispatch.Instance, instance: vk.Instance, surface: vk.SurfaceKHR) !vk.PhysicalDevice {
     var device_count: u32 = 0;
@@ -109,15 +111,15 @@ pub fn selectPrimary(allocator: *Allocator, vki: dispatch.Instance, instance: vk
         std.debug.panic("no GPU suitable for vulkan identified");
     }
 
-    var devices = try ArrayList(vk.PhysicalDevice).initCapacity(allocator, device_count);
-    defer devices.deinit();
+    var devices = try allocator.alloc(vk.PhysicalDevice, device_count);
+    defer allocator.free(devices);
 
-    _ = try vki.enumeratePhysicalDevices(instance, &device_count, devices.items.ptr); // TODO: handle incomplete
-    devices.items.len = device_count;
+    _ = try vki.enumeratePhysicalDevices(instance, &device_count, devices.ptr); // TODO: handle incomplete
+    devices.len = device_count;
 
     var device_score: i32 = -1;
     var device_index: ?usize = null;
-    for (devices.items) |device, i| {
+    for (devices) |device, i| {
         const new_score = try deviceHeuristic(allocator, vki, device, surface);
         if (device_score < new_score) {
             device_score = new_score;
@@ -129,7 +131,8 @@ pub fn selectPrimary(allocator: *Allocator, vki: dispatch.Instance, instance: vk
         return error.NoSuitablePhysicalDevice;
     }
 
-    return devices.items[device_index.?];
+    const val = devices[device_index.?];
+    return val;
 }
 
 /// Any suiteable GPU should result in a positive value, an unsuitable GPU might return a negative value
@@ -187,17 +190,17 @@ pub fn createLogicalDevice(allocator: *Allocator, ctx: Context) !vk.Device {
         break :blk &[_]u32{ctx.queue_indices.graphics};
     };
 
-    var queue_create_infos = try ArrayList(vk.DeviceQueueCreateInfo).initCapacity(allocator, family_indices.len);
-    defer queue_create_infos.deinit();
+    var queue_create_infos = try allocator.alloc(vk.DeviceQueueCreateInfo, family_indices.len);
+    defer allocator.free(queue_create_infos);
 
     const queue_priority = [_]f32{1.0};
-    for (family_indices) |family_index| {
-        queue_create_infos.appendAssumeCapacity(vk.DeviceQueueCreateInfo{
+    for (family_indices) |family_index, i| {
+        queue_create_infos[i] = .{
             .flags = .{},
             .queue_family_index = family_index,
             .queue_count = 1,
             .p_queue_priorities = &queue_priority,
-        });
+        };
     }
 
     const device_features = FalsePhysicalDeviceFeatures{};
@@ -206,8 +209,8 @@ pub fn createLogicalDevice(allocator: *Allocator, ctx: Context) !vk.Device {
 
     const create_info = vk.DeviceCreateInfo{
         .flags = .{},
-        .queue_create_info_count = @intCast(u32, queue_create_infos.items.len),
-        .p_queue_create_infos = queue_create_infos.items.ptr,
+        .queue_create_info_count = @intCast(u32, queue_create_infos.len),
+        .p_queue_create_infos = queue_create_infos.ptr,
         .enabled_layer_count = validation_layer_info.enabled_layer_count,
         .pp_enabled_layer_names = validation_layer_info.enabled_layer_names,
         .enabled_extension_count = constants.logicical_device_extensions.len,
