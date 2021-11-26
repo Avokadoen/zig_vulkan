@@ -475,7 +475,7 @@ pub const Pipeline2D = struct {
                 vk.TRUE,
                 std.math.maxInt(u64) 
             ) catch |err| {
-                ctx.writers.stderr.print("waiting for fence failed: {}", .{err}) catch |e| switch (e) {
+                std.io.getStdErr().writer().print("waiting for fence failed: {}", .{err}) catch |e| switch (e) {
                     else => {}, // Discard print errors
                 };
             };

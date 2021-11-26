@@ -13,12 +13,6 @@ const QueueFamilyIndices = physical_device.QueueFamilyIndices;
 const validation_layer = @import("validation_layer.zig");
 const vk_utils = @import("vk_utils.zig");
 
-// TODO: mutex protection before prints
-pub const IoWriters = struct {
-    stdout: std.fs.File.Writer,
-    stderr: std.fs.File.Writer,
-};
-
 // TODO: move command pool to context? 
 
 /// Utilized to supply vulkan methods and common vulkan state to other
@@ -46,13 +40,12 @@ pub const Context = struct {
 
     // TODO: utilize comptime for this (emit from struct if we are in release mode)
     messenger: ?vk.DebugUtilsMessengerEXT,
-    writers: *IoWriters,
 
     /// pointer to the window handle. Caution is adviced when using this pointer ...
     window_ptr: *glfw.Window,
 
     // Caller should make sure to call deinit, context takes ownership of IoWriters
-    pub fn init(allocator: *Allocator, application_name: []const u8, window: *glfw.Window, io_writers: ?*IoWriters) !Context {
+    pub fn init(allocator: *Allocator, application_name: []const u8, window: *glfw.Window) !Context {
         const app_name = try std.cstr.addNullByte(allocator, application_name);
         defer allocator.destroy(app_name.ptr);
         
@@ -95,19 +88,7 @@ pub const Context = struct {
         // Partially init a context so that we can use "self" even in init 
         var self: Context = undefined;
         self.allocator = allocator;
-
-        // use supplied writers, or make our own
-        self.writers = blk: {
-            if (io_writers) |write| {
-                break :blk write;
-            }
-            const writes: *IoWriters = try self.allocator.create(IoWriters);
-            writes.stderr = std.io.getStdErr().writer();
-            writes.stdout = std.io.getStdOut().writer();
-                
-            break :blk writes;
-        };
-
+       
         // load base dispatch wrapper
         const vk_proc = @ptrCast(fn(instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction, glfw.getInstanceProcAddress);
         self.vkb = try dispatch.Base.load(vk_proc);
@@ -120,7 +101,7 @@ pub const Context = struct {
         var create_p_next: ?*c_void = null;
         if (consts.enable_validation_layers) {
             comptime { std.debug.assert(consts.enable_validation_layers); }
-            var debug_create_info = createDefaultDebugCreateInfo(self.writers);
+            var debug_create_info = createDefaultDebugCreateInfo();
             create_p_next = @ptrCast(?*c_void, &debug_create_info);
         }
 
@@ -150,7 +131,7 @@ pub const Context = struct {
 
         self.messenger = blk: {
             if (!consts.enable_validation_layers) break :blk null;
-            const create_info = createDefaultDebugCreateInfo(self.writers);
+            const create_info = createDefaultDebugCreateInfo();
             break :blk self.vki.createDebugUtilsMessengerEXT(self.instance, create_info, null) catch {
                 std.debug.panic("failed to create debug messenger", .{});
             };
@@ -198,7 +179,6 @@ pub const Context = struct {
             .gfx_cmd_pool  = self.gfx_cmd_pool,
             .comp_cmd_pool  = self.comp_cmd_pool,
             .messenger = self.messenger,
-            .writers = self.writers,
             .window_ptr = window,
         };
     }
@@ -341,13 +321,11 @@ pub const Context = struct {
             self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.messenger.?, null);
         }
         self.vki.destroyInstance(self.instance, null);
-
-        self.allocator.destroy(self.writers);
     }
 };
 
 // TODO: can probably drop function and inline it in init
-fn createDefaultDebugCreateInfo(writers: *IoWriters) vk.DebugUtilsMessengerCreateInfoEXT {
+fn createDefaultDebugCreateInfo() vk.DebugUtilsMessengerCreateInfoEXT {
     const message_severity = vk.DebugUtilsMessageSeverityFlagsEXT{
         .verbose_bit_ext = true,
         .warning_bit_ext = true,
@@ -365,6 +343,6 @@ fn createDefaultDebugCreateInfo(writers: *IoWriters) vk.DebugUtilsMessengerCreat
         .message_severity = message_severity,
         .message_type = message_type,
         .pfn_user_callback = validation_layer.messageCallback,
-        .p_user_data = @ptrCast(?*c_void, writers),
+        .p_user_data = null,
     };
 }

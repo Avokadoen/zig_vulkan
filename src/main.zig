@@ -54,8 +54,8 @@ pub fn main() anyerror!void {
         return;
     };
     defer window.destroy();
-
-    const ctx = try render.Context.init(allocator, application_name, &window, null);
+    
+    const ctx = try render.Context.init(allocator, application_name, &window);
     defer ctx.deinit();
 
     // _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);

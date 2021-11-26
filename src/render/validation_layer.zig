@@ -81,9 +81,9 @@ pub fn messageCallback(
     p_callback_data: *const vk.DebugUtilsMessengerCallbackDataEXT,
     p_user_data: *c_void,
 ) callconv(vk.vulkan_call_conv) vk.Bool32 {
+    _ = p_user_data;
     _ = message_types;
 
-    const writers = @ptrCast(*IoWriters, @alignCast(@alignOf(*IoWriters), p_user_data));
     const error_mask = comptime blk: {
         break :blk vk.DebugUtilsMessageSeverityFlagsEXT{
             .warning_bit_ext = true,
@@ -91,7 +91,7 @@ pub fn messageCallback(
         };
     };
     const is_severe = error_mask.toInt() & message_severity > 0;
-    const writer = if (is_severe) writers.stderr else writers.stdout;
+    const writer = if (is_severe) std.io.getStdErr().writer() else std.io.getStdOut().writer();
 
     writer.print("validation layer: {s}\n", .{p_callback_data.p_message}) catch {
         std.debug.print("error from stdout print in message callback", .{});
