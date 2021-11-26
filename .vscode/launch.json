@@ -44,7 +44,7 @@
             "program": "${workspaceFolder}/zig-out/bin/zig_vulkan",
             "args": [],
             "cwd": "${fileDirname}",
-            "preLaunchTask": "build"
+            "preLaunchTask": "safe"
         }
     ]
 }
