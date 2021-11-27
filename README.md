@@ -4,7 +4,11 @@ A toy renderer written in zig using vulkan and glfw
 
 # Run the project
 
-To build simply ``git pull`` followed by a ``zig build run`` in the root of the project
+Do the following steps 
+ - ``git clone <repo>`` 
+ - ``git submodule init``
+ - ``git submodule update``
+ - ``zig build run``
 
 # Run tests 
 
