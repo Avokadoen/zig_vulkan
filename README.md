@@ -5,8 +5,11 @@ A toy renderer written in zig using vulkan and glfw
 # Run the project
 
 Do the following steps 
- - ``git clone --recurse-submodules -j4`` - clone repo, and submodules in parallel
- - ``zig build run``
+```bash
+$ git clone --recurse-submodules -j4 <repo>
+$ cd <folder>
+$ zig build run
+```
 
 # Run tests 
 
