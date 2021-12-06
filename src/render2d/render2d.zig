@@ -6,6 +6,7 @@ const ArrayList = std.ArrayList;
 
 const zlm = @import("zlm");
 const stbi = @import("stbi");
+const glfw = @import("glfw");
 
 const render = @import("../render/render.zig");
 const sc = render.swapchain;
@@ -208,89 +209,74 @@ pub const InitializedApi = struct {
             .buffer_sizes = buffer_sizes[0..],
         };
         var api = DrawApi(gpu_update_rate){
-            .allocator = self.allocator,
-            .ctx = self.ctx,
-            .swapchain = self.swapchain,
-            .subo = undefined,
-            .pipeline = undefined,
-            .view = self.view,
-            .mega_image = mega_image,
-            .db_ptr = self.db_ptr,
+            .state = .{
+                .allocator = self.allocator,
+                .ctx = self.ctx,
+                .swapchain = try self.allocator.create(sc.Data),
+                .subo = try self.allocator.create(descriptor.SyncDescriptor),
+                .view = try self.allocator.create(sc.ViewportScissor),
+                .pipeline = undefined,
+                .mega_image = mega_image,
+                .db_ptr = self.db_ptr,
+            }
         };
-        api.subo = try self.allocator.create(descriptor.SyncDescriptor);
-        api.subo.* = try descriptor.SyncDescriptor.init(desc_config);
-        api.pipeline = try render.Pipeline2D.init(self.allocator, self.ctx, &self.swapchain, @intCast(u32, self.db_ptr.*.len), &self.view, api.subo);
+        api.state.swapchain.* = self.swapchain;
+        api.state.view.* = self.view;
+        api.state.subo.* = try descriptor.SyncDescriptor.init(desc_config);
+        api.state.pipeline = try render.Pipeline2D.init(self.allocator, self.ctx, api.state.swapchain, @intCast(u32, self.db_ptr.*.len), api.state.view, api.state.subo);
         
-        try api.db_ptr.generateUvBuffer(mega_uvs);
+        try api.state.db_ptr.generateUvBuffer(mega_uvs);
 
-        for (api.swapchain.images.items) |_, i| {
-            const buffers = api.subo.*.ubo.storage_buffers[i];
-            try api.db_ptr.*.uv_buffer.handleDeviceTransfer(self.ctx, &buffers[4]);
+        for (api.state.swapchain.images.items) |_, i| {
+            const buffers = api.state.subo.*.ubo.storage_buffers[i];
+            try api.state.db_ptr.*.uv_buffer.handleDeviceTransfer(self.ctx, &buffers[4]);
         }
 
         self.prepared_to_draw = true;
-        
+
         return api;
     }
 };
 
-// TODO: find a way to not use duplicate code here (using a function variable triggers a bug in the zig compiler)
+// data shared between DrawApi types
+const CommonDrawState = struct {
+    // image container, used to compile a mega texture 
+    allocator: *Allocator,
+
+    // render specific state
+    ctx: render.Context,
+    swapchain: *sc.Data,
+    subo: *descriptor.SyncDescriptor,
+    pipeline: render.Pipeline2D,
+    view: *sc.ViewportScissor,
+
+    // render2d specific state
+    mega_image: stbi.Image,
+    db_ptr: *DB,
+};
+
 pub fn DrawApi(comptime rate: BufferUpdateRate) type {
     switch (rate) {
         .always => {
             return struct {
                 const Self = @This();
 
-                // image container, used to compile a mega texture 
-                allocator: *Allocator,
+                state: CommonDrawState,      
 
-                // render specific state
-                ctx: render.Context,
-                swapchain: sc.Data,
-                subo: *descriptor.SyncDescriptor,
-                pipeline: render.Pipeline2D,
-
-                // render2d specific state
-                view: sc.ViewportScissor,
-                mega_image: stbi.Image,
-
-                db_ptr: *DB,
-
-                /// get a handle to the sprite camera
-                pub fn createCamera(self: Self, move_speed: f32, zoom_speed: f32) Camera {
-                    return Camera{
-                        .move_speed = move_speed,
-                        .zoom_speed = zoom_speed,
-                        .view = self.view,
-                        .sync_desc_ptr = self.subo,
-                    };
-                }
+                usingnamespace ShaderDrawAPI(Self);
 
                 /// draw with sprite api
                 pub inline fn draw(self: *Self) !void {
-                    try self.pipeline.draw(self.ctx, updateBuffers, &self);
-                }
-
-                // deinitialize sprite library
-                pub fn deinit(self: Self) void {
-                    self.allocator.free(self.mega_image.data);
-                    self.pipeline.deinit(self.ctx);
-                    self.subo.deinit(self.ctx);
-
-                    self.db_ptr.*.deinit();
-                    self.swapchain.deinit(self.ctx);
-
-                    self.allocator.destroy(self.subo);
-                    self.allocator.destroy(self.db_ptr);
+                    try self.state.pipeline.draw(self.state.ctx, updateBuffers, &self);
                 }
 
                 fn updateBuffers(image_index: usize, user_ctx: anytype) void {
                     const buffers = user_ctx.*.subo.ubo.storage_buffers[image_index];
-                    user_ctx.*.db_ptr.*.positions.handleDeviceTransfer(user_ctx.*.ctx, &buffers[0]) catch {};
-                    user_ctx.*.db_ptr.*.scales.handleDeviceTransfer(user_ctx.*.ctx, &buffers[1]) catch {};
-                    user_ctx.*.db_ptr.*.rotations.handleDeviceTransfer(user_ctx.*.ctx, &buffers[2]) catch {};
-                    user_ctx.*.db_ptr.*.uv_indices.handleDeviceTransfer(user_ctx.*.ctx, &buffers[3]) catch {};
-                    user_ctx.*.db_ptr.*.flush() catch {};
+                    user_ctx.*.state.db_ptr.*.positions.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[0]) catch {};
+                    user_ctx.*.state.db_ptr.*.scales.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[1]) catch {};
+                    user_ctx.*.state.db_ptr.*.rotations.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[2]) catch {};
+                    user_ctx.*.state.db_ptr.*.uv_indices.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[3]) catch {};
+                    user_ctx.*.state.db_ptr.*.flush() catch {};
                 }
             };
         },
@@ -298,54 +284,19 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
              return struct {
                 const Self = @This();
 
-                // image container, used to compile a mega texture 
-                allocator: *Allocator,
-
-                // render specific state
-                ctx: render.Context,
-                swapchain: sc.Data,
-                subo: *descriptor.SyncDescriptor,
-                pipeline: render.Pipeline2D,
-
-                // render2d specific state
-                view: sc.ViewportScissor,
-                mega_image: stbi.Image,
-
-                db_ptr: *DB,
+                state: CommonDrawState,
 
                 // set default value for members that are not common with .always
                 last_update_counter: i64 = 0,
                 prev_frame: i64 = 0,
                 update_frame_count: u32 = 0,
 
-                /// get a handle to the sprite camera
-                pub fn createCamera(self: *Self, move_speed: f32, zoom_speed: f32) Camera {
-                    return Camera{
-                        .move_speed = move_speed,
-                        .zoom_speed = zoom_speed,
-                        .view = self.view,
-                        .sync_desc_ptr = self.subo,
-                    };
-                }
+                usingnamespace ShaderDrawAPI(Self);
 
                 /// draw with sprite api
                 pub inline fn draw(self: *Self) !void {
-                    try self.pipeline.draw(self.ctx, updateBuffers, &self);
+                    try self.state.pipeline.draw(self.state.ctx, updateBuffers, &self);
                 }
-
-                // deinitialize sprite library
-                pub fn deinit(self: Self) void {
-                    self.allocator.free(self.mega_image.data);
-                    self.pipeline.deinit(self.ctx);
-                    self.subo.deinit(self.ctx);
-
-                    self.db_ptr.*.deinit();
-                    self.swapchain.deinit(self.ctx);
-
-                    self.allocator.destroy(self.subo);
-                    self.allocator.destroy(self.db_ptr);
-                }
-
 
                 fn updateBuffers(image_index: usize, user_ctx: anytype) void {
                     const current_frame = std.time.milliTimestamp();
@@ -355,19 +306,19 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
                         user_ctx.*.update_frame_count = 0;
                     }
 
-                    const image_count = user_ctx.*.swapchain.images.items.len;
+                    const image_count = user_ctx.*.state.swapchain.images.items.len;
                     if (user_ctx.*.update_frame_count < image_count) {
-                        const buffers = user_ctx.*.subo.ubo.storage_buffers[image_index];
-                        user_ctx.*.db_ptr.*.positions.handleDeviceTransfer(user_ctx.*.ctx, &buffers[0]) catch {};
-                        user_ctx.*.db_ptr.*.scales.handleDeviceTransfer(user_ctx.*.ctx, &buffers[1]) catch {};
-                        user_ctx.*.db_ptr.*.rotations.handleDeviceTransfer(user_ctx.*.ctx, &buffers[2]) catch {};
-                        user_ctx.*.db_ptr.*.uv_indices.handleDeviceTransfer(user_ctx.*.ctx, &buffers[3]) catch {};
+                        const buffers = user_ctx.*.state.subo.ubo.storage_buffers[image_index];
+                        user_ctx.*.state.db_ptr.*.positions.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[0]) catch {};
+                        user_ctx.*.state.db_ptr.*.scales.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[1]) catch {};
+                        user_ctx.*.state.db_ptr.*.rotations.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[2]) catch {};
+                        user_ctx.*.state.db_ptr.*.uv_indices.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[3]) catch {};
                         
                         user_ctx.*.update_frame_count += 1;
                         user_ctx.*.last_update_counter = 0;
 
                         if (user_ctx.*.update_frame_count >= image_count) {
-                            user_ctx.*.db_ptr.*.flush();
+                            user_ctx.*.state.db_ptr.*.flush();
                         }
                     }
 
@@ -376,4 +327,61 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
             };
         }
     }
+}
+
+fn ShaderDrawAPI(comptime Self: type) type {
+    return struct {
+
+        // deinitialize sprite library
+        pub fn deinit(self: Self) void {
+            self.state.allocator.free(self.state.mega_image.data);
+            self.state.pipeline.deinit(self.state.ctx);
+            self.state.subo.deinit(self.state.ctx);
+
+            self.state.db_ptr.*.deinit();
+            self.state.swapchain.deinit(self.state.ctx);
+
+            // destroy render pointers
+            self.state.allocator.destroy(self.state.swapchain);
+            self.state.allocator.destroy(self.state.view);
+            self.state.allocator.destroy(self.state.subo);
+
+            // destroy sprite db ptr
+            self.state.allocator.destroy(self.state.db_ptr);
+        }
+
+
+        /// get a handle to the sprite camera
+        pub fn createCamera(self: *Self, move_speed: f32, zoom_speed: f32) Camera {
+            return Camera{
+                .move_speed = move_speed,
+                .zoom_speed = zoom_speed,
+                .sync_desc_ptr = self.state.subo,
+            };
+        }
+
+        /// program pipeline dynamically scale with window
+        /// caller should make sure to call noHandleWindowResize
+        pub fn handleWindowResize(self: *Self, window: glfw.Window) void {
+            requested_rescale_pipeline = &self.state.pipeline.requested_rescale_pipeline;
+            _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
+        }
+
+        pub fn noHandleWindowResize(self: Self, window: glfw.Window) void {
+            _ = self;
+            _ = window.setFramebufferSizeCallback(null);
+        }
+
+    };
+}
+
+// TODO: due to a bug in zig, using optional causes pointer to be garbage, so we use undefined for now
+// used by window resize event
+var requested_rescale_pipeline: *bool = undefined;
+pub fn framebufferSizeCallbackFn(_window: glfw.Window, width: isize, height: isize) void {
+    _ = _window;
+    _ = width;
+    _ = height;
+
+    requested_rescale_pipeline.* = true;
 }

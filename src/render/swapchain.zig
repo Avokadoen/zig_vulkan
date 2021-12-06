@@ -44,6 +44,8 @@ pub const ViewportScissor = struct {
 };
 
 // TODO: rename
+// TODO: mutex! : the data is shared between rendering implementation and pipeline
+//                pipeline will attempt to update the data in the event of rescale which might lead to RC 
 pub const Data = struct {
     swapchain: vk.SwapchainKHR,
     images: ArrayList(vk.Image),

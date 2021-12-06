@@ -40,8 +40,8 @@ pub const Pipeline2D = struct {
     vertex_buffer: GpuBufferMemory,
     indices_buffer: GpuBufferMemory,
 
-    sc_data: *const swapchain.Data,
-    view: *const swapchain.ViewportScissor,
+    sc_data: *swapchain.Data,
+    view: *swapchain.ViewportScissor,
 
     sync_descript: *descriptor.SyncDescriptor,
 
@@ -50,7 +50,7 @@ pub const Pipeline2D = struct {
     // TODO: correctness if init fail, clean up resources created with errdefer
     /// initialize a graphics pipe line, caller must make sure to call deinit
     /// sc_data, view and ubo needs a lifetime that is atleast as long as created pipeline
-    pub fn init(allocator: *Allocator, ctx: Context, sc_data: *const swapchain.Data, instance_count: u32, view: *const swapchain.ViewportScissor, sync_descript: *descriptor.SyncDescriptor) !Self {
+    pub fn init(allocator: *Allocator, ctx: Context, sc_data: *swapchain.Data, instance_count: u32, view: *swapchain.ViewportScissor, sync_descript: *descriptor.SyncDescriptor) !Self {
         var self: Self = undefined; 
         self.allocator = allocator;
         self.sc_data = sc_data;
@@ -425,6 +425,16 @@ pub const Pipeline2D = struct {
         // TODO: this container can be reused in createCmdBuffers!
         self.command_buffers.deinit(); 
         ctx.destroyRenderPass(self.render_pass);
+
+        // recreate swapchain utilizing the old one 
+        const old_swapchain = self.sc_data.*;
+        self.sc_data.* = swapchain.Data.init(self.allocator, ctx, old_swapchain.swapchain) catch |err| {
+            std.debug.panic("failed to resize swapchain, err {any}", .{err}) catch unreachable;
+        };
+        old_swapchain.deinit(ctx);
+
+        // recreate view from swapchain extent
+        self.view.* = swapchain.ViewportScissor.init(self.sc_data.*.extent);
 
         // recreate renderpass and framebuffers
         self.render_pass = try ctx.createRenderPass(self.sc_data.format);

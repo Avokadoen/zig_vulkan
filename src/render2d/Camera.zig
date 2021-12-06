@@ -9,8 +9,6 @@ const Camera = @This();
 move_speed: f32,
 zoom_speed: f32,
 
-view: sc.ViewportScissor,
-
 sync_desc_ptr: *descriptor.SyncDescriptor,
 
 pub fn zoomIn(self: *Camera, delta_time: f32) void {

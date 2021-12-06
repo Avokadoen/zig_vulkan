@@ -58,9 +58,6 @@ pub fn main() anyerror!void {
     const ctx = try render.Context.init(allocator, application_name, &window);
     defer ctx.deinit();
 
-    // _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
-    // defer _ = window.setFramebufferSizeCallback(null);
-
     // const comp_pipeline = try renderer.ComputePipeline.init(allocator, ctx, "../../comp.comp.spv", &subo.ubo.my_texture);
     // defer comp_pipeline.deinit(ctx);
 
@@ -109,6 +106,9 @@ pub fn main() anyerror!void {
         break :blk try init_api.initDrawApi(.{ .every_ms = 14 });
     };
     defer draw_api.deinit();
+
+    draw_api.handleWindowResize(window);
+    defer draw_api.noHandleWindowResize(window);
 
     var camera = draw_api.createCamera(500, 2);
     var camera_translate = zlm.Vec2.zero;
@@ -230,34 +230,10 @@ fn mouseBtnInputFn(event: input.MouseButtonEvent) void {
         }
     }
 }
+
 fn cursorPosInputFn(event: input.CursorPosEvent) void {
     _ = event;
     // std.debug.print("cursor pos: {s} {d}, {d} {s}\n", .{"{", event.x, event.y, "}"});
 }
 
-// TODO: move to internal of pipeline
-// var sc_data: swapchain.Data = undefined;
-// var view: swapchain.ViewportScissor = undefined;
-
-// /// called by glfw to message pipelines about scaling
-// /// this should never be registered before pipeline init
-// fn framebufferSizeCallbackFn(_window: ?*glfw.RawWindow, width: c_int, height: c_int) callconv(.C) void {
-//     _ = _window;
-//     _ = width;
-//     _ = height;
-
-//     // recreate swapchain utilizing the old one 
-//     const old_swapchain = sc_data;
-//     sc_data = swapchain.Data.init(allocator, ctx, old_swapchain.swapchain) catch |err| {
-//         std.debug.panic("failed to resize swapchain, err {any}", .{err}) catch unreachable;
-//     };
-//     old_swapchain.deinit(ctx);
-
-//     // recreate view from swapchain extent
-//     view = swapchain.ViewportScissor.init(sc_data.extent);
-    
-//     gfx_pipeline.sc_data = &sc_data;
-//     gfx_pipeline.view = &view;
-//     gfx_pipeline.requested_rescale_pipeline = true;
-// }
 
