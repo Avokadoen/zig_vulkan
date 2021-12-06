@@ -204,12 +204,13 @@ pub fn build(b: *Builder) void {
     );
     const shader_move_step = ShaderMoveStep.init(b, shader_comp) catch unreachable;
 
-    const vert = shader_comp.add("assets/shaders/pass.vert");
-    shader_move_step.add_abs_resource(vert) catch unreachable;
-
-    const frag = shader_comp.add("assets/shaders/pass.frag");
-    shader_move_step.add_abs_resource(frag) catch unreachable;
-
+    {
+        const vert = shader_comp.add("assets/shaders/render2d.vert");
+        shader_move_step.add_abs_resource(vert) catch unreachable;
+        const frag = shader_comp.add("assets/shaders/render2d.frag");
+        shader_move_step.add_abs_resource(frag) catch unreachable;
+    }
+    
     const comp = shader_comp.add("assets/shaders/comp.comp");
     shader_move_step.add_abs_resource(comp) catch unreachable;
 

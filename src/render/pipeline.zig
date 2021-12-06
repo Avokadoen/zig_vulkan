@@ -76,7 +76,7 @@ pub const Pipeline2D = struct {
             // TODO: function in context for shader stage creation?
             const vert_code = blk1: {
                 const path = blk2: {
-                    const join_path = [_][]const u8{ self_path, "../../pass.vert.spv" };
+                    const join_path = [_][]const u8{ self_path, "../../render2d.vert.spv" };
                     break :blk2 try std.fs.path.resolve(allocator, join_path[0..]);
                 };
                 defer allocator.destroy(path.ptr);
@@ -97,7 +97,7 @@ pub const Pipeline2D = struct {
             };
             const frag_code = blk1: {
                 const path = blk2: {
-                    const join_path = [_][]const u8{ self_path, "../../pass.frag.spv" };
+                    const join_path = [_][]const u8{ self_path, "../../render2d.frag.spv" };
                     break :blk2 try std.fs.path.resolve(allocator, join_path[0..]);
                 };
                 defer allocator.destroy(path.ptr);
