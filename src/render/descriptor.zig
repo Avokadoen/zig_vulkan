@@ -23,7 +23,7 @@ const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
 // public api calls it Config since it will be in the descriptor struct i.e descriptor.Config
 /// Configuration for SyncDescriptor and Descriptor
 pub const Config = struct {
-    allocator: *Allocator,
+    allocator: Allocator,
     ctx: Context, 
     image: stbi.Image, 
     viewport: vk.Viewport,
@@ -55,7 +55,7 @@ pub const SyncDescriptor = struct {
 pub const Descriptor = struct {
     const Self = @This();
     
-    allocator: *Allocator,
+    allocator: Allocator,
 
     uniform_data: Uniform,
     uniform_buffers: []GpuBufferMemory,
@@ -242,7 +242,7 @@ pub const Uniform = extern struct {
 }; 
 
 /// No external memory management needed
-fn createDescriptorSetLayout(ctx: Context, allocator: *Allocator, buffer_sizes_len: usize) !vk.DescriptorSetLayout {
+fn createDescriptorSetLayout(ctx: Context, allocator: Allocator, buffer_sizes_len: usize) !vk.DescriptorSetLayout {
     const ubo_layout_binding = vk.DescriptorSetLayoutBinding{
         .binding = 0,
         .descriptor_type = .uniform_buffer,
@@ -277,11 +277,11 @@ fn createDescriptorSetLayout(ctx: Context, allocator: *Allocator, buffer_sizes_l
         .binding_count = @intCast(u32, layout_bindings.len),
         .p_bindings = @ptrCast([*]const vk.DescriptorSetLayoutBinding, layout_bindings.ptr),
     };
-    return ctx.vkd.createDescriptorSetLayout(ctx.logical_device, layout_info, null);
+    return ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
 }
 
 /// No external memory management needed
-inline fn createDescriptorPool(ctx: Context, allocator: *Allocator, buffer_sizes_len: usize, swapchain_image_count: usize) !vk.DescriptorPool {
+inline fn createDescriptorPool(ctx: Context, allocator: Allocator, buffer_sizes_len: usize, swapchain_image_count: usize) !vk.DescriptorPool {
     const image_count = @intCast(u32, swapchain_image_count);
     const ubo_pool_size = vk.DescriptorPoolSize{
         .@"type" = .uniform_buffer,
@@ -310,13 +310,13 @@ inline fn createDescriptorPool(ctx: Context, allocator: *Allocator, buffer_sizes
         .pool_size_count = @intCast(u32, pool_sizes.len),
         .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, pool_sizes.ptr),
     };
-    return ctx.vkd.createDescriptorPool(ctx.logical_device, pool_info, null);
+    return ctx.vkd.createDescriptorPool(ctx.logical_device, &pool_info, null);
 }
 
 // TODO: update to reflect on config!
 /// caller must make sure to destroy returned memory needed
 fn createDescriptorSet(
-    allocator: *Allocator, 
+    allocator: Allocator, 
     ctx: Context,
     buffer_sizes: []const u64, // type of storage buffer, may be empty
     swapchain_image_count: usize, 
@@ -352,7 +352,7 @@ fn createDescriptorSet(
     var sets = try allocator.alloc(vk.DescriptorSet, swapchain_image_count);
     errdefer allocator.free(sets);
 
-    try ctx.vkd.allocateDescriptorSets(ctx.logical_device, alloc_info, sets.ptr);
+    try ctx.vkd.allocateDescriptorSets(ctx.logical_device, &alloc_info, sets.ptr);
     {
         var i: usize = 0;
         while(i < swapchain_image_count) : (i += 1) {
@@ -436,7 +436,7 @@ fn createDescriptorSet(
 
 /// Caller must make sure to clean up returned memory
 /// Create buffers for each image in the swapchain 
-inline fn createShaderBuffers(allocator: *Allocator, comptime StorageType: type, buf_usage_flags: vk.BufferUsageFlags, ctx: Context, count: usize) ![]GpuBufferMemory {
+inline fn createShaderBuffers(allocator: Allocator, comptime StorageType: type, buf_usage_flags: vk.BufferUsageFlags, ctx: Context, count: usize) ![]GpuBufferMemory {
     const buffers = try allocator.alloc(GpuBufferMemory, count);
     errdefer allocator.free(buffers);
 

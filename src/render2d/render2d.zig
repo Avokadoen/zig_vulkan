@@ -32,7 +32,7 @@ pub const InvalidApiUseError = error {
 
 /// initialize the sprite library, caller must make sure to call deinit
 /// - init_capacity: how many sprites should be preallocated 
-pub fn init(allocator: *Allocator, context: render.Context, init_capacity: usize) !InitializedApi {
+pub fn init(allocator: Allocator, context: render.Context, init_capacity: usize) !InitializedApi {
     const swapchain = try sc.Data.init(allocator, context, null);
 
     // heap allocate db since this will be tranfered to the draw api
@@ -59,7 +59,7 @@ pub const InitializedApi = struct {
     prepared_to_draw: bool = false,
 
     // image container, used to compile a mega texture 
-    allocator: *Allocator,
+    allocator: Allocator,
 
     // render specific state
     ctx: render.Context,
@@ -241,7 +241,7 @@ pub const InitializedApi = struct {
 // data shared between DrawApi types
 const CommonDrawState = struct {
     // image container, used to compile a mega texture 
-    allocator: *Allocator,
+    allocator: Allocator,
 
     // render specific state
     ctx: render.Context,

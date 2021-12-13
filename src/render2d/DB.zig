@@ -59,7 +59,7 @@ scales: StorageType(zlm.Vec2),
 rotations: StorageType(f32),
 uv_indices: StorageType(c_int),
 
-pub fn initCapacity(allocator: *Allocator, capacity: usize) !DB {
+pub fn initCapacity(allocator: Allocator, capacity: usize) !DB {
     var layers = ArrayList(Layer).init(allocator);
     try layers.append(.{ .id = 0, .len = 0, .begin_index = 0, });
     return DB{
@@ -268,7 +268,7 @@ fn StorageType(comptime T: type) type {
         storage: ArrayList(T),
         delta: DeltaRange,
 
-        pub inline fn initCapacity(allocator: *Allocator, capacity: usize) !Self {
+        pub inline fn initCapacity(allocator: Allocator, capacity: usize) !Self {
             return Self {
                 .storage = try ArrayList(T).initCapacity(allocator, capacity),
                 .delta = .{ .has_changes = false, .from = 0, .to = 0 },

@@ -20,7 +20,7 @@ pub const Image = struct {
 
     // TODO: remove comptime keyword -> // TODO: acount for any channel type
     /// Caller must call deinit to free created memory
-    pub fn from_file(allocator: *Allocator, path: []const u8, comptime desired_channels: DesiredChannels) !Image {
+    pub fn from_file(allocator: Allocator, path: []const u8, comptime desired_channels: DesiredChannels) !Image {
         const use_path = try buildPath(allocator, path);
         defer allocator.destroy(use_path.ptr);
         // TODO: acount for any channel type
@@ -57,7 +57,7 @@ pub const Image = struct {
         };
     }
 
-    pub fn save_write_png(self: Image, allocator: *Allocator, path: []const u8) !void {
+    pub fn save_write_png(self: Image, allocator: Allocator, path: []const u8) !void {
         const use_path = try buildPath(allocator, path);
         defer allocator.destroy(use_path.ptr);
 
@@ -84,7 +84,7 @@ pub const DesiredChannels = enum(c_int) {
     STBI_rgb_alpha  = 4
 };
 
-inline fn buildPath(allocator: *Allocator, path: []const u8) ![:0]u8 {
+inline fn buildPath(allocator: Allocator, path: []const u8) ![:0]u8 {
     var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
     const exe_path = try std.fs.selfExeDirPath(buf[0..]);
     const path_segments = [_][]const u8{exe_path, path};

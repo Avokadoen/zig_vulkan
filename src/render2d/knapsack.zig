@@ -54,7 +54,7 @@ pub fn InitBruteForceWidthHeightFn(comptime use_restrictions: bool) type {
         };
     }
     const BruteForcer = struct {
-        pub fn bruteForceWidthHeight(allocator: *Allocator, packages: []PackJob, max_image_width: u32, max_image_height: u32) BrutePackError!CalculatedImageSize {
+        pub fn bruteForceWidthHeight(allocator: Allocator, packages: []PackJob, max_image_width: u32, max_image_height: u32) BrutePackError!CalculatedImageSize {
             var image_height: u32 = 0;
             var max_height_index: usize = 0;
 
@@ -111,7 +111,7 @@ pub fn InitBruteForceWidthHeightFn(comptime use_restrictions: bool) type {
         return BruteForcer.bruteForceWidthHeight;
     } else {
         return struct {
-            pub inline fn bruteForceWidthHeight(allocator: *Allocator, packages: []PackJob) BrutePackError!CalculatedImageSize {
+            pub inline fn bruteForceWidthHeight(allocator: Allocator, packages: []PackJob) BrutePackError!CalculatedImageSize {
                 return BruteForcer.bruteForceWidthHeight(allocator, packages, 0, 0);
             }
         };
@@ -125,7 +125,7 @@ pub const PackError = Allocator.Error || error {
 /// attempts to pack a slice of rectangles through brute force. This method is slower than others, but should have the best 
 /// packing efficeny
 /// !caller should note that parameter slice will mutate!
-pub fn pixelScanPack(allocator: *Allocator, image_width: u32, image_height: u32, packjobs: []PackJob) PackError!void {
+pub fn pixelScanPack(allocator: Allocator, image_width: u32, image_height: u32, packjobs: []PackJob) PackError!void {
 
     // sort rectangles by height
     std.sort.sort(PackJob, packjobs, {}, sortByHeight);

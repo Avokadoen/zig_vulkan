@@ -64,7 +64,7 @@ pub const Texture = struct {
                 .p_queue_family_indices = config.queue_family_indices.ptr,
                 .initial_layout = .@"undefined",
             };
-            break :blk try ctx.vkd.createImage(ctx.logical_device, image_info, null);
+            break :blk try ctx.vkd.createImage(ctx.logical_device, &image_info, null);
         };
 
         const image_memory = blk: {
@@ -73,7 +73,7 @@ pub const Texture = struct {
                 .allocation_size = memory_requirements.size,
                 .memory_type_index = try vk_utils.findMemoryTypeIndex(ctx, memory_requirements.memory_type_bits, .{ .device_local_bit = true, }),
             };
-            break :blk try ctx.vkd.allocateMemory(ctx.logical_device, alloc_info, null);
+            break :blk try ctx.vkd.allocateMemory(ctx.logical_device, &alloc_info, null);
         };
         
         try ctx.vkd.bindImageMemory(ctx.logical_device, image, image_memory, 0);
@@ -103,7 +103,7 @@ pub const Texture = struct {
                     .layer_count = 1,
                 },
             };
-            break :blk try ctx.vkd.createImageView(ctx.logical_device, image_view_info, null);
+            break :blk try ctx.vkd.createImageView(ctx.logical_device, &image_view_info, null);
         };
 
         const sampler = blk: {
@@ -126,7 +126,7 @@ pub const Texture = struct {
                 .border_color = .int_opaque_black,
                 .unnormalized_coordinates = vk.FALSE, // TODO: might be good for pixel sim to use true
             };
-            break :blk try ctx.vkd.createSampler(ctx.logical_device, sampler_info, null);
+            break :blk try ctx.vkd.createSampler(ctx.logical_device, &sampler_info, null);
         };
 
         return Texture {

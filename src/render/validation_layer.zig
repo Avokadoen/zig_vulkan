@@ -16,7 +16,7 @@ fn InfoType() type {
             enabled_layer_count: u8,
             enabled_layer_names: [*]const [*:0]const u8,
 
-            pub fn init(allocator: *Allocator, vkb: dispatch.Base) !Self {
+            pub fn init(allocator: Allocator, vkb: dispatch.Base) !Self {
                 const validation_layers = [_][*:0]const u8{"VK_LAYER_KHRONOS_validation"};
                 const is_valid = try isLayersPresent(allocator, vkb, validation_layers[0..validation_layers.len]);
                 if (!is_valid) {
@@ -36,7 +36,7 @@ fn InfoType() type {
             enabled_layer_count: u8,
             enabled_layer_names: [*]const [*:0]const u8,
 
-            pub fn init(allocator: *Allocator, vkb: dispatch.Base) !Self {
+            pub fn init(allocator: Allocator, vkb: dispatch.Base) !Self {
                 _ = allocator;
                 _ = vkb;
                 return Self{
@@ -50,7 +50,7 @@ fn InfoType() type {
 pub const Info = InfoType();
 
 /// check if validation layer exist
-fn isLayersPresent(allocator: *Allocator, vkb: dispatch.Base, target_layers: []const [*:0]const u8) !bool {
+fn isLayersPresent(allocator: Allocator, vkb: dispatch.Base, target_layers: []const [*:0]const u8) !bool {
     var layer_count: u32 = 0;
     _ = try vkb.enumerateInstanceLayerProperties(&layer_count, null);
 

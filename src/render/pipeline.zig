@@ -19,7 +19,7 @@ const Context = @import("context.zig").Context;
 pub const Pipeline2D = struct {
     const Self = @This();
 
-    allocator: *Allocator,
+    allocator: Allocator,
 
     render_pass: vk.RenderPass,
     pipeline_layout: vk.PipelineLayout,
@@ -50,7 +50,7 @@ pub const Pipeline2D = struct {
     // TODO: correctness if init fail, clean up resources created with errdefer
     /// initialize a graphics pipe line, caller must make sure to call deinit
     /// sc_data, view and ubo needs a lifetime that is atleast as long as created pipeline
-    pub fn init(allocator: *Allocator, ctx: Context, sc_data: *swapchain.Data, instance_count: u32, view: *swapchain.ViewportScissor, sync_descript: *descriptor.SyncDescriptor) !Self {
+    pub fn init(allocator: Allocator, ctx: Context, sc_data: *swapchain.Data, instance_count: u32, view: *swapchain.ViewportScissor, sync_descript: *descriptor.SyncDescriptor) !Self {
         var self: Self = undefined; 
         self.allocator = allocator;
         self.sc_data = sc_data;
@@ -253,13 +253,13 @@ pub const Pipeline2D = struct {
         {
             var i: usize = 0;
             while (i < constants.max_frames_in_flight) : (i += 1) {
-                const image_sem = try ctx.vkd.createSemaphore(ctx.logical_device, semaphore_info, null);
+                const image_sem = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
                 self.image_available_s.appendAssumeCapacity(image_sem);
 
-                const finish_sem = try ctx.vkd.createSemaphore(ctx.logical_device, semaphore_info, null);
+                const finish_sem = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
                 self.renderer_finished_s.appendAssumeCapacity(finish_sem);
 
-                const fence = try ctx.vkd.createFence(ctx.logical_device, fence_info, null);
+                const fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
                 self.in_flight_fences.appendAssumeCapacity(fence);
             }
         }
@@ -381,8 +381,7 @@ pub const Pipeline2D = struct {
             .p_image_indices = @ptrCast([*]const u32, &image_index),
             .p_results = null,
         };
-        
-        if (ctx.vkd.queuePresentKHR(ctx.present_queue, present_info)) |_| {
+        if (ctx.vkd.queuePresentKHR(ctx.present_queue, &present_info)) |_| {
             // TODO:
         } else |_| {
             // TODO:
@@ -397,7 +396,7 @@ pub const Pipeline2D = struct {
 
     /// Used to update the pipeline according to changes in the window spec
     /// This functions should only be called from the main thread (see glfwGetFramebufferSize)
-    fn rescalePipeline(self: *Self, allocator: *Allocator, ctx: Context) !void {
+    fn rescalePipeline(self: *Self, allocator: Allocator, ctx: Context) !void {
         var window_size = try ctx.window_ptr.*.getFramebufferSize();
         while (window_size.width == 0 or window_size.height == 0) {
             window_size = try ctx.window_ptr.*.getFramebufferSize();
@@ -494,7 +493,7 @@ pub const Pipeline2D = struct {
 
 // TODO: move gfx specific functions inside the gfx scope
 
-inline fn createFramebuffers(allocator: *Allocator, ctx: Context, swapchain_data: *const swapchain.Data, render_pass: vk.RenderPass) !ArrayList(vk.Framebuffer) {
+inline fn createFramebuffers(allocator: Allocator, ctx: Context, swapchain_data: *const swapchain.Data, render_pass: vk.RenderPass) !ArrayList(vk.Framebuffer) {
     const image_views = swapchain_data.image_views;
     var framebuffers = try ArrayList(vk.Framebuffer).initCapacity(allocator, image_views.items.len);
     for (image_views.items) |view| {
@@ -510,22 +509,21 @@ inline fn createFramebuffers(allocator: *Allocator, ctx: Context, swapchain_data
             .height = swapchain_data.extent.height,
             .layers = 1,
         };
-        const framebuffer = try ctx.vkd.createFramebuffer(ctx.logical_device, framebuffer_info, null);
+        const framebuffer = try ctx.vkd.createFramebuffer(ctx.logical_device, &framebuffer_info, null);
         framebuffers.appendAssumeCapacity(framebuffer);
     }
     return framebuffers;
 }
 
 /// create a command buffers with sizeof buffer_count, caller must deinit returned list
-inline fn createCmdBuffers(allocator: *Allocator, ctx: Context, command_pool: vk.CommandPool, buffer_count: usize) !ArrayList(vk.CommandBuffer) {
+inline fn createCmdBuffers(allocator: Allocator, ctx: Context, command_pool: vk.CommandPool, buffer_count: usize) !ArrayList(vk.CommandBuffer) {
     var command_buffers = try ArrayList(vk.CommandBuffer).initCapacity(allocator, buffer_count);
     const alloc_info = vk.CommandBufferAllocateInfo{
         .command_pool = command_pool,
         .level = vk.CommandBufferLevel.primary,
         .command_buffer_count = @intCast(u32, command_buffers.capacity),
     };
-
-    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, alloc_info, command_buffers.items.ptr);
+    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &alloc_info, command_buffers.items.ptr);
     command_buffers.items.len = command_buffers.capacity;
 
     return command_buffers;
@@ -539,7 +537,7 @@ inline fn createCmdBuffer(ctx: Context, command_pool: vk.CommandPool) !vk.Comman
         .command_buffer_count = @intCast(u32, 1),
     };
     var command_buffer: vk.CommandBuffer = undefined;
-    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, alloc_info, @ptrCast([*]vk.CommandBuffer, &command_buffer));
+    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &alloc_info, @ptrCast([*]vk.CommandBuffer, &command_buffer));
 
     return command_buffer;
 }
@@ -559,7 +557,7 @@ fn recordGfxCmdBuffers(ctx: Context, pipeline: *Pipeline2D) !void {
             .flags = .{},
             .p_inheritance_info = null,
         };
-        try ctx.vkd.beginCommandBuffer(command_buffer, command_begin_info);
+        try ctx.vkd.beginCommandBuffer(command_buffer, &command_begin_info);
 
         // make sure compute shader complet writer before beginning render pass
         ctx.vkd.cmdPipelineBarrier(
@@ -584,7 +582,7 @@ fn recordGfxCmdBuffers(ctx: Context, pipeline: *Pipeline2D) !void {
         ctx.vkd.cmdSetViewport(command_buffer, 0, pipeline.view.viewport.len, &pipeline.view.viewport);
         ctx.vkd.cmdSetScissor(command_buffer, 0, pipeline.view.scissor.len, &pipeline.view.scissor);
         ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.graphics, pipeline.pipeline.*);
-        ctx.vkd.cmdBeginRenderPass(command_buffer, render_begin_info, vk.SubpassContents.@"inline");
+        ctx.vkd.cmdBeginRenderPass(command_buffer, &render_begin_info, vk.SubpassContents.@"inline");
 
         const buffer_offsets = [_]vk.DeviceSize{ 0 };
         ctx.vkd.cmdBindVertexBuffers(
@@ -618,7 +616,7 @@ fn recordGfxCmdBuffers(ctx: Context, pipeline: *Pipeline2D) !void {
 pub const ComputePipeline = struct {
     const Self = @This();
 
-    allocator: *Allocator,
+    allocator: Allocator,
 
     pipeline_layout: vk.PipelineLayout,
     pipeline: *vk.Pipeline,
@@ -638,7 +636,7 @@ pub const ComputePipeline = struct {
     // TODO: correctness if init fail, clean up resources created with errdefer
     /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
     /// texture should have a lifetime atleast the lenght of comptute pipeline
-    pub fn init(allocator: *Allocator, ctx: Context, shader_path: []const u8, target_texture: *Texture) !Self {
+    pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_texture: *Texture) !Self {
         var self: Self = undefined; 
         self.allocator = allocator;
         self.target_texture = target_texture;

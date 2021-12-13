@@ -23,7 +23,7 @@ pub const QueueFamilyIndices = struct {
 
     // TODO: use internal allocator that is suitable
     /// Initialize a QueueFamilyIndices instance, internal allocation is handled by QueueFamilyIndices (no manuall cleanup)
-    pub fn init(allocator: *Allocator, vki: dispatch.Instance, physical_device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !QueueFamilyIndices {
+    pub fn init(allocator: Allocator, vki: dispatch.Instance, physical_device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !QueueFamilyIndices {
         var queue_family_count: u32 = 0;
         vki.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, null);
 
@@ -76,7 +76,7 @@ pub const QueueFamilyIndices = struct {
 
 /// check if physical device supports given target extensions
 // TODO: unify with getRequiredInstanceExtensions?
-pub fn isDeviceExtensionsPresent(allocator: *Allocator, vki: dispatch.Instance, device: vk.PhysicalDevice, target_extensions: []const [*:0]const u8) !bool {
+pub fn isDeviceExtensionsPresent(allocator: Allocator, vki: dispatch.Instance, device: vk.PhysicalDevice, target_extensions: []const [*:0]const u8) !bool {
     // query extensions available
     var supported_extensions_count: u32 = 0;
     // TODO: handle "VkResult.incomplete"
@@ -104,7 +104,7 @@ pub fn isDeviceExtensionsPresent(allocator: *Allocator, vki: dispatch.Instance, 
 
 // TODO: use internal allocator that is suitable
 /// select primary physical device in init
-pub fn selectPrimary(allocator: *Allocator, vki: dispatch.Instance, instance: vk.Instance, surface: vk.SurfaceKHR) !vk.PhysicalDevice {
+pub fn selectPrimary(allocator: Allocator, vki: dispatch.Instance, instance: vk.Instance, surface: vk.SurfaceKHR) !vk.PhysicalDevice {
     var device_count: u32 = 0;
     _ = try vki.enumeratePhysicalDevices(instance, &device_count, null); // TODO: handle incomplete
     if (device_count < 0) {
@@ -136,7 +136,7 @@ pub fn selectPrimary(allocator: *Allocator, vki: dispatch.Instance, instance: vk
 }
 
 /// Any suiteable GPU should result in a positive value, an unsuitable GPU might return a negative value
-fn deviceHeuristic(allocator: *Allocator, vki: dispatch.Instance, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !i32 {
+fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !i32 {
     // TODO: rewrite function to have clearer distinction between required and bonus features
     //       possible solutions:
     //          - return error if missing feature and discard negative return value (use u32 instead)
@@ -180,7 +180,7 @@ fn deviceHeuristic(allocator: *Allocator, vki: dispatch.Instance, device: vk.Phy
     return -30 + property_score + feature_score + queue_fam_score + extensions_score + swapchain_score;
 }
 
-pub fn createLogicalDevice(allocator: *Allocator, ctx: Context) !vk.Device {
+pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
 
     // merge indices if they are identical according to vulkan spec
     const family_indices: []const u32 = blk: {
@@ -217,6 +217,5 @@ pub fn createLogicalDevice(allocator: *Allocator, ctx: Context) !vk.Device {
         .pp_enabled_extension_names = &constants.logicical_device_extensions,
         .p_enabled_features = @ptrCast(*const vk.PhysicalDeviceFeatures, &device_features),
     };
-
-    return ctx.vki.createDevice(ctx.physical_device, create_info, null);
+    return ctx.vki.createDevice(ctx.physical_device, &create_info, null);
 }

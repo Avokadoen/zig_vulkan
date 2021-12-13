@@ -18,7 +18,7 @@ const vk_utils = @import("vk_utils.zig");
 /// Utilized to supply vulkan methods and common vulkan state to other
 /// renderer functions and structs
 pub const Context = struct {
-    allocator: *Allocator,
+    allocator: Allocator,
 
     vkb: dispatch.Base,
     vki: dispatch.Instance,
@@ -45,7 +45,7 @@ pub const Context = struct {
     window_ptr: *glfw.Window,
 
     // Caller should make sure to call deinit, context takes ownership of IoWriters
-    pub fn init(allocator: *Allocator, application_name: []const u8, window: *glfw.Window) !Context {
+    pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Window) !Context {
         const app_name = try std.cstr.addNullByte(allocator, application_name);
         defer allocator.destroy(app_name.ptr);
         
@@ -114,7 +114,7 @@ pub const Context = struct {
                 .enabled_extension_count = @intCast(u32, extensions.items.len),
                 .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, extensions.items.ptr),
             };
-            break :blk try self.vkb.createInstance(instanceInfo, null);
+            break :blk try self.vkb.createInstance(&instanceInfo, null);
         };
        
         self.vki = try dispatch.Instance.load(self.instance, vk_proc);
@@ -131,7 +131,7 @@ pub const Context = struct {
         self.messenger = blk: {
             if (!consts.enable_validation_layers) break :blk null;
             const create_info = createDefaultDebugCreateInfo();
-            break :blk self.vki.createDebugUtilsMessengerEXT(self.instance, create_info, null) catch {
+            break :blk self.vki.createDebugUtilsMessengerEXT(self.instance, &create_info, null) catch {
                 std.debug.panic("failed to create debug messenger", .{});
             };
         };
@@ -147,8 +147,7 @@ pub const Context = struct {
                 .flags = .{},
                 .queue_family_index = self.queue_indices.graphics,
             };
-
-            break :blk try self.vkd.createCommandPool(self.logical_device, pool_info, null);
+            break :blk try self.vkd.createCommandPool(self.logical_device, &pool_info, null);
         };
 
         self.comp_cmd_pool = blk: {
@@ -156,8 +155,7 @@ pub const Context = struct {
                 .flags = .{},
                 .queue_family_index = self.queue_indices.compute,
             };
-
-            break :blk try self.vkd.createCommandPool(self.logical_device, pool_info, null);
+            break :blk try self.vkd.createCommandPool(self.logical_device, &pool_info, null);
         };
 
         // possibly a bit wasteful, but to get compile errors when forgetting to
@@ -190,8 +188,7 @@ pub const Context = struct {
             .p_code = @ptrCast([*]const u32, @alignCast(4, spir_v.ptr)),
             .code_size = spir_v.len,
         };
-
-        return self.vkd.createShaderModule(self.logical_device, create_info, null);
+        return self.vkd.createShaderModule(self.logical_device, &create_info, null);
     }
 
     pub fn destroyShaderModule(self: Context, module: vk.ShaderModule) void {
@@ -200,7 +197,7 @@ pub const Context = struct {
 
     /// caller must destroy returned module 
     pub fn createPipelineLayout(self: Context, create_info: vk.PipelineLayoutCreateInfo) !vk.PipelineLayout {
-        return self.vkd.createPipelineLayout(self.logical_device, create_info, null);
+        return self.vkd.createPipelineLayout(self.logical_device, &create_info, null);
     }
 
     pub fn destroyPipelineLayout(self: Context, pipeline_layout: vk.PipelineLayout) void {
@@ -208,7 +205,7 @@ pub const Context = struct {
     }
 
     /// caller must both destroy pipeline from the heap and in vulkan
-    pub fn createGraphicsPipeline(self: Context, allocator: *Allocator, create_info: vk.GraphicsPipelineCreateInfo) !*vk.Pipeline {
+    pub fn createGraphicsPipeline(self: Context, allocator: Allocator, create_info: vk.GraphicsPipelineCreateInfo) !*vk.Pipeline {
         var pipeline = try allocator.create(vk.Pipeline);
         errdefer allocator.destroy(pipeline);
 
@@ -225,7 +222,7 @@ pub const Context = struct {
     }
 
     /// caller must both destroy pipeline from the heap and in vulkan
-    pub fn createComputePipeline(self: Context, allocator: *Allocator, create_info: vk.ComputePipelineCreateInfo) !*vk.Pipeline {
+    pub fn createComputePipeline(self: Context, allocator: Allocator, create_info: vk.ComputePipelineCreateInfo) !*vk.Pipeline {
         var pipeline = try allocator.create(vk.Pipeline);
         errdefer allocator.destroy(pipeline);
 
@@ -301,8 +298,7 @@ pub const Context = struct {
             .dependency_count = 1,
             .p_dependencies = @ptrCast([*]const vk.SubpassDependency, &subpass_dependency),
         };
-
-        return try self.vkd.createRenderPass(self.logical_device, render_pass_info, null);
+        return try self.vkd.createRenderPass(self.logical_device, &render_pass_info, null);
     }
 
     pub fn destroyRenderPass(self: Context, render_pass: vk.RenderPass) void {

@@ -33,7 +33,7 @@ pub fn GetFalseFeatures(comptime T: type) type {
 }
 
 /// Check if extensions are available on host instance
-pub fn isInstanceExtensionsPresent(allocator: *Allocator, vkb: dispatch.Base, target_extensions: []const [*:0]const u8) !bool {
+pub fn isInstanceExtensionsPresent(allocator: Allocator, vkb: dispatch.Base, target_extensions: []const [*:0]const u8) !bool {
     // query extensions available
     var supported_extensions_count: u32 = 0;
     // TODO: handle "VkResult.incomplete"
@@ -82,13 +82,13 @@ pub inline fn beginOneTimeCommandBuffer(ctx: Context, command_pool: vk.CommandPo
         .command_buffer_count = 1,
     };
     var commmand_buffer: vk.CommandBuffer = undefined; 
-    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, allocate_info, @ptrCast([*]vk.CommandBuffer, &commmand_buffer));
+    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &allocate_info, @ptrCast([*]vk.CommandBuffer, &commmand_buffer));
 
     const begin_info = vk.CommandBufferBeginInfo{
         .flags = .{ .one_time_submit_bit = true, },
         .p_inheritance_info = null,
     };
-    try ctx.vkd.beginCommandBuffer(commmand_buffer, begin_info);
+    try ctx.vkd.beginCommandBuffer(commmand_buffer, &begin_info);
 
     return commmand_buffer;
 }

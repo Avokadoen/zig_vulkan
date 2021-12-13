@@ -28,7 +28,7 @@ pub const GpuBufferMemory = struct {
                 .queue_family_index_count = 0,
                 .p_queue_family_indices = undefined,
             };
-            break :blk try ctx.vkd.createBuffer(ctx.logical_device, buffer_info, null);
+            break :blk try ctx.vkd.createBuffer(ctx.logical_device, &buffer_info, null);
         };
         errdefer ctx.vkd.destroyBuffer(ctx.logical_device, buffer, null);
        
@@ -39,7 +39,7 @@ pub const GpuBufferMemory = struct {
                 .allocation_size = memory_requirements.size,
                 .memory_type_index = memory_type_index,
             };
-            break :blk try ctx.vkd.allocateMemory(ctx.logical_device, allocate_info, null);
+            break :blk try ctx.vkd.allocateMemory(ctx.logical_device, &allocate_info, null);
         };
         errdefer ctx.vkd.freeMemory(ctx.logical_device, memory, null);
 
