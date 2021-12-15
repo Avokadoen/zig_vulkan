@@ -10,6 +10,7 @@ const glfw = @import("glfw");
 const vk = @import("vulkan");
 
 const render = @import("../render/render.zig");
+const dispatch = render.dispatch;
 const sc = render.swapchain;
 const descriptor = render.descriptor;
 
@@ -395,7 +396,7 @@ pub fn framebufferSizeCallbackFn(_window: glfw.Window, width: isize, height: isi
 }
 
 /// record default commands to the command buffer
-fn recordGfxCmdBuffers(ctx: render.Context, pipeline: *render.Pipeline2D) !void {
+fn recordGfxCmdBuffers(ctx: render.Context, pipeline: *render.Pipeline2D) dispatch.BeginCommandBufferError!void {
     const image = pipeline.sync_descript.ubo.my_texture.image;
     const image_use = render.texture.getImageTransitionBarrier(image, .general, .general);
     const clear_color = [_]vk.ClearColorValue{
@@ -403,7 +404,7 @@ fn recordGfxCmdBuffers(ctx: render.Context, pipeline: *render.Pipeline2D) !void 
             .float_32 = [_]f32{ 0.0, 0.0, 0.0, 1.0 },
         },
     };
-    for (pipeline.command_buffers.items) |command_buffer, i| {
+    for (pipeline.command_buffers) |command_buffer, i| {
         const command_begin_info = vk.CommandBufferBeginInfo{
             .flags = .{},
             .p_inheritance_info = null,
@@ -425,7 +426,7 @@ fn recordGfxCmdBuffers(ctx: render.Context, pipeline: *render.Pipeline2D) !void 
         );
         const render_begin_info = vk.RenderPassBeginInfo{
             .render_pass = pipeline.render_pass,
-            .framebuffer = pipeline.framebuffers.items[i],
+            .framebuffer = pipeline.framebuffers[i],
             .render_area = .{ .offset = .{ .x = 0, .y = 0 }, .extent = pipeline.sc_data.extent },
             .clear_value_count = clear_color.len,
             .p_clear_values = @ptrCast([*]const vk.ClearValue, &clear_color),

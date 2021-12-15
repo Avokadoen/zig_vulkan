@@ -37,15 +37,15 @@ pub const Pipeline2D = struct {
     render_pass: vk.RenderPass,
     pipeline_layout: vk.PipelineLayout,
     pipeline: *vk.Pipeline,
-    framebuffers: ArrayList(vk.Framebuffer),
+    framebuffers: []vk.Framebuffer,
 
     // TODO: command buffers should be according to what we draw, and not directly related to pipeline?
-    command_buffers: ArrayList(vk.CommandBuffer),
+    command_buffers: []vk.CommandBuffer,
 
-    image_available_s: ArrayList(vk.Semaphore),
-    renderer_finished_s: ArrayList(vk.Semaphore),
-    in_flight_fences: ArrayList(vk.Fence),
-    images_in_flight: ArrayList(vk.Fence),
+    image_available_s: []vk.Semaphore,
+    renderer_finished_s: []vk.Semaphore,
+    in_flight_fences: []vk.Fence,
+    images_in_flight: []vk.Fence,
 
     requested_rescale_pipeline: bool = false,
 
@@ -230,8 +230,8 @@ pub const Pipeline2D = struct {
             break :blk try ctx.createGraphicsPipeline(self.allocator, pipeline_info);
         };
 
-        self.framebuffers = try createFramebuffers(self.allocator, ctx, self.sc_data, self.render_pass);
-        errdefer self.framebuffers.deinit();
+        self.framebuffers = try createFramebuffers(self.allocator, ctx, self.sc_data, self.render_pass, null);
+        errdefer self.allocator.free(self.framebuffers);
 
         self.vertex_buffer = try vertex.createDefaultVertexBuffer(ctx, ctx.gfx_cmd_pool);
         errdefer self.vertex_buffer.deinit(ctx);
@@ -239,27 +239,27 @@ pub const Pipeline2D = struct {
         self.indices_buffer = try vertex.createDefaultIndicesBuffer(ctx, ctx.gfx_cmd_pool);
         errdefer self.indices_buffer.deinit(ctx);
 
-        self.command_buffers = try createCmdBuffers(self.allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers.items.len);
-        errdefer self.command_buffers.deinit();
+        self.command_buffers = try createCmdBuffers(self.allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers.len, null);
+        errdefer self.allocator.free(self.command_buffers);
 
         self.images_in_flight = blk: {
-            var images_in_flight = try ArrayList(vk.Fence).initCapacity(self.allocator, self.sc_data.images.items.len);
+            var images_in_flight = try self.allocator.alloc(vk.Fence, self.sc_data.images.items.len);
             var i: usize = 0;
-            while(i < images_in_flight.capacity) : (i += 1) {
-                images_in_flight.appendAssumeCapacity(.null_handle);
+            while(i < images_in_flight.len) : (i += 1) {
+                images_in_flight[i] = .null_handle;
             }
             break :blk images_in_flight;
         };
-        errdefer self.images_in_flight.deinit();
+        errdefer self.allocator.free(self.images_in_flight);
 
-        self.image_available_s = try ArrayList(vk.Semaphore).initCapacity(self.allocator, constants.max_frames_in_flight);
-        errdefer self.image_available_s.deinit();
+        self.image_available_s = try self.allocator.alloc(vk.Semaphore, constants.max_frames_in_flight);
+        errdefer self.allocator.free(self.image_available_s);
 
-        self.renderer_finished_s = try ArrayList(vk.Semaphore).initCapacity(self.allocator, constants.max_frames_in_flight);
-        errdefer self.renderer_finished_s.deinit();
+        self.renderer_finished_s = try self.allocator.alloc(vk.Semaphore, constants.max_frames_in_flight);
+        errdefer self.allocator.free(self.renderer_finished_s);
 
-        self.in_flight_fences = try ArrayList(vk.Fence).initCapacity(self.allocator, constants.max_frames_in_flight);
-        errdefer self.in_flight_fences.deinit();
+        self.in_flight_fences = try self.allocator.alloc(vk.Fence, constants.max_frames_in_flight);
+        errdefer self.allocator.free(self.in_flight_fences);
 
         const semaphore_info = vk.SemaphoreCreateInfo{
             .flags = .{},
@@ -271,13 +271,13 @@ pub const Pipeline2D = struct {
             var i: usize = 0;
             while (i < constants.max_frames_in_flight) : (i += 1) {
                 const image_sem = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
-                self.image_available_s.appendAssumeCapacity(image_sem);
+                self.image_available_s[i] = image_sem;
 
                 const finish_sem = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
-                self.renderer_finished_s.appendAssumeCapacity(finish_sem);
+                self.renderer_finished_s[i] = finish_sem;
 
                 const fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
-                self.in_flight_fences.appendAssumeCapacity(fence);
+                self.in_flight_fences[i] = fence;
             }
         }
 
@@ -313,7 +313,7 @@ pub const Pipeline2D = struct {
         };
         const max_u64 = std.math.maxInt(u64); 
 
-        const in_flight_fence_p = @ptrCast([*]const vk.Fence, &self.in_flight_fences.items[state.current_frame]);
+        const in_flight_fence_p = @ptrCast([*]const vk.Fence, &self.in_flight_fences[state.current_frame]);
         _ = try ctx.vkd.waitForFences(
             ctx.logical_device, 
             1, 
@@ -327,7 +327,7 @@ pub const Pipeline2D = struct {
             ctx.logical_device, 
             self.sc_data.swapchain, 
             max_u64, 
-            self.image_available_s.items[state.current_frame],
+            self.image_available_s[state.current_frame],
             .null_handle
         )) |ok| switch(ok.result) {
             .success => {
@@ -351,11 +351,11 @@ pub const Pipeline2D = struct {
             },
         }
         
-        if (self.images_in_flight.items[image_index] != .null_handle) {
-            const p_fence = @ptrCast([*]const vk.Fence, &self.images_in_flight.items[image_index]);
+        if (self.images_in_flight[image_index] != .null_handle) {
+            const p_fence = @ptrCast([*]const vk.Fence, &self.images_in_flight[image_index]);
             _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, p_fence, vk.TRUE, max_u64);
         }
-        self.images_in_flight.items[image_index] = self.in_flight_fences.items[state.current_frame];
+        self.images_in_flight[image_index] = self.in_flight_fences[state.current_frame];
 
         // if ubo is dirty
         if (self.sync_descript.ubo.is_dirty[image_index]) {
@@ -371,12 +371,12 @@ pub const Pipeline2D = struct {
         const wait_stages = vk.PipelineStageFlags{ .color_attachment_output_bit = true };
         const submit_info = vk.SubmitInfo{
             .wait_semaphore_count = 1,
-            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.image_available_s.items[state.current_frame]),
+            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.image_available_s[state.current_frame]),
             .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &wait_stages),
             .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers.items[image_index]),
+            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers[image_index]),
             .signal_semaphore_count = 1,
-            .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s.items[state.current_frame]),
+            .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s[state.current_frame]),
         };
         const p_submit_info = @ptrCast([*]const vk.SubmitInfo, &submit_info);
         _ = try ctx.vkd.resetFences(
@@ -388,12 +388,12 @@ pub const Pipeline2D = struct {
             ctx.graphics_queue, 
             1, 
             p_submit_info, 
-            self.in_flight_fences.items[state.current_frame]
+            self.in_flight_fences[state.current_frame]
         );
 
         const present_info = vk.PresentInfoKHR{
             .wait_semaphore_count = 1,
-            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s.items[state.current_frame]),
+            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s[state.current_frame]),
             .swapchain_count = 1,
             .p_swapchains = @ptrCast([*]const vk.SwapchainKHR, &self.sc_data.swapchain),
             .p_image_indices = @ptrCast([*]const u32, &image_index),
@@ -428,19 +428,15 @@ pub const Pipeline2D = struct {
         self.wait_idle(ctx);
 
         // destroy outdated pipeline state
-        for (self.framebuffers.items) |framebuffer| {
+        for (self.framebuffers) |framebuffer| {
             ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
         }
-        // TODO: this container can be reused in createFramebuffers!
-        self.framebuffers.deinit();
         ctx.vkd.freeCommandBuffers(
             ctx.logical_device, 
             ctx.gfx_cmd_pool, 
-            @intCast(u32, self.command_buffers.items.len), 
-            @ptrCast([*]const vk.CommandBuffer, self.command_buffers.items.ptr)
+            @intCast(u32, self.command_buffers.len), 
+            @ptrCast([*]const vk.CommandBuffer, self.command_buffers.ptr)
         );
-        // TODO: this container can be reused in createCmdBuffers!
-        self.command_buffers.deinit(); 
         ctx.destroyRenderPass(self.render_pass);
 
         // recreate swapchain utilizing the old one 
@@ -455,9 +451,9 @@ pub const Pipeline2D = struct {
 
         // recreate renderpass and framebuffers
         self.render_pass = try ctx.createRenderPass(self.sc_data.format);
-        self.framebuffers = try createFramebuffers(allocator, ctx, self.sc_data, self.render_pass);
+        self.framebuffers = try createFramebuffers(allocator, ctx, self.sc_data, self.render_pass, self.framebuffers);
 
-        self.command_buffers = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers.items.len);
+        self.command_buffers = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers.len, self.command_buffers);
         try self.recordCmdBufferFn(ctx, self);
     }
 
@@ -466,26 +462,26 @@ pub const Pipeline2D = struct {
         {
             var i: usize = 0;
             while (i < constants.max_frames_in_flight) : (i += 1) {
-                ctx.vkd.destroySemaphore(ctx.logical_device, self.image_available_s.items[i], null);
-                ctx.vkd.destroySemaphore(ctx.logical_device, self.renderer_finished_s.items[i], null);
-                ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fences.items[i], null);
+                ctx.vkd.destroySemaphore(ctx.logical_device, self.image_available_s[i], null);
+                ctx.vkd.destroySemaphore(ctx.logical_device, self.renderer_finished_s[i], null);
+                ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fences[i], null);
             }
         }
     
         self.vertex_buffer.deinit(ctx);
         self.indices_buffer.deinit(ctx);
 
-        self.image_available_s.deinit();
-        self.renderer_finished_s.deinit();
-        self.in_flight_fences.deinit();
-        self.images_in_flight.deinit();
+        self.allocator.free(self.image_available_s);
+        self.allocator.free(self.renderer_finished_s);
+        self.allocator.free(self.in_flight_fences);
+        self.allocator.free(self.images_in_flight);
 
-        self.command_buffers.deinit();
+        self.allocator.free(self.command_buffers);
 
-        for (self.framebuffers.items) |framebuffer| {
+        for (self.framebuffers) |framebuffer| {
             ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
         }
-        self.framebuffers.deinit();
+        self.allocator.free(self.framebuffers);
 
         ctx.destroyPipelineLayout(self.pipeline_layout);
         ctx.destroyRenderPass(self.render_pass);
@@ -497,8 +493,8 @@ pub const Pipeline2D = struct {
         inline fn wait_idle(self: Self, ctx: Context) void {
             _ = ctx.vkd.waitForFences(
                 ctx.logical_device, 
-                @intCast(u32, self.in_flight_fences.items.len),
-                self.in_flight_fences.items.ptr,
+                @intCast(u32, self.in_flight_fences.len),
+                self.in_flight_fences.ptr,
                 vk.TRUE,
                 std.math.maxInt(u64) 
             ) catch |err| {
@@ -511,10 +507,10 @@ pub const Pipeline2D = struct {
 
 // TODO: move gfx specific functions inside the gfx scope
 
-inline fn createFramebuffers(allocator: Allocator, ctx: Context, swapchain_data: *const swapchain.Data, render_pass: vk.RenderPass) !ArrayList(vk.Framebuffer) {
+inline fn createFramebuffers(allocator: Allocator, ctx: Context, swapchain_data: *const swapchain.Data, render_pass: vk.RenderPass, prev_framebuffer: ?[]vk.Framebuffer) ![]vk.Framebuffer {
     const image_views = swapchain_data.image_views;
-    var framebuffers = try ArrayList(vk.Framebuffer).initCapacity(allocator, image_views.items.len);
-    for (image_views.items) |view| {
+    var framebuffers = prev_framebuffer orelse try allocator.alloc(vk.Framebuffer, image_views.items.len);
+    for (image_views.items) |view, i| {
         const attachments = [_]vk.ImageView{
             view,
         };
@@ -528,21 +524,21 @@ inline fn createFramebuffers(allocator: Allocator, ctx: Context, swapchain_data:
             .layers = 1,
         };
         const framebuffer = try ctx.vkd.createFramebuffer(ctx.logical_device, &framebuffer_info, null);
-        framebuffers.appendAssumeCapacity(framebuffer);
+        framebuffers[i] = framebuffer;
     }
     return framebuffers;
 }
 
 /// create a command buffers with sizeof buffer_count, caller must deinit returned list
-inline fn createCmdBuffers(allocator: Allocator, ctx: Context, command_pool: vk.CommandPool, buffer_count: usize) !ArrayList(vk.CommandBuffer) {
-    var command_buffers = try ArrayList(vk.CommandBuffer).initCapacity(allocator, buffer_count);
+inline fn createCmdBuffers(allocator: Allocator, ctx: Context, command_pool: vk.CommandPool, buffer_count: usize, prev_buffer: ?[]vk.CommandBuffer) ![]vk.CommandBuffer {
+    var command_buffers = prev_buffer orelse try allocator.alloc(vk.CommandBuffer, buffer_count);
     const alloc_info = vk.CommandBufferAllocateInfo{
         .command_pool = command_pool,
         .level = vk.CommandBufferLevel.primary,
-        .command_buffer_count = @intCast(u32, command_buffers.capacity),
+        .command_buffer_count = @intCast(u32, buffer_count),
     };
-    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &alloc_info, command_buffers.items.ptr);
-    command_buffers.items.len = command_buffers.capacity;
+    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &alloc_info, command_buffers.ptr);
+    command_buffers.len = buffer_count;
 
     return command_buffers;
 }
