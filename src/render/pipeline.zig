@@ -11,10 +11,23 @@ const vertex = @import("vertex.zig");
 const descriptor = @import("descriptor.zig");
 const utils = @import("../utils.zig");
 const texture = @import("texture.zig");
+const dispatch = @import("dispatch.zig");
 
 const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
 const Texture = texture.Texture;
 const Context = @import("context.zig").Context;
+
+pub const RecordCmdBufferError = dispatch.BeginCommandBufferError;
+
+pub const InitData = struct {
+    allocator: Allocator, 
+    ctx: Context,
+    sc_data: *swapchain.Data,
+    instance_count: u32,
+    view: *swapchain.ViewportScissor,
+    sync_descript: *descriptor.SyncDescriptor,
+    recordCmdBufferFn: fn(ctx: Context, pipeline: *Pipeline2D) RecordCmdBufferError!void,
+};
 
 pub const Pipeline2D = struct {
     const Self = @This();
@@ -47,16 +60,20 @@ pub const Pipeline2D = struct {
 
     instance_count: u32,
 
+    recordCmdBufferFn: fn(ctx: Context, pipeline: *Pipeline2D) RecordCmdBufferError!void,
+
     // TODO: correctness if init fail, clean up resources created with errdefer
     /// initialize a graphics pipe line, caller must make sure to call deinit
     /// sc_data, view and ubo needs a lifetime that is atleast as long as created pipeline
-    pub fn init(allocator: Allocator, ctx: Context, sc_data: *swapchain.Data, instance_count: u32, view: *swapchain.ViewportScissor, sync_descript: *descriptor.SyncDescriptor) !Self {
+    pub fn init(data: InitData) !Self {
         var self: Self = undefined; 
-        self.allocator = allocator;
-        self.sc_data = sc_data;
-        self.view = view;
-        self.sync_descript = sync_descript;
-        self.instance_count = instance_count;
+        self.allocator = data.allocator;
+        self.sc_data = data.sc_data;
+        self.view = data.view;
+        self.sync_descript = data.sync_descript;
+        self.instance_count = data.instance_count;
+        self.recordCmdBufferFn = data.recordCmdBufferFn;
+        const ctx = data.ctx;
     
         self.pipeline_layout = blk: {
             const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
@@ -68,20 +85,20 @@ pub const Pipeline2D = struct {
             };
             break :blk try ctx.createPipelineLayout(pipeline_layout_info);
         };
-        self.render_pass = try ctx.createRenderPass(sc_data.format);
+        self.render_pass = try ctx.createRenderPass(self.sc_data.format);
         self.pipeline = blk: {
-            const self_path = try std.fs.selfExePathAlloc(allocator);
-            defer ctx.allocator.destroy(self_path.ptr);
+            const self_path = try std.fs.selfExePathAlloc(self.allocator);
+            defer self.allocator.destroy(self_path.ptr);
 
             // TODO: function in context for shader stage creation?
             const vert_code = blk1: {
                 const path = blk2: {
-                    const join_path = [_][]const u8{ self_path, "../../render2d.vert.spv" };
-                    break :blk2 try std.fs.path.resolve(allocator, join_path[0..]);
+                    const join_path = [_][]const u8{ self_path, "../../pass.vert.spv" };
+                    break :blk2 try std.fs.path.resolve(self.allocator, join_path[0..]);
                 };
-                defer allocator.destroy(path.ptr);
+                defer self.allocator.destroy(path.ptr);
 
-                break :blk1 try utils.readFile(allocator, path);
+                break :blk1 try utils.readFile(self.allocator, path);
             };
             defer vert_code.deinit();
 
@@ -97,12 +114,12 @@ pub const Pipeline2D = struct {
             };
             const frag_code = blk1: {
                 const path = blk2: {
-                    const join_path = [_][]const u8{ self_path, "../../render2d.frag.spv" };
-                    break :blk2 try std.fs.path.resolve(allocator, join_path[0..]);
+                    const join_path = [_][]const u8{ self_path, "../../pass.frag.spv" };
+                    break :blk2 try std.fs.path.resolve(self.allocator, join_path[0..]);
                 };
-                defer allocator.destroy(path.ptr);
+                defer self.allocator.destroy(path.ptr);
 
-                break :blk1 try utils.readFile(allocator, path);
+                break :blk1 try utils.readFile(self.allocator, path);
             };
             defer frag_code.deinit();
 
@@ -210,10 +227,10 @@ pub const Pipeline2D = struct {
                 .base_pipeline_handle = .null_handle,
                 .base_pipeline_index = -1,
             };
-            break :blk try ctx.createGraphicsPipeline(allocator, pipeline_info);
+            break :blk try ctx.createGraphicsPipeline(self.allocator, pipeline_info);
         };
 
-        self.framebuffers = try createFramebuffers(allocator, ctx, sc_data, self.render_pass);
+        self.framebuffers = try createFramebuffers(self.allocator, ctx, self.sc_data, self.render_pass);
         errdefer self.framebuffers.deinit();
 
         self.vertex_buffer = try vertex.createDefaultVertexBuffer(ctx, ctx.gfx_cmd_pool);
@@ -222,11 +239,11 @@ pub const Pipeline2D = struct {
         self.indices_buffer = try vertex.createDefaultIndicesBuffer(ctx, ctx.gfx_cmd_pool);
         errdefer self.indices_buffer.deinit(ctx);
 
-        self.command_buffers = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers.items.len);
+        self.command_buffers = try createCmdBuffers(self.allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers.items.len);
         errdefer self.command_buffers.deinit();
 
         self.images_in_flight = blk: {
-            var images_in_flight = try ArrayList(vk.Fence).initCapacity(allocator, sc_data.images.items.len);
+            var images_in_flight = try ArrayList(vk.Fence).initCapacity(self.allocator, self.sc_data.images.items.len);
             var i: usize = 0;
             while(i < images_in_flight.capacity) : (i += 1) {
                 images_in_flight.appendAssumeCapacity(.null_handle);
@@ -235,13 +252,13 @@ pub const Pipeline2D = struct {
         };
         errdefer self.images_in_flight.deinit();
 
-        self.image_available_s = try ArrayList(vk.Semaphore).initCapacity(allocator, constants.max_frames_in_flight);
+        self.image_available_s = try ArrayList(vk.Semaphore).initCapacity(self.allocator, constants.max_frames_in_flight);
         errdefer self.image_available_s.deinit();
 
-        self.renderer_finished_s = try ArrayList(vk.Semaphore).initCapacity(allocator, constants.max_frames_in_flight);
+        self.renderer_finished_s = try ArrayList(vk.Semaphore).initCapacity(self.allocator, constants.max_frames_in_flight);
         errdefer self.renderer_finished_s.deinit();
 
-        self.in_flight_fences = try ArrayList(vk.Fence).initCapacity(allocator, constants.max_frames_in_flight);
+        self.in_flight_fences = try ArrayList(vk.Fence).initCapacity(self.allocator, constants.max_frames_in_flight);
         errdefer self.in_flight_fences.deinit();
 
         const semaphore_info = vk.SemaphoreCreateInfo{
@@ -265,7 +282,7 @@ pub const Pipeline2D = struct {
         }
 
         // self is sufficiently defined to record command buffer
-        try recordGfxCmdBuffers(ctx, &self); 
+        try self.recordCmdBufferFn(ctx, &self); 
 
         return Self{
             .allocator = self.allocator,
@@ -281,9 +298,10 @@ pub const Pipeline2D = struct {
             .images_in_flight = self.images_in_flight,
             .vertex_buffer = self.vertex_buffer,
             .indices_buffer = self.indices_buffer,
-            .sc_data = sc_data,
-            .sync_descript = sync_descript,
+            .sc_data = self.sc_data,
+            .sync_descript = self.sync_descript,
             .instance_count = self.instance_count,
+            .recordCmdBufferFn = self.recordCmdBufferFn,
         };
     }
 
@@ -440,7 +458,7 @@ pub const Pipeline2D = struct {
         self.framebuffers = try createFramebuffers(allocator, ctx, self.sc_data, self.render_pass);
 
         self.command_buffers = try createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers.items.len);
-        try recordGfxCmdBuffers(ctx, self);
+        try self.recordCmdBufferFn(ctx, self);
     }
 
     pub fn deinit(self: Self, ctx: Context) void {
@@ -542,74 +560,6 @@ inline fn createCmdBuffer(ctx: Context, command_pool: vk.CommandPool) !vk.Comman
     return command_buffer;
 }
 
-
-/// record default commands to the command buffer
-fn recordGfxCmdBuffers(ctx: Context, pipeline: *Pipeline2D) !void {
-    const image = pipeline.sync_descript.ubo.my_texture.image;
-    const image_use = texture.getImageTransitionBarrier(image, .general, .general);
-    const clear_color = [_]vk.ClearColorValue{
-        .{
-            .float_32 = [_]f32{ 0.0, 0.0, 0.0, 1.0 },
-        },
-    };
-    for (pipeline.command_buffers.items) |command_buffer, i| {
-        const command_begin_info = vk.CommandBufferBeginInfo{
-            .flags = .{},
-            .p_inheritance_info = null,
-        };
-        try ctx.vkd.beginCommandBuffer(command_buffer, &command_begin_info);
-
-        // make sure compute shader complet writer before beginning render pass
-        ctx.vkd.cmdPipelineBarrier(
-            command_buffer,
-            image_use.transition.src_stage,
-            image_use.transition.dst_stage,
-            vk.DependencyFlags{}, 
-            0,
-            undefined,
-            0,
-            undefined,
-            1,
-            @ptrCast([*]const vk.ImageMemoryBarrier, &image_use.barrier)
-        );
-        const render_begin_info = vk.RenderPassBeginInfo{
-            .render_pass = pipeline.render_pass,
-            .framebuffer = pipeline.framebuffers.items[i],
-            .render_area = .{ .offset = .{ .x = 0, .y = 0 }, .extent = pipeline.sc_data.extent },
-            .clear_value_count = clear_color.len,
-            .p_clear_values = @ptrCast([*]const vk.ClearValue, &clear_color),
-        };
-        ctx.vkd.cmdSetViewport(command_buffer, 0, pipeline.view.viewport.len, &pipeline.view.viewport);
-        ctx.vkd.cmdSetScissor(command_buffer, 0, pipeline.view.scissor.len, &pipeline.view.scissor);
-        ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.graphics, pipeline.pipeline.*);
-        ctx.vkd.cmdBeginRenderPass(command_buffer, &render_begin_info, vk.SubpassContents.@"inline");
-
-        const buffer_offsets = [_]vk.DeviceSize{ 0 };
-        ctx.vkd.cmdBindVertexBuffers(
-            command_buffer, 
-            0, 
-            1, 
-            @ptrCast([*]const vk.Buffer, &pipeline.vertex_buffer.buffer), 
-            @ptrCast([*]const vk.DeviceSize, &buffer_offsets)
-        );
-        ctx.vkd.cmdBindIndexBuffer(command_buffer, pipeline.indices_buffer.buffer, 0, .uint32);
-        // TODO: Race Condition: sync_descript is not synced here 
-        ctx.vkd.cmdBindDescriptorSets(
-            command_buffer, 
-            .graphics, 
-            pipeline.pipeline_layout, 
-            0, 
-            1, 
-            @ptrCast([*]const vk.DescriptorSet, &pipeline.sync_descript.ubo.descriptor_sets[i]),
-            0,
-            undefined
-        );
-        
-        ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, pipeline.instance_count, 0, 0, 0);
-        ctx.vkd.cmdEndRenderPass(command_buffer);
-        try ctx.vkd.endCommandBuffer(command_buffer);
-    }
-}
 
 // TODO: at this point pipelines should have their own internal module!
 

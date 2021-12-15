@@ -7,6 +7,7 @@ const ArrayList = std.ArrayList;
 const zlm = @import("zlm");
 const stbi = @import("stbi");
 const glfw = @import("glfw");
+const vk = @import("vulkan");
 
 const render = @import("../render/render.zig");
 const sc = render.swapchain;
@@ -223,8 +224,15 @@ pub const InitializedApi = struct {
         api.state.swapchain.* = self.swapchain;
         api.state.view.* = self.view;
         api.state.subo.* = try descriptor.SyncDescriptor.init(desc_config);
-        api.state.pipeline = try render.Pipeline2D.init(self.allocator, self.ctx, api.state.swapchain, @intCast(u32, self.db_ptr.*.len), api.state.view, api.state.subo);
-        
+        api.state.pipeline = try render.Pipeline2D.init(.{
+            .allocator = self.allocator, 
+            .ctx = self.ctx, 
+            .sc_data = api.state.swapchain, 
+            .instance_count = @intCast(u32, self.db_ptr.*.len), 
+            .view = api.state.view, 
+            .sync_descript = api.state.subo,
+            .recordCmdBufferFn = recordGfxCmdBuffers
+        });
         try api.state.db_ptr.generateUvBuffer(mega_uvs);
 
         for (api.state.swapchain.images.items) |_, i| {
@@ -384,4 +392,72 @@ pub fn framebufferSizeCallbackFn(_window: glfw.Window, width: isize, height: isi
     _ = height;
 
     requested_rescale_pipeline.* = true;
+}
+
+/// record default commands to the command buffer
+fn recordGfxCmdBuffers(ctx: render.Context, pipeline: *render.Pipeline2D) !void {
+    const image = pipeline.sync_descript.ubo.my_texture.image;
+    const image_use = render.texture.getImageTransitionBarrier(image, .general, .general);
+    const clear_color = [_]vk.ClearColorValue{
+        .{
+            .float_32 = [_]f32{ 0.0, 0.0, 0.0, 1.0 },
+        },
+    };
+    for (pipeline.command_buffers.items) |command_buffer, i| {
+        const command_begin_info = vk.CommandBufferBeginInfo{
+            .flags = .{},
+            .p_inheritance_info = null,
+        };
+        try ctx.vkd.beginCommandBuffer(command_buffer, &command_begin_info);
+
+        // make sure compute shader complet writer before beginning render pass
+        ctx.vkd.cmdPipelineBarrier(
+            command_buffer,
+            image_use.transition.src_stage,
+            image_use.transition.dst_stage,
+            vk.DependencyFlags{}, 
+            0,
+            undefined,
+            0,
+            undefined,
+            1,
+            @ptrCast([*]const vk.ImageMemoryBarrier, &image_use.barrier)
+        );
+        const render_begin_info = vk.RenderPassBeginInfo{
+            .render_pass = pipeline.render_pass,
+            .framebuffer = pipeline.framebuffers.items[i],
+            .render_area = .{ .offset = .{ .x = 0, .y = 0 }, .extent = pipeline.sc_data.extent },
+            .clear_value_count = clear_color.len,
+            .p_clear_values = @ptrCast([*]const vk.ClearValue, &clear_color),
+        };
+        ctx.vkd.cmdSetViewport(command_buffer, 0, pipeline.view.viewport.len, &pipeline.view.viewport);
+        ctx.vkd.cmdSetScissor(command_buffer, 0, pipeline.view.scissor.len, &pipeline.view.scissor);
+        ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.graphics, pipeline.pipeline.*);
+        ctx.vkd.cmdBeginRenderPass(command_buffer, &render_begin_info, vk.SubpassContents.@"inline");
+
+        const buffer_offsets = [_]vk.DeviceSize{ 0 };
+        ctx.vkd.cmdBindVertexBuffers(
+            command_buffer, 
+            0, 
+            1, 
+            @ptrCast([*]const vk.Buffer, &pipeline.vertex_buffer.buffer), 
+            @ptrCast([*]const vk.DeviceSize, &buffer_offsets)
+        );
+        ctx.vkd.cmdBindIndexBuffer(command_buffer, pipeline.indices_buffer.buffer, 0, .uint32);
+        // TODO: Race Condition: sync_descript is not synced here 
+        ctx.vkd.cmdBindDescriptorSets(
+            command_buffer, 
+            .graphics, 
+            pipeline.pipeline_layout, 
+            0, 
+            1, 
+            @ptrCast([*]const vk.DescriptorSet, &pipeline.sync_descript.ubo.descriptor_sets[i]),
+            0,
+            undefined
+        );
+        
+        ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, pipeline.instance_count, 0, 0, 0);
+        ctx.vkd.cmdEndRenderPass(command_buffer);
+        try ctx.vkd.endCommandBuffer(command_buffer);
+    }
 }
