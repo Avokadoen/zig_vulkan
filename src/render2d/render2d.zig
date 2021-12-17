@@ -20,6 +20,8 @@ const bruteForceFn = knapsack.InitBruteForceWidthHeightFn(false).bruteForceWidth
 const DB = @import("DB.zig");
 const util_types = @import("util_types.zig");
 
+const Pipeline = render.PipelineTypesFn(void).Pipeline;
+
 // Exterior public types
 pub const Rectangle = util_types.Rectangle;
 pub const UV = util_types.UV;
@@ -225,13 +227,14 @@ pub const InitializedApi = struct {
         api.state.swapchain.* = self.swapchain;
         api.state.view.* = self.view;
         api.state.subo.* = try descriptor.SyncDescriptor.init(desc_config);
-        api.state.pipeline = try render.Pipeline2D.init(.{
+        api.state.pipeline = try Pipeline.init(.{
             .allocator = self.allocator, 
             .ctx = self.ctx, 
             .sc_data = api.state.swapchain, 
             .instance_count = @intCast(u32, self.db_ptr.*.len), 
             .view = api.state.view, 
             .sync_descript = api.state.subo,
+            .user_data = .{},
             .recordCmdBufferFn = recordGfxCmdBuffers
         });
         try api.state.db_ptr.generateUvBuffer(mega_uvs);
@@ -256,7 +259,7 @@ const CommonDrawState = struct {
     ctx: render.Context,
     swapchain: *sc.Data,
     subo: *descriptor.SyncDescriptor,
-    pipeline: render.Pipeline2D,
+    pipeline: Pipeline,
     view: *sc.ViewportScissor,
 
     // render2d specific state
@@ -396,7 +399,7 @@ pub fn framebufferSizeCallbackFn(_window: glfw.Window, width: isize, height: isi
 }
 
 /// record default commands to the command buffer
-fn recordGfxCmdBuffers(ctx: render.Context, pipeline: *render.Pipeline2D) dispatch.BeginCommandBufferError!void {
+fn recordGfxCmdBuffers(ctx: render.Context, pipeline: *Pipeline) dispatch.BeginCommandBufferError!void {
     const image = pipeline.sync_descript.ubo.my_texture.image;
     const image_use = render.texture.getImageTransitionBarrier(image, .general, .general);
     const clear_color = [_]vk.ClearColorValue{

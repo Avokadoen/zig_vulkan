@@ -4,7 +4,7 @@ const pipelines = @import("pipeline.zig");
 
 pub const ComputePipeline = pipelines.ComputePipeline;
 pub const Context = context.Context;
-pub const Pipeline2D = pipelines.Pipeline2D;
+pub const PipelineTypesFn = pipelines.PipelineTypesFn;
 pub const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
 // TODO: don't directly export tb data
 pub const Vertex = vertex.Vertex;
