@@ -24,7 +24,7 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
     return struct {
         const ParentType = @This();
 
-        pub const InitInfo = struct {
+        pub const PipelineBuilder = struct {
             allocator: Allocator, 
             ctx: Context,
             sc_data: *swapchain.Data,
@@ -33,60 +33,22 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
             sync_descript: *descriptor.SyncDescriptor,
             user_data: T,
             recordCmdBufferFn: fn(ctx: Context, pipeline: *ParentType.Pipeline) RecordCmdBufferError!void,
-        };
-
-        pub const Pipeline = struct {
-            const Self = @This();
-
-            allocator: Allocator,
-
-            render_pass: vk.RenderPass,
-            pipeline_layout: vk.PipelineLayout,
-            pipeline: *vk.Pipeline,
-            framebuffers: []vk.Framebuffer,
-
-            // TODO: command buffers should be according to what we draw, and not directly related to pipeline?
-            command_buffers: []vk.CommandBuffer,
-
-            image_available_s: []vk.Semaphore,
-            renderer_finished_s: []vk.Semaphore,
-            in_flight_fences: []vk.Fence,
-            images_in_flight: []vk.Fence,
-
-            requested_rescale_pipeline: bool = false,
-
-            // TODO seperate vertex/index buffers from pipeline
-            vertex_buffer: GpuBufferMemory,
-            indices_buffer: GpuBufferMemory,
-
-            sc_data: *swapchain.Data,
-            view: *swapchain.ViewportScissor,
-
-            sync_descript: *descriptor.SyncDescriptor,
-
-            instance_count: u32,
-
-            // user data, attach any data to the pipeline
-            // this data can be used in recordCmdBufferFn or any
-            // other function that accepts pipelines
-            user_data: T,
-            recordCmdBufferFn: fn(ctx: Context, pipeline: *ParentType.Pipeline) RecordCmdBufferError!void,
-
-            // TODO: correctness if init fail, clean up resources created with errdefer
-            /// initialize a graphics pipe line, caller must make sure to call deinit
-            /// sc_data, view and ubo needs a lifetime that is atleast as long as created pipeline
-            pub fn init(data: ParentType.InitInfo) !Self {
-                var self: Self = undefined; 
-                self.allocator = data.allocator;
-                self.sc_data = data.sc_data;
-                self.view = data.view;
-                self.sync_descript = data.sync_descript;
-                self.instance_count = data.instance_count;
-                self.user_data = data.user_data;
-                self.recordCmdBufferFn = data.recordCmdBufferFn;
-                const ctx = data.ctx;
             
-                self.pipeline_layout = blk: {
+            // intermediate builder state
+            pipelines: ArrayList(*vk.Pipeline),
+            exe_path: ?[]u8,
+                
+            pub fn init(
+                allocator: Allocator, 
+                ctx: Context,
+                sc_data: *swapchain.Data,
+                instance_count: u32,
+                view: *swapchain.ViewportScissor,
+                sync_descript: *descriptor.SyncDescriptor,
+                user_data: T,
+                recordCmdBufferFn: fn(ctx: Context, pipeline: *ParentType.Pipeline) RecordCmdBufferError!void,
+            ) PipelineBuilder {
+                const pipeline_layout = blk: {
                     const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
                         .flags = .{},
                         .set_layout_count = 1,
@@ -94,163 +56,183 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                         .push_constant_range_count = 0,
                         .p_push_constant_ranges = undefined,
                     };
-                    break :blk try ctx.createPipelineLayout(pipeline_layout_info);
-                };
-                self.render_pass = try ctx.createRenderPass(self.sc_data.format);
-                self.pipeline = blk: {
-                    const self_path = try std.fs.selfExePathAlloc(self.allocator);
-                    defer self.allocator.destroy(self_path.ptr);
-
-                    // TODO: function in context for shader stage creation?
-                    const vert_code = blk1: {
-                        const path = blk2: {
-                            const join_path = [_][]const u8{ self_path, "../../pass.vert.spv" };
-                            break :blk2 try std.fs.path.resolve(self.allocator, join_path[0..]);
-                        };
-                        defer self.allocator.destroy(path.ptr);
-
-                        break :blk1 try utils.readFile(self.allocator, path);
-                    };
-                    defer vert_code.deinit();
-
-                    const vert_module = try ctx.createShaderModule(vert_code.items[0..]);
-                    defer ctx.destroyShaderModule(vert_module);
-
-                    const vert_stage = vk.PipelineShaderStageCreateInfo{ 
-                        .flags = .{}, 
-                        .stage = .{ .vertex_bit = true }, 
-                        .module = vert_module, 
-                        .p_name = "main", 
-                        .p_specialization_info = null 
-                    };
-                    const frag_code = blk1: {
-                        const path = blk2: {
-                            const join_path = [_][]const u8{ self_path, "../../pass.frag.spv" };
-                            break :blk2 try std.fs.path.resolve(self.allocator, join_path[0..]);
-                        };
-                        defer self.allocator.destroy(path.ptr);
-
-                        break :blk1 try utils.readFile(self.allocator, path);
-                    };
-                    defer frag_code.deinit();
-
-                    const frag_module = try ctx.createShaderModule(frag_code.items[0..]);
-                    defer ctx.destroyShaderModule(frag_module);
-
-                    const frag_stage = vk.PipelineShaderStageCreateInfo{ 
-                        .flags = .{}, 
-                        .stage = .{ .fragment_bit = true }, 
-                        .module = frag_module, 
-                        .p_name = "main", 
-                        .p_specialization_info = null 
-                    };
-                    const shader_stages_info = [_]vk.PipelineShaderStageCreateInfo{ vert_stage, frag_stage };
-
-                    const binding_desription = vertex.getBindingDescriptors();
-                    const attrib_desriptions = vertex.getAttribureDescriptions();
-                    const vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
-                        .flags = .{},
-                        .vertex_binding_description_count = binding_desription.len,
-                        .p_vertex_binding_descriptions = &binding_desription,
-                        .vertex_attribute_description_count = attrib_desriptions.len,
-                        .p_vertex_attribute_descriptions = &attrib_desriptions,
-                    };
-                    const input_assembley_info = vk.PipelineInputAssemblyStateCreateInfo{
-                        .flags = .{},
-                        .topology = vk.PrimitiveTopology.triangle_list,
-                        .primitive_restart_enable = vk.FALSE,
-                    };
-                    
-                    const viewport_info = vk.PipelineViewportStateCreateInfo{
-                        .flags = .{},
-                        .viewport_count = self.view.viewport.len,
-                        .p_viewports = @ptrCast(?[*]const vk.Viewport, &self.view.viewport),
-                        .scissor_count = self.view.scissor.len,
-                        .p_scissors = @ptrCast(?[*]const vk.Rect2D, &self.view.scissor),
-                    };
-                    const rasterizer_info = vk.PipelineRasterizationStateCreateInfo{
-                        .flags = .{},
-                        .depth_clamp_enable = vk.FALSE,
-                        .rasterizer_discard_enable = vk.FALSE,
-                        .polygon_mode = .fill,
-                        .cull_mode = .{ .back_bit = false }, // we should not need culling since we are currently rendering 2D
-                        .front_face = .counter_clockwise,
-                        .depth_bias_enable = vk.FALSE,
-                        .depth_bias_constant_factor = 0.0,
-                        .depth_bias_clamp = 0.0,
-                        .depth_bias_slope_factor = 0.0,
-                        .line_width = 1.0,
-                    };
-                    const multisample_info = vk.PipelineMultisampleStateCreateInfo{
-                        .flags = .{},
-                        .rasterization_samples = .{ .@"1_bit" = true },
-                        .sample_shading_enable = vk.FALSE,
-                        .min_sample_shading = 1.0,
-                        .p_sample_mask = null,
-                        .alpha_to_coverage_enable = vk.FALSE,
-                        .alpha_to_one_enable = vk.FALSE,
-                    };
-                    const color_blend_attachments = [_]vk.PipelineColorBlendAttachmentState{
-                        .{
-                            .blend_enable = vk.TRUE,
-                            .src_color_blend_factor = .src_alpha,
-                            .dst_color_blend_factor = .one_minus_src_alpha,
-                            .color_blend_op = .add,
-                            .src_alpha_blend_factor = .one,
-                            .dst_alpha_blend_factor = .zero,
-                            .alpha_blend_op = .add,
-                            .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
-                        },
-                    };
-                    const color_blend_state = vk.PipelineColorBlendStateCreateInfo{
-                        .flags = .{},
-                        .logic_op_enable = vk.FALSE,
-                        .logic_op = .copy,
-                        .attachment_count = color_blend_attachments.len,
-                        .p_attachments = @ptrCast([*]const vk.PipelineColorBlendAttachmentState, &color_blend_attachments),
-                        .blend_constants = [_]f32{0.0} ** 4,
-                    };
-                    const dynamic_states = [_]vk.DynamicState{
-                        .viewport,
-                        .scissor,
-                    };
-                    const dynamic_state_info = vk.PipelineDynamicStateCreateInfo{
-                        .flags = .{},
-                        .dynamic_state_count = dynamic_states.len,
-                        .p_dynamic_states = @ptrCast([*]const vk.DynamicState, &dynamic_states),
-                    };
-                    const pipeline_info = vk.GraphicsPipelineCreateInfo{
-                        .flags = .{},
-                        .stage_count = shader_stages_info.len,
-                        .p_stages = @ptrCast([*]const vk.PipelineShaderStageCreateInfo, &shader_stages_info),
-                        .p_vertex_input_state = &vertex_input_info,
-                        .p_input_assembly_state = &input_assembley_info,
-                        .p_tessellation_state = null,
-                        .p_viewport_state = &viewport_info,
-                        .p_rasterization_state = &rasterizer_info,
-                        .p_multisample_state = &multisample_info,
-                        .p_depth_stencil_state = null,
-                        .p_color_blend_state = &color_blend_state,
-                        .p_dynamic_state = &dynamic_state_info,
-                        .layout = self.pipeline_layout,
-                        .render_pass = self.render_pass,
-                        .subpass = 0,
-                        .base_pipeline_handle = .null_handle,
-                        .base_pipeline_index = -1,
-                    };
-                    break :blk try ctx.createGraphicsPipeline(self.allocator, pipeline_info);
+                    break :blk try self.ctx.createPipelineLayout(pipeline_layout_info);
                 };
 
-                self.framebuffers = try createFramebuffers(self.allocator, ctx, self.sc_data, self.render_pass, null);
+                return PipelineBuilder{
+                    .allocator = allocator,
+                    .ctx = ctx,
+                    .sc_data = sc_data,
+                    .instance_count = instance_count,
+                    .view = view,
+                    .sync_descript = sync_descript,
+                    .user_data = user_data,
+                    .recordCmdBufferFn = recordCmdBufferFn
+                };
+            }
+
+            pub fn addPipeline(self: *InitInfo, vert_shader_path: []u8, frag_shader_path: []u8) void {
+                self.exe_path = self.exe_path orelse try std.fs.selfExePathAlloc(self.allocator);
+
+                // TODO: function in context for shader stage creation?
+                const vert_code = blk1: {
+                    const path = blk2: {
+                        const join_path = [_][]const u8{ self.exe_path, "../../pass.vert.spv" };
+                        break :blk2 try std.fs.path.resolve(self.allocator, join_path[0..]);
+                    };
+                    defer self.allocator.destroy(path.ptr);
+
+                    break :blk1 try utils.readFile(self.allocator, path);
+                };
+                defer vert_code.deinit();
+
+                const vert_module = try ctx.createShaderModule(vert_code.items[0..]);
+                defer ctx.destroyShaderModule(vert_module);
+
+                const vert_stage = vk.PipelineShaderStageCreateInfo{ 
+                    .flags = .{}, 
+                    .stage = .{ .vertex_bit = true }, 
+                    .module = vert_module, 
+                    .p_name = "main", 
+                    .p_specialization_info = null 
+                };
+                const frag_code = blk1: {
+                    const path = blk2: {
+                        const join_path = [_][]const u8{ self.exe_path, "../../pass.frag.spv" };
+                        break :blk2 try std.fs.path.resolve(self.allocator, join_path[0..]);
+                    };
+                    defer self.allocator.destroy(path.ptr);
+
+                    break :blk1 try utils.readFile(self.allocator, path);
+                };
+                defer frag_code.deinit();
+
+                const frag_module = try ctx.createShaderModule(frag_code.items[0..]);
+                defer ctx.destroyShaderModule(frag_module);
+
+                const frag_stage = vk.PipelineShaderStageCreateInfo{ 
+                    .flags = .{}, 
+                    .stage = .{ .fragment_bit = true }, 
+                    .module = frag_module, 
+                    .p_name = "main", 
+                    .p_specialization_info = null 
+                };
+                const shader_stages_info = [_]vk.PipelineShaderStageCreateInfo{ vert_stage, frag_stage };
+
+                const binding_desription = vertex.getBindingDescriptors();
+                const attrib_desriptions = vertex.getAttribureDescriptions();
+                const vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
+                    .flags = .{},
+                    .vertex_binding_description_count = binding_desription.len,
+                    .p_vertex_binding_descriptions = &binding_desription,
+                    .vertex_attribute_description_count = attrib_desriptions.len,
+                    .p_vertex_attribute_descriptions = &attrib_desriptions,
+                };
+                const input_assembley_info = vk.PipelineInputAssemblyStateCreateInfo{
+                    .flags = .{},
+                    .topology = vk.PrimitiveTopology.triangle_list,
+                    .primitive_restart_enable = vk.FALSE,
+                };
+                
+                const viewport_info = vk.PipelineViewportStateCreateInfo{
+                    .flags = .{},
+                    .viewport_count = self.view.viewport.len,
+                    .p_viewports = @ptrCast(?[*]const vk.Viewport, &self.view.viewport),
+                    .scissor_count = self.view.scissor.len,
+                    .p_scissors = @ptrCast(?[*]const vk.Rect2D, &self.view.scissor),
+                };
+                const rasterizer_info = vk.PipelineRasterizationStateCreateInfo{
+                    .flags = .{},
+                    .depth_clamp_enable = vk.FALSE,
+                    .rasterizer_discard_enable = vk.FALSE,
+                    .polygon_mode = .fill,
+                    .cull_mode = .{ .back_bit = false }, // we should not need culling since we are currently rendering 2D
+                    .front_face = .counter_clockwise,
+                    .depth_bias_enable = vk.FALSE,
+                    .depth_bias_constant_factor = 0.0,
+                    .depth_bias_clamp = 0.0,
+                    .depth_bias_slope_factor = 0.0,
+                    .line_width = 1.0,
+                };
+                const multisample_info = vk.PipelineMultisampleStateCreateInfo{
+                    .flags = .{},
+                    .rasterization_samples = .{ .@"1_bit" = true },
+                    .sample_shading_enable = vk.FALSE,
+                    .min_sample_shading = 1.0,
+                    .p_sample_mask = null,
+                    .alpha_to_coverage_enable = vk.FALSE,
+                    .alpha_to_one_enable = vk.FALSE,
+                };
+                const color_blend_attachments = [_]vk.PipelineColorBlendAttachmentState{
+                    .{
+                        .blend_enable = vk.TRUE,
+                        .src_color_blend_factor = .src_alpha,
+                        .dst_color_blend_factor = .one_minus_src_alpha,
+                        .color_blend_op = .add,
+                        .src_alpha_blend_factor = .one,
+                        .dst_alpha_blend_factor = .zero,
+                        .alpha_blend_op = .add,
+                        .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
+                    },
+                };
+                const color_blend_state = vk.PipelineColorBlendStateCreateInfo{
+                    .flags = .{},
+                    .logic_op_enable = vk.FALSE,
+                    .logic_op = .copy,
+                    .attachment_count = color_blend_attachments.len,
+                    .p_attachments = @ptrCast([*]const vk.PipelineColorBlendAttachmentState, &color_blend_attachments),
+                    .blend_constants = [_]f32{0.0} ** 4,
+                };
+                const dynamic_states = [_]vk.DynamicState{
+                    .viewport,
+                    .scissor,
+                };
+                const dynamic_state_info = vk.PipelineDynamicStateCreateInfo{
+                    .flags = .{},
+                    .dynamic_state_count = dynamic_states.len,
+                    .p_dynamic_states = @ptrCast([*]const vk.DynamicState, &dynamic_states),
+                };
+                const pipeline_info = vk.GraphicsPipelineCreateInfo{
+                    .flags = .{},
+                    .stage_count = shader_stages_info.len,
+                    .p_stages = @ptrCast([*]const vk.PipelineShaderStageCreateInfo, &shader_stages_info),
+                    .p_vertex_input_state = &vertex_input_info,
+                    .p_input_assembly_state = &input_assembley_info,
+                    .p_tessellation_state = null,
+                    .p_viewport_state = &viewport_info,
+                    .p_rasterization_state = &rasterizer_info,
+                    .p_multisample_state = &multisample_info,
+                    .p_depth_stencil_state = null,
+                    .p_color_blend_state = &color_blend_state,
+                    .p_dynamic_state = &dynamic_state_info,
+                    .layout = self.pipeline_layout,
+                    .render_pass = render_pass,
+                    .subpass = 0,
+                    .base_pipeline_handle = .null_handle,
+                    .base_pipeline_index = -1,
+                };
+                try self.pipelines.append(ctx.createGraphicsPipeline(self.allocator, pipeline_info));
+            }
+
+            
+            // TODO: correctness if build fail, clean up resources created with errdefer
+            /// initialize a graphics pipe line, caller must make sure to call deinit
+            /// sc_data, view and ubo needs a lifetime that is atleast as long as created pipeline
+            pub fn build(self: *PipelineBuilder) ParentType.Pipeline {
+                self.allocator.destroy(self.exe_path.ptr);
+            
+                const render_pass = try self.ctx.createRenderPass(self.sc_data.format);
+
+                const framebuffers = try createFramebuffers(self.allocator, self.ctx, self.sc_data, self.render_pass, null);
                 errdefer self.allocator.free(self.framebuffers);
 
-                self.vertex_buffer = try vertex.createDefaultVertexBuffer(ctx, ctx.gfx_cmd_pool);
-                errdefer self.vertex_buffer.deinit(ctx);
+                self.vertex_buffer = try vertex.createDefaultVertexBuffer(self.ctx, self.ctx.gfx_cmd_pool);
+                errdefer self.vertex_buffer.deinit(self.ctx);
 
-                self.indices_buffer = try vertex.createDefaultIndicesBuffer(ctx, ctx.gfx_cmd_pool);
-                errdefer self.indices_buffer.deinit(ctx);
+                self.indices_buffer = try vertex.createDefaultIndicesBuffer(self.ctx, self.ctx.gfx_cmd_pool);
+                errdefer self.indices_buffer.deinit(self.ctx);
 
-                self.command_buffers = try createCmdBuffers(self.allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers.len, null);
+                self.command_buffers = try createCmdBuffers(self.allocator, self.ctx, self.ctx.gfx_cmd_pool, self.framebuffers.len, null);
                 errdefer self.allocator.free(self.command_buffers);
 
                 self.images_in_flight = blk: {
@@ -281,19 +263,19 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                 {
                     var i: usize = 0;
                     while (i < constants.max_frames_in_flight) : (i += 1) {
-                        const image_sem = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
+                        const image_sem = try self.ctx.vkd.createSemaphore(self.ctx.logical_device, &semaphore_info, null);
                         self.image_available_s[i] = image_sem;
 
-                        const finish_sem = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
+                        const finish_sem = try self.ctx.vkd.createSemaphore(self.ctx.logical_device, &semaphore_info, null);
                         self.renderer_finished_s[i] = finish_sem;
 
-                        const fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
+                        const fence = try self.ctx.vkd.createFence(self.ctx.logical_device, &fence_info, null);
                         self.in_flight_fences[i] = fence;
                     }
                 }
 
                 // self is sufficiently defined to record command buffer
-                try self.recordCmdBufferFn(ctx, &self); 
+                try self.recordCmdBufferFn(self.ctx, &self); 
 
                 return Self{
                     .allocator = self.allocator,
@@ -316,6 +298,44 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                     .recordCmdBufferFn = self.recordCmdBufferFn,
                 };
             }
+        };
+
+        pub const Pipeline = struct {
+            const Self = @This();
+
+            allocator: Allocator,
+
+            render_pass: vk.RenderPass,
+            pipeline_layout: vk.PipelineLayout,
+            pipelines: []*vk.Pipeline,
+            framebuffers: []vk.Framebuffer,
+
+            // TODO: command buffers should be according to what we draw, and not directly related to pipeline?
+            command_buffers: []vk.CommandBuffer,
+
+            image_available_s: []vk.Semaphore,
+            renderer_finished_s: []vk.Semaphore,
+            in_flight_fences: []vk.Fence,
+            images_in_flight: []vk.Fence,
+
+            requested_rescale_pipeline: bool = false,
+
+            // TODO seperate vertex/index buffers from pipeline
+            vertex_buffer: GpuBufferMemory,
+            indices_buffer: GpuBufferMemory,
+
+            sc_data: *swapchain.Data,
+            view: *swapchain.ViewportScissor,
+
+            sync_descript: *descriptor.SyncDescriptor,
+
+            instance_count: u32,
+
+            // user data, attach any data to the pipeline
+            // this data can be used in recordCmdBufferFn or any
+            // other function that accepts pipelines
+            user_data: T,
+            recordCmdBufferFn: fn(ctx: Context, pipeline: *ParentType.Pipeline) RecordCmdBufferError!void,
 
             /// Draw using pipeline
             /// transfer_fn can be used to update any relevant storage buffers or other data that are timing critical according to rendering
