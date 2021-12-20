@@ -79,7 +79,7 @@ pub fn messageCallback(
     message_severity: vk.DebugUtilsMessageSeverityFlagsEXT.IntType,
     message_types: vk.DebugUtilsMessageTypeFlagsEXT.IntType,
     p_callback_data: *const vk.DebugUtilsMessengerCallbackDataEXT,
-    p_user_data: *c_void,
+    p_user_data: *anyopaque,
 ) callconv(vk.vulkan_call_conv) vk.Bool32 {
     _ = p_user_data;
     _ = message_types;

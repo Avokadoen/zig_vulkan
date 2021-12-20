@@ -97,11 +97,11 @@ pub const Context = struct {
 
         const validation_layer_info = try validation_layer.Info.init(allocator, self.vkb);
 
-        var create_p_next: ?*c_void = null;
+        var create_p_next: ?*anyopaque = null;
         if (consts.enable_validation_layers) {
             comptime { std.debug.assert(consts.enable_validation_layers); }
             var debug_create_info = createDefaultDebugCreateInfo();
-            create_p_next = @ptrCast(?*c_void, &debug_create_info);
+            create_p_next = @ptrCast(?*anyopaque, &debug_create_info);
         }
 
         self.instance = blk: {
