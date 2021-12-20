@@ -204,20 +204,17 @@ pub const Context = struct {
         self.vkd.destroyPipelineLayout(self.logical_device, pipeline_layout, null);
     }
 
-    /// caller must both destroy pipeline from the heap and in vulkan
-    pub fn createGraphicsPipeline(self: Context, allocator: Allocator, create_info: vk.GraphicsPipelineCreateInfo) !*vk.Pipeline {
-        var pipeline = try allocator.create(vk.Pipeline);
-        errdefer allocator.destroy(pipeline);
-
+    /// caller must destroy pipeline from vulkan
+    pub inline fn createGraphicsPipeline(self: Context, create_info: vk.GraphicsPipelineCreateInfo) !vk.Pipeline {
         const create_infos = [_]vk.GraphicsPipelineCreateInfo{
             create_info,
         };
-        const result = try self.vkd.createGraphicsPipelines(self.logical_device, .null_handle, create_infos.len, @ptrCast([*]const vk.GraphicsPipelineCreateInfo, &create_infos), null, @ptrCast([*]vk.Pipeline, pipeline));
+        var pipeline: vk.Pipeline = undefined;
+        const result = try self.vkd.createGraphicsPipelines(self.logical_device, .null_handle, create_infos.len, @ptrCast([*]const vk.GraphicsPipelineCreateInfo, &create_infos), null, @ptrCast([*]vk.Pipeline, &pipeline));
         if (result != vk.Result.success) {
             // TODO: not panic?
             std.debug.panic("failed to initialize pipeline!", .{});
         }
-
         return pipeline;
     }
 
