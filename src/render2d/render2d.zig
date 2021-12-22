@@ -20,6 +20,9 @@ const bruteForceFn = knapsack.InitBruteForceWidthHeightFn(false).bruteForceWidth
 const DB = @import("DB.zig");
 const util_types = @import("util_types.zig");
 
+const Pipeline = render.PipelineTypesFn(void).Pipeline;
+const PipelineBuilder = render.PipelineTypesFn(void).PipelineBuilder;
+
 // Exterior public types
 pub const Rectangle = util_types.Rectangle;
 pub const UV = util_types.UV;
@@ -225,15 +228,20 @@ pub const InitializedApi = struct {
         api.state.swapchain.* = self.swapchain;
         api.state.view.* = self.view;
         api.state.subo.* = try descriptor.SyncDescriptor.init(desc_config);
-        api.state.pipeline = try render.Pipeline2D.init(.{
-            .allocator = self.allocator, 
-            .ctx = self.ctx, 
-            .sc_data = api.state.swapchain, 
-            .instance_count = @intCast(u32, self.db_ptr.*.len), 
-            .view = api.state.view, 
-            .sync_descript = api.state.subo,
-            .recordCmdBufferFn = recordGfxCmdBuffers
-        });
+        api.state.pipeline = blk: {
+            var pipe_builder = try PipelineBuilder.init(
+                self.allocator, 
+                self.ctx, 
+                api.state.swapchain, 
+                @intCast(u32, self.db_ptr.*.len), 
+                api.state.view, 
+                api.state.subo,
+                .{},
+                recordGfxCmdBuffers
+            );
+            try pipe_builder.addPipeline("../../pass.vert.spv", "../../pass.frag.spv");
+            break :blk (try pipe_builder.build());
+        };
         try api.state.db_ptr.generateUvBuffer(mega_uvs);
 
         for (api.state.swapchain.images.items) |_, i| {
@@ -256,7 +264,7 @@ const CommonDrawState = struct {
     ctx: render.Context,
     swapchain: *sc.Data,
     subo: *descriptor.SyncDescriptor,
-    pipeline: render.Pipeline2D,
+    pipeline: Pipeline,
     view: *sc.ViewportScissor,
 
     // render2d specific state
@@ -372,7 +380,7 @@ fn ShaderDrawAPI(comptime Self: type) type {
         /// program pipeline dynamically scale with window
         /// caller should make sure to call noHandleWindowResize
         pub fn handleWindowResize(self: *Self, window: glfw.Window) void {
-            requested_rescale_pipeline = &self.state.pipeline.requested_rescale_pipeline;
+            window.setUserPointer(bool, &self.state.pipeline.requested_rescale_pipeline);
             _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
         }
 
@@ -384,19 +392,16 @@ fn ShaderDrawAPI(comptime Self: type) type {
     };
 }
 
-// TODO: due to a bug in zig, using optional causes pointer to be garbage, so we use undefined for now
-// used by window resize event
-var requested_rescale_pipeline: *bool = undefined;
-pub fn framebufferSizeCallbackFn(_window: glfw.Window, width: isize, height: isize) void {
-    _ = _window;
+pub fn framebufferSizeCallbackFn(window: glfw.Window, width: u32, height: u32) void {
     _ = width;
     _ = height;
-
-    requested_rescale_pipeline.* = true;
+    if (window.getUserPointer(*bool)) |rescale| {
+        rescale.* = true;
+    }
 }
 
 /// record default commands to the command buffer
-fn recordGfxCmdBuffers(ctx: render.Context, pipeline: *render.Pipeline2D) dispatch.BeginCommandBufferError!void {
+fn recordGfxCmdBuffers(ctx: render.Context, pipeline: *Pipeline) dispatch.BeginCommandBufferError!void {
     const image = pipeline.sync_descript.ubo.my_texture.image;
     const image_use = render.texture.getImageTransitionBarrier(image, .general, .general);
     const clear_color = [_]vk.ClearColorValue{
@@ -433,7 +438,7 @@ fn recordGfxCmdBuffers(ctx: render.Context, pipeline: *render.Pipeline2D) dispat
         };
         ctx.vkd.cmdSetViewport(command_buffer, 0, pipeline.view.viewport.len, &pipeline.view.viewport);
         ctx.vkd.cmdSetScissor(command_buffer, 0, pipeline.view.scissor.len, &pipeline.view.scissor);
-        ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.graphics, pipeline.pipeline.*);
+        ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.graphics, pipeline.pipelines[0]);
         ctx.vkd.cmdBeginRenderPass(command_buffer, &render_begin_info, vk.SubpassContents.@"inline");
 
         const buffer_offsets = [_]vk.DeviceSize{ 0 };
