@@ -392,7 +392,7 @@ fn ShaderDrawAPI(comptime Self: type) type {
     };
 }
 
-pub fn framebufferSizeCallbackFn(window: glfw.Window, width: isize, height: isize) void {
+pub fn framebufferSizeCallbackFn(window: glfw.Window, width: u32, height: u32) void {
     _ = width;
     _ = height;
     if (window.getUserPointer(*bool)) |rescale| {

@@ -192,7 +192,7 @@ pub fn handleCursorPosInput() void {
 ///     - scan_code	    The system-specific scancode of the key.
 ///     - action	    GLFW_PRESS, GLFW_RELEASE or GLFW_REPEAT. Future releases may add more actions.
 ///     - mod	        Bit field describing which modifier keys were held down.
-fn keyCallback(_window: glfw.Window, key: Key, scan_code: isize, action: Action, mods: Mods) void {
+fn keyCallback(_window: glfw.Window, key: Key, scan_code: i32, action: Action, mods: Mods) void {
     _ = _window;
     _ = scan_code;
 
