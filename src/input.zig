@@ -24,7 +24,7 @@ var key_stream = KeyEventStream{
     .mutex = .{},
     .len = 0,
     .buffer = undefined,
-}; 
+};
 
 var mouse_btn_stream = MouseButtonEventStream{
     .new_input_event = undefined,
@@ -52,14 +52,9 @@ var key_input_thread: std.Thread = undefined;
 var mouse_btn_input_thread: std.Thread = undefined;
 var cursor_pos_input_thread: std.Thread = undefined;
 
-pub fn init(
-    input_window: glfw.Window, 
-    input_handle_fn: KeyHandleFn, 
-    input_mouse_btn_handle_fn: MouseButtonHandleFn,
-    input_cursor_pos_handle_fn: CursorPosHandleFn
-) !void {
+pub fn init(input_window: glfw.Window, input_handle_fn: KeyHandleFn, input_mouse_btn_handle_fn: MouseButtonHandleFn, input_cursor_pos_handle_fn: CursorPosHandleFn) !void {
     window = input_window;
-    
+
     key_handle_fn = input_handle_fn;
     try key_stream.new_input_event.init();
 
@@ -71,15 +66,14 @@ pub fn init(
 
     try window.setInputMode(glfw.Window.InputMode.cursor, glfw.Window.InputModeCursor.normal);
 
-    _ = window.setKeyCallback(keyCallback); 
+    _ = window.setKeyCallback(keyCallback);
     _ = window.setMouseButtonCallback(mouseBtnCallback);
     _ = window.setCursorPosCallback(cursorPosCallback);
 
-    key_input_thread = try std.Thread.spawn(.{}, handleKeyboardInput, .{} );
-    mouse_btn_input_thread = try std.Thread.spawn(.{}, handleMouseButtonInput, .{} );
-    cursor_pos_input_thread = try std.Thread.spawn(.{}, handleCursorPosInput, .{} );
+    key_input_thread = try std.Thread.spawn(.{}, handleKeyboardInput, .{});
+    mouse_btn_input_thread = try std.Thread.spawn(.{}, handleMouseButtonInput, .{});
+    cursor_pos_input_thread = try std.Thread.spawn(.{}, handleCursorPosInput, .{});
 }
-
 
 /// kill input module, this will make input threads shut down
 pub fn deinit() void {
@@ -99,7 +93,7 @@ pub fn deinit() void {
         key_stream.new_input_event.set();
     }
 
-    { // critical zone 
+    { // critical zone
         mouse_btn_stream.mutex.lock();
         defer mouse_btn_stream.mutex.unlock();
 
@@ -107,23 +101,23 @@ pub fn deinit() void {
         mouse_btn_stream.new_input_event.set();
     }
 
-    { // critical zone 
+    { // critical zone
         cursor_pos_stream.mutex.lock();
-        defer cursor_pos_stream.mutex.unlock(); 
+        defer cursor_pos_stream.mutex.unlock();
 
         // wake thread
         cursor_pos_stream.new_input_event.set();
     }
 
-    key_input_thread.join(); 
-    mouse_btn_input_thread.join(); 
-    cursor_pos_input_thread.join(); 
+    key_input_thread.join();
+    mouse_btn_input_thread.join();
+    cursor_pos_input_thread.join();
 }
 
 // TODO: generic?
 /// function that user can spawn threads with to handle keyboard input
 pub fn handleKeyboardInput() void {
-    while(kill_all_input_threads == false) {
+    while (kill_all_input_threads == false) {
         // block loop progression if stream is inactive
         key_stream.new_input_event.wait();
 
@@ -131,7 +125,7 @@ pub fn handleKeyboardInput() void {
             key_stream.mutex.lock();
             defer key_stream.mutex.unlock();
 
-            while(key_stream.len > 0) : (key_stream.len -= 1){
+            while (key_stream.len > 0) : (key_stream.len -= 1) {
                 const event = key_stream.buffer[key_stream.len - 1];
                 key_handle_fn(event);
             }
@@ -143,7 +137,7 @@ pub fn handleKeyboardInput() void {
 // TODO: generic?
 /// function that user can spawn threads with to handle mouse button input
 pub fn handleMouseButtonInput() void {
-    while(kill_all_input_threads == false) {
+    while (kill_all_input_threads == false) {
         // block loop progression if stream is inactive
         mouse_btn_stream.new_input_event.wait();
 
@@ -151,7 +145,7 @@ pub fn handleMouseButtonInput() void {
             mouse_btn_stream.mutex.lock();
             defer mouse_btn_stream.mutex.unlock();
 
-            while(mouse_btn_stream.len > 0) : (mouse_btn_stream.len -= 1){
+            while (mouse_btn_stream.len > 0) : (mouse_btn_stream.len -= 1) {
                 const event = mouse_btn_stream.buffer[mouse_btn_stream.len - 1];
                 mouse_btn_handle_fn(event);
             }
@@ -163,7 +157,7 @@ pub fn handleMouseButtonInput() void {
 // TODO: generic?
 /// function that user can spawn threads with to handle cursor pos input
 pub fn handleCursorPosInput() void {
-    while(kill_all_input_threads == false) {
+    while (kill_all_input_threads == false) {
         // block loop progression if stream is inactive
         cursor_pos_stream.new_input_event.wait();
 
@@ -171,7 +165,7 @@ pub fn handleCursorPosInput() void {
             cursor_pos_stream.mutex.lock();
             defer cursor_pos_stream.mutex.unlock();
 
-            while(cursor_pos_stream.len > 0) : (cursor_pos_stream.len -= 1){
+            while (cursor_pos_stream.len > 0) : (cursor_pos_stream.len -= 1) {
                 const event = cursor_pos_stream.buffer[cursor_pos_stream.len - 1];
                 cursor_pos_handle_fn(event);
             }
@@ -224,7 +218,7 @@ fn keyCallback(_window: glfw.Window, key: Key, scan_code: i32, action: Action, m
 fn mouseBtnCallback(_window: glfw.Window, button: MouseButton, action: Action, mods: Mods) void {
     _ = _window;
 
-      // if buffer is full
+    // if buffer is full
     if (mouse_btn_stream.len >= mouse_btn_stream.buffer.len) {
         return;
     }
@@ -237,7 +231,7 @@ fn mouseBtnCallback(_window: glfw.Window, button: MouseButton, action: Action, m
         .mods = parsed_mods.*,
     };
 
-   { // critical zone
+    { // critical zone
         mouse_btn_stream.mutex.lock();
         defer mouse_btn_stream.mutex.unlock();
 
@@ -253,7 +247,7 @@ fn mouseBtnCallback(_window: glfw.Window, button: MouseButton, action: Action, m
 fn cursorPosCallback(_window: glfw.Window, x_pos: f64, y_pos: f64) void {
     _ = _window;
 
-      // if buffer is full
+    // if buffer is full
     if (cursor_pos_stream.len >= cursor_pos_stream.buffer.len) {
         return;
     }
@@ -263,7 +257,7 @@ fn cursorPosCallback(_window: glfw.Window, x_pos: f64, y_pos: f64) void {
         .y = y_pos,
     };
 
-   { // critical zone
+    { // critical zone
         cursor_pos_stream.mutex.lock();
         defer cursor_pos_stream.mutex.unlock();
         cursor_pos_stream.buffer[cursor_pos_stream.len] = event;
@@ -291,9 +285,9 @@ pub const CursorPosEvent = struct {
     y: f64,
 };
 
-pub const KeyHandleFn = fn(KeyEvent) void;
-pub const MouseButtonHandleFn = fn(MouseButtonEvent) void;
-pub const CursorPosHandleFn = fn(CursorPosEvent) void;
+pub const KeyHandleFn = fn (KeyEvent) void;
+pub const MouseButtonHandleFn = fn (MouseButtonEvent) void;
+pub const CursorPosHandleFn = fn (CursorPosEvent) void;
 
 // TODO: generic?
 const KeyEventStream = struct {
@@ -318,4 +312,3 @@ const CursorPosEventStream = struct {
     len: usize,
     buffer: [input_buffer_size]CursorPosEvent,
 };
-

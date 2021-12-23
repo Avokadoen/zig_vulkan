@@ -1,5 +1,4 @@
 /// This file contains compiletime constants that are relevant for the renderer API.
-
 const std = @import("std");
 const builtin = @import("builtin");
 const vk = @import("vulkan");

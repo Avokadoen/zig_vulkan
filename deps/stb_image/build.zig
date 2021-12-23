@@ -6,11 +6,11 @@ pub fn linkStep(b: *std.build.Builder, step: *std.build.LibExeObjStep) void {
     defer b.allocator.free(include_dir);
     step.addIncludeDir(include_dir);
 
-    var src_path = std.fs.path.join(b.allocator, &.{include_dir, "stb_image.c" }) catch unreachable;
+    var src_path = std.fs.path.join(b.allocator, &.{ include_dir, "stb_image.c" }) catch unreachable;
     defer b.allocator.free(src_path);
-    const src_paths = [_][]u8{ src_path };
+    const src_paths = [_][]u8{src_path};
     step.addCSourceFiles(src_paths[0..], &.{});
-    
+
     var package_path = std.fs.path.join(b.allocator, &.{ this_dir, "src/main.zig" }) catch unreachable;
     defer b.allocator.free(package_path);
     step.addPackagePath("stbi", package_path);

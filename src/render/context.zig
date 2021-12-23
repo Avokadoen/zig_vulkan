@@ -13,7 +13,7 @@ const QueueFamilyIndices = physical_device.QueueFamilyIndices;
 const validation_layer = @import("validation_layer.zig");
 const vk_utils = @import("vk_utils.zig");
 
-// TODO: move command pool to context? 
+// TODO: move command pool to context?
 
 /// Utilized to supply vulkan methods and common vulkan state to other
 /// renderer functions and structs
@@ -35,8 +35,8 @@ pub const Context = struct {
     surface: vk.SurfaceKHR,
     queue_indices: QueueFamilyIndices,
 
-    gfx_cmd_pool: vk.CommandPool, 
-    comp_cmd_pool: vk.CommandPool, 
+    gfx_cmd_pool: vk.CommandPool,
+    comp_cmd_pool: vk.CommandPool,
 
     // TODO: utilize comptime for this (emit from struct if we are in release mode)
     messenger: ?vk.DebugUtilsMessengerEXT,
@@ -48,7 +48,7 @@ pub const Context = struct {
     pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Window) !Context {
         const app_name = try std.cstr.addNullByte(allocator, application_name);
         defer allocator.destroy(app_name.ptr);
-        
+
         const app_info = vk.ApplicationInfo{
             .p_next = null,
             .p_application_name = app_name,
@@ -57,7 +57,7 @@ pub const Context = struct {
             .engine_version = consts.engine_version,
             .api_version = vk.API_VERSION_1_2,
         };
-        
+
         // TODO: move to global scope (currently crashes the zig compiler :') )
         const common_extensions = [_][*:0]const u8{vk.extension_info.khr_surface.name};
         const application_extensions = blk: {
@@ -83,11 +83,11 @@ pub const Context = struct {
         for (application_extensions) |extension| {
             try extensions.append(extension);
         }
-        
-        // Partially init a context so that we can use "self" even in init 
+
+        // Partially init a context so that we can use "self" even in init
         var self: Context = undefined;
         self.allocator = allocator;
-       
+
         // load base dispatch wrapper
         const vk_proc = @ptrCast(vk.PfnGetInstanceProcAddr, glfw.getInstanceProcAddress);
         self.vkb = try dispatch.Base.load(vk_proc);
@@ -99,7 +99,9 @@ pub const Context = struct {
 
         var create_p_next: ?*anyopaque = null;
         if (consts.enable_validation_layers) {
-            comptime { std.debug.assert(consts.enable_validation_layers); }
+            comptime {
+                std.debug.assert(consts.enable_validation_layers);
+            }
             var debug_create_info = createDefaultDebugCreateInfo();
             create_p_next = @ptrCast(?*anyopaque, &debug_create_info);
         }
@@ -116,7 +118,7 @@ pub const Context = struct {
             };
             break :blk try self.vkb.createInstance(&instanceInfo, null);
         };
-       
+
         self.vki = try dispatch.Instance.load(self.instance, vk_proc);
         errdefer self.vki.destroyInstance(self.instance, null);
 
@@ -173,8 +175,8 @@ pub const Context = struct {
             .present_queue = self.present_queue,
             .surface = self.surface,
             .queue_indices = self.queue_indices,
-            .gfx_cmd_pool  = self.gfx_cmd_pool,
-            .comp_cmd_pool  = self.comp_cmd_pool,
+            .gfx_cmd_pool = self.gfx_cmd_pool,
+            .comp_cmd_pool = self.comp_cmd_pool,
             .messenger = self.messenger,
             .window_ptr = window,
         };
@@ -280,10 +282,16 @@ pub const Context = struct {
         const subpass_dependency = vk.SubpassDependency{
             .src_subpass = vk.SUBPASS_EXTERNAL,
             .dst_subpass = 0,
-            .src_stage_mask = .{ .color_attachment_output_bit = true, },
-            .dst_stage_mask = .{ .color_attachment_output_bit = true, },
+            .src_stage_mask = .{
+                .color_attachment_output_bit = true,
+            },
+            .dst_stage_mask = .{
+                .color_attachment_output_bit = true,
+            },
             .src_access_mask = .{},
-            .dst_access_mask = .{ .color_attachment_write_bit = true, },
+            .dst_access_mask = .{
+                .color_attachment_write_bit = true,
+            },
             .dependency_flags = .{},
         };
         const render_pass_info = vk.RenderPassCreateInfo{

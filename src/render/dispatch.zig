@@ -14,7 +14,10 @@ pub const Base = vk.BaseWrapper(&[_]vk.BaseCommand{
 
 pub const Instance = blk: {
     var default_commands = [_]vk.InstanceCommand{ .createDevice, .destroyInstance, .destroySurfaceKHR, .enumerateDeviceExtensionProperties, .enumeratePhysicalDevices, .getDeviceProcAddr, .getPhysicalDeviceFeatures, .getPhysicalDeviceMemoryProperties, .getPhysicalDeviceProperties, .getPhysicalDeviceQueueFamilyProperties, .getPhysicalDeviceSurfaceCapabilitiesKHR, .getPhysicalDeviceSurfaceFormatsKHR, .getPhysicalDeviceSurfacePresentModesKHR, .getPhysicalDeviceSurfaceSupportKHR };
-    var output_commands = default_commands ++ if(consts.enable_validation_layers) [_]vk.InstanceCommand{ .createDebugUtilsMessengerEXT, .destroyDebugUtilsMessengerEXT, } else [_]vk.InstanceCommand{};
+    var output_commands = default_commands ++ if (consts.enable_validation_layers) [_]vk.InstanceCommand{
+        .createDebugUtilsMessengerEXT,
+        .destroyDebugUtilsMessengerEXT,
+    } else [_]vk.InstanceCommand{};
     break :blk vk.InstanceWrapper(&output_commands);
 };
 

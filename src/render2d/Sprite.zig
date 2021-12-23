@@ -65,7 +65,7 @@ pub inline fn getTexture(self: *Sprite) TextureHandle {
 /// Update the sprite layer
 pub inline fn setLayer(self: *Sprite, layer: usize) !void {
     if (self.layer == layer) return;
-    
+
     try self.db_ptr.applyLayer(&self.db_id, self.layer, layer);
     self.layer = layer;
 }

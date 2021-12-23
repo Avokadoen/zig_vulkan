@@ -1,4 +1,4 @@
-// This file contains code to help merge images into one single image aka. [the knapsack problem](https://en.wikipedia.org/wiki/Knapsack_problem). 
+// This file contains code to help merge images into one single image aka. [the knapsack problem](https://en.wikipedia.org/wiki/Knapsack_problem).
 // Source: https://www.david-colson.com/2020/03/10/exploring-rect-packing.html
 
 const std = @import("std");
@@ -7,27 +7,27 @@ const Rectangle = @import("util_types.zig").Rectangle;
 
 pub const PackJob = struct {
     // set by caller of pack function
-    id: usize, 
+    id: usize,
     x: u32,
     y: u32,
     width: u32,
     height: u32,
 };
 
-pub const BruteForceFunction = fn(*Allocator, []PackJob, u32, u32) BrutePackError!CalculatedImageSize;
+pub const BruteForceFunction = fn (*Allocator, []PackJob, u32, u32) BrutePackError!CalculatedImageSize;
 
 fn sortByHeight(context: void, lhs: PackJob, rhs: PackJob) bool {
     _ = context;
     return lhs.height < rhs.height;
 }
 
-// TODO: pixelScanPack() might be viable to optimize depending on the load time 
+// TODO: pixelScanPack() might be viable to optimize depending on the load time
 
 pub const CalculatedImageSize = struct {
     width: u64,
     height: u64,
 };
-pub const BrutePackError = PackError || error {
+pub const BrutePackError = PackError || error{
     InsufficentWidth,
     InsufficentHeight,
 };
@@ -45,7 +45,7 @@ pub fn InitBruteForceWidthHeightFn(comptime use_restrictions: bool) type {
         };
     } else {
         Validator = struct {
-             pub inline fn validate(max: u32, value: u32, rtr_error: BrutePackError) BrutePackError!void {
+            pub inline fn validate(max: u32, value: u32, rtr_error: BrutePackError) BrutePackError!void {
                 _ = max;
                 _ = value;
                 rtr_error catch {};
@@ -79,18 +79,18 @@ pub fn InitBruteForceWidthHeightFn(comptime use_restrictions: bool) type {
             var add_width = true;
             var add_width_index: usize = if (max_width_index != packages.len - 1) max_width_index + 1 else 0;
             var add_height_index: usize = if (max_height_index != packages.len - 1) max_image_height + 1 else 0;
-            while(!solved) {
+            while (!solved) {
                 if (pixelScanPack(allocator, image_width, image_height, packages)) |_| {
                     solved = true;
                 } else |err| {
                     switch (err) {
                         PackError.InsufficentSpace => {
                             if (add_width) {
-                                image_width += packages[add_width_index].width; 
+                                image_width += packages[add_width_index].width;
                                 add_width_index = (add_width_index + 1) % packages.len;
                                 try Validator.validate(max_image_width, image_width, BrutePackError.InsufficentWidth);
                             } else {
-                                image_height += packages[add_height_index].height; 
+                                image_height += packages[add_height_index].height;
                                 add_height_index = (add_height_index + 1) % packages.len;
                                 try Validator.validate(max_image_height, image_height, BrutePackError.InsufficentHeight);
                             }
@@ -107,7 +107,7 @@ pub fn InitBruteForceWidthHeightFn(comptime use_restrictions: bool) type {
         }
     };
 
-    if(use_restrictions) {
+    if (use_restrictions) {
         return BruteForcer.bruteForceWidthHeight;
     } else {
         return struct {
@@ -118,8 +118,7 @@ pub fn InitBruteForceWidthHeightFn(comptime use_restrictions: bool) type {
     }
 }
 
-
-pub const PackError = Allocator.Error || error {
+pub const PackError = Allocator.Error || error{
     InsufficentSpace,
 };
 /// attempts to pack a slice of rectangles through brute force. This method is slower than others, but should have the best 
@@ -144,12 +143,12 @@ pub fn pixelScanPack(allocator: Allocator, image_width: u32, image_height: u32, 
 
         // loop mega texture pixels
         im_loop: for (image_map) |pixel, i| {
-            const x = i % image_width; 
-            const y = i / image_width; 
+            const x = i % image_width;
+            const y = i / image_width;
 
             const x_bound = x + (packjob.width - 1);
             const y_bound = y + (packjob.height - 1);
-            
+
             // Check if rectangle doesn't go over the edge of the boundary
             if (x_bound >= image_width or y_bound >= image_height) {
                 continue :im_loop;
@@ -161,8 +160,8 @@ pub fn pixelScanPack(allocator: Allocator, image_width: u32, image_height: u32, 
                 continue :im_loop;
             }
 
-            {   // Check all pixels inside rectangle if we have a valid slot
-                var iy = y;  
+            { // Check all pixels inside rectangle if we have a valid slot
+                var iy = y;
                 while (iy <= y_bound) : (iy += 1) {
                     const y_element = iy * image_width;
 
@@ -170,7 +169,7 @@ pub fn pixelScanPack(allocator: Allocator, image_width: u32, image_height: u32, 
                     while (ix <= x_bound) : (ix += 1) {
                         const index = y_element + ix;
                         if (image_map[index]) {
-                            continue :im_loop; // skip, occupied 
+                            continue :im_loop; // skip, occupied
                         }
                     }
                 }
@@ -203,7 +202,6 @@ pub fn pixelScanPack(allocator: Allocator, image_width: u32, image_height: u32, 
     }
 }
 
-
 test "symmetric square pixelScanPack" {
     const allocator = std.testing.allocator;
     const rectangles = try allocator.alloc(PackJob, 4);
@@ -215,7 +213,7 @@ test "symmetric square pixelScanPack" {
     }
 
     try pixelScanPack(allocator, 2, 2, rectangles);
-    
+
     try std.testing.expectEqual(@as(usize, 0), rectangles[0].x);
     try std.testing.expectEqual(@as(usize, 0), rectangles[0].y);
 
@@ -224,7 +222,7 @@ test "symmetric square pixelScanPack" {
 
     try std.testing.expectEqual(@as(usize, 0), rectangles[2].x);
     try std.testing.expectEqual(@as(usize, 1), rectangles[2].y);
-    
+
     try std.testing.expectEqual(@as(usize, 1), rectangles[3].x);
     try std.testing.expectEqual(@as(usize, 1), rectangles[3].y);
 }
@@ -238,12 +236,12 @@ test "asymmetric square pixelScanPack" {
     rectangles[0].height = 2;
     rectangles[1].width = 3;
     rectangles[1].height = 4;
- 
+
     try pixelScanPack(allocator, 4, 4, rectangles);
 
     try std.testing.expectEqual(@as(usize, 0), rectangles[0].x);
     try std.testing.expectEqual(@as(usize, 0), rectangles[0].y);
-    
+
     try std.testing.expectEqual(@as(usize, 1), rectangles[1].x);
     try std.testing.expectEqual(@as(usize, 0), rectangles[1].y);
 }
@@ -264,7 +262,7 @@ test "asymmetric square full pixelScanPack" {
 
     try std.testing.expectEqual(@as(usize, 0), rectangles[0].x);
     try std.testing.expectEqual(@as(usize, 0), rectangles[0].y);
-    
+
     try std.testing.expectEqual(@as(usize, 3), rectangles[1].x);
     try std.testing.expectEqual(@as(usize, 0), rectangles[1].y);
 

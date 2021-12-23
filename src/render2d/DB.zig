@@ -45,7 +45,7 @@ const ShiftEvent = union(ShiftEnum) {
 len: usize,
 sprite_pool_size: usize,
 uv_buffer: StorageType(zlm.Vec2),
-uv_meta: ArrayList(TextureHandle), 
+uv_meta: ArrayList(TextureHandle),
 
 // used to lookup index of sprite in array's using ID
 layer_data: ArrayList(Layer),
@@ -61,18 +61,22 @@ uv_indices: StorageType(c_int),
 
 pub fn initCapacity(allocator: Allocator, capacity: usize) !DB {
     var layers = ArrayList(Layer).init(allocator);
-    try layers.append(.{ .id = 0, .len = 0, .begin_index = 0, });
+    try layers.append(.{
+        .id = 0,
+        .len = 0,
+        .begin_index = 0,
+    });
     return DB{
         .len = 0,
         .sprite_pool_size = capacity,
-        .uv_buffer      = try StorageType(zlm.Vec2).initCapacity(allocator, 10 * 4 * 2), // TODO: allow configure
-        .uv_meta        = try ArrayList(TextureHandle).initCapacity(allocator, capacity),
-        .layer_data     = layers,
-        .shift_events   = ArrayList(ShiftEvent).init(allocator),
-        .positions      = try StorageType(zlm.Vec2).initCapacity(allocator, capacity),
-        .scales         = try StorageType(zlm.Vec2).initCapacity(allocator, capacity),
-        .rotations      = try StorageType(f32).initCapacity(allocator, capacity),
-        .uv_indices     = try StorageType(c_int).initCapacity(allocator, capacity),
+        .uv_buffer = try StorageType(zlm.Vec2).initCapacity(allocator, 10 * 4 * 2), // TODO: allow configure
+        .uv_meta = try ArrayList(TextureHandle).initCapacity(allocator, capacity),
+        .layer_data = layers,
+        .shift_events = ArrayList(ShiftEvent).init(allocator),
+        .positions = try StorageType(zlm.Vec2).initCapacity(allocator, capacity),
+        .scales = try StorageType(zlm.Vec2).initCapacity(allocator, capacity),
+        .rotations = try StorageType(f32).initCapacity(allocator, capacity),
+        .uv_indices = try StorageType(c_int).initCapacity(allocator, capacity),
     };
 }
 
@@ -82,7 +86,7 @@ pub fn getNewId(self: *DB) !Id {
         .value = self.len,
         .verify = self.shift_events.items.len,
     };
-    
+
     if (newId.value >= self.sprite_pool_size) {
         self.sprite_pool_size += 1;
     }
@@ -109,9 +113,9 @@ pub inline fn applyLayer(self: *DB, sprite_id: *Id, current_layer: usize, new_la
         const work_layer = blk: {
             if (new_layer == item.id) {
                 // assumption: you don't call this function on a sprite that is already in target layer
-                item.len += 1; 
+                item.len += 1;
                 break :blk item;
-            } 
+            }
 
             if (i == self.layer_data.items.len - 1) {
                 try self.layer_data.append(.{
@@ -123,12 +127,12 @@ pub inline fn applyLayer(self: *DB, sprite_id: *Id, current_layer: usize, new_la
             } else {
                 const begin_index = blk2: {
                     if (i > 0) {
-                        const prev_layer = self.layer_data.items[i-1];
+                        const prev_layer = self.layer_data.items[i - 1];
                         break :blk2 prev_layer.begin_index + prev_layer.len;
                     } else {
                         break :blk2 0;
                     }
-                }; 
+                };
                 try self.layer_data.insert(i, .{
                     .id = new_layer,
                     .begin_index = begin_index,
@@ -144,7 +148,7 @@ pub inline fn applyLayer(self: *DB, sprite_id: *Id, current_layer: usize, new_la
         var abs_delta: usize = undefined;
         var from: usize = undefined;
         var to: usize = undefined;
-        if(neg_delta == true) {
+        if (neg_delta == true) {
             // update layers between index and new layer begin.index
             for (self.layer_data.items[1..]) |*item2| {
                 if (item2.begin_index >= index and item2.begin_index <= work_layer.begin_index) {
@@ -170,7 +174,7 @@ pub inline fn applyLayer(self: *DB, sprite_id: *Id, current_layer: usize, new_la
             from = index - abs_delta;
             to = index;
             try self.shift_events.append(ShiftEvent{ .right = .{ .from = from, .to = to } });
-        } 
+        }
 
         const postion = self.positions.storage.orderedRemove(index);
         const scale = self.scales.storage.orderedRemove(index);
@@ -183,7 +187,7 @@ pub inline fn applyLayer(self: *DB, sprite_id: *Id, current_layer: usize, new_la
 
         sprite_id.value = work_layer.begin_index;
         sprite_id.verify += 1;
-        
+
         break;
     }
 
@@ -203,7 +207,7 @@ pub fn getIndex(self: *DB, sprite_id: *Id) Index {
     // if sprite id is no longer valid, update id
     if (sprite_id.verify != self.shift_events.items.len) {
         var i: usize = sprite_id.verify;
-        while(i < self.shift_events.items.len) : (i += 1) {
+        while (i < self.shift_events.items.len) : (i += 1) {
             switch (self.shift_events.items[i]) {
                 .left => |event| {
                     if (sprite_id.value >= event.from and sprite_id.value <= event.to) {
@@ -214,7 +218,7 @@ pub fn getIndex(self: *DB, sprite_id: *Id) Index {
                     if (sprite_id.value >= event.from and sprite_id.value <= event.to) {
                         sprite_id.value += 1;
                     }
-                }
+                },
             }
         }
         sprite_id.verify = self.shift_events.items.len;
@@ -269,7 +273,7 @@ fn StorageType(comptime T: type) type {
         delta: DeltaRange,
 
         pub inline fn initCapacity(allocator: Allocator, capacity: usize) !Self {
-            return Self {
+            return Self{
                 .storage = try ArrayList(T).initCapacity(allocator, capacity),
                 .delta = .{ .has_changes = false, .from = 0, .to = 0 },
             };
@@ -290,7 +294,7 @@ fn StorageType(comptime T: type) type {
 
         pub inline fn signalChangesPushed(self: *Self) void {
             self.delta.from = 0;
-            self.delta.to   = 0;
+            self.delta.to = 0;
             self.delta.has_changes = false;
         }
 
@@ -301,12 +305,12 @@ fn StorageType(comptime T: type) type {
         pub fn handleDeviceTransfer(self: *Self, ctx: Context, buffer: *GpuBufferMemory) !void {
             if (self.delta.has_changes == false) return;
 
-            var offset = [1]usize{ self.delta.from };
-            var slice = [1][]const T{ self.storage.items[self.delta.from..self.delta.to + 1] };
+            var offset = [1]usize{self.delta.from};
+            var slice = [1][]const T{self.storage.items[self.delta.from .. self.delta.to + 1]};
             try buffer.batchTransfer(ctx, T, offset[0..], slice[0..]);
         }
 
-        fn sortMethod(context: void, lhs: DeltaRange, rhs: DeltaRange) bool  {
+        fn sortMethod(context: void, lhs: DeltaRange, rhs: DeltaRange) bool {
             _ = context;
             return lhs.to < rhs.to;
         }

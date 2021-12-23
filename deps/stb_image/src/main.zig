@@ -24,14 +24,14 @@ pub const Image = struct {
         const use_path = try buildPath(allocator, path);
         defer allocator.destroy(use_path.ptr);
         // TODO: acount for any channel type
-        if(desired_channels != DesiredChannels.STBI_rgb_alpha) {
+        if (desired_channels != DesiredChannels.STBI_rgb_alpha) {
             @compileError("unimplemented channel type, expected " ++ @tagName(DesiredChannels.STBI_rgb_alpha) ++ ", found " ++ @tagName(desired_channels));
         }
 
         var width: i32 = undefined;
         var height: i32 = undefined;
         var channels: i32 = undefined;
-        const char_ptr = c.stbi_load(use_path.ptr, &width, &height, &channels, @enumToInt(desired_channels)); 
+        const char_ptr = c.stbi_load(use_path.ptr, &width, &height, &channels, @enumToInt(desired_channels));
         if (char_ptr == null) {
             return error.FailedToLoadImage; // Only error scenario here is failed to open file descriptor
         }
@@ -43,13 +43,13 @@ pub const Image = struct {
         const char_slice = std.mem.span(char_ptr);
         const aligned_char_ptr = std.mem.alignPointer(char_slice.ptr, 8);
         if (aligned_char_ptr == null) {
-            return error.PtrNotAligned; // failed to align char pointer as a pixel pointer 
+            return error.PtrNotAligned; // failed to align char pointer as a pixel pointer
         }
 
         const pixel_ptr = @ptrCast([*]Pixel, aligned_char_ptr);
 
         const pixel_count = @intCast(usize, width * height);
-        return Image {
+        return Image{
             .width = width,
             .height = height,
             .channels = channels,
@@ -62,7 +62,7 @@ pub const Image = struct {
         defer allocator.destroy(use_path.ptr);
 
         const char_ptr = std.mem.alignPointer(self.data.ptr, 2);
-        
+
         const error_code = c.stbi_write_png(use_path.ptr, self.width, self.height, self.channels + 1, char_ptr, self.width * (self.channels + 1));
         if (error_code == 0) {
             return error.StbiFailedWrite; // error scenarios are not specified :(
@@ -78,21 +78,21 @@ pub const Image = struct {
 pub const DesiredChannels = enum(c_int) {
     STBI_default = 0, // only used for desired_channels
 
-    STBI_grey       = 1,
+    STBI_grey = 1,
     STBI_grey_alpha = 2,
-    STBI_rgb        = 3,
-    STBI_rgb_alpha  = 4
+    STBI_rgb = 3,
+    STBI_rgb_alpha = 4,
 };
 
 inline fn buildPath(allocator: Allocator, path: []const u8) ![:0]u8 {
     var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
     const exe_path = try std.fs.selfExeDirPath(buf[0..]);
-    const path_segments = [_][]const u8{exe_path, path};
+    const path_segments = [_][]const u8{ exe_path, path };
 
     var zig_use_path = try std.fs.path.join(allocator, path_segments[0..]);
     defer allocator.destroy(zig_use_path.ptr);
 
-    const sep = [_]u8{ std.fs.path.sep };
+    const sep = [_]u8{std.fs.path.sep};
     _ = std.mem.replace(u8, zig_use_path, "\\", sep[0..], zig_use_path);
     _ = std.mem.replace(u8, zig_use_path, "/", sep[0..], zig_use_path);
 

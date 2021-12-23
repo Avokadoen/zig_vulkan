@@ -18,7 +18,7 @@ const Texture = texture.Texture;
 const Context = @import("context.zig").Context;
 
 pub const RecordCmdBufferError = dispatch.BeginCommandBufferError;
-pub const PipelineBuildError = error {
+pub const PipelineBuildError = error{
     MissingPipelines,
 };
 
@@ -28,7 +28,7 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
         const ParentType = @This();
 
         pub const PipelineBuilder = struct {
-            allocator: Allocator, 
+            allocator: Allocator,
             ctx: Context,
             sc_data: *swapchain.Data,
             instance_count: u32,
@@ -37,21 +37,21 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
             render_pass: vk.RenderPass,
             pipeline_layout: vk.PipelineLayout,
             user_data: T,
-            recordCmdBufferFn: fn(ctx: Context, pipeline: *ParentType.Pipeline) RecordCmdBufferError!void,
-            
+            recordCmdBufferFn: fn (ctx: Context, pipeline: *ParentType.Pipeline) RecordCmdBufferError!void,
+
             // intermediate builder state
             pipelines: ArrayList(vk.Pipeline),
             exe_path: ?[]u8,
-                
+
             pub fn init(
-                allocator: Allocator, 
+                allocator: Allocator,
                 ctx: Context,
                 sc_data: *swapchain.Data,
                 instance_count: u32,
                 view: *swapchain.ViewportScissor,
                 sync_descript: *descriptor.SyncDescriptor,
                 user_data: T,
-                recordCmdBufferFn: fn(ctx: Context, pipeline: *ParentType.Pipeline) RecordCmdBufferError!void,
+                recordCmdBufferFn: fn (ctx: Context, pipeline: *ParentType.Pipeline) RecordCmdBufferError!void,
             ) !PipelineBuilder {
                 // TODO: should be from addPipeline
                 const pipeline_layout = blk: {
@@ -100,13 +100,7 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                 const vert_module = try self.ctx.createShaderModule(vert_code.items[0..]);
                 defer self.ctx.destroyShaderModule(vert_module);
 
-                const vert_stage = vk.PipelineShaderStageCreateInfo{ 
-                    .flags = .{}, 
-                    .stage = .{ .vertex_bit = true }, 
-                    .module = vert_module, 
-                    .p_name = "main", 
-                    .p_specialization_info = null 
-                };
+                const vert_stage = vk.PipelineShaderStageCreateInfo{ .flags = .{}, .stage = .{ .vertex_bit = true }, .module = vert_module, .p_name = "main", .p_specialization_info = null };
                 const frag_code = blk1: {
                     const path = blk2: {
                         const join_path = [_][]const u8{ self.exe_path.?, frag_shader_path };
@@ -121,13 +115,7 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                 const frag_module = try self.ctx.createShaderModule(frag_code.items[0..]);
                 defer self.ctx.destroyShaderModule(frag_module);
 
-                const frag_stage = vk.PipelineShaderStageCreateInfo{ 
-                    .flags = .{}, 
-                    .stage = .{ .fragment_bit = true }, 
-                    .module = frag_module, 
-                    .p_name = "main", 
-                    .p_specialization_info = null 
-                };
+                const frag_stage = vk.PipelineShaderStageCreateInfo{ .flags = .{}, .stage = .{ .fragment_bit = true }, .module = frag_module, .p_name = "main", .p_specialization_info = null };
                 const shader_stages_info = [_]vk.PipelineShaderStageCreateInfo{ vert_stage, frag_stage };
 
                 const binding_desription = vertex.getBindingDescriptors();
@@ -144,7 +132,7 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                     .topology = vk.PrimitiveTopology.triangle_list,
                     .primitive_restart_enable = vk.FALSE,
                 };
-                
+
                 const viewport_info = vk.PipelineViewportStateCreateInfo{
                     .flags = .{},
                     .viewport_count = self.view.viewport.len,
@@ -226,7 +214,6 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                 try self.pipelines.append(pipeline);
             }
 
-            
             // TODO: correctness if build fail, clean up resources created with errdefer
             /// initialize a graphics pipe line, caller must make sure to call deinit
             /// sc_data, view and ubo needs a lifetime that is atleast as long as created pipeline
@@ -236,7 +223,7 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                 }
 
                 self.allocator.destroy(self.exe_path.?.ptr);
-            
+
                 const framebuffers = try createFramebuffers(self.allocator, self.ctx, self.sc_data, self.render_pass, null);
                 errdefer self.allocator.free(framebuffers);
 
@@ -252,7 +239,7 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                 const images_in_flight = blk: {
                     var images_in_flight = try self.allocator.alloc(vk.Fence, self.sc_data.images.items.len);
                     var i: usize = 0;
-                    while(i < images_in_flight.len) : (i += 1) {
+                    while (i < images_in_flight.len) : (i += 1) {
                         images_in_flight[i] = .null_handle;
                     }
                     break :blk images_in_flight;
@@ -272,7 +259,9 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                     .flags = .{},
                 };
                 const fence_info = vk.FenceCreateInfo{
-                    .flags = .{ .signaled_bit = true, },
+                    .flags = .{
+                        .signaled_bit = true,
+                    },
                 };
                 {
                     var i: usize = 0;
@@ -287,7 +276,6 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                         in_flight_fences[i] = fence;
                     }
                 }
-
 
                 var pipeline = Pipeline{
                     .allocator = self.allocator,
@@ -309,7 +297,7 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                     .user_data = self.user_data,
                     .recordCmdBufferFn = self.recordCmdBufferFn,
                 };
-                try self.recordCmdBufferFn(self.ctx, &pipeline); 
+                try self.recordCmdBufferFn(self.ctx, &pipeline);
                 return pipeline;
             }
         };
@@ -349,33 +337,21 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
             // this data can be used in recordCmdBufferFn or any
             // other function that accepts pipelines
             user_data: T,
-            recordCmdBufferFn: fn(ctx: Context, pipeline: *ParentType.Pipeline) RecordCmdBufferError!void,
+            recordCmdBufferFn: fn (ctx: Context, pipeline: *ParentType.Pipeline) RecordCmdBufferError!void,
 
             /// Draw using pipeline
             /// transfer_fn can be used to update any relevant storage buffers or other data that are timing critical according to rendering
-            pub fn draw(self: *Self, ctx: Context, comptime transfer_fn: fn(image_index: usize, user_ctx: anytype) void, user_ctx: anytype) !void {
+            pub fn draw(self: *Self, ctx: Context, comptime transfer_fn: fn (image_index: usize, user_ctx: anytype) void, user_ctx: anytype) !void {
                 const state = struct {
                     var current_frame: usize = 0;
                 };
-                const max_u64 = std.math.maxInt(u64); 
+                const max_u64 = std.math.maxInt(u64);
 
                 const in_flight_fence_p = @ptrCast([*]const vk.Fence, &self.in_flight_fences[state.current_frame]);
-                _ = try ctx.vkd.waitForFences(
-                    ctx.logical_device, 
-                    1, 
-                    in_flight_fence_p, 
-                    vk.TRUE, 
-                    max_u64
-                );
+                _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, in_flight_fence_p, vk.TRUE, max_u64);
 
                 var image_index: u32 = undefined;
-                if (ctx.vkd.acquireNextImageKHR(
-                    ctx.logical_device, 
-                    self.sc_data.swapchain, 
-                    max_u64, 
-                    self.image_available_s[state.current_frame],
-                    .null_handle
-                )) |ok| switch(ok.result) {
+                if (ctx.vkd.acquireNextImageKHR(ctx.logical_device, self.sc_data.swapchain, max_u64, self.image_available_s[state.current_frame], .null_handle)) |ok| switch (ok.result) {
                     .success => {
                         image_index = ok.image_index;
                     },
@@ -386,8 +362,8 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                     else => {
                         // TODO: handle timeout and not_ready
                         return error.UnhandledAcquireResult;
-                    }
-                } else |err| switch(err) {
+                    },
+                } else |err| switch (err) {
                     error.OutOfDateKHR => {
                         self.requested_rescale_pipeline = true;
                         return;
@@ -396,7 +372,7 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                         return err;
                     },
                 }
-                
+
                 if (self.images_in_flight[image_index] != .null_handle) {
                     const p_fence = @ptrCast([*]const vk.Fence, &self.images_in_flight[image_index]);
                     _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, p_fence, vk.TRUE, max_u64);
@@ -413,7 +389,7 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                 }
 
                 transfer_fn(image_index, user_ctx);
-            
+
                 const wait_stages = vk.PipelineStageFlags{ .color_attachment_output_bit = true };
                 const submit_info = vk.SubmitInfo{
                     .wait_semaphore_count = 1,
@@ -425,17 +401,8 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                     .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s[state.current_frame]),
                 };
                 const p_submit_info = @ptrCast([*]const vk.SubmitInfo, &submit_info);
-                _ = try ctx.vkd.resetFences(
-                    ctx.logical_device, 
-                    1, 
-                    in_flight_fence_p
-                );
-                try ctx.vkd.queueSubmit(
-                    ctx.graphics_queue, 
-                    1, 
-                    p_submit_info, 
-                    self.in_flight_fences[state.current_frame]
-                );
+                _ = try ctx.vkd.resetFences(ctx.logical_device, 1, in_flight_fence_p);
+                try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, p_submit_info, self.in_flight_fences[state.current_frame]);
 
                 const present_info = vk.PresentInfoKHR{
                     .wait_semaphore_count = 1,
@@ -468,24 +435,19 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                 }
 
                 self.requested_rescale_pipeline = false;
-                // TODO: swapchain can be recreated without waiting and so waiting in the top of the 
+                // TODO: swapchain can be recreated without waiting and so waiting in the top of the
                 //       functions is wasteful
-                // Wait for pipeline to become idle 
+                // Wait for pipeline to become idle
                 self.wait_idle(ctx);
 
                 // destroy outdated pipeline state
                 for (self.framebuffers) |framebuffer| {
                     ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
                 }
-                ctx.vkd.freeCommandBuffers(
-                    ctx.logical_device, 
-                    ctx.gfx_cmd_pool, 
-                    @intCast(u32, self.command_buffers.len), 
-                    @ptrCast([*]const vk.CommandBuffer, self.command_buffers.ptr)
-                );
+                ctx.vkd.freeCommandBuffers(ctx.logical_device, ctx.gfx_cmd_pool, @intCast(u32, self.command_buffers.len), @ptrCast([*]const vk.CommandBuffer, self.command_buffers.ptr));
                 ctx.destroyRenderPass(self.render_pass);
 
-                // recreate swapchain utilizing the old one 
+                // recreate swapchain utilizing the old one
                 const old_swapchain = self.sc_data.*;
                 self.sc_data.* = swapchain.Data.init(self.allocator, ctx, old_swapchain.swapchain) catch |err| {
                     std.debug.panic("failed to resize swapchain, err {any}", .{err}) catch unreachable;
@@ -513,7 +475,7 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                         ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fences[i], null);
                     }
                 }
-            
+
                 self.vertex_buffer.deinit(ctx);
                 self.indices_buffer.deinit(ctx);
 
@@ -539,20 +501,14 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
             }
 
             inline fn wait_idle(self: Self, ctx: Context) void {
-                _ = ctx.vkd.waitForFences(
-                    ctx.logical_device, 
-                    @intCast(u32, self.in_flight_fences.len),
-                    self.in_flight_fences.ptr,
-                    vk.TRUE,
-                    std.math.maxInt(u64) 
-                ) catch |err| {
+                _ = ctx.vkd.waitForFences(ctx.logical_device, @intCast(u32, self.in_flight_fences.len), self.in_flight_fences.ptr, vk.TRUE, std.math.maxInt(u64)) catch |err| {
                     std.io.getStdErr().writer().print("waiting for fence failed: {}", .{err}) catch |e| switch (e) {
                         else => {}, // Discard print errors
                     };
                 };
             }
         };
-    };   
+    };
 }
 
 inline fn createFramebuffers(allocator: Allocator, ctx: Context, swapchain_data: *const swapchain.Data, render_pass: vk.RenderPass, prev_framebuffer: ?[]vk.Framebuffer) ![]vk.Framebuffer {
@@ -604,7 +560,6 @@ inline fn createCmdBuffer(ctx: Context, command_pool: vk.CommandPool) !vk.Comman
     return command_buffer;
 }
 
-
 // TODO: at this point pipelines should have their own internal module!
 
 pub const ComputePipeline = struct {
@@ -631,7 +586,7 @@ pub const ComputePipeline = struct {
     /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
     /// texture should have a lifetime atleast the lenght of comptute pipeline
     pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_texture: *Texture) !Self {
-        var self: Self = undefined; 
+        var self: Self = undefined;
         self.allocator = allocator;
         self.target_texture = target_texture;
 
@@ -640,10 +595,12 @@ pub const ComputePipeline = struct {
                 .binding = 1,
                 .descriptor_type = .storage_image, // TODO: validate correct type
                 .descriptor_count = 1,
-                .stage_flags = .{ .compute_bit = true, },
+                .stage_flags = .{
+                    .compute_bit = true,
+                },
                 .p_immutable_samplers = null,
             };
-            const layout_bindings = [_]vk.DescriptorSetLayoutBinding{ sampler_layout_binding };
+            const layout_bindings = [_]vk.DescriptorSetLayoutBinding{sampler_layout_binding};
             const layout_info = vk.DescriptorSetLayoutCreateInfo{
                 .flags = .{},
                 .binding_count = layout_bindings.len,
@@ -690,20 +647,14 @@ pub const ComputePipeline = struct {
                 .p_buffer_info = undefined,
                 .p_texel_buffer_view = undefined,
             };
-            ctx.vkd.updateDescriptorSets(
-                ctx.logical_device, 
-                1, 
-                @ptrCast([*]const vk.WriteDescriptorSet, &image_write_descriptor_set), 
-                0, 
-                undefined
-            );
+            ctx.vkd.updateDescriptorSets(ctx.logical_device, 1, @ptrCast([*]const vk.WriteDescriptorSet, &image_write_descriptor_set), 0, undefined);
         }
 
         self.pipeline_layout = blk: {
             const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
                 .flags = .{},
                 .set_layout_count = 1, // TODO: see GfxPipeline
-                .p_set_layouts = @ptrCast([*]vk.DescriptorSetLayout, &self.target_descriptor_layout), 
+                .p_set_layouts = @ptrCast([*]vk.DescriptorSetLayout, &self.target_descriptor_layout),
                 .push_constant_range_count = 0,
                 .p_push_constant_ranges = undefined,
             };
@@ -715,7 +666,7 @@ pub const ComputePipeline = struct {
 
             const code = blk1: {
                 const path = blk2: {
-                    const join_path = [_][]const u8{ self_path, shader_path};
+                    const join_path = [_][]const u8{ self_path, shader_path };
                     break :blk2 try std.fs.path.resolve(allocator, join_path[0..]);
                 };
                 defer allocator.destroy(path.ptr);
@@ -727,13 +678,7 @@ pub const ComputePipeline = struct {
             const module = try ctx.createShaderModule(code.items[0..]);
             defer ctx.destroyShaderModule(module);
 
-            const stage = vk.PipelineShaderStageCreateInfo{ 
-                .flags = .{}, 
-                .stage = .{ .compute_bit = true }, 
-                .module = module, 
-                .p_name = "main", 
-                .p_specialization_info = null 
-            };
+            const stage = vk.PipelineShaderStageCreateInfo{ .flags = .{}, .stage = .{ .compute_bit = true }, .module = module, .p_name = "main", .p_specialization_info = null };
 
             // TOOD: read on defer_compile_bit_nv
             const pipeline_info = vk.ComputePipelineCreateInfo{
@@ -741,7 +686,7 @@ pub const ComputePipeline = struct {
                 .stage = stage,
                 .layout = self.pipeline_layout,
                 .base_pipeline_handle = .null_handle, // TODO: GfxPipeline?
-                .base_pipeline_index =  -1,
+                .base_pipeline_index = -1,
             };
             break :blk try ctx.createComputePipeline(allocator, pipeline_info);
         };
@@ -749,11 +694,13 @@ pub const ComputePipeline = struct {
         // TODO: data(vertex/uniform/etc) buffers! (see GfxPipeline)
 
         const fence_info = vk.FenceCreateInfo{
-            .flags = .{ .signaled_bit = true, },
+            .flags = .{
+                .signaled_bit = true,
+            },
         };
         self.in_flight_fence = try ctx.vkd.createFence(ctx.logical_device, fence_info, null);
 
-        // TODO: we need to rescale pipeline dispatch 
+        // TODO: we need to rescale pipeline dispatch
         self.command_buffer = try createCmdBuffer(ctx, ctx.comp_cmd_pool);
         errdefer ctx.vkd.freeCommandBuffers(ctx.logical_device, ctx.comp_cmd_pool, 1, @ptrCast([*]vk.CommandBuffer, &self.command_buffer));
 
@@ -787,15 +734,11 @@ pub const ComputePipeline = struct {
             .p_signal_semaphores = undefined,
         };
         const p_submit_info = @ptrCast([*]const vk.SubmitInfo, &submit_info);
-        _ = try ctx.vkd.resetFences(
-            ctx.logical_device, 
-            1, 
-            @ptrCast([*]const vk.Fence, &self.in_flight_fence)
-        );
+        _ = try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.in_flight_fence));
         try ctx.vkd.queueSubmit(
-            ctx.compute_queue, 
-            1, 
-            p_submit_info, 
+            ctx.compute_queue,
+            1,
+            p_submit_info,
             self.in_flight_fence,
         );
     }
@@ -810,17 +753,12 @@ pub const ComputePipeline = struct {
         }
 
         self.requested_rescale_pipeline = false;
-        // TODO: swapchain can be recreated without waiting and so waiting in the top of the 
+        // TODO: swapchain can be recreated without waiting and so waiting in the top of the
         //       functions is wasteful
-        // Wait for pipeline to become idle 
+        // Wait for pipeline to become idle
         self.wait_idle(ctx);
 
-        ctx.vkd.freeCommandBuffers(
-            ctx.logical_device, 
-            ctx.comp_cmd_pool, 
-            1, 
-            @ptrCast([*]const vk.CommandBuffer, &self.command_buffer)
-        );
+        ctx.vkd.freeCommandBuffers(ctx.logical_device, ctx.comp_cmd_pool, 1, @ptrCast([*]const vk.CommandBuffer, &self.command_buffer));
 
         self.command_buffer = try createCmdBuffer(ctx, ctx.comp_cmd_pool);
 
@@ -831,7 +769,7 @@ pub const ComputePipeline = struct {
         self.wait_idle(ctx);
 
         ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fence, null);
-        
+
         ctx.vkd.freeCommandBuffers(ctx.logical_device, ctx.comp_cmd_pool, 1, @ptrCast([*]const vk.CommandBuffer, &self.command_buffer));
         ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
         ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.target_descriptor_pool, null);
@@ -844,13 +782,7 @@ pub const ComputePipeline = struct {
 
     /// Wait for fence to signal complete 
     pub inline fn wait_idle(self: Self, ctx: Context) void {
-        _ = ctx.vkd.waitForFences(
-            ctx.logical_device, 
-            1,
-            @ptrCast([*]const vk.Fence, &self.in_flight_fence),
-            vk.TRUE,
-            std.math.maxInt(u64) 
-        ) catch |err| {
+        _ = ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.in_flight_fence), vk.TRUE, std.math.maxInt(u64)) catch |err| {
             ctx.writers.stderr.print("waiting for fence failed: {}", .{err}) catch |e| switch (e) {
                 else => {}, // Discard print errors ...
             };
@@ -865,32 +797,14 @@ pub const ComputePipeline = struct {
         };
         try ctx.vkd.beginCommandBuffer(self.command_buffer, command_begin_info);
         ctx.vkd.cmdBindPipeline(self.command_buffer, vk.PipelineBindPoint.compute, self.pipeline.*);
-        ctx.vkd.cmdPipelineBarrier(
-            self.command_buffer,
-            image_use.transition.src_stage,
-            image_use.transition.dst_stage,
-            vk.DependencyFlags{}, 
-            0,
-            undefined,
-            0,
-            undefined,
-            1,
-            @ptrCast([*]const vk.ImageMemoryBarrier, &image_use.barrier)
-        );
+        ctx.vkd.cmdPipelineBarrier(self.command_buffer, image_use.transition.src_stage, image_use.transition.dst_stage, vk.DependencyFlags{}, 0, undefined, 0, undefined, 1, @ptrCast([*]const vk.ImageMemoryBarrier, &image_use.barrier));
         // bind target texture
-        ctx.vkd.cmdBindDescriptorSets(
-            self.command_buffer,
-            .compute,
-            self.pipeline_layout,
-            0, 
-            1,
-            @ptrCast([*]const vk.DescriptorSet, &self.target_descriptor_set),
-            0,
-            undefined
-        );
+        ctx.vkd.cmdBindDescriptorSets(self.command_buffer, .compute, self.pipeline_layout, 0, 1, @ptrCast([*]const vk.DescriptorSet, &self.target_descriptor_set), 0, undefined);
         // TODO: allow varying local thread size, error if x_ or y_ dispatch have decimal values
-        // compute shader has 16 thread in x and y, we calculate inverse at compile time 
-        const local_thread_factor: f32 = comptime blk: { break :blk 1.0 / 16.0; };
+        // compute shader has 16 thread in x and y, we calculate inverse at compile time
+        const local_thread_factor: f32 = comptime blk: {
+            break :blk 1.0 / 16.0;
+        };
         const x_dispatch = @intToFloat(f32, self.target_texture.image_extent.width) * local_thread_factor;
         const y_dispatch = @intToFloat(f32, self.target_texture.image_extent.height) * local_thread_factor;
         ctx.vkd.cmdDispatch(self.command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);

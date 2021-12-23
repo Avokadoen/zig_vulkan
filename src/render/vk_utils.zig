@@ -81,11 +81,13 @@ pub inline fn beginOneTimeCommandBuffer(ctx: Context, command_pool: vk.CommandPo
         .level = .primary,
         .command_buffer_count = 1,
     };
-    var commmand_buffer: vk.CommandBuffer = undefined; 
+    var commmand_buffer: vk.CommandBuffer = undefined;
     try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &allocate_info, @ptrCast([*]vk.CommandBuffer, &commmand_buffer));
 
     const begin_info = vk.CommandBufferBeginInfo{
-        .flags = .{ .one_time_submit_bit = true, },
+        .flags = .{
+            .one_time_submit_bit = true,
+        },
         .p_inheritance_info = null,
     };
     try ctx.vkd.beginCommandBuffer(commmand_buffer, &begin_info);

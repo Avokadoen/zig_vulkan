@@ -31,7 +31,7 @@ pub const BufferUpdateRate = util_types.BufferUpdateRate;
 pub const Camera = @import("Camera.zig");
 pub const Sprite = @import("Sprite.zig");
 
-pub const InvalidApiUseError = error {
+pub const InvalidApiUseError = error{
     Invalidated,
 };
 
@@ -63,7 +63,7 @@ pub const InitializedApi = struct {
     // set to true after a DrawAPI struct has been initialized
     prepared_to_draw: bool = false,
 
-    // image container, used to compile a mega texture 
+    // image container, used to compile a mega texture
     allocator: Allocator,
 
     // render specific state
@@ -107,13 +107,13 @@ pub const InitializedApi = struct {
             return InvalidApiUseError.Invalidated; // this function can not be called after prepareDraw has been called
         }
 
-        var new_sprite = Sprite {
+        var new_sprite = Sprite{
             .db_ptr = self.db_ptr,
             .db_id = try self.db_ptr.*.getNewId(),
-            // a new sprite will by default be in the top layer 
-            .layer = self.db_ptr.*.layer_data.items[self.db_ptr.*.layer_data.items.len-1].id,
+            // a new sprite will by default be in the top layer
+            .layer = self.db_ptr.*.layer_data.items[self.db_ptr.*.layer_data.items.len - 1].id,
         };
-        self.db_ptr.*.layer_data.items[self.db_ptr.*.layer_data.items.len-1].len += 1;
+        self.db_ptr.*.layer_data.items[self.db_ptr.*.layer_data.items.len - 1].len += 1;
 
         const index = self.db_ptr.*.getIndex(&new_sprite.db_id);
         self.db_ptr.*.positions.updateAt(index, position);
@@ -131,7 +131,7 @@ pub const InitializedApi = struct {
         if (self.prepared_to_draw) {
             return InvalidApiUseError.Invalidated; // this function can not be called after prepareDraw has been called
         }
-        
+
         // calculate position of each image registered
         const packjobs = try self.allocator.alloc(knapsack.PackJob, self.images.items.len);
         defer self.allocator.free(packjobs);
@@ -154,22 +154,19 @@ pub const InitializedApi = struct {
         const mega_widthf = @intToFloat(f64, mega_size.width);
         const mega_heightf = @intToFloat(f64, mega_size.height);
         for (packjobs) |packjob| {
-            // the max image index components 
+            // the max image index components
             const y_bound = packjob.y + packjob.height;
             const x_bound = packjob.x + packjob.width;
 
             // image we are moving from (src)
             const image = self.images.items[packjob.id];
-            mega_uvs[packjob.id] = .{
-                .min = .{
-                    .x = @floatCast(f32, @intToFloat(f64, packjob.x) / mega_widthf),
-                    .y = @floatCast(f32, @intToFloat(f64, packjob.y) / mega_heightf),
-                },
-                .max = .{
-                    .x = @floatCast(f32, @intToFloat(f64, x_bound) / mega_widthf),
-                    .y = @floatCast(f32, @intToFloat(f64, y_bound) / mega_heightf),
-                }
-            };
+            mega_uvs[packjob.id] = .{ .min = .{
+                .x = @floatCast(f32, @intToFloat(f64, packjob.x) / mega_widthf),
+                .y = @floatCast(f32, @intToFloat(f64, packjob.y) / mega_heightf),
+            }, .max = .{
+                .x = @floatCast(f32, @intToFloat(f64, x_bound) / mega_widthf),
+                .y = @floatCast(f32, @intToFloat(f64, y_bound) / mega_heightf),
+            } };
 
             var iy = packjob.y;
             while (iy < y_bound) : (iy += 1) {
@@ -181,7 +178,7 @@ pub const InitializedApi = struct {
                 var ix = packjob.x;
                 while (ix < x_bound) : (ix += 1) {
                     const src_index = y_src_index + (ix - packjob.x);
-                    mega_data[y_dest_index + ix] = image.data[src_index]; 
+                    mega_data[y_dest_index + ix] = image.data[src_index];
                 }
             }
         }
@@ -196,49 +193,38 @@ pub const InitializedApi = struct {
             .channels = 4,
             .data = mega_data,
         };
-        
+
         const buffer_sizes = [_]u64{
             @sizeOf(zlm.Vec2) * self.db_ptr.*.sprite_pool_size,
             @sizeOf(zlm.Vec2) * self.db_ptr.*.sprite_pool_size,
-            @sizeOf(f32)      * self.db_ptr.*.sprite_pool_size,
-            @sizeOf(c_int)    * self.db_ptr.*.sprite_pool_size,
+            @sizeOf(f32) * self.db_ptr.*.sprite_pool_size,
+            @sizeOf(c_int) * self.db_ptr.*.sprite_pool_size,
             @sizeOf(zlm.Vec2) * mega_uvs.len * 4,
         };
 
         const desc_config = render.descriptor.Config{
             .allocator = self.allocator,
-            .ctx = self.ctx, 
-            .image = mega_image, 
+            .ctx = self.ctx,
+            .image = mega_image,
             .viewport = self.view.viewport[0],
-            .buffer_count = self.swapchain.images.items.len, 
+            .buffer_count = self.swapchain.images.items.len,
             .buffer_sizes = buffer_sizes[0..],
         };
-        var api = DrawApi(gpu_update_rate){
-            .state = .{
-                .allocator = self.allocator,
-                .ctx = self.ctx,
-                .swapchain = try self.allocator.create(sc.Data),
-                .subo = try self.allocator.create(descriptor.SyncDescriptor),
-                .view = try self.allocator.create(sc.ViewportScissor),
-                .pipeline = undefined,
-                .mega_image = mega_image,
-                .db_ptr = self.db_ptr,
-            }
-        };
+        var api = DrawApi(gpu_update_rate){ .state = .{
+            .allocator = self.allocator,
+            .ctx = self.ctx,
+            .swapchain = try self.allocator.create(sc.Data),
+            .subo = try self.allocator.create(descriptor.SyncDescriptor),
+            .view = try self.allocator.create(sc.ViewportScissor),
+            .pipeline = undefined,
+            .mega_image = mega_image,
+            .db_ptr = self.db_ptr,
+        } };
         api.state.swapchain.* = self.swapchain;
         api.state.view.* = self.view;
         api.state.subo.* = try descriptor.SyncDescriptor.init(desc_config);
         api.state.pipeline = blk: {
-            var pipe_builder = try PipelineBuilder.init(
-                self.allocator, 
-                self.ctx, 
-                api.state.swapchain, 
-                @intCast(u32, self.db_ptr.*.len), 
-                api.state.view, 
-                api.state.subo,
-                .{},
-                recordGfxCmdBuffers
-            );
+            var pipe_builder = try PipelineBuilder.init(self.allocator, self.ctx, api.state.swapchain, @intCast(u32, self.db_ptr.*.len), api.state.view, api.state.subo, .{}, recordGfxCmdBuffers);
             try pipe_builder.addPipeline("../../pass.vert.spv", "../../pass.frag.spv");
             break :blk (try pipe_builder.build());
         };
@@ -257,7 +243,7 @@ pub const InitializedApi = struct {
 
 // data shared between DrawApi types
 const CommonDrawState = struct {
-    // image container, used to compile a mega texture 
+    // image container, used to compile a mega texture
     allocator: Allocator,
 
     // render specific state
@@ -278,7 +264,7 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
             return struct {
                 const Self = @This();
 
-                state: CommonDrawState,      
+                state: CommonDrawState,
 
                 usingnamespace ShaderDrawAPI(Self);
 
@@ -298,7 +284,7 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
             };
         },
         .every_ms => |ms| {
-             return struct {
+            return struct {
                 const Self = @This();
 
                 state: CommonDrawState,
@@ -330,7 +316,7 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
                         user_ctx.*.state.db_ptr.*.scales.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[1]) catch {};
                         user_ctx.*.state.db_ptr.*.rotations.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[2]) catch {};
                         user_ctx.*.state.db_ptr.*.uv_indices.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[3]) catch {};
-                        
+
                         user_ctx.*.update_frame_count += 1;
                         user_ctx.*.last_update_counter = 0;
 
@@ -342,7 +328,7 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
                     user_ctx.*.prev_frame = current_frame;
                 }
             };
-        }
+        },
     }
 }
 
@@ -367,7 +353,6 @@ fn ShaderDrawAPI(comptime Self: type) type {
             self.state.allocator.destroy(self.state.db_ptr);
         }
 
-
         /// get a handle to the sprite camera
         pub fn createCamera(self: *Self, move_speed: f32, zoom_speed: f32) Camera {
             return Camera{
@@ -388,7 +373,6 @@ fn ShaderDrawAPI(comptime Self: type) type {
             _ = self;
             _ = window.setFramebufferSizeCallback(null);
         }
-
     };
 }
 
@@ -417,18 +401,7 @@ fn recordGfxCmdBuffers(ctx: render.Context, pipeline: *Pipeline) dispatch.BeginC
         try ctx.vkd.beginCommandBuffer(command_buffer, &command_begin_info);
 
         // make sure compute shader complet writer before beginning render pass
-        ctx.vkd.cmdPipelineBarrier(
-            command_buffer,
-            image_use.transition.src_stage,
-            image_use.transition.dst_stage,
-            vk.DependencyFlags{}, 
-            0,
-            undefined,
-            0,
-            undefined,
-            1,
-            @ptrCast([*]const vk.ImageMemoryBarrier, &image_use.barrier)
-        );
+        ctx.vkd.cmdPipelineBarrier(command_buffer, image_use.transition.src_stage, image_use.transition.dst_stage, vk.DependencyFlags{}, 0, undefined, 0, undefined, 1, @ptrCast([*]const vk.ImageMemoryBarrier, &image_use.barrier));
         const render_begin_info = vk.RenderPassBeginInfo{
             .render_pass = pipeline.render_pass,
             .framebuffer = pipeline.framebuffers[i],
@@ -441,27 +414,12 @@ fn recordGfxCmdBuffers(ctx: render.Context, pipeline: *Pipeline) dispatch.BeginC
         ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.graphics, pipeline.pipelines[0]);
         ctx.vkd.cmdBeginRenderPass(command_buffer, &render_begin_info, vk.SubpassContents.@"inline");
 
-        const buffer_offsets = [_]vk.DeviceSize{ 0 };
-        ctx.vkd.cmdBindVertexBuffers(
-            command_buffer, 
-            0, 
-            1, 
-            @ptrCast([*]const vk.Buffer, &pipeline.vertex_buffer.buffer), 
-            @ptrCast([*]const vk.DeviceSize, &buffer_offsets)
-        );
+        const buffer_offsets = [_]vk.DeviceSize{0};
+        ctx.vkd.cmdBindVertexBuffers(command_buffer, 0, 1, @ptrCast([*]const vk.Buffer, &pipeline.vertex_buffer.buffer), @ptrCast([*]const vk.DeviceSize, &buffer_offsets));
         ctx.vkd.cmdBindIndexBuffer(command_buffer, pipeline.indices_buffer.buffer, 0, .uint32);
-        // TODO: Race Condition: sync_descript is not synced here 
-        ctx.vkd.cmdBindDescriptorSets(
-            command_buffer, 
-            .graphics, 
-            pipeline.pipeline_layout, 
-            0, 
-            1, 
-            @ptrCast([*]const vk.DescriptorSet, &pipeline.sync_descript.ubo.descriptor_sets[i]),
-            0,
-            undefined
-        );
-        
+        // TODO: Race Condition: sync_descript is not synced here
+        ctx.vkd.cmdBindDescriptorSets(command_buffer, .graphics, pipeline.pipeline_layout, 0, 1, @ptrCast([*]const vk.DescriptorSet, &pipeline.sync_descript.ubo.descriptor_sets[i]), 0, undefined);
+
         ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, pipeline.instance_count, 0, 0, 0);
         ctx.vkd.cmdEndRenderPass(command_buffer);
         try ctx.vkd.endCommandBuffer(command_buffer);

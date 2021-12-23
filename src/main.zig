@@ -19,7 +19,7 @@ pub const application_name = "zig vulkan";
 var window: glfw.Window = undefined;
 var delta_time: f64 = 0;
 
-var zoom_in  = false;
+var zoom_in = false;
 var zoom_out = false;
 var move_up = false;
 var move_left = false;
@@ -40,7 +40,7 @@ pub fn main() anyerror!void {
         }
     }
     const allocator = if (consts.enable_validation_layers) alloc.allocator() else alloc;
-    
+
     // Initialize the library *
     try glfw.init(.{});
     defer glfw.terminate();
@@ -49,13 +49,13 @@ pub fn main() anyerror!void {
         std.debug.panic("vulkan not supported on device (glfw)", .{});
     }
 
-    // Create a windowed mode window 
+    // Create a windowed mode window
     window = glfw.Window.create(800, 800, application_name, null, null, .{ .client_api = .no_api }) catch |err| {
         try stderr.print("failed to create window, code: {}", .{err});
         return;
     };
     defer window.destroy();
-    
+
     const ctx = try render.Context.init(allocator, application_name, &window);
     defer ctx.deinit();
 
@@ -67,7 +67,7 @@ pub fn main() anyerror!void {
     defer input.deinit();
 
     var my_textures: [4]render2d.TextureHandle = undefined;
-    var my_sprites: [25]render2d.Sprite = undefined; 
+    var my_sprites: [25]render2d.Sprite = undefined;
     var draw_api = blk: {
         var init_api = try render2d.init(allocator, ctx, 25);
 
@@ -76,7 +76,7 @@ pub fn main() anyerror!void {
         my_textures[2] = try init_api.loadTexture("../assets/images/bern_burger.jpg"[0..]);
         my_textures[3] = try init_api.loadTexture("../assets/images/tiger.jpg"[0..]);
 
-        {   
+        {
             const window_size = try window.getSize();
             const windowf = @intToFloat(f32, window_size.height);
             const size = @intToFloat(f32, window_size.height) / @as(f32, 5);
@@ -94,10 +94,7 @@ pub fn main() anyerror!void {
                     if (index > 24) break :outer;
 
                     const texture_handle = my_textures[@floatToInt(usize, @mod(index, 4))];
-                    const pos = zlm.Vec2.new(
-                        j * scale.x - pos_offset_x,
-                        i * scale.y - pos_offset_y
-                    );
+                    const pos = zlm.Vec2.new(j * scale.x - pos_offset_x, i * scale.y - pos_offset_y);
                     my_sprites[@floatToInt(usize, index)] = try init_api.createSprite(texture_handle, pos, rotation, scale);
                     rotation += 10;
                     rotation = @mod(rotation, 360);
@@ -127,7 +124,7 @@ pub fn main() anyerror!void {
     my_sprites[0].setSize(zlm.Vec2.new(500, 500));
     my_sprites[0].setPosition(zlm.Vec2.new(0, 0));
     my_sprites[0].setTexture(my_textures[2]);
-    
+
     try my_sprites[0].setLayer(1);
     try my_sprites[12].setLayer(4);
     my_sprites[12].setSize(zlm.Vec2.new(100, 100));
@@ -171,7 +168,7 @@ pub fn main() anyerror!void {
         sin_wave += @floatCast(f32, delta_time);
         sin_dir = if (@mod(sin_wave, 2) < 1) 1 else -1;
         const offset = std.math.sin(sin_wave);
-        for(my_sprites[2..]) |*my_sprite| {
+        for (my_sprites[2..]) |*my_sprite| {
             var pos = my_sprite.getPosition();
             pos.x += offset * sin_dir * 0.2;
             my_sprite.setPosition(pos);
@@ -196,37 +193,37 @@ pub fn main() anyerror!void {
 
 fn keyInputFn(event: input.KeyEvent) void {
     if (event.action == .press) {
-        switch(event.key) {
+        switch (event.key) {
             input.Key.w => move_up = true,
             input.Key.s => move_down = true,
             input.Key.d => move_left = true,
             input.Key.a => move_right = true,
             input.Key.escape => window.setShouldClose(true),
-            else => { },
-        }   
+            else => {},
+        }
     } else if (event.action == .release) {
-        switch(event.key) {
+        switch (event.key) {
             input.Key.w => move_up = false,
             input.Key.s => move_down = false,
             input.Key.d => move_left = false,
             input.Key.a => move_right = false,
-            else => { },
+            else => {},
         }
-    }   
+    }
 }
 
 fn mouseBtnInputFn(event: input.MouseButtonEvent) void {
     if (event.action == input.Action.press) {
-        if (event.button == input.MouseButton.left) {   
-            zoom_in = true;    
-        } else if (event.button == input.MouseButton.right) {  
+        if (event.button == input.MouseButton.left) {
+            zoom_in = true;
+        } else if (event.button == input.MouseButton.right) {
             zoom_out = true;
         }
     }
     if (event.action == input.Action.release) {
-        if (event.button == input.MouseButton.left) {   
-            zoom_in = false;    
-        } else if (event.button == input.MouseButton.right) {  
+        if (event.button == input.MouseButton.left) {
+            zoom_in = false;
+        } else if (event.button == input.MouseButton.right) {
             zoom_out = false;
         }
     }
@@ -236,5 +233,3 @@ fn cursorPosInputFn(event: input.CursorPosEvent) void {
     _ = event;
     // std.debug.print("cursor pos: {s} {d}, {d} {s}\n", .{"{", event.x, event.y, "}"});
 }
-
-

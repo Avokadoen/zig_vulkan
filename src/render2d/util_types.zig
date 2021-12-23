@@ -34,4 +34,3 @@ pub const BufferUpdateRate = union(BufferUpdateRateEnum) {
     always: void,
     every_ms: u32,
 };
-

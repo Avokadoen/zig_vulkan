@@ -11,7 +11,7 @@ const QueueFamilyIndices = physical_device.QueueFamilyIndices;
 const Context = @import("context.zig").Context;
 
 pub const ViewportScissor = struct {
-    viewport: [1]vk.Viewport, 
+    viewport: [1]vk.Viewport,
     scissor: [1]vk.Rect2D,
 
     /// utility to create simple view state info
@@ -21,23 +21,13 @@ pub const ViewportScissor = struct {
         const height = extent.height;
         return .{
             .viewport = [1]vk.Viewport{
-                .{ 
-                    .x = 0, 
-                    .y = 0, 
-                    .width = @intToFloat(f32, width), 
-                    .height = @intToFloat(f32, height), 
-                    .min_depth = 0.0, 
-                    .max_depth = 1.0 
-                },
+                .{ .x = 0, .y = 0, .width = @intToFloat(f32, width), .height = @intToFloat(f32, height), .min_depth = 0.0, .max_depth = 1.0 },
             },
             .scissor = [1]vk.Rect2D{
-                .{
-                    .offset = .{
-                        .x = 0,
-                        .y = 0,
-                    },
-                    .extent = extent
-                },
+                .{ .offset = .{
+                    .x = 0,
+                    .y = 0,
+                }, .extent = extent },
             },
         };
     }
@@ -45,7 +35,7 @@ pub const ViewportScissor = struct {
 
 // TODO: rename
 // TODO: mutex! : the data is shared between rendering implementation and pipeline
-//                pipeline will attempt to update the data in the event of rescale which might lead to RC 
+//                pipeline will attempt to update the data in the event of rescale which might lead to RC
 pub const Data = struct {
     swapchain: vk.SwapchainKHR,
     images: ArrayList(vk.Image),
@@ -53,7 +43,7 @@ pub const Data = struct {
     format: vk.Format,
     extent: vk.Extent2D,
     support_details: SupportDetails,
-    
+
     // create a swapchain data struct, caller must make sure to call deinit
     pub fn init(allocator: Allocator, ctx: Context, old_swapchain: ?vk.SwapchainKHR) !Data {
         const support_details = try SupportDetails.init(allocator, ctx.vki, ctx.physical_device, ctx.surface);
@@ -179,7 +169,6 @@ pub const Data = struct {
 
         ctx.vkd.destroySwapchainKHR(ctx.logical_device, self.swapchain, null);
     }
-    
 };
 
 pub const SupportDetails = struct {
@@ -257,10 +246,7 @@ pub const SupportDetails = struct {
         } else {
             var window_size = blk: {
                 const size = try window.getFramebufferSize();
-                break :blk vk.Extent2D{ 
-                    .width = @intCast(u32, size.width), 
-                    .height = @intCast(u32, size.height) 
-                };
+                break :blk vk.Extent2D{ .width = @intCast(u32, size.width), .height = @intCast(u32, size.height) };
             };
 
             const clamp = std.math.clamp;
@@ -278,4 +264,3 @@ pub const SupportDetails = struct {
         self.present_modes.deinit();
     }
 };
-

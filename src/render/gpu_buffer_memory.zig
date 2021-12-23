@@ -1,4 +1,4 @@
-const std= @import("std");
+const std = @import("std");
 const vk = @import("vulkan");
 
 const vk_utils = @import("vk_utils.zig");
@@ -10,7 +10,7 @@ pub const GpuBufferMemory = struct {
 
     // TODO: might not make sense if different type, should be array
     /// how many elements does the buffer contain
-    len: u32, 
+    len: u32,
     // TODO: rename capacity, and add an accumulating size variable
     /// how many bytes *can* be stored in the buffer
     size: vk.DeviceSize,
@@ -31,7 +31,7 @@ pub const GpuBufferMemory = struct {
             break :blk try ctx.vkd.createBuffer(ctx.logical_device, &buffer_info, null);
         };
         errdefer ctx.vkd.destroyBuffer(ctx.logical_device, buffer, null);
-       
+
         const memory = blk: {
             const memory_requirements = ctx.vkd.getBufferMemoryRequirements(ctx.logical_device, buffer);
             const memory_type_index = try vk_utils.findMemoryTypeIndex(ctx, memory_requirements.memory_type_bits, mem_prop_flags);
@@ -44,8 +44,8 @@ pub const GpuBufferMemory = struct {
         errdefer ctx.vkd.freeMemory(ctx.logical_device, memory, null);
 
         try ctx.vkd.bindBufferMemory(ctx.logical_device, buffer, memory, 0);
-        
-        return Self {
+
+        return Self{
             .len = 0,
             .size = size,
             .buffer = buffer,
@@ -69,7 +69,7 @@ pub const GpuBufferMemory = struct {
     pub fn transfer(self: *Self, ctx: Context, comptime T: type, data: []const T) !void {
         // transfer empty data slice is NOP
         if (data.len <= 0) return;
-    
+
         const size = data.len * @sizeOf(T);
         if (self.size < size) {
             return error.InsufficentBufferSize; // size of buffer is less than data being transfered
@@ -95,7 +95,7 @@ pub const GpuBufferMemory = struct {
         }
 
         // calculate how far in the memory location we are going
-        const size = datas[datas.len-1].len * @sizeOf(T) + offsets[offsets.len-1] * @sizeOf(T);
+        const size = datas[datas.len - 1].len * @sizeOf(T) + offsets[offsets.len - 1] * @sizeOf(T);
         if (self.size < size) {
             return error.InsufficentBufferSize; // size of buffer is less than data being transfered
         }
@@ -112,7 +112,7 @@ pub const GpuBufferMemory = struct {
         }
         ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
 
-        self.len = std.math.max(self.len, @intCast(u32, datas[datas.len-1].len + offsets[offsets.len-1]));
+        self.len = std.math.max(self.len, @intCast(u32, datas[datas.len - 1].len + offsets[offsets.len - 1]));
     }
 
     pub inline fn deinit(self: Self, ctx: Context) void {
@@ -120,4 +120,3 @@ pub const GpuBufferMemory = struct {
         ctx.vkd.freeMemory(ctx.logical_device, self.memory, null);
     }
 };
-

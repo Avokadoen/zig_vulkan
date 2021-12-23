@@ -6,10 +6,9 @@ const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
 const Context = @import("context.zig").Context;
 const Allocator = std.mem.Allocator;
 
-
 pub fn Config(comptime T: type) type {
     return struct {
-        data: []T, 
+        data: []T,
         width: u32,
         height: u32,
         usage: vk.ImageUsageFlags,
@@ -20,7 +19,6 @@ pub fn Config(comptime T: type) type {
 
 // TODO: send a texture
 pub const Texture = struct {
-
     image_size: vk.DeviceSize,
     image_extent: vk.Extent2D,
 
@@ -31,14 +29,18 @@ pub const Texture = struct {
     sampler: vk.Sampler,
 
     pub fn init(ctx: Context, command_pool: vk.CommandPool, comptime layout: vk.ImageLayout, comptime T: type, config: Config(T)) !Texture {
-
-        const image_extent = vk.Extent2D{ 
+        const image_extent = vk.Extent2D{
             .width = config.width,
             .height = config.height,
         };
         // transfer texture data to gpu
         const image_size: vk.DeviceSize = @intCast(vk.DeviceSize, config.data.len * @sizeOf(T));
-        var staging_buffer = try GpuBufferMemory.init(ctx, image_size, .{ .transfer_src_bit = true, }, .{ .host_visible_bit = true, .host_coherent_bit = true, });
+        var staging_buffer = try GpuBufferMemory.init(ctx, image_size, .{
+            .transfer_src_bit = true,
+        }, .{
+            .host_visible_bit = true,
+            .host_coherent_bit = true,
+        });
         defer staging_buffer.deinit(ctx);
         try staging_buffer.transfer(ctx, T, config.data);
 
@@ -56,9 +58,11 @@ pub const Texture = struct {
                 },
                 .mip_levels = 1,
                 .array_layers = 1,
-                .samples = .{ .@"1_bit" = true, },
+                .samples = .{
+                    .@"1_bit" = true,
+                },
                 .tiling = .optimal,
-                .usage = config.usage, 
+                .usage = config.usage,
                 .sharing_mode = .exclusive, // TODO: concurrent if (queue_family_indices.len > 1)
                 .queue_family_index_count = @intCast(u32, config.queue_family_indices.len),
                 .p_queue_family_indices = config.queue_family_indices.ptr,
@@ -71,11 +75,13 @@ pub const Texture = struct {
             const memory_requirements = ctx.vkd.getImageMemoryRequirements(ctx.logical_device, image);
             const alloc_info = vk.MemoryAllocateInfo{
                 .allocation_size = memory_requirements.size,
-                .memory_type_index = try vk_utils.findMemoryTypeIndex(ctx, memory_requirements.memory_type_bits, .{ .device_local_bit = true, }),
+                .memory_type_index = try vk_utils.findMemoryTypeIndex(ctx, memory_requirements.memory_type_bits, .{
+                    .device_local_bit = true,
+                }),
             };
             break :blk try ctx.vkd.allocateMemory(ctx.logical_device, &alloc_info, null);
         };
-        
+
         try ctx.vkd.bindImageMemory(ctx.logical_device, image, image_memory, 0);
         try transitionImageLayout(ctx, command_pool, image, .@"undefined", .transfer_dst_optimal);
         try copyImageToBuffer(ctx, command_pool, image, staging_buffer.buffer, image_extent);
@@ -96,7 +102,9 @@ pub const Texture = struct {
                     .a = .identity,
                 },
                 .subresource_range = .{
-                    .aspect_mask = .{ .color_bit = true, },
+                    .aspect_mask = .{
+                        .color_bit = true,
+                    },
                     .base_mip_level = 0,
                     .level_count = 1,
                     .base_array_layer = 0,
@@ -129,7 +137,7 @@ pub const Texture = struct {
             break :blk try ctx.vkd.createSampler(ctx.logical_device, &sampler_info, null);
         };
 
-        return Texture {
+        return Texture{
             .image_size = image_size,
             .image_extent = image_extent,
             .image = image,
@@ -156,47 +164,76 @@ const TransitionBits = struct {
 };
 fn getTransitionBits(comptime old_layout: vk.ImageLayout, comptime new_layout: vk.ImageLayout) TransitionBits {
     var transition_bits: TransitionBits = undefined;
-    switch(old_layout) {
+    switch (old_layout) {
         .@"undefined" => {
             transition_bits.src_mask = .{};
-            transition_bits.src_stage = .{ .top_of_pipe_bit = true, };
+            transition_bits.src_stage = .{
+                .top_of_pipe_bit = true,
+            };
         },
         .general => {
-            transition_bits.src_mask = .{ .shader_read_bit = true, .shader_write_bit = true, };
-            transition_bits.src_stage = .{ .compute_shader_bit = true, };
+            transition_bits.src_mask = .{
+                .shader_read_bit = true,
+                .shader_write_bit = true,
+            };
+            transition_bits.src_stage = .{
+                .compute_shader_bit = true,
+            };
         },
         .shader_read_only_optimal => {
-            transition_bits.src_mask = .{ .shader_read_bit = true, };
-            transition_bits.src_stage = .{ .fragment_shader_bit = true, };
+            transition_bits.src_mask = .{
+                .shader_read_bit = true,
+            };
+            transition_bits.src_stage = .{
+                .fragment_shader_bit = true,
+            };
         },
         .transfer_dst_optimal => {
-            transition_bits.src_mask = .{ .transfer_write_bit = true, };
-            transition_bits.src_stage = .{ .transfer_bit = true, };
+            transition_bits.src_mask = .{
+                .transfer_write_bit = true,
+            };
+            transition_bits.src_stage = .{
+                .transfer_bit = true,
+            };
         },
         else => {
             @compileError("unsupported old_layout \"" ++ @tagName(old_layout) ++ "\"");
-        }
+        },
     }
-    switch(new_layout) {
+    switch (new_layout) {
         .@"undefined" => {
             transition_bits.dst_mask = .{};
-            transition_bits.dst_stage = .{ .top_of_pipe_bit = true, };
+            transition_bits.dst_stage = .{
+                .top_of_pipe_bit = true,
+            };
         },
         .general => {
-            transition_bits.dst_mask = .{ .shader_read_bit = true, };
-            transition_bits.dst_stage = .{ .fragment_shader_bit = true, };
+            transition_bits.dst_mask = .{
+                .shader_read_bit = true,
+            };
+            transition_bits.dst_stage = .{
+                .fragment_shader_bit = true,
+            };
         },
         .shader_read_only_optimal => {
-            transition_bits.dst_mask = .{ .shader_read_bit = true, };
-            transition_bits.dst_stage = .{ .fragment_shader_bit = true, };
+            transition_bits.dst_mask = .{
+                .shader_read_bit = true,
+            };
+            transition_bits.dst_stage = .{
+                .fragment_shader_bit = true,
+            };
         },
         .transfer_dst_optimal => {
-            transition_bits.dst_mask = .{ .transfer_write_bit = true, };
-            transition_bits.dst_stage = .{ .transfer_bit = true, };
+            transition_bits.dst_mask = .{
+                .transfer_write_bit = true,
+            };
+            transition_bits.dst_stage = .{
+                .transfer_bit = true,
+            };
         },
         else => {
             @compileError("unsupported new_layout \"" ++ @tagName(new_layout) ++ "\"");
-        }
+        },
     }
     return transition_bits;
 }
@@ -207,18 +244,20 @@ pub const TransitionBarrier = struct {
 };
 pub inline fn getImageTransitionBarrier(image: vk.Image, comptime old_layout: vk.ImageLayout, comptime new_layout: vk.ImageLayout) TransitionBarrier {
     const transition = getTransitionBits(old_layout, new_layout);
-    return TransitionBarrier {
+    return TransitionBarrier{
         .transition = transition,
         .barrier = vk.ImageMemoryBarrier{
             .src_access_mask = transition.src_mask,
-            .dst_access_mask = transition.dst_mask, 
+            .dst_access_mask = transition.dst_mask,
             .old_layout = old_layout,
             .new_layout = new_layout,
             .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
             .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
             .image = image,
             .subresource_range = vk.ImageSubresourceRange{
-                .aspect_mask = .{ .color_bit = true, },
+                .aspect_mask = .{
+                    .color_bit = true,
+                },
                 .base_mip_level = 0,
                 .level_count = 1,
                 .base_array_layer = 0,
@@ -233,36 +272,27 @@ inline fn transitionImageLayout(ctx: Context, command_pool: vk.CommandPool, imag
     const transition = getTransitionBits(old_layout, new_layout);
     const barrier = vk.ImageMemoryBarrier{
         .src_access_mask = transition.src_mask,
-        .dst_access_mask = transition.dst_mask, 
+        .dst_access_mask = transition.dst_mask,
         .old_layout = old_layout,
         .new_layout = new_layout,
         .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
         .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
         .image = image,
         .subresource_range = vk.ImageSubresourceRange{
-            .aspect_mask = .{ .color_bit = true, },
+            .aspect_mask = .{
+                .color_bit = true,
+            },
             .base_mip_level = 0,
             .level_count = 1,
             .base_array_layer = 0,
             .layer_count = 1,
         },
     };
-    ctx.vkd.cmdPipelineBarrier(
-        commmand_buffer,
-        transition.src_stage,
-        transition.dst_stage,
-        vk.DependencyFlags{}, 
-        0,
-        undefined,
-        0,
-        undefined,
-        1,
-        @ptrCast([*]const vk.ImageMemoryBarrier, &barrier)
-    );
+    ctx.vkd.cmdPipelineBarrier(commmand_buffer, transition.src_stage, transition.dst_stage, vk.DependencyFlags{}, 0, undefined, 0, undefined, 1, @ptrCast([*]const vk.ImageMemoryBarrier, &barrier));
     try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, commmand_buffer);
 }
 
-// TODO: find a suitable location for this functio 
+// TODO: find a suitable location for this functio
 inline fn copyImageToBuffer(ctx: Context, command_pool: vk.CommandPool, image: vk.Image, buffer: vk.Buffer, image_extent: vk.Extent2D) !void {
     const command_buffer = try vk_utils.beginOneTimeCommandBuffer(ctx, command_pool);
     {
@@ -271,7 +301,9 @@ inline fn copyImageToBuffer(ctx: Context, command_pool: vk.CommandPool, image: v
             .buffer_row_length = 0,
             .buffer_image_height = 0,
             .image_subresource = vk.ImageSubresourceLayers{
-                .aspect_mask = .{ .color_bit = true, },
+                .aspect_mask = .{
+                    .color_bit = true,
+                },
                 .mip_level = 0,
                 .base_array_layer = 0,
                 .layer_count = 1,

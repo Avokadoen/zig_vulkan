@@ -19,4 +19,3 @@ pub const texture = @import("texture.zig");
 pub const validation_layer = @import("validation_layer.zig");
 pub const vertex = @import("vertex.zig");
 pub const vk_utils = @import("vk_utils.zig");
-

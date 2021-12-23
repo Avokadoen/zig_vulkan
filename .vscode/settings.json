@@ -1,3 +1,17 @@
 {
-    "cmake.configureOnOpen": false
+    "cmake.configureOnOpen": false,
+    "zigLanguageClient.path": "/home/aksel/Projects/zls/zig-out/bin/zls",
+    "debug.onTaskErrors": "abort",
+    "glsllint.glslangValidatorArgs": "--target-env vulkan1.2",
+
+    // run zig fmt when saving 
+    "emeraldwalk.runonsave": {
+        "commands": [
+            {
+                "match": ".zig",
+                "isAsync": true,
+                "cmd": "zig fmt ${file}"
+            },
+        ]
+    }
 }
