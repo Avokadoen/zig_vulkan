@@ -15,11 +15,9 @@ const Context = @import("context.zig").Context;
 const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
 
 // TODO: rename file
-// TODO: rename struct to reflect 2D?
 // TODO: check for slices in config, report error
 // TODO: allow naming shader types!
 
-// public api calls it Config since it will be in the descriptor struct i.e descriptor.Config
 /// Configuration for SyncDescriptor and Descriptor
 pub const Config = struct {
     allocator: Allocator,
@@ -137,6 +135,7 @@ pub const Descriptor = struct {
                     .host_visible_bit = true,
                     .host_coherent_bit = true,
                 });
+                // TODO: properly handle error occurance in the loop
                 errdefer buffers.*[i].deinit(config.ctx);
             }
         }

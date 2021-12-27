@@ -145,7 +145,7 @@ pub const InitializedApi = struct {
         // brute force optimal width and height with no restrictions in size ...
         const mega_size = try bruteForceFn(self.allocator, packjobs);
 
-        // place each image in the mega texture
+        // place each texture in the mega texture
         var mega_data = try self.allocator.alloc(stbi.Pixel, mega_size.width * mega_size.height);
 
         var mega_uvs = try self.allocator.alloc(UV, self.images.items.len);
@@ -154,7 +154,7 @@ pub const InitializedApi = struct {
         const mega_widthf = @intToFloat(f64, mega_size.width);
         const mega_heightf = @intToFloat(f64, mega_size.height);
         for (packjobs) |packjob| {
-            // the max image index components
+            // the max texture index components
             const y_bound = packjob.y + packjob.height;
             const x_bound = packjob.x + packjob.width;
 
@@ -266,7 +266,7 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
 
                 state: CommonDrawState,
 
-                usingnamespace ShaderDrawAPI(Self);
+                usingnamespace CommonDrawAPI(Self);
 
                 /// draw with sprite api
                 pub inline fn draw(self: *Self) !void {
@@ -294,7 +294,7 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
                 prev_frame: i64 = 0,
                 update_frame_count: u32 = 0,
 
-                usingnamespace ShaderDrawAPI(Self);
+                usingnamespace CommonDrawAPI(Self);
 
                 /// draw with sprite api
                 pub inline fn draw(self: *Self) !void {
@@ -332,9 +332,8 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
     }
 }
 
-fn ShaderDrawAPI(comptime Self: type) type {
+fn CommonDrawAPI(comptime Self: type) type {
     return struct {
-
         // deinitialize sprite library
         pub fn deinit(self: Self) void {
             self.state.allocator.free(self.state.mega_image.data);
@@ -379,12 +378,14 @@ fn ShaderDrawAPI(comptime Self: type) type {
 pub fn framebufferSizeCallbackFn(window: glfw.Window, width: u32, height: u32) void {
     _ = width;
     _ = height;
+
+    // get application pointer data, and set rescale to true to signal pipeline rescale
     if (window.getUserPointer(*bool)) |rescale| {
         rescale.* = true;
     }
 }
 
-/// record default commands to the command buffer
+/// record default commands for the render2D pipeline
 fn recordGfxCmdBuffers(ctx: render.Context, pipeline: *Pipeline) dispatch.BeginCommandBufferError!void {
     const image = pipeline.sync_descript.ubo.my_texture.image;
     const image_use = render.texture.getImageTransitionBarrier(image, .general, .general);

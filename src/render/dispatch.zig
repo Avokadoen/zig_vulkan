@@ -13,7 +13,24 @@ pub const Base = vk.BaseWrapper(&[_]vk.BaseCommand{
 });
 
 pub const Instance = blk: {
-    var default_commands = [_]vk.InstanceCommand{ .createDevice, .destroyInstance, .destroySurfaceKHR, .enumerateDeviceExtensionProperties, .enumeratePhysicalDevices, .getDeviceProcAddr, .getPhysicalDeviceFeatures, .getPhysicalDeviceMemoryProperties, .getPhysicalDeviceProperties, .getPhysicalDeviceQueueFamilyProperties, .getPhysicalDeviceSurfaceCapabilitiesKHR, .getPhysicalDeviceSurfaceFormatsKHR, .getPhysicalDeviceSurfacePresentModesKHR, .getPhysicalDeviceSurfaceSupportKHR };
+    // zig fmt: off
+    var default_commands = [_]vk.InstanceCommand{ 
+        .createDevice, 
+        .destroyInstance, 
+        .destroySurfaceKHR,
+        .enumerateDeviceExtensionProperties,
+        .enumeratePhysicalDevices, 
+        .getDeviceProcAddr, 
+        .getPhysicalDeviceFeatures, 
+        .getPhysicalDeviceMemoryProperties, 
+        .getPhysicalDeviceProperties, 
+        .getPhysicalDeviceQueueFamilyProperties, 
+        .getPhysicalDeviceSurfaceCapabilitiesKHR, 
+        .getPhysicalDeviceSurfaceFormatsKHR, 
+        .getPhysicalDeviceSurfacePresentModesKHR, 
+        .getPhysicalDeviceSurfaceSupportKHR 
+    };
+    // zig fmt: on
     var output_commands = default_commands ++ if (consts.enable_validation_layers) [_]vk.InstanceCommand{
         .createDebugUtilsMessengerEXT,
         .destroyDebugUtilsMessengerEXT,
@@ -21,6 +38,78 @@ pub const Instance = blk: {
     break :blk vk.InstanceWrapper(&output_commands);
 };
 
-pub const Device = vk.DeviceWrapper(&[_]vk.DeviceCommand{ .acquireNextImageKHR, .allocateCommandBuffers, .allocateDescriptorSets, .allocateMemory, .beginCommandBuffer, .bindBufferMemory, .bindImageMemory, .cmdBeginRenderPass, .cmdBindDescriptorSets, .cmdBindIndexBuffer, .cmdBindPipeline, .cmdBindVertexBuffers, .cmdCopyBuffer, .cmdCopyBufferToImage, .cmdCopyImageToBuffer, .cmdDispatch, .cmdDrawIndexed, .cmdEndRenderPass, .cmdPipelineBarrier, .cmdSetScissor, .cmdSetViewport, .createBuffer, .createCommandPool, .createComputePipelines, .createDescriptorPool, .createDescriptorSetLayout, .createFence, .createFramebuffer, .createGraphicsPipelines, .createImage, .createImageView, .createPipelineLayout, .createRenderPass, .createSampler, .createSemaphore, .createShaderModule, .createSwapchainKHR, .destroyBuffer, .destroyCommandPool, .destroyDescriptorPool, .destroyDescriptorSetLayout, .destroyDevice, .destroyFence, .destroyFramebuffer, .destroyImage, .destroyImageView, .destroyPipeline, .destroyPipelineLayout, .destroyRenderPass, .destroySampler, .destroySemaphore, .destroyShaderModule, .destroySwapchainKHR, .deviceWaitIdle, .endCommandBuffer, .freeCommandBuffers, .freeMemory, .getBufferMemoryRequirements, .getDeviceQueue, .getImageMemoryRequirements, .getSwapchainImagesKHR, .mapMemory, .queuePresentKHR, .queueSubmit, .queueWaitIdle, .resetFences, .unmapMemory, .updateDescriptorSets, .waitForFences });
+// zig fmt: off
+pub const Device = vk.DeviceWrapper(&[_]vk.DeviceCommand{ 
+    .acquireNextImageKHR, 
+    .allocateCommandBuffers, 
+    .allocateDescriptorSets, 
+    .allocateMemory, 
+    .beginCommandBuffer, 
+    .bindBufferMemory, 
+    .bindImageMemory, 
+    .cmdBeginRenderPass, 
+    .cmdBindDescriptorSets, 
+    .cmdBindIndexBuffer,
+    .cmdBindPipeline,
+    .cmdBindVertexBuffers,
+    .cmdCopyBuffer,
+    .cmdCopyBufferToImage,
+    .cmdCopyImageToBuffer,
+    .cmdDispatch,
+    .cmdDrawIndexed,
+    .cmdEndRenderPass,
+    .cmdPipelineBarrier,
+    .cmdSetScissor,
+    .cmdSetViewport,
+    .createBuffer,
+    .createCommandPool,
+    .createComputePipelines,
+    .createDescriptorPool,
+    .createDescriptorSetLayout,
+    .createFence,
+    .createFramebuffer,
+    .createGraphicsPipelines,
+    .createImage,
+    .createImageView,
+    .createPipelineLayout,
+    .createRenderPass,
+    .createSampler,
+    .createSemaphore,
+    .createShaderModule,
+    .createSwapchainKHR,
+    .destroyBuffer,
+    .destroyCommandPool,
+    .destroyDescriptorPool,
+    .destroyDescriptorSetLayout,
+    .destroyDevice,
+    .destroyFence,
+    .destroyFramebuffer,
+    .destroyImage,
+    .destroyImageView,
+    .destroyPipeline,
+    .destroyPipelineLayout,
+    .destroyRenderPass,
+    .destroySampler,
+    .destroySemaphore,
+    .destroyShaderModule,
+    .destroySwapchainKHR,
+    .deviceWaitIdle,
+    .endCommandBuffer,
+    .freeCommandBuffers,
+    .freeMemory,
+    .getBufferMemoryRequirements,
+    .getDeviceQueue,
+    .getImageMemoryRequirements,
+    .getSwapchainImagesKHR,
+    .mapMemory,
+    .queuePresentKHR,
+    .queueSubmit,
+    .queueWaitIdle,
+    .resetFences,
+    .unmapMemory,
+    .updateDescriptorSets,
+    .waitForFences 
+});
+// zig fmt: on
 
 pub const BeginCommandBufferError = Device.BeginCommandBufferError;
