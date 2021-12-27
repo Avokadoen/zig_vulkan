@@ -606,7 +606,7 @@ pub const ComputePipeline = struct {
                 .binding_count = layout_bindings.len,
                 .p_bindings = @ptrCast([*]const vk.DescriptorSetLayoutBinding, &layout_bindings),
             };
-            break :blk try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, layout_info, null);
+            break :blk try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
         };
         errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
 
@@ -621,7 +621,7 @@ pub const ComputePipeline = struct {
                 .pool_size_count = 1,
                 .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, &sampler_pool_size),
             };
-            break :blk try ctx.vkd.createDescriptorPool(ctx.logical_device, pool_info, null);
+            break :blk try ctx.vkd.createDescriptorPool(ctx.logical_device, &pool_info, null);
         };
         errdefer ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.target_descriptor_pool, null);
 
@@ -630,7 +630,7 @@ pub const ComputePipeline = struct {
             .descriptor_set_count = 1,
             .p_set_layouts = @ptrCast([*]vk.DescriptorSetLayout, &self.target_descriptor_layout),
         };
-        try ctx.vkd.allocateDescriptorSets(ctx.logical_device, descriptor_set_alloc_info, @ptrCast([*]vk.DescriptorSet, &self.target_descriptor_set));
+        try ctx.vkd.allocateDescriptorSets(ctx.logical_device, &descriptor_set_alloc_info, @ptrCast([*]vk.DescriptorSet, &self.target_descriptor_set));
         {
             const image_info = vk.DescriptorImageInfo{
                 .sampler = self.target_texture.sampler,
@@ -698,7 +698,7 @@ pub const ComputePipeline = struct {
                 .signaled_bit = true,
             },
         };
-        self.in_flight_fence = try ctx.vkd.createFence(ctx.logical_device, fence_info, null);
+        self.in_flight_fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
 
         // TODO: we need to rescale pipeline dispatch
         self.command_buffer = try createCmdBuffer(ctx, ctx.comp_cmd_pool);
@@ -783,9 +783,10 @@ pub const ComputePipeline = struct {
     /// Wait for fence to signal complete 
     pub inline fn wait_idle(self: Self, ctx: Context) void {
         _ = ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.in_flight_fence), vk.TRUE, std.math.maxInt(u64)) catch |err| {
-            ctx.writers.stderr.print("waiting for fence failed: {}", .{err}) catch |e| switch (e) {
-                else => {}, // Discard print errors ...
-            };
+            // ctx.writers.stderr.print("waiting for fence failed: {}", .{err}) catch |e| switch (e) {
+            //     else => {}, // Discard print errors ...
+            // };
+            std.io.getStdErr().writer().print("waiting for fence failed: {}", .{err}) catch {};
         };
     }
 
@@ -795,18 +796,40 @@ pub const ComputePipeline = struct {
             .flags = .{},
             .p_inheritance_info = null,
         };
-        try ctx.vkd.beginCommandBuffer(self.command_buffer, command_begin_info);
+        try ctx.vkd.beginCommandBuffer(self.command_buffer, &command_begin_info);
         ctx.vkd.cmdBindPipeline(self.command_buffer, vk.PipelineBindPoint.compute, self.pipeline.*);
-        ctx.vkd.cmdPipelineBarrier(self.command_buffer, image_use.transition.src_stage, image_use.transition.dst_stage, vk.DependencyFlags{}, 0, undefined, 0, undefined, 1, @ptrCast([*]const vk.ImageMemoryBarrier, &image_use.barrier));
+        // zig fmt: off
+        ctx.vkd.cmdPipelineBarrier(
+            self.command_buffer, 
+            image_use.transition.src_stage, 
+            image_use.transition.dst_stage, 
+            vk.DependencyFlags{}, 
+            0, 
+            undefined, 
+            0, 
+            undefined, 
+            1, 
+            @ptrCast([*]const vk.ImageMemoryBarrier, &image_use.barrier)
+        );
         // bind target texture
-        ctx.vkd.cmdBindDescriptorSets(self.command_buffer, .compute, self.pipeline_layout, 0, 1, @ptrCast([*]const vk.DescriptorSet, &self.target_descriptor_set), 0, undefined);
+        ctx.vkd.cmdBindDescriptorSets(
+            self.command_buffer, 
+            .compute, 
+            self.pipeline_layout, 
+            0, 
+            1, 
+            @ptrCast([*]const vk.DescriptorSet, &self.target_descriptor_set), 
+            0, 
+            undefined
+        );
+        // zig fmt: on
         // TODO: allow varying local thread size, error if x_ or y_ dispatch have decimal values
         // compute shader has 16 thread in x and y, we calculate inverse at compile time
         const local_thread_factor: f32 = comptime blk: {
             break :blk 1.0 / 16.0;
         };
-        const x_dispatch = @intToFloat(f32, self.target_texture.image_extent.width) * local_thread_factor;
-        const y_dispatch = @intToFloat(f32, self.target_texture.image_extent.height) * local_thread_factor;
+        const x_dispatch = @ceil(@intToFloat(f32, self.target_texture.image_extent.width) * local_thread_factor);
+        const y_dispatch = @ceil(@intToFloat(f32, self.target_texture.image_extent.height) * local_thread_factor);
         ctx.vkd.cmdDispatch(self.command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
         try ctx.vkd.endCommandBuffer(self.command_buffer);
     }

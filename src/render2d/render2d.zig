@@ -225,7 +225,7 @@ pub const InitializedApi = struct {
         api.state.subo.* = try descriptor.SyncDescriptor.init(desc_config);
         api.state.pipeline = blk: {
             var pipe_builder = try PipelineBuilder.init(self.allocator, self.ctx, api.state.swapchain, @intCast(u32, self.db_ptr.*.len), api.state.view, api.state.subo, .{}, recordGfxCmdBuffers);
-            try pipe_builder.addPipeline("../../pass.vert.spv", "../../pass.frag.spv");
+            try pipe_builder.addPipeline("../../render2d.vert.spv", "../../render2d.frag.spv");
             break :blk (try pipe_builder.build());
         };
         try api.state.db_ptr.generateUvBuffer(mega_uvs);

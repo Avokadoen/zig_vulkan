@@ -100,13 +100,10 @@ pub const Descriptor = struct {
             .data = config.image.data,
             .width = @intCast(u32, config.image.width),
             .height = @intCast(u32, config.image.height),
-            .usage = .{
-                .transfer_dst_bit = true,
-                .sampled_bit = true,
-            },
+            .usage = .{ .transfer_dst_bit = true, .sampled_bit = true, .storage_bit = true },
             .queue_family_indices = indices[0..indices_len],
             // TODO: r8g8b8a8_srgb does not work for compute shader textures
-            .format = .r8g8b8a8_srgb,
+            .format = .r8g8b8a8_unorm,
         };
         const my_texture = try Texture.init(config.ctx, config.ctx.gfx_cmd_pool, .general, PixelType, texture_config);
         errdefer my_texture.deinit(config.ctx);

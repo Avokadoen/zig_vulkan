@@ -4,6 +4,6 @@ layout (local_size_x = 16, local_size_y = 16) in;
 layout(rgba32f, binding = 1) uniform image2D image;
 
 void main() {	
-    // If we can get a white image to render, then we are set for now ...
-	imageStore(image, ivec2(gl_GlobalInvocationID.xy), vec4(gl_GlobalInvocationID.x / 256.0, gl_GlobalInvocationID.y / 256.0, 0, 0));
+    const vec2 size = imageSize(image);
+	imageStore(image, ivec2(gl_GlobalInvocationID.xy), vec4(gl_GlobalInvocationID.x / size.x, gl_GlobalInvocationID.y / size.y, 0, 1));
 }

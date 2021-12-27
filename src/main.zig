@@ -59,9 +59,6 @@ pub fn main() anyerror!void {
     const ctx = try render.Context.init(allocator, application_name, &window);
     defer ctx.deinit();
 
-    // const comp_pipeline = try renderer.ComputePipeline.init(allocator, ctx, "../../comp.comp.spv", &subo.ubo.my_texture);
-    // defer comp_pipeline.deinit(ctx);
-
     // init input module with iput handler functions
     try input.init(window, keyInputFn, mouseBtnInputFn, cursorPosInputFn);
     defer input.deinit();
@@ -129,6 +126,9 @@ pub fn main() anyerror!void {
     try my_sprites[12].setLayer(4);
     my_sprites[12].setSize(zlm.Vec2.new(100, 100));
 
+    const comp_pipeline = try render.ComputePipeline.init(allocator, ctx, "../../comp.comp.spv", &draw_api.state.subo.ubo.my_texture);
+    defer comp_pipeline.deinit(ctx);
+
     // Loop until the user closes the window
     while (!window.shouldClose()) {
         const current_frame = std.time.milliTimestamp();
@@ -179,7 +179,7 @@ pub fn main() anyerror!void {
         }
         {
             // Test compute
-            // try comp_pipeline.compute(ctx);
+            try comp_pipeline.compute(ctx);
 
             // Render here
             try draw_api.draw();
