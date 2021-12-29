@@ -6,12 +6,12 @@ layout(local_size_x = 32, local_size_y = 32) in;
 layout(rgba32f, binding = 0) uniform image2D img_output;
 
 // Constants
-// See glsl 4.40 spec chapter 4.7.1 for info on infinity
-// https://www.khronos.org/registry/OpenGL/specs/gl/GLSLangSpec.4.40.pdf
 const int MAT_LAMBERTIAN = 0;
 const int MAT_METAL = 1;
 const int MAT_DIELECTRIC = 2;
 
+// See glsl 4.40 spec chapter 4.7.1 for info on infinity
+// https://www.khronos.org/registry/OpenGL/specs/gl/GLSLangSpec.4.40.pdf
 const float infinity = 0.001 / 0;
 const float pi = 3.14159265358; // 3.1415926535897932385
 

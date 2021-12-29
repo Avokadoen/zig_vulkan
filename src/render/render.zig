@@ -2,7 +2,7 @@
 const context = @import("context.zig");
 const pipelines = @import("pipeline.zig");
 
-pub const ComputePipeline = pipelines.ComputePipeline;
+pub const ComputeDrawPipeline = pipelines.ComputeDrawPipeline;
 pub const Context = context.Context;
 pub const PipelineTypesFn = pipelines.PipelineTypesFn;
 pub const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;

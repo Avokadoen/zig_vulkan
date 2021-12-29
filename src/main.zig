@@ -63,42 +63,23 @@ pub fn main() anyerror!void {
     try input.init(window, keyInputFn, mouseBtnInputFn, cursorPosInputFn);
     defer input.deinit();
 
-    var my_textures: [4]render2d.TextureHandle = undefined;
-    var my_sprites: [25]render2d.Sprite = undefined;
+    var my_texture: render2d.TextureHandle = undefined;
+    var my_sprite: render2d.Sprite = undefined;
     var draw_api = blk: {
-        var init_api = try render2d.init(allocator, ctx, 25);
+        var init_api = try render2d.init(allocator, ctx, 1);
 
-        my_textures[0] = try init_api.loadTexture("../assets/images/grasstop.png"[0..]);
-        my_textures[1] = try init_api.loadTexture("../assets/images/texture.jpg"[0..]);
-        my_textures[2] = try init_api.loadTexture("../assets/images/bern_burger.jpg"[0..]);
-        my_textures[3] = try init_api.loadTexture("../assets/images/tiger.jpg"[0..]);
+        my_texture = try init_api.loadTexture("../assets/images/grasstop.png"[0..]);
 
         {
             const window_size = try window.getSize();
             const windowf = @intToFloat(f32, window_size.height);
-            const size = @intToFloat(f32, window_size.height) / @as(f32, 5);
+            const size = @intToFloat(f32, window_size.height);
             const scale = zlm.Vec2.new(size, size);
 
-            const pos_offset_x = (windowf - scale.x) * 0.5;
-            const pos_offset_y = (windowf - scale.y) * 0.5;
-
-            var rotation: f32 = 0;
-            var i: f32 = 0;
-            outer: while (i < 5) : (i += 1) {
-                var j: f32 = 0;
-                while (j < 5) : (j += 1) {
-                    const index = i * 5 + j;
-                    if (index > 24) break :outer;
-
-                    const texture_handle = my_textures[@floatToInt(usize, @mod(index, 4))];
-                    const pos = zlm.Vec2.new(j * scale.x - pos_offset_x, i * scale.y - pos_offset_y);
-                    my_sprites[@floatToInt(usize, index)] = try init_api.createSprite(texture_handle, pos, rotation, scale);
-                    rotation += 10;
-                    rotation = @mod(rotation, 360);
-                }
-            }
+            const pos = zlm.Vec2.new((windowf - scale.x) * 0.5, (windowf - scale.y) * 0.5);
+            my_sprite = try init_api.createSprite(my_texture, pos, 0, scale);
         }
-        break :blk try init_api.initDrawApi(.{ .every_ms = 14 });
+        break :blk try init_api.initDrawApi(.{ .every_ms = 9999 });
     };
     defer draw_api.deinit();
 
@@ -108,26 +89,20 @@ pub fn main() anyerror!void {
     var camera = draw_api.createCamera(500, 2);
     var camera_translate = zlm.Vec2.zero;
 
-    var sin_wave: f32 = 0;
-    var sin_dir: f32 = 1;
-
     var prev_frame = std.time.milliTimestamp();
 
-    try my_sprites[1].setLayer(2);
-    my_sprites[1].setSize(zlm.Vec2.new(500, 500));
-    my_sprites[1].setPosition(zlm.Vec2.new(150, 150));
-
-    try my_sprites[0].setLayer(3);
-    my_sprites[0].setSize(zlm.Vec2.new(500, 500));
-    my_sprites[0].setPosition(zlm.Vec2.new(0, 0));
-    my_sprites[0].setTexture(my_textures[2]);
-
-    try my_sprites[0].setLayer(1);
-    try my_sprites[12].setLayer(4);
-    my_sprites[12].setSize(zlm.Vec2.new(100, 100));
-
-    const comp_pipeline = try render.ComputePipeline.init(allocator, ctx, "../../comp.comp.spv", &draw_api.state.subo.ubo.my_texture);
+    // place holder test compute pipeline
+    const comp_pipeline = blk: {
+        const Compute = render.ComputeDrawPipeline;
+        const buffer_configs: [1]Compute.BufferConfig = .{.{ .size = @sizeOf(zlm.Vec2) * 2, .constant = false }};
+        break :blk try Compute.init(allocator, ctx, "../../comp.comp.spv", &draw_api.state.subo.ubo.my_texture, buffer_configs[0..]);
+    };
     defer comp_pipeline.deinit(ctx);
+    const test_data = [2]zlm.Vec2{
+        .{ .x = 0, .y = 1 },
+        .{ .x = 1, .y = 0 },
+    };
+    try comp_pipeline.buffers[0].transfer(ctx, zlm.Vec2, test_data[0..]);
 
     // Loop until the user closes the window
     while (!window.shouldClose()) {
@@ -165,18 +140,6 @@ pub fn main() anyerror!void {
             camera_translate = zlm.Vec2.zero;
         }
 
-        sin_wave += @floatCast(f32, delta_time);
-        sin_dir = if (@mod(sin_wave, 2) < 1) 1 else -1;
-        const offset = std.math.sin(sin_wave);
-        for (my_sprites[2..]) |*my_sprite| {
-            var pos = my_sprite.getPosition();
-            pos.x += offset * sin_dir * 0.2;
-            my_sprite.setPosition(pos);
-
-            var rot = my_sprite.getRotation();
-            rot -= @floatCast(f32, 60 * delta_time);
-            my_sprite.setRotation(rot);
-        }
         {
             // Test compute
             try comp_pipeline.compute(ctx);

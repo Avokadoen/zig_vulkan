@@ -562,7 +562,10 @@ inline fn createCmdBuffer(ctx: Context, command_pool: vk.CommandPool) !vk.Comman
 
 // TODO: at this point pipelines should have their own internal module!
 
-pub const ComputePipeline = struct {
+/// compute shader that draws to a target texture
+pub const ComputeDrawPipeline = struct {
+    pub const BufferConfig = struct { size: u64, constant: bool };
+
     const Self = @This();
 
     allocator: Allocator,
@@ -582,62 +585,110 @@ pub const ComputePipeline = struct {
 
     requested_rescale_pipeline: bool = false,
 
+    buffers: []GpuBufferMemory,
+
+    // TODO: descriptor has a lot of duplicate code with init ...
     // TODO: correctness if init fail, clean up resources created with errdefer
+
     /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
-    /// texture should have a lifetime atleast the lenght of comptute pipeline
-    pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_texture: *Texture) !Self {
+    /// texture should have a lifetime atleast the length of comptute pipeline
+    pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_texture: *Texture, buffer_configs: []const BufferConfig) !Self {
         var self: Self = undefined;
         self.allocator = allocator;
         self.target_texture = target_texture;
 
+        // TODO: descriptor set creation: one single for loop for each config instead of one for loop for each type
+
+        // TODO: create buffers using buffer_size
+        // TODO: transfer data to device buffer
+        const buffers = try allocator.alloc(GpuBufferMemory, buffer_configs.len);
+        errdefer allocator.free(buffers);
+
+        for (buffer_configs) |config, i| {
+            if (config.constant) {
+                // TODO: transfer here and convert to device local
+                std.debug.panic("constant compute buffer is not implemented", .{});
+            } else {
+                // TODO: errdefer deinit
+                buffers[i] = try GpuBufferMemory.init(ctx, config.size, .{ .storage_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
+            }
+        }
+
+        const layout_bindings = try allocator.alloc(vk.DescriptorSetLayoutBinding, 1 + buffer_configs.len);
+        defer allocator.free(layout_bindings);
         self.target_descriptor_layout = blk: {
-            const sampler_layout_binding = vk.DescriptorSetLayoutBinding{
+            layout_bindings[0] = vk.DescriptorSetLayoutBinding{
                 .binding = 1,
-                .descriptor_type = .storage_image, // TODO: validate correct type
+                .descriptor_type = .storage_image,
                 .descriptor_count = 1,
                 .stage_flags = .{
                     .compute_bit = true,
                 },
                 .p_immutable_samplers = null,
             };
-            const layout_bindings = [_]vk.DescriptorSetLayoutBinding{sampler_layout_binding};
+            for (buffer_configs) |_, i| {
+                layout_bindings[1 + i] = vk.DescriptorSetLayoutBinding{
+                    .binding = 2 + @intCast(u32, i),
+                    .descriptor_type = .storage_buffer,
+                    .descriptor_count = 1,
+                    .stage_flags = .{
+                        .compute_bit = true,
+                    },
+                    .p_immutable_samplers = null,
+                };
+            }
+
             const layout_info = vk.DescriptorSetLayoutCreateInfo{
                 .flags = .{},
-                .binding_count = layout_bindings.len,
-                .p_bindings = @ptrCast([*]const vk.DescriptorSetLayoutBinding, &layout_bindings),
+                .binding_count = @intCast(u32, layout_bindings.len),
+                .p_bindings = @ptrCast([*]const vk.DescriptorSetLayoutBinding, layout_bindings.ptr),
             };
             break :blk try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
         };
         errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
 
+        const pool_sizes = try allocator.alloc(vk.DescriptorPoolSize, 1 + buffer_configs.len);
+        defer allocator.free(pool_sizes);
         self.target_descriptor_pool = blk: {
-            const sampler_pool_size = vk.DescriptorPoolSize{
+            pool_sizes[0] = vk.DescriptorPoolSize{
                 .@"type" = .storage_image,
                 .descriptor_count = 1,
             };
+            for (buffer_configs) |_, i| {
+                pool_sizes[1 + i] = vk.DescriptorPoolSize{
+                    .@"type" = .storage_buffer,
+                    .descriptor_count = 1,
+                };
+            }
             const pool_info = vk.DescriptorPoolCreateInfo{
                 .flags = .{},
                 .max_sets = 1,
-                .pool_size_count = 1,
-                .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, &sampler_pool_size),
+                .pool_size_count = @intCast(u32, pool_sizes.len),
+                .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, pool_sizes.ptr),
             };
             break :blk try ctx.vkd.createDescriptorPool(ctx.logical_device, &pool_info, null);
         };
         errdefer ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.target_descriptor_pool, null);
 
-        const descriptor_set_alloc_info = vk.DescriptorSetAllocateInfo{
-            .descriptor_pool = self.target_descriptor_pool,
-            .descriptor_set_count = 1,
-            .p_set_layouts = @ptrCast([*]vk.DescriptorSetLayout, &self.target_descriptor_layout),
-        };
-        try ctx.vkd.allocateDescriptorSets(ctx.logical_device, &descriptor_set_alloc_info, @ptrCast([*]vk.DescriptorSet, &self.target_descriptor_set));
         {
+            const descriptor_set_alloc_info = vk.DescriptorSetAllocateInfo{
+                .descriptor_pool = self.target_descriptor_pool,
+                .descriptor_set_count = 1,
+                .p_set_layouts = @ptrCast([*]vk.DescriptorSetLayout, &self.target_descriptor_layout),
+            };
+            try ctx.vkd.allocateDescriptorSets(ctx.logical_device, &descriptor_set_alloc_info, @ptrCast([*]vk.DescriptorSet, &self.target_descriptor_set));
+        }
+
+        {
+            const write_descriptor_sets = try allocator.alloc(vk.WriteDescriptorSet, 1 + buffer_configs.len);
+            defer allocator.free(write_descriptor_sets);
+
             const image_info = vk.DescriptorImageInfo{
                 .sampler = self.target_texture.sampler,
                 .image_view = self.target_texture.image_view,
                 .image_layout = .general,
             };
-            const image_write_descriptor_set = vk.WriteDescriptorSet{
+            write_descriptor_sets[0] = vk.WriteDescriptorSet{
                 .dst_set = self.target_descriptor_set,
                 .dst_binding = 1,
                 .dst_array_element = 0,
@@ -647,7 +698,38 @@ pub const ComputePipeline = struct {
                 .p_buffer_info = undefined,
                 .p_texel_buffer_view = undefined,
             };
-            ctx.vkd.updateDescriptorSets(ctx.logical_device, 1, @ptrCast([*]const vk.WriteDescriptorSet, &image_write_descriptor_set), 0, undefined);
+
+            const buffer_infos = try allocator.alloc(vk.DescriptorBufferInfo, buffer_configs.len);
+            defer allocator.free(buffer_infos);
+            // store any user defined shader buffers
+            for (buffer_configs) |config, i| {
+                // descriptor for buffer info
+                buffer_infos[i] = vk.DescriptorBufferInfo{
+                    .buffer = buffers[i].buffer,
+                    .offset = 0,
+                    .range = config.size,
+                };
+                write_descriptor_sets[1 + i] = vk.WriteDescriptorSet{
+                    .dst_set = self.target_descriptor_set,
+                    .dst_binding = @intCast(u32, 2 + i),
+                    .dst_array_element = 0,
+                    .descriptor_count = 1,
+                    .descriptor_type = .storage_buffer,
+                    .p_image_info = undefined,
+                    .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &buffer_infos[i]),
+                    .p_texel_buffer_view = undefined,
+                };
+            }
+
+            // zig fmt: off
+            ctx.vkd.updateDescriptorSets(
+                ctx.logical_device, 
+                @intCast(u32, write_descriptor_sets.len), 
+                @ptrCast([*]const vk.WriteDescriptorSet, write_descriptor_sets.ptr),
+                0,
+                undefined
+            );
+            // zig fmt: on
         }
 
         self.pipeline_layout = blk: {
@@ -706,17 +788,20 @@ pub const ComputePipeline = struct {
 
         try self.recordCommands(ctx);
 
-        return Self{
-            .allocator = self.allocator,
-            .pipeline_layout = self.pipeline_layout,
-            .pipeline = self.pipeline,
-            .in_flight_fence = self.in_flight_fence,
-            .command_buffer = self.command_buffer,
-            .target_texture = self.target_texture,
-            .target_descriptor_layout = self.target_descriptor_layout,
-            .target_descriptor_pool = self.target_descriptor_pool,
-            .target_descriptor_set = self.target_descriptor_set,
+        // zig fmt: off
+        return Self{ 
+            .allocator = self.allocator, 
+            .pipeline_layout = self.pipeline_layout, 
+            .pipeline = self.pipeline, 
+            .in_flight_fence = self.in_flight_fence, 
+            .command_buffer = self.command_buffer, 
+            .target_texture = self.target_texture, 
+            .target_descriptor_layout = self.target_descriptor_layout, 
+            .target_descriptor_pool = self.target_descriptor_pool, 
+            .target_descriptor_set = self.target_descriptor_set, 
+            .buffers = buffers,
         };
+        // zig fmt: on
     }
 
     // TODO: sync
@@ -769,6 +854,11 @@ pub const ComputePipeline = struct {
         self.wait_idle(ctx);
 
         ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fence, null);
+
+        for (self.buffers) |buffer| {
+            buffer.deinit(ctx);
+        }
+        self.allocator.free(self.buffers);
 
         ctx.vkd.freeCommandBuffers(ctx.logical_device, ctx.comp_cmd_pool, 1, @ptrCast([*]const vk.CommandBuffer, &self.command_buffer));
         ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
