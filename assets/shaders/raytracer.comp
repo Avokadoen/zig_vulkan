@@ -155,7 +155,7 @@ struct OctreeFloats {
     float inv_scale;
     float inv_cell_count;
 };
-layout (shared, binding = 6) buffer OctreeFloatsBuffer {
+layout (shared, binding = 5) buffer OctreeFloatsBuffer {
     OctreeFloats octree_floats[];
 };
 struct OctreeInts {
@@ -163,7 +163,7 @@ struct OctreeInts {
     int max_iter;
     int cell_count;
 };
-layout (shared, binding = 7) buffer OctreeIntsBuffer {
+layout (shared, binding = 6) buffer OctreeIntsBuffer {
     OctreeInts octree_ints[];
 };
 

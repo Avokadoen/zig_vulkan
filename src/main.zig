@@ -13,6 +13,8 @@ const consts = render.consts;
 const input = @import("input.zig");
 const render2d = @import("render2d/render2d.zig");
 
+const VoxelRT = @import("voxel_rt/VoxelRT.zig");
+
 pub const application_name = "zig vulkan";
 
 // TODO: wrap this in render to make main seem simpler :^)
@@ -89,21 +91,10 @@ pub fn main() anyerror!void {
     var camera = draw_api.createCamera(500, 2);
     var camera_translate = zlm.Vec2.zero;
 
+    const voxel_rt = try VoxelRT.init(allocator, ctx, &draw_api.state.subo.ubo.my_texture);
+    defer voxel_rt.deinit(ctx);
+
     var prev_frame = std.time.milliTimestamp();
-
-    // place holder test compute pipeline
-    const comp_pipeline = blk: {
-        const Compute = render.ComputeDrawPipeline;
-        const buffer_configs: [1]Compute.BufferConfig = .{.{ .size = @sizeOf(zlm.Vec2) * 2, .constant = false }};
-        break :blk try Compute.init(allocator, ctx, "../../comp.comp.spv", &draw_api.state.subo.ubo.my_texture, buffer_configs[0..]);
-    };
-    defer comp_pipeline.deinit(ctx);
-    const test_data = [2]zlm.Vec2{
-        .{ .x = 0, .y = 1 },
-        .{ .x = 1, .y = 0 },
-    };
-    try comp_pipeline.buffers[0].transfer(ctx, zlm.Vec2, test_data[0..]);
-
     // Loop until the user closes the window
     while (!window.shouldClose()) {
         const current_frame = std.time.milliTimestamp();
@@ -141,10 +132,10 @@ pub fn main() anyerror!void {
         }
 
         {
-            // Test compute
-            try comp_pipeline.compute(ctx);
+            //
+            try voxel_rt.compute(ctx);
 
-            // Render here
+            // Render 2d stuff
             try draw_api.draw();
         }
 
