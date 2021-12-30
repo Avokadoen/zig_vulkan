@@ -388,7 +388,7 @@ pub fn framebufferSizeCallbackFn(window: glfw.Window, width: u32, height: u32) v
 /// record default commands for the render2D pipeline
 fn recordGfxCmdBuffers(ctx: render.Context, pipeline: *Pipeline) dispatch.BeginCommandBufferError!void {
     const image = pipeline.sync_descript.ubo.my_texture.image;
-    const image_use = render.texture.getImageTransitionBarrier(image, .general, .general);
+    const image_use = render.Texture.getImageTransitionBarrier(image, .general, .general);
     const clear_color = [_]vk.ClearColorValue{
         .{
             .float_32 = [_]f32{ 0.0, 0.0, 0.0, 1.0 },

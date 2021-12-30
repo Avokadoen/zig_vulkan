@@ -2,8 +2,8 @@ const std = @import("std");
 const vk = @import("vulkan");
 
 const vk_utils = @import("vk_utils.zig");
-const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
-const Context = @import("context.zig").Context;
+const GpuBufferMemory = @import("GpuBufferMemory.zig");
+const Context = @import("Context.zig");
 const Allocator = std.mem.Allocator;
 
 pub fn Config(comptime T: type) type {
@@ -17,144 +17,143 @@ pub fn Config(comptime T: type) type {
     };
 }
 
-// TODO: send a texture
-pub const Texture = struct {
-    image_size: vk.DeviceSize,
-    image_extent: vk.Extent2D,
+const Texture = @This();
 
-    image: vk.Image,
-    image_view: vk.ImageView,
-    image_memory: vk.DeviceMemory,
-    format: vk.Format,
-    sampler: vk.Sampler,
+image_size: vk.DeviceSize,
+image_extent: vk.Extent2D,
 
-    pub fn init(ctx: Context, command_pool: vk.CommandPool, comptime layout: vk.ImageLayout, comptime T: type, config: Config(T)) !Texture {
-        const image_extent = vk.Extent2D{
-            .width = config.width,
-            .height = config.height,
-        };
-        // transfer texture data to gpu
-        const image_size: vk.DeviceSize = @intCast(vk.DeviceSize, config.data.len * @sizeOf(T));
-        var staging_buffer = try GpuBufferMemory.init(ctx, image_size, .{
-            .transfer_src_bit = true,
-        }, .{
-            .host_visible_bit = true,
-            .host_coherent_bit = true,
-        });
-        defer staging_buffer.deinit(ctx);
-        try staging_buffer.transfer(ctx, T, config.data);
+image: vk.Image,
+image_view: vk.ImageView,
+image_memory: vk.DeviceMemory,
+format: vk.Format,
+sampler: vk.Sampler,
 
-        const image = blk: {
-            // TODO: make sure we use correct usage bits https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkImageUsageFlagBits.html
-            // TODO: VK_IMAGE_CREATE_SPARSE_BINDING_BIT
-            const image_info = vk.ImageCreateInfo{
-                .flags = .{},
-                .image_type = .@"2d",
-                .format = config.format,
-                .extent = vk.Extent3D{
-                    .width = config.width,
-                    .height = config.height,
-                    .depth = 1,
-                },
-                .mip_levels = 1,
-                .array_layers = 1,
-                .samples = .{
-                    .@"1_bit" = true,
-                },
-                .tiling = .optimal,
-                .usage = config.usage,
-                .sharing_mode = .exclusive, // TODO: concurrent if (queue_family_indices.len > 1)
-                .queue_family_index_count = @intCast(u32, config.queue_family_indices.len),
-                .p_queue_family_indices = config.queue_family_indices.ptr,
-                .initial_layout = .@"undefined",
-            };
-            break :blk try ctx.vkd.createImage(ctx.logical_device, &image_info, null);
-        };
+pub fn init(ctx: Context, command_pool: vk.CommandPool, comptime layout: vk.ImageLayout, comptime T: type, config: Config(T)) !Texture {
+    const image_extent = vk.Extent2D{
+        .width = config.width,
+        .height = config.height,
+    };
+    // transfer texture data to gpu
+    const image_size: vk.DeviceSize = @intCast(vk.DeviceSize, config.data.len * @sizeOf(T));
+    var staging_buffer = try GpuBufferMemory.init(ctx, image_size, .{
+        .transfer_src_bit = true,
+    }, .{
+        .host_visible_bit = true,
+        .host_coherent_bit = true,
+    });
+    defer staging_buffer.deinit(ctx);
+    try staging_buffer.transfer(ctx, T, config.data);
 
-        const image_memory = blk: {
-            const memory_requirements = ctx.vkd.getImageMemoryRequirements(ctx.logical_device, image);
-            const alloc_info = vk.MemoryAllocateInfo{
-                .allocation_size = memory_requirements.size,
-                .memory_type_index = try vk_utils.findMemoryTypeIndex(ctx, memory_requirements.memory_type_bits, .{
-                    .device_local_bit = true,
-                }),
-            };
-            break :blk try ctx.vkd.allocateMemory(ctx.logical_device, &alloc_info, null);
-        };
-
-        try ctx.vkd.bindImageMemory(ctx.logical_device, image, image_memory, 0);
-        try transitionImageLayout(ctx, command_pool, image, .@"undefined", .transfer_dst_optimal);
-        try copyImageToBuffer(ctx, command_pool, image, staging_buffer.buffer, image_extent);
-
-        try transitionImageLayout(ctx, command_pool, image, .transfer_dst_optimal, layout);
-
-        const image_view = blk: {
-            // TODO: evaluate if this and swapchain should share logic (probably no)
-            const image_view_info = vk.ImageViewCreateInfo{
-                .flags = .{},
-                .image = image,
-                .view_type = .@"2d",
-                .format = config.format,
-                .components = .{
-                    .r = .identity,
-                    .g = .identity,
-                    .b = .identity,
-                    .a = .identity,
-                },
-                .subresource_range = .{
-                    .aspect_mask = .{
-                        .color_bit = true,
-                    },
-                    .base_mip_level = 0,
-                    .level_count = 1,
-                    .base_array_layer = 0,
-                    .layer_count = 1,
-                },
-            };
-            break :blk try ctx.vkd.createImageView(ctx.logical_device, &image_view_info, null);
-        };
-
-        const sampler = blk: {
-            // const device_properties = ctx.vki.getPhysicalDeviceProperties(ctx.physical_device);
-            const sampler_info = vk.SamplerCreateInfo{
-                .flags = .{},
-                .mag_filter = .nearest, // not sure what the application would need
-                .min_filter = .nearest, // RT should use linear, pixel sim should be nearest
-                .mipmap_mode = .nearest,
-                .address_mode_u = .repeat,
-                .address_mode_v = .repeat,
-                .address_mode_w = .repeat,
-                .mip_lod_bias = 0.0,
-                .anisotropy_enable = vk.FALSE, // TODO: test with, and without
-                .max_anisotropy = 1.0, // device_properties.limits.max_sampler_anisotropy,
-                .compare_enable = vk.FALSE,
-                .compare_op = .always,
-                .min_lod = 0.0,
-                .max_lod = 0.0,
-                .border_color = .int_opaque_black,
-                .unnormalized_coordinates = vk.FALSE, // TODO: might be good for pixel sim to use true
-            };
-            break :blk try ctx.vkd.createSampler(ctx.logical_device, &sampler_info, null);
-        };
-
-        return Texture{
-            .image_size = image_size,
-            .image_extent = image_extent,
-            .image = image,
-            .image_view = image_view,
-            .image_memory = image_memory,
+    const image = blk: {
+        // TODO: make sure we use correct usage bits https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkImageUsageFlagBits.html
+        // TODO: VK_IMAGE_CREATE_SPARSE_BINDING_BIT
+        const image_info = vk.ImageCreateInfo{
+            .flags = .{},
+            .image_type = .@"2d",
             .format = config.format,
-            .sampler = sampler,
+            .extent = vk.Extent3D{
+                .width = config.width,
+                .height = config.height,
+                .depth = 1,
+            },
+            .mip_levels = 1,
+            .array_layers = 1,
+            .samples = .{
+                .@"1_bit" = true,
+            },
+            .tiling = .optimal,
+            .usage = config.usage,
+            .sharing_mode = .exclusive, // TODO: concurrent if (queue_family_indices.len > 1)
+            .queue_family_index_count = @intCast(u32, config.queue_family_indices.len),
+            .p_queue_family_indices = config.queue_family_indices.ptr,
+            .initial_layout = .@"undefined",
         };
-    }
+        break :blk try ctx.vkd.createImage(ctx.logical_device, &image_info, null);
+    };
 
-    pub fn deinit(self: Texture, ctx: Context) void {
-        ctx.vkd.destroySampler(ctx.logical_device, self.sampler, null);
-        ctx.vkd.destroyImageView(ctx.logical_device, self.image_view, null);
-        ctx.vkd.destroyImage(ctx.logical_device, self.image, null);
-        ctx.vkd.freeMemory(ctx.logical_device, self.image_memory, null);
-    }
-};
+    const image_memory = blk: {
+        const memory_requirements = ctx.vkd.getImageMemoryRequirements(ctx.logical_device, image);
+        const alloc_info = vk.MemoryAllocateInfo{
+            .allocation_size = memory_requirements.size,
+            .memory_type_index = try vk_utils.findMemoryTypeIndex(ctx, memory_requirements.memory_type_bits, .{
+                .device_local_bit = true,
+            }),
+        };
+        break :blk try ctx.vkd.allocateMemory(ctx.logical_device, &alloc_info, null);
+    };
+
+    try ctx.vkd.bindImageMemory(ctx.logical_device, image, image_memory, 0);
+    try transitionImageLayout(ctx, command_pool, image, .@"undefined", .transfer_dst_optimal);
+    try copyImageToBuffer(ctx, command_pool, image, staging_buffer.buffer, image_extent);
+
+    try transitionImageLayout(ctx, command_pool, image, .transfer_dst_optimal, layout);
+
+    const image_view = blk: {
+        // TODO: evaluate if this and swapchain should share logic (probably no)
+        const image_view_info = vk.ImageViewCreateInfo{
+            .flags = .{},
+            .image = image,
+            .view_type = .@"2d",
+            .format = config.format,
+            .components = .{
+                .r = .identity,
+                .g = .identity,
+                .b = .identity,
+                .a = .identity,
+            },
+            .subresource_range = .{
+                .aspect_mask = .{
+                    .color_bit = true,
+                },
+                .base_mip_level = 0,
+                .level_count = 1,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            },
+        };
+        break :blk try ctx.vkd.createImageView(ctx.logical_device, &image_view_info, null);
+    };
+
+    const sampler = blk: {
+        // const device_properties = ctx.vki.getPhysicalDeviceProperties(ctx.physical_device);
+        const sampler_info = vk.SamplerCreateInfo{
+            .flags = .{},
+            .mag_filter = .nearest, // not sure what the application would need
+            .min_filter = .nearest, // RT should use linear, pixel sim should be nearest
+            .mipmap_mode = .nearest,
+            .address_mode_u = .repeat,
+            .address_mode_v = .repeat,
+            .address_mode_w = .repeat,
+            .mip_lod_bias = 0.0,
+            .anisotropy_enable = vk.FALSE, // TODO: test with, and without
+            .max_anisotropy = 1.0, // device_properties.limits.max_sampler_anisotropy,
+            .compare_enable = vk.FALSE,
+            .compare_op = .always,
+            .min_lod = 0.0,
+            .max_lod = 0.0,
+            .border_color = .int_opaque_black,
+            .unnormalized_coordinates = vk.FALSE, // TODO: might be good for pixel sim to use true
+        };
+        break :blk try ctx.vkd.createSampler(ctx.logical_device, &sampler_info, null);
+    };
+
+    return Texture{
+        .image_size = image_size,
+        .image_extent = image_extent,
+        .image = image,
+        .image_view = image_view,
+        .image_memory = image_memory,
+        .format = config.format,
+        .sampler = sampler,
+    };
+}
+
+pub fn deinit(self: Texture, ctx: Context) void {
+    ctx.vkd.destroySampler(ctx.logical_device, self.sampler, null);
+    ctx.vkd.destroyImageView(ctx.logical_device, self.image_view, null);
+    ctx.vkd.destroyImage(ctx.logical_device, self.image, null);
+    ctx.vkd.freeMemory(ctx.logical_device, self.image_memory, null);
+}
 
 const TransitionBits = struct {
     src_mask: vk.AccessFlags,

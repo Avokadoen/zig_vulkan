@@ -9,7 +9,7 @@ const Allocator = std.mem.Allocator;
 const vk = @import("vulkan");
 const dispatch = @import("dispatch.zig");
 
-const Context = @import("context.zig").Context;
+const Context = @import("Context.zig");
 
 // TODO: support mixed types
 /// Construct VkPhysicalDeviceFeatures type with VkFalse as default field value 

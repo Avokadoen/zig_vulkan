@@ -6,7 +6,6 @@ const vk = @import("vulkan");
 
 const constants = @import("consts.zig");
 const dispatch = @import("dispatch.zig");
-const IoWriters = @import("context.zig").IoWriters;
 
 fn InfoType() type {
     if (constants.enable_validation_layers) {

@@ -8,7 +8,7 @@ const glfw = @import("glfw");
 const dispatch = @import("dispatch.zig");
 const physical_device = @import("physical_device.zig");
 const QueueFamilyIndices = physical_device.QueueFamilyIndices;
-const Context = @import("context.zig").Context;
+const Context = @import("Context.zig");
 
 pub const ViewportScissor = struct {
     viewport: [1]vk.Viewport,

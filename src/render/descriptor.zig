@@ -8,11 +8,10 @@ const stbi = @import("stbi");
 
 const zlm = @import("zlm");
 
-const texture = @import("texture.zig");
-const Texture = texture.Texture; // TODO: remove me
+const Texture = @import("Texture.zig"); // TODO: remove me
 
-const Context = @import("context.zig").Context;
-const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
+const Context = @import("Context.zig");
+const GpuBufferMemory = @import("GpuBufferMemory.zig");
 
 // TODO: rename file
 // TODO: check for slices in config, report error
@@ -95,7 +94,7 @@ pub const Descriptor = struct {
         const indices_len: usize = if (config.ctx.queue_indices.graphics == config.ctx.queue_indices.compute) 1 else 2;
 
         const PixelType = stbi.Pixel;
-        const TextureConfig = texture.Config(PixelType);
+        const TextureConfig = Texture.Config(PixelType);
         const texture_config = TextureConfig{
             .data = config.image.data,
             .width = @intCast(u32, config.image.width),

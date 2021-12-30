@@ -10,12 +10,11 @@ const swapchain = @import("swapchain.zig");
 const vertex = @import("vertex.zig");
 const descriptor = @import("descriptor.zig");
 const utils = @import("../utils.zig");
-const texture = @import("texture.zig");
 const dispatch = @import("dispatch.zig");
 
-const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
-const Texture = texture.Texture;
-const Context = @import("context.zig").Context;
+const GpuBufferMemory = @import("GpuBufferMemory.zig");
+const Texture = @import("Texture.zig");
+const Context = @import("Context.zig");
 
 pub const RecordCmdBufferError = dispatch.BeginCommandBufferError;
 pub const PipelineBuildError = error{
@@ -881,7 +880,7 @@ pub const ComputeDrawPipeline = struct {
     }
 
     inline fn recordCommands(self: Self, ctx: Context) !void {
-        const image_use = texture.getImageTransitionBarrier(self.target_texture.image, .general, .general);
+        const image_use = Texture.getImageTransitionBarrier(self.target_texture.image, .general, .general);
         const command_begin_info = vk.CommandBufferBeginInfo{
             .flags = .{},
             .p_inheritance_info = null,

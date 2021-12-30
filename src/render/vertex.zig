@@ -1,8 +1,8 @@
 const vk = @import("vulkan");
 const zlm = @import("zlm");
 
-const GpuBufferMemory = @import("gpu_buffer_memory.zig").GpuBufferMemory;
-const Context = @import("context.zig").Context;
+const GpuBufferMemory = @import("GpuBufferMemory.zig");
+const Context = @import("Context.zig");
 
 pub const Index = u32;
 
