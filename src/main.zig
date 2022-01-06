@@ -4,7 +4,7 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
 const glfw = @import("glfw");
-const zlm = @import("zlm");
+const za = @import("zalgebra");
 
 const render = @import("render/render.zig");
 const swapchain = render.swapchain;
@@ -76,9 +76,9 @@ pub fn main() anyerror!void {
             const window_size = try window.getSize();
             const windowf = @intToFloat(f32, window_size.height);
             const size = @intToFloat(f32, window_size.height);
-            const scale = zlm.Vec2.new(size, size);
+            const scale = za.Vec2.new(size, size);
 
-            const pos = zlm.Vec2.new((windowf - scale.x) * 0.5, (windowf - scale.y) * 0.5);
+            const pos = za.Vec2.new((windowf - scale[0]) * 0.5, (windowf - scale[0]) * 0.5);
             my_sprite = try init_api.createSprite(my_texture, pos, 0, scale);
         }
         break :blk try init_api.initDrawApi(.{ .every_ms = 9999 });
@@ -89,7 +89,7 @@ pub fn main() anyerror!void {
     defer draw_api.noHandleWindowResize(window);
 
     var camera = draw_api.createCamera(500, 2);
-    var camera_translate = zlm.Vec2.zero;
+    var camera_translate = za.Vec2.zero();
 
     const voxel_rt = try VoxelRT.init(allocator, ctx, &draw_api.state.subo.ubo.my_texture);
     defer voxel_rt.deinit(ctx);
@@ -111,24 +111,24 @@ pub fn main() anyerror!void {
 
         var call_translate = false;
         if (move_up) {
-            camera_translate.y -= 1;
+            camera_translate[1] -= 1;
             call_translate = true;
         }
         if (move_down) {
-            camera_translate.y += 1;
+            camera_translate[1] += 1;
             call_translate = true;
         }
         if (move_right) {
-            camera_translate.x += 1;
+            camera_translate[0] += 1;
             call_translate = true;
         }
         if (move_left) {
-            camera_translate.x -= 1;
+            camera_translate[0] -= 1;
             call_translate = true;
         }
         if (call_translate) {
             camera.translate(dt, camera_translate);
-            camera_translate = zlm.Vec2.zero;
+            camera_translate = za.Vec2.zero();
         }
 
         {

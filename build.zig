@@ -86,11 +86,7 @@ const ShaderMoveStep = struct {
         var new_dir = try fs.openDirAbsolute(self.builder.install_prefix, .{});
         defer new_dir.close();
 
-        const join_arr = [_][]const u8{ old_path.file_name, "spv" };
-        const new_file_name = try std.mem.join(self.*.builder.allocator, ".", join_arr[0..join_arr.len]);
-        self.*.builder.allocator.destroy(new_file_name.ptr);
-
-        try fs.rename(old_dir, old_path.file_name, new_dir, new_file_name);
+        try fs.rename(old_dir, old_path.file_name, new_dir, old_path.file_name);
     }
 };
 
@@ -186,9 +182,7 @@ pub fn build(b: *Builder) void {
     // compile and link with glfw statically
     glfw.link(b, exe, .{});
     exe.addPackagePath("glfw", "deps/mach-glfw/src/main.zig");
-
-    exe.addPackagePath("ecs", "deps/zig-ecs/src/ecs.zig");
-    exe.addPackagePath("zlm", "deps/zlm/zlm.zig");
+    exe.addPackagePath("zalgebra", "deps/zalgebra/src/main.zig");
 
     stbi.linkStep(b, exe);
 
@@ -197,11 +191,9 @@ pub fn build(b: *Builder) void {
     exe.step.dependOn(&gen.step);
     exe.addPackage(gen.package);
 
-    const shader_comp = vkgen.ShaderCompileStep.init(
-        b,
-        // TODO: -O (optimize), -I (includes)
-        &[_][]const u8{ "glslc", "--target-env=vulkan1.2" },
-    );
+    const shader_comp = vkgen.ShaderCompileStep.init(b,
+    // TODO: -O (optimize), -I (includes)
+    &[_][]const u8{ "glslc", "--target-env=vulkan1.2" }, "shaders");
     const shader_move_step = ShaderMoveStep.init(b, shader_comp) catch unreachable;
 
     {

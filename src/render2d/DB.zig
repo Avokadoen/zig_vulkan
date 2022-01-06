@@ -6,7 +6,9 @@ const render = @import("../render/render.zig");
 const Context = render.Context;
 const GpuBufferMemory = render.GpuBufferMemory;
 
-const zlm = @import("zlm");
+const za = @import("zalgebra");
+const Vec2 = @Vector(2, f32);
+
 const util_types = @import("util_types.zig");
 const UV = util_types.UV;
 const TextureHandle = util_types.TextureHandle;
@@ -44,7 +46,7 @@ const ShiftEvent = union(ShiftEnum) {
 // global data
 len: usize,
 sprite_pool_size: usize,
-uv_buffer: StorageType(zlm.Vec2),
+uv_buffer: StorageType(Vec2),
 uv_meta: ArrayList(TextureHandle),
 
 // used to lookup index of sprite in array's using ID
@@ -54,8 +56,8 @@ layer_data: ArrayList(Layer),
 shift_events: ArrayList(ShiftEvent),
 
 // instance data
-positions: StorageType(zlm.Vec2),
-scales: StorageType(zlm.Vec2),
+positions: StorageType(Vec2),
+scales: StorageType(Vec2),
 rotations: StorageType(f32),
 uv_indices: StorageType(c_int),
 
@@ -69,12 +71,12 @@ pub fn initCapacity(allocator: Allocator, capacity: usize) !DB {
     return DB{
         .len = 0,
         .sprite_pool_size = capacity,
-        .uv_buffer = try StorageType(zlm.Vec2).initCapacity(allocator, 10 * 4 * 2), // TODO: allow configure
+        .uv_buffer = try StorageType(Vec2).initCapacity(allocator, 10 * 4 * 2), // TODO: allow configure
         .uv_meta = try ArrayList(TextureHandle).initCapacity(allocator, capacity),
         .layer_data = layers,
         .shift_events = ArrayList(ShiftEvent).init(allocator),
-        .positions = try StorageType(zlm.Vec2).initCapacity(allocator, capacity),
-        .scales = try StorageType(zlm.Vec2).initCapacity(allocator, capacity),
+        .positions = try StorageType(Vec2).initCapacity(allocator, capacity),
+        .scales = try StorageType(Vec2).initCapacity(allocator, capacity),
         .rotations = try StorageType(f32).initCapacity(allocator, capacity),
         .uv_indices = try StorageType(c_int).initCapacity(allocator, capacity),
     };
@@ -91,8 +93,8 @@ pub fn getNewId(self: *DB) !Id {
         self.sprite_pool_size += 1;
     }
 
-    try self.positions.append(zlm.Vec2.zero);
-    try self.scales.append(zlm.Vec2.zero);
+    try self.positions.append(za.Vec2.zero());
+    try self.scales.append(za.Vec2.zero());
     try self.rotations.append(0);
     try self.uv_indices.append(0);
 
@@ -238,10 +240,10 @@ pub fn flush(self: *DB) void {
 pub inline fn generateUvBuffer(self: *DB, mega_uvs: []UV) !void {
     self.uv_buffer.delta.from = 0;
     for (mega_uvs) |uv| {
-        try self.uv_buffer.append(zlm.Vec2.new(uv.min.x, uv.max.y));
+        try self.uv_buffer.append(za.Vec2.new(uv.min[0], uv.max[1]));
         try self.uv_buffer.append(uv.max);
         try self.uv_buffer.append(uv.min);
-        try self.uv_buffer.append(zlm.Vec2.new(uv.max.x, uv.min.y));
+        try self.uv_buffer.append(za.Vec2.new(uv.max[0], uv.min[1]));
     }
     self.uv_buffer.delta.to = self.uv_buffer.storage.items.len - 1;
     self.uv_buffer.delta.has_changes = true;

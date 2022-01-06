@@ -1,4 +1,4 @@
-const zlm = @import("zlm");
+const za = @import("zalgebra");
 
 pub const NodeType = enum(u32) {
     empty = 0,
@@ -16,7 +16,7 @@ pub const Node = extern struct {
 pub const Material = extern struct { @"type": i32, attributee_index: i32, albedo_index: i32 };
 
 // storage buffer, binding: 2
-pub const Albedo = extern struct { value: zlm.Vec3 };
+pub const Albedo = extern struct { value: za.Vec3 };
 
 // storage buffer, binding: 3
 pub const Metal = extern struct {
@@ -30,7 +30,7 @@ pub const Dielectric = extern struct {
 
 // storage buffer, binding: 5
 pub const OctreeFloats = extern struct {
-    min_point: zlm.Vec4,
+    min_point: za.Vec4,
     scale: f32,
     inv_scale: f32,
     inv_cell_count: f32,
@@ -48,11 +48,11 @@ pub const Camera = extern struct {
     image_width: i32,
     image_height: i32,
 
-    horizontal: zlm.Vec3,
-    vertical: zlm.Vec3,
+    horizontal: za.Vec3,
+    vertical: za.Vec3,
 
-    lower_left_corner: zlm.Vec3,
-    origin: zlm.Vec3,
+    lower_left_corner: za.Vec3,
+    origin: za.Vec3,
 
     samples_per_pixel: i32,
     max_bounce: i32,
