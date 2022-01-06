@@ -4,7 +4,7 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const zlm = @import("zlm");
+const za = @import("zalgebra");
 const stbi = @import("stbi");
 const glfw = @import("glfw");
 const vk = @import("vulkan");
@@ -34,6 +34,8 @@ pub const Sprite = @import("Sprite.zig");
 pub const InvalidApiUseError = error{
     Invalidated,
 };
+
+const Vec2 = @Vector(2, f32);
 
 /// initialize the sprite library, caller must make sure to call deinit
 /// - init_capacity: how many sprites should be preallocated 
@@ -102,7 +104,7 @@ pub const InitializedApi = struct {
     }
 
     /// Create a new sprite 
-    pub fn createSprite(self: *Self, texture: TextureHandle, position: zlm.Vec2, rotation: f32, size: zlm.Vec2) !Sprite {
+    pub fn createSprite(self: *Self, texture: TextureHandle, position: Vec2, rotation: f32, size: Vec2) !Sprite {
         if (self.prepared_to_draw) {
             return InvalidApiUseError.Invalidated; // this function can not be called after prepareDraw has been called
         }
@@ -118,7 +120,7 @@ pub const InitializedApi = struct {
         const index = self.db_ptr.*.getIndex(&new_sprite.db_id);
         self.db_ptr.*.positions.updateAt(index, position);
         self.db_ptr.*.scales.updateAt(index, size);
-        self.db_ptr.*.rotations.updateAt(index, zlm.toRadians(rotation));
+        self.db_ptr.*.rotations.updateAt(index, za.toRadians(rotation));
         self.db_ptr.*.uv_indices.updateAt(index, texture.id);
 
         return new_sprite;
@@ -160,12 +162,12 @@ pub const InitializedApi = struct {
 
             // image we are moving from (src)
             const image = self.images.items[packjob.id];
-            mega_uvs[packjob.id] = .{ .min = .{
-                .x = @floatCast(f32, @intToFloat(f64, packjob.x) / mega_widthf),
-                .y = @floatCast(f32, @intToFloat(f64, packjob.y) / mega_heightf),
-            }, .max = .{
-                .x = @floatCast(f32, @intToFloat(f64, x_bound) / mega_widthf),
-                .y = @floatCast(f32, @intToFloat(f64, y_bound) / mega_heightf),
+            mega_uvs[packjob.id] = .{ .min = [2]f32{
+                @floatCast(f32, @intToFloat(f64, packjob.x) / mega_widthf),
+                @floatCast(f32, @intToFloat(f64, packjob.y) / mega_heightf),
+            }, .max = [2]f32{
+                @floatCast(f32, @intToFloat(f64, x_bound) / mega_widthf),
+                @floatCast(f32, @intToFloat(f64, y_bound) / mega_heightf),
             } };
 
             var iy = packjob.y;
@@ -195,11 +197,11 @@ pub const InitializedApi = struct {
         };
 
         const buffer_sizes = [_]u64{
-            @sizeOf(zlm.Vec2) * self.db_ptr.*.sprite_pool_size,
-            @sizeOf(zlm.Vec2) * self.db_ptr.*.sprite_pool_size,
+            @sizeOf(Vec2) * self.db_ptr.*.sprite_pool_size,
+            @sizeOf(Vec2) * self.db_ptr.*.sprite_pool_size,
             @sizeOf(f32) * self.db_ptr.*.sprite_pool_size,
             @sizeOf(c_int) * self.db_ptr.*.sprite_pool_size,
-            @sizeOf(zlm.Vec2) * mega_uvs.len * 4,
+            @sizeOf(Vec2) * mega_uvs.len * 4,
         };
 
         const desc_config = render.descriptor.Config{

@@ -6,7 +6,7 @@ const vk = @import("vulkan");
 
 const stbi = @import("stbi");
 
-const zlm = @import("zlm");
+const za = @import("zalgebra");
 
 const Texture = @import("Texture.zig"); // TODO: remove me
 
@@ -202,12 +202,12 @@ pub const Descriptor = struct {
 // TODO: multiply projection and view on CPU (model is instanced (TODO) and has to be applied on GPU)
 // TODO: push constant instead?
 pub const Uniform = extern struct {
-    view: zlm.Mat4,
-    projection: zlm.Mat4,
+    view: za.Mat4,
+    projection: za.Mat4,
 
     pub fn init(viewport: vk.Viewport) Uniform {
         return .{
-            .view = zlm.Mat4.identity,
+            .view = za.Mat4.identity(),
             .projection = blk: {
                 const half_width = viewport.width * 0.5;
                 const half_height = viewport.height * 0.5;
@@ -217,7 +217,7 @@ pub const Uniform = extern struct {
                 const top: f32 = -half_height;
                 const z_near: f32 = -1000;
                 const z_far: f32 = 1000;
-                break :blk zlm.Mat4.createOrthogonal(left, right, bottom, top, z_near, z_far);
+                break :blk za.Mat4.orthographic(left, right, bottom, top, z_near, z_far);
             },
         };
     }

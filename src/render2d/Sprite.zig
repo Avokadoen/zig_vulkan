@@ -1,4 +1,4 @@
-const zlm = @import("zlm");
+const za = @import("zalgebra");
 
 const DB = @import("DB.zig");
 const types = @import("util_types.zig");
@@ -17,23 +17,23 @@ pub inline fn init() void {
 }
 
 /// set sprite position
-pub inline fn setPosition(self: *Sprite, pos: zlm.Vec2) void {
+pub inline fn setPosition(self: *Sprite, pos: za.Vec2) void {
     const index = self.db_ptr.getIndex(&self.db_id);
     self.db_ptr.positions.updateAt(index, pos);
 }
 
-pub inline fn getPosition(self: *Sprite) zlm.Vec2 {
+pub inline fn getPosition(self: *Sprite) za.Vec2 {
     const index = self.db_ptr.getIndex(&self.db_id);
     return self.db_ptr.positions.storage.items[index];
 }
 
 /// set sprite size in pixels
-pub fn setSize(self: *Sprite, scale: zlm.Vec2) void {
+pub fn setSize(self: *Sprite, scale: za.Vec2) void {
     const index = self.db_ptr.getIndex(&self.db_id);
     self.db_ptr.scales.updateAt(index, scale);
 }
 
-pub inline fn getSize(self: *Sprite) zlm.Vec2 {
+pub inline fn getSize(self: *Sprite) za.Vec2 {
     const index = self.db_ptr.getIndex(&self.db_id);
     return self.db_ptr.scales.storage.items[index];
 }
@@ -41,12 +41,12 @@ pub inline fn getSize(self: *Sprite) zlm.Vec2 {
 /// set sprite rotation, counter clockwise degrees
 pub inline fn setRotation(self: *Sprite, rotation: f32) void {
     const index = self.db_ptr.getIndex(&self.db_id);
-    self.db_ptr.rotations.updateAt(index, zlm.toRadians(rotation));
+    self.db_ptr.rotations.updateAt(index, za.toRadians(rotation));
 }
 
 pub inline fn getRotation(self: *Sprite) f32 {
     const index = self.db_ptr.getIndex(&self.db_id);
-    return zlm.toDegrees(self.db_ptr.rotations.storage.items[index]);
+    return za.toDegrees(self.db_ptr.rotations.storage.items[index]);
 }
 
 /// Update sprite image to a new handle
@@ -86,7 +86,7 @@ pub fn scaleToHeight(self: *Sprite, height: f32) void {
     const rect = self.getRectangle();
     const ratio = @intToFloat(f32, rect.height) / @intToFloat(f32, rect.width);
     const index = self.db_ptr.getIndex(&self.db_id);
-    self.scales.items[index] = zlm.Vec2{
+    self.scales.items[index] = za.Vec2{
         .x = height * ratio,
         .y = height,
     };

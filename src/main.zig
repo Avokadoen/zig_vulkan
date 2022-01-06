@@ -4,7 +4,7 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
 const glfw = @import("glfw");
-const zlm = @import("zlm");
+const za = @import("zalgebra");
 
 const render = @import("render/render.zig");
 const swapchain = render.swapchain;
@@ -76,9 +76,9 @@ pub fn main() anyerror!void {
             const window_size = try window.getSize();
             const windowf = @intToFloat(f32, window_size.height);
             const size = @intToFloat(f32, window_size.height);
-            const scale = zlm.Vec2.new(size, size);
+            const scale = za.Vec2.new(size, size);
 
-            const pos = zlm.Vec2.new((windowf - scale.x) * 0.5, (windowf - scale.y) * 0.5);
+            const pos = za.Vec2.new((windowf - scale[0]) * 0.5, (windowf - scale[0]) * 0.5);
             my_sprite = try init_api.createSprite(my_texture, pos, 0, scale);
         }
         break :blk try init_api.initDrawApi(.{ .every_ms = 9999 });

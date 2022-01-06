@@ -1,12 +1,9 @@
 [submodule "deps/vulkan-zig"]
 	path = deps/vulkan-zig
 	url = https://github.com/Snektron/vulkan-zig.git
-[submodule "deps/zig-ecs"]
-	path = deps/zig-ecs
-	url = https://github.com/prime31/zig-ecs.git
-[submodule "deps/zlm"]
-	path = deps/zlm
-	url = https://github.com/ziglibs/zlm.git
 [submodule "deps/mach-glfw"]
 	path = deps/mach-glfw
 	url = git@github.com:hexops/mach-glfw.git
+[submodule "deps/zalgebra"]
+	path = deps/zalgebra
+	url = git@github.com:kooparse/zalgebra.git

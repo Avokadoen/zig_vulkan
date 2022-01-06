@@ -1,5 +1,6 @@
 const std = @import("std");
-const zlm = @import("zlm");
+const Vec3 = @Vector(3, f32);
+const Vec4 = @Vector(4, f32);
 
 pub const BufferConfig = @import("../render/pipeline.zig").ComputeDrawPipeline.BufferConfig;
 
@@ -50,7 +51,7 @@ pub const Material = extern struct {
 // TODO: convert to push constants: Albedo, Metal, Dielectric
 
 // storage buffer, binding: 4
-pub const Albedo = extern struct { value: zlm.Vec3 };
+pub const Albedo = extern struct { value: Vec3 };
 
 // storage buffer, binding: 5
 pub const Metal = extern struct {
@@ -64,7 +65,7 @@ pub const Dielectric = extern struct {
 
 // storage buffer, binding: 7
 pub const OctreeFloats = extern struct {
-    min_point: zlm.Vec4,
+    min_point: Vec4,
     scale: f32,
     inv_scale: f32,
     inv_cell_count: f32,
