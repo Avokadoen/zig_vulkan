@@ -88,9 +88,6 @@ pub fn main() anyerror!void {
     draw_api.handleWindowResize(window);
     defer draw_api.noHandleWindowResize(window);
 
-    var camera = draw_api.createCamera(500, 2);
-    var camera_translate = zlm.Vec2.zero;
-
     const voxel_rt = try VoxelRT.init(allocator, ctx, &draw_api.state.subo.ubo.my_texture);
     defer voxel_rt.deinit(ctx);
 
@@ -101,35 +98,7 @@ pub fn main() anyerror!void {
         delta_time = @intToFloat(f64, current_frame - prev_frame) / @as(f64, std.time.ms_per_s);
         // f32 variant of delta_time
         const dt = @floatCast(f32, delta_time);
-
-        if (zoom_in) {
-            camera.zoomIn(dt);
-        }
-        if (zoom_out) {
-            camera.zoomOut(dt);
-        }
-
-        var call_translate = false;
-        if (move_up) {
-            camera_translate.y -= 1;
-            call_translate = true;
-        }
-        if (move_down) {
-            camera_translate.y += 1;
-            call_translate = true;
-        }
-        if (move_right) {
-            camera_translate.x += 1;
-            call_translate = true;
-        }
-        if (move_left) {
-            camera_translate.x -= 1;
-            call_translate = true;
-        }
-        if (call_translate) {
-            camera.translate(dt, camera_translate);
-            camera_translate = zlm.Vec2.zero;
-        }
+        _ = dt;
 
         {
             //

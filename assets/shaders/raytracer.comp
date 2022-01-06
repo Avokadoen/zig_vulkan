@@ -1,6 +1,6 @@
 #version 450
 
-// Shader from: https://github.com/Avokadoen/tdt4230_project_raytracing
+#include "rand.comp"
 
 layout(local_size_x = 32, local_size_y = 32) in;
 layout(rgba32f, binding = 0) uniform image2D img_output;
@@ -50,72 +50,6 @@ vec3 SampleGGXVNDF(vec3 inv_view_dir, vec2 alpha, vec2 U) {
     return normalize(vec3(alpha.x * Nh.x, alpha.y * Nh.y, max(0.0, Nh.z)));
 }
 
-
-float Rand(float co) { return fract(sin(co*(91.3458)) * 47453.5453); }
-float Rand(vec2 co){ return fract(sin(dot(co.xy, vec2(12.9898,78.233))) * 43758.5453); }
-float Rand(vec3 co){ return Rand(co.xy+Rand(co.z)); }
-float Rand(vec2 co, float min, float max) {
-    return min + (max - min) * Rand(co);
-}
-vec3 RandVec3(vec2 co) {
-    float x = Rand(co);
-    float y = Rand(vec2(co.x + x, co.y + x));
-    float z = Rand(vec2(co.x + y, co.y + y));
-    return vec3(x, y, z);
-}
-vec3 RandVec3(vec2 co, float min, float max) {
-    float x = Rand(co, min, max);
-    float y = Rand(vec2(co.x + x, co.y + x), min, max);
-    float z = Rand(vec2(co.x + y, co.y + y), min, max);
-    return vec3(x, y, z);
-}
-// Source: https://www.shadertoy.com/view/4djSRW
-float hash12(vec2 p) {
-	vec3 p3  = fract(vec3(p.xyx) * .1031);
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
-}
-float hash12(vec2 p, float min, float max) {
-    return fma(hash12(p), (max - min), min) ;
-}
-float hash13(vec3 p3)
-{
-	p3  = fract(p3 * .1031);
-    p3 += dot(p3, p3.zyx + 31.32);
-    return fract((p3.x + p3.y) * p3.z);
-}
-vec2 hash23(vec3 p3)
-{
-	p3 = fract(p3 * vec3(.1031, .1030, .0973));
-    p3 += dot(p3, p3.yzx+33.33);
-    return fract((p3.xx+p3.yz)*p3.zy);
-}
-vec3 hash32(vec2 p)
-{
-	vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973));
-    p3 += dot(p3, p3.yxz + 33.33);
-    return fract((p3.xxy + p3.yzz) * p3.zyx);
-}
-vec3 hash32(vec2 p, float min, float max) {
-    vec3 rng = hash32(p);
-    float min_max_diff = max - min;
-    return vec3(
-        fma(rng.x, min_max_diff, min), 
-        fma(rng.y, min_max_diff, min), 
-        fma(rng.z, min_max_diff, min)
-    );
-}
-vec3 RandInHemisphere(vec2 co, vec3 normal) {
-    vec3 in_unit_sphere = RandVec3(co, -1, 1);
-    while (dot(in_unit_sphere, in_unit_sphere) >= 1) {
-        in_unit_sphere = RandVec3(co, -1, 1);
-    }
-    if (dot(in_unit_sphere, normal) > 0.0) // In the same hemisphere as the normal
-        return in_unit_sphere;
-    else
-        return -in_unit_sphere;
-}
-
 struct Ray {
     vec3 origin;
     vec3 direction;
@@ -132,7 +66,7 @@ struct HitRecord {
     bool front_face;
 };
 
-struct Camera {
+layout(binding = 1) uniform CameraBuffer {
     int image_width;
     int image_height;
 
@@ -144,9 +78,8 @@ struct Camera {
 
     int samples_per_pixel;
     int max_bounce;
-};
-uniform Camera camera;
-Ray CameraGetRay(Camera camera, float u, float v);
+} camera;
+Ray CameraGetRay(float u, float v);
 
 
 struct OctreeFloats {
@@ -155,7 +88,7 @@ struct OctreeFloats {
     float inv_scale;
     float inv_cell_count;
 };
-layout (shared, binding = 5) buffer OctreeFloatsBuffer {
+layout (std430, binding = 7) buffer OctreeFloatsBuffer {
     OctreeFloats octree_floats[];
 };
 struct OctreeInts {
@@ -163,7 +96,7 @@ struct OctreeInts {
     int max_iter;
     int cell_count;
 };
-layout (shared, binding = 6) buffer OctreeIntsBuffer {
+layout (std430, binding = 8) buffer OctreeIntsBuffer {
     OctreeInts octree_ints[];
 };
 
@@ -175,11 +108,11 @@ struct Node {
     // EMPTY    = not used,
     // PARENT   = index to indirect cell
     // LEAF     = index to material
-    uint value;
     uint type; 
+    uint value;
 };
 // Read about std here: https://www.khronos.org/opengl/wiki/Interface_Block_(GLSL)#Memory_layout
-layout (shared, binding = 0) buffer IndirectCellBuffer {
+layout (std430, binding = 2) buffer IndirectCellBuffer {
     readonly Node indirect_cells[];
 };
 // Octree methods
@@ -190,10 +123,10 @@ bool CubeHit(vec3 cmin, float size, Ray r, float t_min, inout float t_max, out H
 
 struct Material {
     int type;
-    int attribute_index;
+    int type_index;
     int albedo_index;
 };
-layout (std430, binding = 1) buffer MaterialBuffer {
+layout (std430, binding = 3) buffer MaterialBuffer {
     readonly Material materials[];
 };
 bool ScatterLambertian(Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scattered);
@@ -207,7 +140,7 @@ struct Albedo {
     float y;
     float z;
 };
-layout (std430, binding = 2) buffer AlbedoBuffer {
+layout (std430, binding = 4) buffer AlbedoBuffer {
     readonly Albedo albedos[];
 };
 vec3 AlbedoColor(uint index);
@@ -216,7 +149,7 @@ vec3 AlbedoColor(uint index);
 struct Metal {
     float fuzz;
 };
-layout (std430, binding = 3) buffer MetalBuffer {
+layout (std430, binding = 5) buffer MetalBuffer {
     readonly Metal metal[];
 };
 
@@ -224,7 +157,7 @@ layout (std430, binding = 3) buffer MetalBuffer {
 struct Dielectric {
     float ir;
 };
-layout (std430, binding = 4) buffer DielectricBuffer {
+layout (std430, binding = 6) buffer DielectricBuffer {
     readonly Dielectric dielectric[];
 };
 
@@ -244,7 +177,7 @@ void main() {
         // TODO: remove division
         float u = (x + hash12(vec2(x + sample_i, y) * 0.2)) / float(camera.image_width - 1);
         float v = (y + hash12(vec2(x, y + sample_i) * 0.2)) / float(camera.image_height - 1);
-        Ray ray = CameraGetRay(camera, u, v);
+        Ray ray = CameraGetRay(u, v);
         color += RayColor(ray);
     }
 
@@ -303,7 +236,7 @@ vec3 RayColor(Ray r) {
     return background_color;
 }
 
-Ray CameraGetRay(Camera camera, float u, float v) {
+Ray CameraGetRay(float u, float v) {
     vec3 ray_dir = fma(camera.horizontal, vec3(u), camera.lower_left_corner) + fma(vec3(v), camera.vertical, -camera.origin);
     return CreateRay(camera.origin, ray_dir);
 }
@@ -486,7 +419,7 @@ bool ScatterLambertian(Ray r_in, HitRecord hit, out vec3 attenuation, out Ray sc
 bool ScatterMetal(Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scattered) {
     vec3 reflected = reflect(r_in.direction, normalize(hit.normal));
     Material mat = materials[hit.index];
-    float fuzz = metal[mat.attribute_index].fuzz;
+    float fuzz = metal[mat.type_index].fuzz;
     scattered = CreateRay(hit.point, reflected + fuzz * RandInHemisphere(hit.point.xy, hit.normal));
     attenuation = AlbedoColor(hit.index);
     return (dot(scattered.direction, hit.normal) > 0);
@@ -513,7 +446,7 @@ float reflectance(float cosine, float ref_ratio) {
 bool ScatterDielectric(Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scattered) {
     attenuation = vec3(1.0, 1.0, 1.0);
     Material mat = materials[hit.index];
-    float ir = dielectric[mat.attribute_index].ir;
+    float ir = dielectric[mat.type_index].ir;
     float refraction_ratio = ir;
     if(hit.front_face) {
         refraction_ratio = (1.0/ir); 

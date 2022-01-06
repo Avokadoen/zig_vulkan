@@ -563,6 +563,7 @@ inline fn createCmdBuffer(ctx: Context, command_pool: vk.CommandPool) !vk.Comman
 
 /// compute shader that draws to a target texture
 pub const ComputeDrawPipeline = struct {
+    // TODO: explicit binding ..
     pub const BufferConfig = struct { size: u64, constant: bool };
 
     const Self = @This();
@@ -584,24 +585,30 @@ pub const ComputeDrawPipeline = struct {
 
     requested_rescale_pipeline: bool = false,
 
-    buffers: []GpuBufferMemory,
+    uniform_buffer: GpuBufferMemory,
+    storage_buffers: []GpuBufferMemory,
 
     // TODO: descriptor has a lot of duplicate code with init ...
+    // TODO: refactor descriptor stuff to be configurable (loop array of config objects for buffer stuff)
     // TODO: correctness if init fail, clean up resources created with errdefer
 
     /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
     /// texture should have a lifetime atleast the length of comptute pipeline
-    pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_texture: *Texture, buffer_configs: []const BufferConfig) !Self {
+    pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_texture: *Texture, uniform_size: u64, buffer_configs: []const BufferConfig) !Self {
         var self: Self = undefined;
         self.allocator = allocator;
         self.target_texture = target_texture;
 
         // TODO: descriptor set creation: one single for loop for each config instead of one for loop for each type
 
+        // TODO: camera should be a push constant instead!
+        const uniform_buffer = try GpuBufferMemory.init(ctx, uniform_size, .{ .uniform_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
+        errdefer uniform_buffer.deinit(ctx);
+
         // TODO: create buffers using buffer_size
         // TODO: transfer data to device buffer
-        const buffers = try allocator.alloc(GpuBufferMemory, buffer_configs.len);
-        errdefer allocator.free(buffers);
+        const storage_buffers = try allocator.alloc(GpuBufferMemory, buffer_configs.len);
+        errdefer allocator.free(storage_buffers);
 
         for (buffer_configs) |config, i| {
             if (config.constant) {
@@ -609,15 +616,16 @@ pub const ComputeDrawPipeline = struct {
                 std.debug.panic("constant compute buffer is not implemented", .{});
             } else {
                 // TODO: errdefer deinit
-                buffers[i] = try GpuBufferMemory.init(ctx, config.size, .{ .storage_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
+                storage_buffers[i] = try GpuBufferMemory.init(ctx, config.size, .{ .storage_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
             }
         }
 
-        const layout_bindings = try allocator.alloc(vk.DescriptorSetLayoutBinding, 1 + buffer_configs.len);
+        const layout_bindings = try allocator.alloc(vk.DescriptorSetLayoutBinding, 2 + buffer_configs.len);
         defer allocator.free(layout_bindings);
         self.target_descriptor_layout = blk: {
+            // target image
             layout_bindings[0] = vk.DescriptorSetLayoutBinding{
-                .binding = 1,
+                .binding = 0,
                 .descriptor_type = .storage_image,
                 .descriptor_count = 1,
                 .stage_flags = .{
@@ -625,8 +633,18 @@ pub const ComputeDrawPipeline = struct {
                 },
                 .p_immutable_samplers = null,
             };
+            // camera struct
+            layout_bindings[1] = vk.DescriptorSetLayoutBinding{
+                .binding = 1,
+                .descriptor_type = .uniform_buffer,
+                .descriptor_count = 1,
+                .stage_flags = .{
+                    .compute_bit = true,
+                },
+                .p_immutable_samplers = null,
+            };
             for (buffer_configs) |_, i| {
-                layout_bindings[1 + i] = vk.DescriptorSetLayoutBinding{
+                layout_bindings[2 + i] = vk.DescriptorSetLayoutBinding{
                     .binding = 2 + @intCast(u32, i),
                     .descriptor_type = .storage_buffer,
                     .descriptor_count = 1,
@@ -646,15 +664,19 @@ pub const ComputeDrawPipeline = struct {
         };
         errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
 
-        const pool_sizes = try allocator.alloc(vk.DescriptorPoolSize, 1 + buffer_configs.len);
+        const pool_sizes = try allocator.alloc(vk.DescriptorPoolSize, 2 + buffer_configs.len);
         defer allocator.free(pool_sizes);
         self.target_descriptor_pool = blk: {
             pool_sizes[0] = vk.DescriptorPoolSize{
                 .@"type" = .storage_image,
                 .descriptor_count = 1,
             };
+            pool_sizes[1] = vk.DescriptorPoolSize{
+                .@"type" = .uniform_buffer,
+                .descriptor_count = 1,
+            };
             for (buffer_configs) |_, i| {
-                pool_sizes[1 + i] = vk.DescriptorPoolSize{
+                pool_sizes[2 + i] = vk.DescriptorPoolSize{
                     .@"type" = .storage_buffer,
                     .descriptor_count = 1,
                 };
@@ -679,7 +701,7 @@ pub const ComputeDrawPipeline = struct {
         }
 
         {
-            const write_descriptor_sets = try allocator.alloc(vk.WriteDescriptorSet, 1 + buffer_configs.len);
+            const write_descriptor_sets = try allocator.alloc(vk.WriteDescriptorSet, 2 + buffer_configs.len);
             defer allocator.free(write_descriptor_sets);
 
             const image_info = vk.DescriptorImageInfo{
@@ -689,12 +711,28 @@ pub const ComputeDrawPipeline = struct {
             };
             write_descriptor_sets[0] = vk.WriteDescriptorSet{
                 .dst_set = self.target_descriptor_set,
-                .dst_binding = 1,
+                .dst_binding = 0,
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_image,
                 .p_image_info = @ptrCast([*]const vk.DescriptorImageInfo, &image_info),
                 .p_buffer_info = undefined,
+                .p_texel_buffer_view = undefined,
+            };
+
+            const uniform_buffer_info = vk.DescriptorBufferInfo{
+                .buffer = uniform_buffer.buffer,
+                .offset = 0,
+                .range = uniform_size,
+            };
+            write_descriptor_sets[1] = vk.WriteDescriptorSet{
+                .dst_set = self.target_descriptor_set,
+                .dst_binding = 1,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .uniform_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &uniform_buffer_info),
                 .p_texel_buffer_view = undefined,
             };
 
@@ -704,11 +742,11 @@ pub const ComputeDrawPipeline = struct {
             for (buffer_configs) |config, i| {
                 // descriptor for buffer info
                 buffer_infos[i] = vk.DescriptorBufferInfo{
-                    .buffer = buffers[i].buffer,
+                    .buffer = storage_buffers[i].buffer,
                     .offset = 0,
                     .range = config.size,
                 };
-                write_descriptor_sets[1 + i] = vk.WriteDescriptorSet{
+                write_descriptor_sets[2 + i] = vk.WriteDescriptorSet{
                     .dst_set = self.target_descriptor_set,
                     .dst_binding = @intCast(u32, 2 + i),
                     .dst_array_element = 0,
@@ -772,8 +810,6 @@ pub const ComputeDrawPipeline = struct {
             break :blk try ctx.createComputePipeline(allocator, pipeline_info);
         };
 
-        // TODO: data(vertex/uniform/etc) buffers! (see GfxPipeline)
-
         const fence_info = vk.FenceCreateInfo{
             .flags = .{
                 .signaled_bit = true,
@@ -798,7 +834,8 @@ pub const ComputeDrawPipeline = struct {
             .target_descriptor_layout = self.target_descriptor_layout, 
             .target_descriptor_pool = self.target_descriptor_pool, 
             .target_descriptor_set = self.target_descriptor_set, 
-            .buffers = buffers,
+            .storage_buffers = storage_buffers,
+            .uniform_buffer = uniform_buffer
         };
         // zig fmt: on
     }
@@ -854,10 +891,11 @@ pub const ComputeDrawPipeline = struct {
 
         ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fence, null);
 
-        for (self.buffers) |buffer| {
+        self.uniform_buffer.deinit(ctx);
+        for (self.storage_buffers) |buffer| {
             buffer.deinit(ctx);
         }
-        self.allocator.free(self.buffers);
+        self.allocator.free(self.storage_buffers);
 
         ctx.vkd.freeCommandBuffers(ctx.logical_device, ctx.comp_cmd_pool, 1, @ptrCast([*]const vk.CommandBuffer, &self.command_buffer));
         ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);

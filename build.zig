@@ -211,8 +211,12 @@ pub fn build(b: *Builder) void {
         shader_move_step.add_abs_resource(frag) catch unreachable;
     }
 
-    const comp = shader_comp.add("assets/shaders/comp.comp");
-    shader_move_step.add_abs_resource(comp) catch unreachable;
+    {
+        const comp = shader_comp.add("assets/shaders/comp.comp");
+        shader_move_step.add_abs_resource(comp) catch unreachable;
+        const rt = shader_comp.add("assets/shaders/raytracer.comp");
+        shader_move_step.add_abs_resource(rt) catch unreachable;
+    }
 
     exe.step.dependOn(&shader_comp.step);
     exe.step.dependOn(&shader_move_step.step);

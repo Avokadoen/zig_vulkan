@@ -1,0 +1,66 @@
+/// File containing different random and hashing functions
+
+float Rand(float co) { return fract(sin(co*(91.3458)) * 47453.5453); }
+float Rand(vec2 co){ return fract(sin(dot(co.xy, vec2(12.9898,78.233))) * 43758.5453); }
+float Rand(vec3 co){ return Rand(co.xy+Rand(co.z)); }
+float Rand(vec2 co, float min, float max) {
+    return min + (max - min) * Rand(co);
+}
+vec3 RandVec3(vec2 co) {
+    float x = Rand(co);
+    float y = Rand(vec2(co.x + x, co.y + x));
+    float z = Rand(vec2(co.x + y, co.y + y));
+    return vec3(x, y, z);
+}
+vec3 RandVec3(vec2 co, float min, float max) {
+    float x = Rand(co, min, max);
+    float y = Rand(vec2(co.x + x, co.y + x), min, max);
+    float z = Rand(vec2(co.x + y, co.y + y), min, max);
+    return vec3(x, y, z);
+}
+// Source: https://www.shadertoy.com/view/4djSRW
+float hash12(vec2 p) {
+	vec3 p3  = fract(vec3(p.xyx) * .1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+float hash12(vec2 p, float min, float max) {
+    return fma(hash12(p), (max - min), min) ;
+}
+float hash13(vec3 p3)
+{
+	p3  = fract(p3 * .1031);
+    p3 += dot(p3, p3.zyx + 31.32);
+    return fract((p3.x + p3.y) * p3.z);
+}
+vec2 hash23(vec3 p3)
+{
+	p3 = fract(p3 * vec3(.1031, .1030, .0973));
+    p3 += dot(p3, p3.yzx+33.33);
+    return fract((p3.xx+p3.yz)*p3.zy);
+}
+vec3 hash32(vec2 p)
+{
+	vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973));
+    p3 += dot(p3, p3.yxz + 33.33);
+    return fract((p3.xxy + p3.yzz) * p3.zyx);
+}
+vec3 hash32(vec2 p, float min, float max) {
+    vec3 rng = hash32(p);
+    float min_max_diff = max - min;
+    return vec3(
+        fma(rng.x, min_max_diff, min), 
+        fma(rng.y, min_max_diff, min), 
+        fma(rng.z, min_max_diff, min)
+    );
+}
+vec3 RandInHemisphere(vec2 co, vec3 normal) {
+    vec3 in_unit_sphere = RandVec3(co, -1, 1);
+    while (dot(in_unit_sphere, in_unit_sphere) >= 1) {
+        in_unit_sphere = RandVec3(co, -1, 1);
+    }
+    if (dot(in_unit_sphere, normal) > 0.0) // In the same hemisphere as the normal
+        return in_unit_sphere;
+    else
+        return -in_unit_sphere;
+}
