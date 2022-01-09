@@ -25,7 +25,9 @@ var delta_time: f64 = 0;
 
 var call_translate: u8 = 0;
 var camera_translate = za.Vec3.zero();
-var mouse_delta = za.Vec3.zero();
+
+var call_turn = false;
+var mouse_delta = za.Vec2.zero();
 
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
@@ -50,13 +52,22 @@ pub fn main() anyerror!void {
         std.debug.panic("vulkan not supported on device (glfw)", .{});
     }
 
+    // zig fmt: off
     // Create a windowed mode window
-    window = glfw.Window.create(800, 800, application_name, null, null, .{ .focused = true, .center_cursor = true, .client_api = .no_api }) catch |err| {
+    window = glfw.Window.create(800, 800, application_name, null, null, 
+    .{ 
+        .center_cursor = true, 
+        .client_api = .no_api,
+        // .maximized = true,
+        // .scale_to_monitor = true,
+        .focused = true, 
+    }
+    ) catch |err| {
         try stderr.print("failed to create window, code: {}", .{err});
         return;
     };
+    // zig fmt: on
     defer window.destroy();
-    try window.setInputMode(glfw.Window.InputMode.cursor, glfw.Window.InputModeCursor.disabled);
 
     const ctx = try render.Context.init(allocator, application_name, &window);
     defer ctx.deinit();
@@ -100,6 +111,7 @@ pub fn main() anyerror!void {
     defer voxel_rt.deinit(ctx);
 
     var prev_frame = std.time.milliTimestamp();
+    try window.setInputMode(glfw.Window.InputMode.cursor, glfw.Window.InputModeCursor.disabled);
     // Loop until the user closes the window
     while (!window.shouldClose()) {
         const current_frame = std.time.milliTimestamp();
@@ -109,7 +121,14 @@ pub fn main() anyerror!void {
 
         if (call_translate > 0) {
             voxel_rt.camera.translate(dt, camera_translate);
+        }
+        if (call_turn) {
+            voxel_rt.camera.turnYaw(-mouse_delta[0] * dt);
+            voxel_rt.camera.turnPitch(mouse_delta[1] * dt);
+        }
+        if (call_translate > 0 or call_turn) {
             try voxel_rt.debug(ctx);
+            call_turn = false;
         }
 
         {
@@ -197,5 +216,13 @@ fn mouseBtnInputFn(event: input.MouseButtonEvent) void {
 }
 
 fn cursorPosInputFn(event: input.CursorPosEvent) void {
-    std.debug.print("cursor pos: {s} {d}, {d} {s}\n", .{ "{", event.x, event.y, "}" });
+    const State = struct {
+        var prev_event = input.CursorPosEvent{ .x = 0, .y = 0 };
+    };
+    defer State.prev_event = event;
+
+    mouse_delta[0] = @floatCast(f32, event.x - State.prev_event.x);
+    mouse_delta[1] = @floatCast(f32, event.y - State.prev_event.y);
+
+    call_turn = true;
 }
