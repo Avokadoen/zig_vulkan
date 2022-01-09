@@ -1,6 +1,5 @@
 {
     "cmake.configureOnOpen": false,
-    "zigLanguageClient.path": "/home/aksel/Projects/zls/zig-out/bin/zls",
     "debug.onTaskErrors": "abort",
     "glsllint.glslangValidatorArgs": "--target-env vulkan1.2",
 

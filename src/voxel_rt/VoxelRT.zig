@@ -7,49 +7,96 @@ const Vec2 = @Vector(2, f32);
 const render = @import("../render/render.zig");
 const Context = render.Context;
 
-const Self = @This();
 const Camera = @import("Camera.zig");
+const Octree = @import("Octree.zig");
 const gpu_types = @import("gpu_types.zig");
 
+const VoxelRT = @This();
+
+camera: Camera,
+octree: Octree,
 comp_pipeline: render.ComputeDrawPipeline,
 
-pub fn init(allocator: Allocator, ctx: Context, target_texture: *render.Texture) !Self {
+/// init VoxelRT, api takes ownership of the octree
+pub fn init(allocator: Allocator, ctx: Context, octree: Octree, target_texture: *render.Texture) !VoxelRT {
     // place holder test compute pipeline
-    const comp_pipeline = blk: {
+    var comp_pipeline = blk: {
         const Compute = render.ComputeDrawPipeline;
-        const buffer_configs = gpu_types.getAllBufferConfigs();
+        var buffer_configs = [_]Compute.BufferConfig{
+            .{ .size = @sizeOf(gpu_types.Node) * octree.indirect_cells.len, .constant = false },
+            .{ .size = @sizeOf(gpu_types.Material), .constant = false },
+            .{ .size = @sizeOf(gpu_types.Albedo), .constant = false },
+            .{ .size = @sizeOf(gpu_types.Metal), .constant = false },
+            .{ .size = @sizeOf(gpu_types.Dielectric), .constant = false },
+            .{ .size = @sizeOf(gpu_types.Floats), .constant = false },
+            .{ .size = @sizeOf(gpu_types.Ints), .constant = false },
+        };
+
         break :blk try Compute.init(allocator, ctx, "../../raytracer.comp.spv", target_texture, Camera.getGpuSize(), buffer_configs[0..]);
     };
     errdefer comp_pipeline.deinit(ctx);
 
-    // const test_data = [2]zlm.Vec2{
-    //     .{ .x = 0, .y = 1 },
-    //     .{ .x = 1, .y = 0 },
-    // };
-    // try comp_pipeline.buffers[0].transfer(ctx, zlm.Vec2, test_data[0..]);
-    // uniform Camera, binding: 1
-    // pub const Camera = extern struct {
-    //     image_width: i32,
-    //     image_height: i32,
+    const camera = blk: {
+        var builder = Camera.Builder.init(90, target_texture.image_extent.width, target_texture.image_extent.height);
+        const c = try builder.setOrigin(za.Vec3.new(0, -0.5, -0.3)).setViewportHeight(2).build();
+        break :blk c;
+    };
 
-    //     horizontal: zlm.Vec3,
-    //     vertical: zlm.Vec3,
+    {
+        const camera_data = [_]Camera.Device{camera.d_camera};
+        try comp_pipeline.uniform_buffer.transfer(ctx, Camera.Device, camera_data[0..]);
+    }
 
-    //     lower_left_corner: zlm.Vec3,
-    //     origin: zlm.Vec3,
+    try comp_pipeline.storage_buffers[0].transfer(ctx, gpu_types.Node, octree.indirect_cells);
+    {
+        const materials = [_]gpu_types.Material{.{
+            .@"type" = .lambertian,
+            .attribute_index = 0,
+            .albedo_index = 0,
+        }};
+        try comp_pipeline.storage_buffers[1].transfer(ctx, gpu_types.Material, materials[0..]);
+    }
+    {
+        const albedos = [_]gpu_types.Albedo{.{
+            .value = za.Vec3.new(1, 0, 0),
+        }};
+        try comp_pipeline.storage_buffers[2].transfer(ctx, gpu_types.Albedo, albedos[0..]);
+    }
+    {
+        const metals = [_]gpu_types.Metal{.{
+            .fuzz = 0.45,
+        }};
+        try comp_pipeline.storage_buffers[3].transfer(ctx, gpu_types.Metal, metals[0..]);
+    }
+    {
+        const dielectrics = [_]gpu_types.Dielectric{.{
+            .ir = 0.45,
+        }};
+        try comp_pipeline.storage_buffers[4].transfer(ctx, gpu_types.Dielectric, dielectrics[0..]);
+    }
+    {
+        const floats = [_]gpu_types.Floats{octree.floats};
+        try comp_pipeline.storage_buffers[5].transfer(ctx, gpu_types.Floats, floats[0..]);
+    }
+    {
+        const ints = [_]gpu_types.Ints{octree.ints};
+        try comp_pipeline.storage_buffers[6].transfer(ctx, gpu_types.Ints, ints[0..]);
+    }
 
-    //     samples_per_pixel: i32,
-    //     max_bounce: i32,
-    // };
-
-    return Self{ .comp_pipeline = comp_pipeline };
+    // zig fmt: off
+    return VoxelRT{ 
+        .camera = camera, 
+        .octree = octree, 
+        .comp_pipeline = comp_pipeline 
+    };
+    // zig fmt: on
 }
 
 // compute the next frame and draw it to target texture, note that it will not draw to any window
-pub inline fn compute(self: Self, ctx: Context) !void {
+pub inline fn compute(self: VoxelRT, ctx: Context) !void {
     try self.comp_pipeline.compute(ctx);
 }
 
-pub fn deinit(self: Self, ctx: Context) void {
+pub fn deinit(self: VoxelRT, ctx: Context) void {
     self.comp_pipeline.deinit(ctx);
 }

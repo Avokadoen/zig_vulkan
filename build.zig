@@ -230,6 +230,9 @@ pub fn build(b: *Builder) void {
     var tests = b.addTest("src/test.zig");
     tests.setBuildMode(mode);
 
+    tests.addPackagePath("glfw", "deps/mach-glfw/src/main.zig");
+    tests.addPackagePath("zalgebra", "deps/zalgebra/src/main.zig");
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&tests.step);
 }

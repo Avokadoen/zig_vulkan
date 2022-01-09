@@ -13,7 +13,9 @@ const consts = render.consts;
 const input = @import("input.zig");
 const render2d = @import("render2d/render2d.zig");
 
+// TODO: API topology
 const VoxelRT = @import("voxel_rt/VoxelRT.zig");
+const Octree = @import("voxel_rt/Octree.zig");
 
 pub const application_name = "zig vulkan";
 
@@ -88,7 +90,15 @@ pub fn main() anyerror!void {
     draw_api.handleWindowResize(window);
     defer draw_api.noHandleWindowResize(window);
 
-    const voxel_rt = try VoxelRT.init(allocator, ctx, &draw_api.state.subo.ubo.my_texture);
+    var octree = blk: {
+        const min_point = za.Vec3.new(-0.5, -0.5, -1.0);
+        var builder = Octree.Builder.init(std.testing.allocator);
+        break :blk try builder.withFloats(min_point, 1.0).withInts(2, 10).build(8 * 5);
+    };
+    octree.insert(&za.Vec3.new(0, 0, 0), 0);
+    octree.insert(&za.Vec3.new(0.99, 0, 0), 1);
+
+    const voxel_rt = try VoxelRT.init(allocator, ctx, octree, &draw_api.state.subo.ubo.my_texture);
     defer voxel_rt.deinit(ctx);
 
     var prev_frame = std.time.milliTimestamp();

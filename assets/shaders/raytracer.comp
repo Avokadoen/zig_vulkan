@@ -67,15 +67,14 @@ struct HitRecord {
 };
 
 layout(binding = 1) uniform CameraBuffer {
-    int image_width;
-    int image_height;
+    uint image_width;
+    uint image_height;
 
     vec3 horizontal;
     vec3 vertical;
-
     vec3 lower_left_corner;
     vec3 origin;
-
+    int padding;
     int samples_per_pixel;
     int max_bounce;
 } camera;
@@ -297,7 +296,7 @@ bool treeLookup(
     out vec3 grid_uv,           // uv coordinates of node in grid
     out Node node
 ) {
-    vec3 indirect_cell_dim = vec3(octree_ints[0].cell_count * 2, 2, 2);
+    const vec3 indirect_cell_dim = vec3(octree_ints[0].cell_count * 2, 2, 2);
     vec3 depth_coords = voxel_coord;
     
     node = Node(0, 0);
@@ -308,7 +307,8 @@ bool treeLookup(
         inv_pow_depth = inv_pow_depth * 0.5;
         vec3 point_uv = fract(depth_coords);
         point_uv.x = (node.value + point_uv.x) * octree_floats[0].inv_cell_count;
-        ivec3 point = ivec3(round(fma(point_uv, vec3(octree_ints[0].cell_count * 2, 2, 2), vec3(-0.5))));
+        // TODO: modulo indirect_cell_dim 
+        ivec3 point = ivec3(round(fma(point_uv, indirect_cell_dim, vec3(-0.4999))));
 
         vec3 added_uv = (mod(point, 2) * inv_pow_depth);
         grid_uv += added_uv;
