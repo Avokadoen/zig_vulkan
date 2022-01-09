@@ -1,17 +1,15 @@
 #version 450
 
-#include "rand.comp"
-
 layout(local_size_x = 32, local_size_y = 32) in;
 layout(rgba32f, binding = 0) uniform image2D img_output;
 
 // Constants
+// See glsl 4.40 spec chapter 4.7.1 for info on infinity
+// https://www.khronos.org/registry/OpenGL/specs/gl/GLSLangSpec.4.40.pdf
 const int MAT_LAMBERTIAN = 0;
 const int MAT_METAL = 1;
 const int MAT_DIELECTRIC = 2;
 
-// See glsl 4.40 spec chapter 4.7.1 for info on infinity
-// https://www.khronos.org/registry/OpenGL/specs/gl/GLSLangSpec.4.40.pdf
 const float infinity = 0.001 / 0;
 const float pi = 3.14159265358; // 3.1415926535897932385
 
@@ -49,6 +47,8 @@ vec3 SampleGGXVNDF(vec3 inv_view_dir, vec2 alpha, vec2 U) {
     // transforming the normal back to the ellipsoid configuration
     return normalize(vec3(alpha.x * Nh.x, alpha.y * Nh.y, max(0.0, Nh.z)));
 }
+
+#include "rand.comp"
 
 struct Ray {
     vec3 origin;
@@ -308,7 +308,7 @@ bool treeLookup(
         vec3 point_uv = fract(depth_coords);
         point_uv.x = (node.value + point_uv.x) * octree_floats[0].inv_cell_count;
         // TODO: modulo indirect_cell_dim 
-        ivec3 point = ivec3(round(fma(point_uv, indirect_cell_dim, vec3(-0.4999))));
+        ivec3 point = ivec3(round(fma(point_uv, indirect_cell_dim, vec3(-0.5000001))));
 
         vec3 added_uv = (mod(point, 2) * inv_pow_depth);
         grid_uv += added_uv;
@@ -424,18 +424,6 @@ bool ScatterMetal(Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scatter
     attenuation = AlbedoColor(hit.index);
     return (dot(scattered.direction, hit.normal) > 0);
 }
-
-
-
-
-
-
-
-
-
-
-
-
 
 // Sclick Approximation
 float reflectance(float cosine, float ref_ratio) {

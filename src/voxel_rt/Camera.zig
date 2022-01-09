@@ -10,6 +10,7 @@ normal_speed: f32,
 sprint_speed: f32,
 movement_speed: f32,
 
+/// changes to viewport_x should call propogatePitchChange
 viewport_width: f32,
 viewport_height: f32,
 
@@ -25,11 +26,55 @@ pub fn init() Camera {
     @compileError("Camera.init() is not supported, use Camera.Builder.init()");
 }
 
+/// Move camera
+pub fn translate(self: *Camera, delta_time: f32, by: Vec3) void {
+    self.d_camera.origin += self.orientation().rotateVec(za.Vec3.scale(by, delta_time * self.movement_speed));
+    self.d_camera.lower_left_corner = self.d_camera.origin - za.Vec3.scale(self.d_camera.horizontal, 0.5) - za.Vec3.scale(self.d_camera.vertical, 0.5) - self.forwardDir();
+}
+
+pub fn turnPitch(self: *Camera, angle: f32) void {
+    // Axis angle to quaternion: https://www.euclideanspace.com/maths/geometry/rotations/conversions/angleToQuaternion/index.htm
+    const h_angle = angle * self.turn_rate;
+    const i = std.math.sin(h_angle);
+    const w = std.math.cos(h_angle);
+    self.pitch = self.pitch.mult(za.Quat{ .w = w, .x = i, .y = 0.0, .z = 0.0 });
+    self.propogatePitchChange();
+}
+
+pub fn turnYaw(self: *Camera, angle: f32) void {
+    const h_angle = angle * self.turn_rate;
+    const j = std.math.sin(h_angle);
+    const w = std.math.cos(h_angle);
+    self.pitch = self.pitch.mult(za.Quat{ .w = w, .x = 0.0, .y = j, .z = 0.0 });
+    self.propogatePitchChange();
+}
+
+pub inline fn orientation(self: Camera) za.Quat {
+    return self.yaw.mult(self.pitch).norm();
+}
+
 /// Get byte size of Camera's GPU data 
 pub inline fn getGpuSize() u64 {
     return @sizeOf(Device);
 }
 
+inline fn forwardDir(self: Camera) Vec3 {
+    return za.Vec3.norm(self.orientation().rotateVec(za.Vec3.new(0, 0, 1)));
+}
+
+inline fn propogatePitchChange(self: *Camera) void {
+    const forward = self.forwardDir();
+    const right = za.Vec3.norm(za.Vec3.cross(za.Vec3.up(), forward));
+    const up = za.Vec3.norm(za.Vec3.cross(forward, right));
+
+    self.d_camera.horizontal = za.Vec3.scale(right, self.viewport_width);
+    self.d_camera.vertical = za.Vec3.scale(up, self.viewport_height);
+    self.d_camera.lower_left_corner = self.lowerLeftCorner();
+}
+
+inline fn lowerLeftCorner(self: Camera) Vec3 {
+    return self.d_camera.origin - za.Vec3.scale(self.d_camera.horizontal, 0.5) - za.Vec3.scale(self.d_camera.vertical, 0.5) - self.forwardDir();
+}
 /// Builder for the Camera struct
 pub const Builder = struct {
     const default_samples_per_pixel = 4;

@@ -23,12 +23,9 @@ pub const application_name = "zig vulkan";
 var window: glfw.Window = undefined;
 var delta_time: f64 = 0;
 
-var zoom_in = false;
-var zoom_out = false;
-var move_up = false;
-var move_left = false;
-var move_right = false;
-var move_down = false;
+var call_translate: u8 = 0;
+var camera_translate = za.Vec3.zero();
+var mouse_delta = za.Vec3.zero();
 
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
@@ -54,11 +51,12 @@ pub fn main() anyerror!void {
     }
 
     // Create a windowed mode window
-    window = glfw.Window.create(800, 800, application_name, null, null, .{ .client_api = .no_api }) catch |err| {
+    window = glfw.Window.create(800, 800, application_name, null, null, .{ .focused = true, .center_cursor = true, .client_api = .no_api }) catch |err| {
         try stderr.print("failed to create window, code: {}", .{err});
         return;
     };
     defer window.destroy();
+    try window.setInputMode(glfw.Window.InputMode.cursor, glfw.Window.InputModeCursor.disabled);
 
     const ctx = try render.Context.init(allocator, application_name, &window);
     defer ctx.deinit();
@@ -72,7 +70,7 @@ pub fn main() anyerror!void {
     var draw_api = blk: {
         var init_api = try render2d.init(allocator, ctx, 1);
 
-        my_texture = try init_api.loadTexture("../assets/images/grasstop.png"[0..]);
+        my_texture = try init_api.loadTexture("../assets/images/tiger.jpg"[0..]);
 
         {
             const window_size = try window.getSize();
@@ -98,7 +96,7 @@ pub fn main() anyerror!void {
     octree.insert(&za.Vec3.new(0, 0, 0), 0);
     octree.insert(&za.Vec3.new(0.99, 0, 0), 1);
 
-    const voxel_rt = try VoxelRT.init(allocator, ctx, octree, &draw_api.state.subo.ubo.my_texture);
+    var voxel_rt = try VoxelRT.init(allocator, ctx, octree, &draw_api.state.subo.ubo.my_texture);
     defer voxel_rt.deinit(ctx);
 
     var prev_frame = std.time.milliTimestamp();
@@ -108,7 +106,11 @@ pub fn main() anyerror!void {
         delta_time = @intToFloat(f64, current_frame - prev_frame) / @as(f64, std.time.ms_per_s);
         // f32 variant of delta_time
         const dt = @floatCast(f32, delta_time);
-        _ = dt;
+
+        if (call_translate > 0) {
+            voxel_rt.camera.translate(dt, camera_translate);
+            try voxel_rt.debug(ctx);
+        }
 
         {
             //
@@ -127,19 +129,59 @@ pub fn main() anyerror!void {
 fn keyInputFn(event: input.KeyEvent) void {
     if (event.action == .press) {
         switch (event.key) {
-            input.Key.w => move_up = true,
-            input.Key.s => move_down = true,
-            input.Key.d => move_left = true,
-            input.Key.a => move_right = true,
+            input.Key.w => {
+                call_translate += 1;
+                camera_translate[2] -= 1;
+            },
+            input.Key.s => {
+                call_translate += 1;
+                camera_translate[2] += 1;
+            },
+            input.Key.d => {
+                call_translate += 1;
+                camera_translate[0] += 1;
+            },
+            input.Key.a => {
+                call_translate += 1;
+                camera_translate[0] -= 1;
+            },
+            input.Key.left_control => {
+                call_translate += 1;
+                camera_translate[1] += 1;
+            },
+            input.Key.space => {
+                call_translate += 1;
+                camera_translate[1] -= 1;
+            },
             input.Key.escape => window.setShouldClose(true),
             else => {},
         }
     } else if (event.action == .release) {
         switch (event.key) {
-            input.Key.w => move_up = false,
-            input.Key.s => move_down = false,
-            input.Key.d => move_left = false,
-            input.Key.a => move_right = false,
+            input.Key.w => {
+                call_translate -= 1;
+                camera_translate[2] += 1;
+            },
+            input.Key.s => {
+                call_translate -= 1;
+                camera_translate[2] -= 1;
+            },
+            input.Key.d => {
+                call_translate -= 1;
+                camera_translate[0] -= 1;
+            },
+            input.Key.a => {
+                call_translate -= 1;
+                camera_translate[0] += 1;
+            },
+            input.Key.left_control => {
+                call_translate -= 1;
+                camera_translate[1] -= 1;
+            },
+            input.Key.space => {
+                call_translate -= 1;
+                camera_translate[1] += 1;
+            },
             else => {},
         }
     }
@@ -147,22 +189,13 @@ fn keyInputFn(event: input.KeyEvent) void {
 
 fn mouseBtnInputFn(event: input.MouseButtonEvent) void {
     if (event.action == input.Action.press) {
-        if (event.button == input.MouseButton.left) {
-            zoom_in = true;
-        } else if (event.button == input.MouseButton.right) {
-            zoom_out = true;
-        }
+        if (event.button == input.MouseButton.left) {} else if (event.button == input.MouseButton.right) {}
     }
     if (event.action == input.Action.release) {
-        if (event.button == input.MouseButton.left) {
-            zoom_in = false;
-        } else if (event.button == input.MouseButton.right) {
-            zoom_out = false;
-        }
+        if (event.button == input.MouseButton.left) {} else if (event.button == input.MouseButton.right) {}
     }
 }
 
 fn cursorPosInputFn(event: input.CursorPosEvent) void {
-    _ = event;
-    // std.debug.print("cursor pos: {s} {d}, {d} {s}\n", .{"{", event.x, event.y, "}"});
+    std.debug.print("cursor pos: {s} {d}, {d} {s}\n", .{ "{", event.x, event.y, "}" });
 }

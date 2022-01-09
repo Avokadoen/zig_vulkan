@@ -92,6 +92,11 @@ pub fn init(allocator: Allocator, ctx: Context, octree: Octree, target_texture: 
     // zig fmt: on
 }
 
+pub fn debug(self: *VoxelRT, ctx: Context) !void {
+    const camera_data = [_]Camera.Device{self.camera.d_camera};
+    try self.comp_pipeline.uniform_buffer.transfer(ctx, Camera.Device, camera_data[0..]);
+}
+
 // compute the next frame and draw it to target texture, note that it will not draw to any window
 pub inline fn compute(self: VoxelRT, ctx: Context) !void {
     try self.comp_pipeline.compute(ctx);
