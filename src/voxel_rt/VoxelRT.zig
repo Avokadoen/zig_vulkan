@@ -37,7 +37,7 @@ pub fn init(allocator: Allocator, ctx: Context, octree: Octree, target_texture: 
     errdefer comp_pipeline.deinit(ctx);
 
     const camera = blk: {
-        var builder = Camera.Builder.init(90, target_texture.image_extent.width, target_texture.image_extent.height);
+        var builder = Camera.Builder.init(75, target_texture.image_extent.width, target_texture.image_extent.height);
         const c = try builder.setOrigin(za.Vec3.new(0, -0.5, -0.3)).setViewportHeight(2).build();
         break :blk c;
     };

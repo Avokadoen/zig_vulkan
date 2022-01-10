@@ -953,7 +953,7 @@ pub const ComputeDrawPipeline = struct {
         // TODO: allow varying local thread size, error if x_ or y_ dispatch have decimal values
         // compute shader has 16 thread in x and y, we calculate inverse at compile time
         const local_thread_factor: f32 = comptime blk: {
-            break :blk 1.0 / 16.0;
+            break :blk 1.0 / 32.0;
         };
         const x_dispatch = @ceil(@intToFloat(f32, self.target_texture.image_extent.width) * local_thread_factor);
         const y_dispatch = @ceil(@intToFloat(f32, self.target_texture.image_extent.height) * local_thread_factor);

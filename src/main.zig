@@ -55,7 +55,7 @@ pub fn main() anyerror!void {
 
     // zig fmt: off
     // Create a windowed mode window
-    window = glfw.Window.create(800, 800, application_name, null, null, 
+    window = glfw.Window.create(800, 600, application_name, null, null, 
     .{ 
         .center_cursor = true, 
         .client_api = .no_api,
@@ -86,14 +86,14 @@ pub fn main() anyerror!void {
 
         {
             const window_size = try window.getSize();
-            const windowf = @intToFloat(f32, window_size.height);
-            const size = @intToFloat(f32, window_size.height);
-            const scale = za.Vec2.new(size, size);
+            const window_w = @intToFloat(f32, window_size.width);
+            const window_h = @intToFloat(f32, window_size.height);
+            const scale = za.Vec2.new(window_w, window_h);
 
-            const pos = za.Vec2.new((windowf - scale[0]) * 0.5, (windowf - scale[0]) * 0.5);
+            const pos = za.Vec2.new((window_w - scale[0]) * 0.5, (window_h - scale[1]) * 0.5);
             my_sprite = try init_api.createSprite(my_texture, pos, 0, scale);
         }
-        break :blk try init_api.initDrawApi(.{ .every_ms = 9999 });
+        break :blk try init_api.initDrawApi(.{ .every_ms = 99999 });
     };
     defer draw_api.deinit();
 
