@@ -400,15 +400,9 @@ mat3 constructFrisvad(vec3 normal) {
 }
 
 bool ScatterLambertian(Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scattered) {
-    mat3 norm_perp = constructFrisvad(hit.normal);
-    vec3 norm_space_view = vec3(dot(r_in.direction, norm_perp[0]), dot(r_in.direction, norm_perp[1]), dot(r_in.direction, norm_perp[2]));
-    vec3 scatter_sample = SampleGGXVNDF(-norm_space_view, vec2(0.85, 0.85), hash23(RngSample(hit.point)));
-    vec3 scatter_dir = reflect(r_in.direction, scatter_sample);
-    scattered = CreateRay(hit.point, hit.normal + scatter_dir);
-
-    // vec3 scatter_dir = hit.normal + RandInHemisphere(hit.point.xy, hit.normal);
-    // if (IsNearZero(scatter_dir)) scatter_dir = hit.normal;
-    // scattered = CreateRay(hit.point, scatter_dir);
+    vec3 scatter_dir = hit.normal + RandInHemisphere(hit.point.xy, hit.normal);
+    if (IsNearZero(scatter_dir)) scatter_dir = hit.normal;
+    scattered = CreateRay(hit.point, scatter_dir);
     attenuation = AlbedoColor(hit.index);
     return true;
 }
