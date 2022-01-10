@@ -20,6 +20,8 @@ active_cell_count: u32,
 indirect_cells: []Node,
 indirect_cell_dim: Vec3,
 
+dimensions: Vec3,
+
 floats: Floats,
 ints: Ints,
 
@@ -34,10 +36,11 @@ pub fn deinit(self: Octree) void {
 /// Insert a leaf node into the octree. 
 /// Will also insert any parent nodes if needed.
 /// @parameters:
-///     - at: xyz coordinates in range [0, 1]
+///     - x: nth voxel in x axis
+///     - y: nth voxel in y axis
+///     - z: nth voxel in z axis
 ///     - value: the new value of leaf node at xyz
-pub fn insert(self: *Octree, at: *const Vec3, value: u32) void {
-    // TODO: 1 is not a valid value because of wrap around and therefor not be what caller expect
+pub fn insert(self: *Octree, x: u32, y: u32, z: u32, value: u32) void {
     // TODO: this function is failable (should return error)
     const visitor = struct {
         pub fn visit(
@@ -56,7 +59,8 @@ pub fn insert(self: *Octree, at: *const Vec3, value: u32) void {
             return .no;
         }
     }.visit;
-    const index = self.traverse(visitor, at);
+    const uvs = za.Vec3.new(@intToFloat(f32, x), @intToFloat(f32, y), @intToFloat(f32, z)) / self.dimensions;
+    const index = self.traverse(visitor, &uvs);
 
     self.indirect_cells[index] = Node{
         .@"type" = .leaf,
@@ -166,6 +170,7 @@ pub const Builder = struct {
         return Octree{
             .allocator = self.*.allocator,
             .active_cell_count = 0,
+            .dimensions = @splat(3, std.math.pow(f32, 2.0, @intToFloat(f32, ints.max_depth))),
             .indirect_cells = indirect_cells,
             .indirect_cell_dim = [3]f32{ @intToFloat(f32, ints.cell_count) * 2.0, 2.0, 2.0 },
             .floats = floats,
@@ -180,6 +185,7 @@ test "Octree Build works" {
         .active_cell_count = 0,
         .indirect_cells = try std.testing.allocator.alloc(Node, 1),
         .indirect_cell_dim = [3]f32{ 2, 2, 2 },
+        .dimensions = @splat(3, std.math.pow(2.0, 2.0)),
         .floats = Floats{
             .min_point = za.Vec4.new(-0.5, -0.5, -1.0, 0.0),
             .scale = 1.0,

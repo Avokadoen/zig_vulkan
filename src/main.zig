@@ -100,15 +100,18 @@ pub fn main() anyerror!void {
     defer draw_api.noHandleWindowResize(window);
 
     var octree: Octree = blk: {
-        const min_point = za.Vec3.new(-0.5, -0.5, -10.0);
+        const min_point = za.Vec3.new(-5.0, -5.0, -5.0);
         var builder = Octree.Builder.init(allocator);
         break :blk try builder.withFloats(min_point, 10.0).withInts(5, 100).build(8 * 5);
     };
     defer octree.deinit();
 
-    octree.insert(&za.Vec3.new(0, 0, 0.8), 0);
-    octree.insert(&za.Vec3.new(0.99, 0, 0.8), 1);
-    octree.insert(&za.Vec3.new(0.5, 0, 0.8), 2);
+    // octree.insert(&za.Vec3.new(0, 0, 0.8), 0);
+    octree.insert(0, 0, 0, 0);
+    octree.insert(1, 0, 0, 1);
+    octree.insert(2, 0, 0, 2);
+    octree.insert(0, 1, 0, 0);
+    octree.insert(1, 2, 0, 2);
 
     var voxel_rt = try VoxelRT.init(allocator, ctx, octree, &draw_api.state.subo.ubo.my_texture, .{});
     defer voxel_rt.deinit(ctx);
