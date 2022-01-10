@@ -28,8 +28,10 @@ pub fn init() Camera {
 
 /// Move camera
 pub fn translate(self: *Camera, delta_time: f32, by: Vec3) void {
-    self.d_camera.origin += self.orientation().rotateVec(za.Vec3.scale(by, delta_time * self.movement_speed));
-    self.d_camera.lower_left_corner = self.d_camera.origin - za.Vec3.scale(self.d_camera.horizontal, 0.5) - za.Vec3.scale(self.d_camera.vertical, 0.5) - self.forwardDir();
+    const norm = za.Vec3.norm(by);
+    const delta = self.orientation().rotateVec(za.Vec3.scale(norm, delta_time * self.movement_speed));
+    self.d_camera.origin += delta;
+    self.propogatePitchChange();
 }
 
 pub fn turnPitch(self: *Camera, angle: f32) void {
@@ -45,7 +47,7 @@ pub fn turnYaw(self: *Camera, angle: f32) void {
     const h_angle = angle * self.turn_rate;
     const j = std.math.sin(h_angle);
     const w = std.math.cos(h_angle);
-    self.pitch = self.pitch.mult(za.Quat{ .w = w, .x = 0.0, .y = j, .z = 0.0 });
+    self.yaw = self.yaw.mult(za.Quat{ .w = w, .x = 0.0, .y = j, .z = 0.0 });
     self.propogatePitchChange();
 }
 
@@ -79,7 +81,7 @@ inline fn lowerLeftCorner(self: Camera) Vec3 {
 pub const Builder = struct {
     const default_samples_per_pixel = 4;
     const default_max_bounce = 3;
-    const default_turn_rate = 0.25;
+    const default_turn_rate = 0.8;
     const default_normal_speed = 1;
     // how much to multiply normal speed in the event sprint is missing
     const default_sprint_scale = 2;
@@ -127,7 +129,7 @@ pub const Builder = struct {
     pub fn build(self: *Builder) !Camera {
         const math = std.math;
 
-        const aspect_ratio = self.*.image_width / self.*.image_height;
+        const aspect_ratio = @intToFloat(f32, self.image_width) / @intToFloat(f32, self.image_height);
 
         const inv_180: comptime_float = comptime blk: {
             break :blk 1.0 / 180.0;
@@ -138,7 +140,7 @@ pub const Builder = struct {
             const height = self.*.viewport_height orelse 2;
             break :blk height * math.tan(theta * 0.5);
         };
-        const viewport_width = @intToFloat(f32, aspect_ratio) * viewport_height;
+        const viewport_width = aspect_ratio * viewport_height;
         const o = self.*.origin orelse default_origin;
 
         const forward = za.Vec3.forward();

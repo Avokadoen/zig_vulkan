@@ -217,12 +217,14 @@ fn mouseBtnInputFn(event: input.MouseButtonEvent) void {
 
 fn cursorPosInputFn(event: input.CursorPosEvent) void {
     const State = struct {
-        var prev_event = input.CursorPosEvent{ .x = 0, .y = 0 };
+        var prev_event: ?input.CursorPosEvent = null;
     };
     defer State.prev_event = event;
 
-    mouse_delta[0] = @floatCast(f32, event.x - State.prev_event.x);
-    mouse_delta[1] = @floatCast(f32, event.y - State.prev_event.y);
-
-    call_turn = true;
+    // let prev_event be defined before processing input
+    if (State.prev_event) |p_event| {
+        mouse_delta[0] = @floatCast(f32, event.x - p_event.x);
+        mouse_delta[1] = @floatCast(f32, event.y - p_event.y);
+        call_turn = true;
+    }
 }
