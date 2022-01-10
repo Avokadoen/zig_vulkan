@@ -23,6 +23,7 @@ pub const application_name = "zig vulkan";
 var window: glfw.Window = undefined;
 var delta_time: f64 = 0;
 
+var activate_sprint: bool = false;
 var call_translate: u8 = 0;
 var camera_translate = za.Vec3.zero();
 
@@ -120,6 +121,11 @@ pub fn main() anyerror!void {
         const dt = @floatCast(f32, delta_time);
 
         if (call_translate > 0) {
+            if (activate_sprint) {
+                voxel_rt.camera.activateSprint();
+            } else {
+                voxel_rt.camera.disableSprint();
+            }
             voxel_rt.camera.translate(dt, camera_translate);
         }
         if (call_turn) {
@@ -168,6 +174,9 @@ fn keyInputFn(event: input.KeyEvent) void {
                 call_translate += 1;
                 camera_translate[1] += 1;
             },
+            input.Key.left_shift => {
+                activate_sprint = true;
+            },
             input.Key.space => {
                 call_translate += 1;
                 camera_translate[1] -= 1;
@@ -196,6 +205,9 @@ fn keyInputFn(event: input.KeyEvent) void {
             input.Key.left_control => {
                 call_translate -= 1;
                 camera_translate[1] -= 1;
+            },
+            input.Key.left_shift => {
+                activate_sprint = false;
             },
             input.Key.space => {
                 call_translate -= 1;

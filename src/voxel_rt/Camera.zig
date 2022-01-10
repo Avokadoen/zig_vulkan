@@ -26,6 +26,16 @@ pub fn init() Camera {
     @compileError("Camera.init() is not supported, use Camera.Builder.init()");
 }
 
+/// set camera movement speed to sprint
+pub fn activateSprint(self: *Camera) void {
+    self.movement_speed = self.normal_speed * self.sprint_speed;
+}
+
+/// set camera movement speed to sprint
+pub fn disableSprint(self: *Camera) void {
+    self.movement_speed = self.normal_speed;
+}
+
 /// Move camera
 pub fn translate(self: *Camera, delta_time: f32, by: Vec3) void {
     const norm = za.Vec3.norm(by);
