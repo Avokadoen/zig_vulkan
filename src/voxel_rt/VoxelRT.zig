@@ -95,15 +95,15 @@ pub fn init(allocator: Allocator, ctx: Context, octree: Octree, target_texture: 
         }, .{
             .@"type" = .dielectric,
             .type_index = 0,
-            .albedo_index = 1,
+            .albedo_index = 0,
         } };
         try comp_pipeline.storage_buffers[1].transfer(ctx, gpu_types.Material, materials[0..]);
     }
     {
         const albedos = [_]gpu_types.Albedo{ .{
-            .value = za.Vec3.new(1, 0, 0),
+            .color = za.Vec4.new(1, 0, 0, 1),
         }, .{
-            .value = za.Vec3.new(0.4, 0, 0.4),
+            .color = za.Vec4.new(0.4, 0, 0.4, 1),
         } };
         try comp_pipeline.storage_buffers[2].transfer(ctx, gpu_types.Albedo, albedos[0..]);
     }

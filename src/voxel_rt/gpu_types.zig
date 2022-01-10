@@ -74,7 +74,9 @@ pub const Material = extern struct {
 // TODO: convert to push constants: Albedo, Metal, Dielectric
 
 // storage buffer, binding: 4
-pub const Albedo = extern struct { value: Vec3 };
+pub const Albedo = extern struct {
+    color: Vec4,
+};
 
 // storage buffer, binding: 5
 pub const Metal = extern struct {

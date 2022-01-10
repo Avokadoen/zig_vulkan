@@ -135,9 +135,7 @@ bool ScatterDielectric(Ray r_in, HitRecord hit, out vec3 attenuation, out Ray sc
 
 // std430 vec3 requires padding if no other variable present ..
 struct Albedo {
-    float x;
-    float y;
-    float z;
+    vec4 color;
 };
 layout (std430, binding = 4) buffer AlbedoBuffer {
     readonly Albedo albedos[];
@@ -242,8 +240,7 @@ Ray CameraGetRay(float u, float v) {
 
 vec3 AlbedoColor(uint index) {
     Material mat = materials[index];
-    Albedo a = albedos[mat.albedo_index];
-    return vec3(a.x, a.y, a.z);
+    return albedos[mat.albedo_index].color.xyz;
 }
 
 // TODO: Source: (Ray tracing gems 2) / Peter Shirley / http://jcgt.org/published/0007/03/04/
