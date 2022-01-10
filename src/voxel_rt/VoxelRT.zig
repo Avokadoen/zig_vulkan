@@ -95,7 +95,7 @@ pub fn init(allocator: Allocator, ctx: Context, octree: Octree, target_texture: 
         }, .{
             .@"type" = .dielectric,
             .type_index = 0,
-            .albedo_index = 0,
+            .albedo_index = 2,
         } };
         try comp_pipeline.storage_buffers[1].transfer(ctx, gpu_types.Material, materials[0..]);
     }
@@ -104,6 +104,8 @@ pub fn init(allocator: Allocator, ctx: Context, octree: Octree, target_texture: 
             .color = za.Vec4.new(1, 0, 0, 1),
         }, .{
             .color = za.Vec4.new(0.4, 0, 0.4, 1),
+        }, .{
+            .color = za.Vec4.new(0.0, 1.0, 1.0, 1),
         } };
         try comp_pipeline.storage_buffers[2].transfer(ctx, gpu_types.Albedo, albedos[0..]);
     }
@@ -115,7 +117,7 @@ pub fn init(allocator: Allocator, ctx: Context, octree: Octree, target_texture: 
     }
     {
         const dielectrics = [_]gpu_types.Dielectric{.{
-            .ir = 0.45,
+            .internal_reflection = 1.52, // glass
         }};
         try comp_pipeline.storage_buffers[4].transfer(ctx, gpu_types.Dielectric, dielectrics[0..]);
     }

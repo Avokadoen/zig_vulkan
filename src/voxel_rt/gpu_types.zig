@@ -85,7 +85,7 @@ pub const Metal = extern struct {
 
 // storage buffer, binding: 6
 pub const Dielectric = extern struct {
-    ir: f32,
+    internal_reflection: f32,
 };
 
 // storage buffer, binding: 7
