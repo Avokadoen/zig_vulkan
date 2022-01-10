@@ -51,15 +51,23 @@ pub fn typeBufferIndex(comptime T: type) u32 {
 // Camera uniform is defined in Camera.zig
 
 // storage buffer, binding: 3
+/// Materials define how a ray should interact with a given voxel
 pub const Material = extern struct {
+    /// Type is the main attribute of a material and define reflection and refraction behaviour
     pub const Type = enum(i32) {
+        /// normal diffuse material
         lambertian,
+        /// shiny material with fuzz
         metal,
+        /// glass and other see through material
         dielectric,
     };
 
     @"type": Type,
-    attribute_index: i32,
+    /// index in the type array
+    /// i.e: type = material, type_index = 0 points to index 0 in metal array
+    type_index: i32,
+    /// index to the color of the voxel
     albedo_index: i32,
 };
 

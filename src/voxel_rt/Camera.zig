@@ -90,7 +90,7 @@ inline fn lowerLeftCorner(self: Camera) Vec3 {
 /// Builder for the Camera struct
 pub const Builder = struct {
     const default_samples_per_pixel = 4;
-    const default_max_bounce = 3;
+    const default_max_bounce = 8;
     const default_turn_rate = 0.8;
     const default_normal_speed = 1;
     // how much to multiply normal speed in the event sprint is missing

@@ -11,6 +11,18 @@ const Camera = @import("Camera.zig");
 const Octree = @import("Octree.zig");
 const gpu_types = @import("gpu_types.zig");
 
+const default_material_buffer = 10;
+const default_albedo_buffer = 10;
+const default_metal_buffer = 10;
+const default_dielectric_buffer = 10;
+
+pub const Config = struct {
+    material_buffer: ?u64 = null,
+    albedo_buffer: ?u64 = null,
+    metal_buffer: ?u64 = null,
+    dielectric_buffer: ?u64 = null,
+};
+
 const VoxelRT = @This();
 
 camera: Camera,
@@ -18,18 +30,41 @@ octree: Octree,
 comp_pipeline: render.ComputeDrawPipeline,
 
 /// init VoxelRT, api takes ownership of the octree
-pub fn init(allocator: Allocator, ctx: Context, octree: Octree, target_texture: *render.Texture) !VoxelRT {
+pub fn init(allocator: Allocator, ctx: Context, octree: Octree, target_texture: *render.Texture, config: Config) !VoxelRT {
     // place holder test compute pipeline
     var comp_pipeline = blk: {
         const Compute = render.ComputeDrawPipeline;
         var buffer_configs = [_]Compute.BufferConfig{
-            .{ .size = @sizeOf(gpu_types.Node) * octree.indirect_cells.len, .constant = false },
-            .{ .size = @sizeOf(gpu_types.Material), .constant = false },
-            .{ .size = @sizeOf(gpu_types.Albedo), .constant = false },
-            .{ .size = @sizeOf(gpu_types.Metal), .constant = false },
-            .{ .size = @sizeOf(gpu_types.Dielectric), .constant = false },
-            .{ .size = @sizeOf(gpu_types.Floats), .constant = false },
-            .{ .size = @sizeOf(gpu_types.Ints), .constant = false },
+            // zig fmt: off
+            .{ 
+                .size = @sizeOf(gpu_types.Node) * octree.indirect_cells.len, 
+                .constant = false 
+            },
+            .{ 
+                .size = @sizeOf(gpu_types.Material) * (config.material_buffer orelse default_material_buffer), 
+                .constant = false 
+            },
+            .{ 
+                .size = @sizeOf(gpu_types.Albedo) * (config.albedo_buffer orelse default_albedo_buffer), 
+                .constant = false 
+            },
+            .{ 
+                .size = @sizeOf(gpu_types.Metal) * (config.metal_buffer orelse default_metal_buffer), 
+                .constant = false 
+            },
+            .{ 
+                .size = @sizeOf(gpu_types.Dielectric) * (config.dielectric_buffer orelse default_dielectric_buffer), 
+                .constant = false 
+            },
+            .{ 
+                .size = @sizeOf(gpu_types.Floats), 
+                .constant = false 
+            },
+            .{ 
+                .size = @sizeOf(gpu_types.Ints), 
+                .constant = false 
+            },
+            // zig fmt: on
         };
 
         break :blk try Compute.init(allocator, ctx, "../../raytracer.comp.spv", target_texture, Camera.getGpuSize(), buffer_configs[0..]);
@@ -49,17 +84,27 @@ pub fn init(allocator: Allocator, ctx: Context, octree: Octree, target_texture: 
 
     try comp_pipeline.storage_buffers[0].transfer(ctx, gpu_types.Node, octree.indirect_cells);
     {
-        const materials = [_]gpu_types.Material{.{
+        const materials = [_]gpu_types.Material{ .{
             .@"type" = .lambertian,
-            .attribute_index = 0,
+            .type_index = 0,
             .albedo_index = 0,
-        }};
+        }, .{
+            .@"type" = .metal,
+            .type_index = 0,
+            .albedo_index = 1,
+        }, .{
+            .@"type" = .dielectric,
+            .type_index = 0,
+            .albedo_index = 1,
+        } };
         try comp_pipeline.storage_buffers[1].transfer(ctx, gpu_types.Material, materials[0..]);
     }
     {
-        const albedos = [_]gpu_types.Albedo{.{
+        const albedos = [_]gpu_types.Albedo{ .{
             .value = za.Vec3.new(1, 0, 0),
-        }};
+        }, .{
+            .value = za.Vec3.new(0.4, 0, 0.4),
+        } };
         try comp_pipeline.storage_buffers[2].transfer(ctx, gpu_types.Albedo, albedos[0..]);
     }
     {

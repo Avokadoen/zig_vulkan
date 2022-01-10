@@ -81,7 +81,6 @@ pub fn main() anyerror!void {
     var my_sprite: render2d.Sprite = undefined;
     var draw_api = blk: {
         var init_api = try render2d.init(allocator, ctx, 1);
-
         my_texture = try init_api.loadTexture("../assets/images/tiger.jpg"[0..]);
 
         {
@@ -100,15 +99,18 @@ pub fn main() anyerror!void {
     draw_api.handleWindowResize(window);
     defer draw_api.noHandleWindowResize(window);
 
-    var octree = blk: {
-        const min_point = za.Vec3.new(-0.5, -0.5, -1.0);
-        var builder = Octree.Builder.init(std.testing.allocator);
-        break :blk try builder.withFloats(min_point, 1.0).withInts(2, 10).build(8 * 5);
+    var octree: Octree = blk: {
+        const min_point = za.Vec3.new(-0.5, -0.5, -10.0);
+        var builder = Octree.Builder.init(allocator);
+        break :blk try builder.withFloats(min_point, 10.0).withInts(5, 100).build(8 * 5);
     };
-    octree.insert(&za.Vec3.new(0, 0, 0), 0);
-    octree.insert(&za.Vec3.new(0.99, 0, 0), 1);
+    defer octree.deinit();
 
-    var voxel_rt = try VoxelRT.init(allocator, ctx, octree, &draw_api.state.subo.ubo.my_texture);
+    octree.insert(&za.Vec3.new(0, 0, 0.8), 0);
+    octree.insert(&za.Vec3.new(0.99, 0, 0.8), 1);
+    octree.insert(&za.Vec3.new(0.5, 0, 0.8), 2);
+
+    var voxel_rt = try VoxelRT.init(allocator, ctx, octree, &draw_api.state.subo.ubo.my_texture, .{});
     defer voxel_rt.deinit(ctx);
 
     var prev_frame = std.time.milliTimestamp();
