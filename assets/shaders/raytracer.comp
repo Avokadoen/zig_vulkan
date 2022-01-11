@@ -167,13 +167,15 @@ void main() {
     ivec2 pixel_coord = ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y);
 
     vec3 color = vec3(0.0, 0.0, 0.0);
-    for (int sample_i = 0; sample_i < camera.samples_per_pixel; sample_i++) {
-        
+    for (int sample_i = 0; sample_i < camera.samples_per_pixel; sample_i++) {  
         float x = float(pixel_coord.x);
         float y = float(pixel_coord.y);
+        // TODO: proper random (blue noise)
         // TODO: remove division
-        float u = (x + hash12(vec2(x + sample_i, y) * 0.2)) / float(camera.image_width - 1);
-        float v = (y + hash12(vec2(x, y + sample_i) * 0.2)) / float(camera.image_height - 1);
+        float noise_x = hash12(vec2(x + sample_i, y) * 0.2 * float(sample_i > 0));
+        float u = (x + noise_x) / float(camera.image_width - 1);
+        float noise_y = hash12(vec2(x, y + sample_i) * 0.2 * float(sample_i > 0));
+        float v = (y + noise_y) / float(camera.image_height - 1);
         Ray ray = CameraGetRay(u, v);
         color += RayColor(ray);
     }
@@ -309,7 +311,7 @@ bool treeLookup(
         vec3 point_uv = fract(depth_coords);
         point_uv.x = (node.value + point_uv.x) * octree_floats[0].inv_cell_count;
         // TODO: modulo indirect_cell_dim 
-        ivec3 point = ivec3(round(fma(point_uv, indirect_cell_dim, vec3(-0.5000001))));
+        ivec3 point = ivec3(round(fma(point_uv, indirect_cell_dim, vec3(-0.500001))));
 
         vec3 added_uv = (mod(point, 2) * inv_pow_depth);
         grid_uv += added_uv;
@@ -409,7 +411,7 @@ mat3 constructFrisvad(vec3 normal) {
 bool ScatterLambertian(Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
     hit.internal_reflection = 1.0;
     
-    vec3 scatter_dir = hit.normal + RandInHemisphere(hit.point.xy, hit.normal);
+    vec3 scatter_dir = normalize(hit.normal + RandInHemisphere(hit.point.xy + hit.point.z, hit.normal));
     if (IsNearZero(scatter_dir)) scatter_dir = hit.normal;
     scattered = CreateRay(hit.point, scatter_dir);
     attenuation = AlbedoColor(hit.index);
@@ -422,7 +424,7 @@ bool ScatterMetal(Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray s
     vec3 reflected = reflect(r_in.direction, normalize(hit.normal));
     Material mat = materials[hit.index];
     float fuzz = metal[mat.type_index].fuzz;
-    scattered = CreateRay(hit.point, reflected + fuzz * RandInHemisphere(hit.point.xy, hit.normal));
+    scattered = CreateRay(hit.point, fma(reflected, vec3(fuzz), RandInHemisphere(hit.point.xy + hit.point.z, hit.normal)));
     attenuation = AlbedoColor(hit.index);
     return (dot(scattered.direction, hit.normal) > 0);
 }
@@ -457,7 +459,8 @@ bool ScatterDielectric(Ray r_in, vec3 hit_c_min, float hit_c_scale, inout HitRec
     float ir = dielectric[mat.type_index].internal_reflection;
     
     // TODO: better noise (blue :))
-    const vec3 normal = normalize(hit.normal * 4 + RandInHemisphere(hit.point.xy + hit.point.z, hit.normal));
+    // TODO: add property to glass: roughness (0 should be no noise)
+    const vec3 normal = normalize(fma(hit.normal, vec3(10), RandInHemisphere(hit.point.xy + hit.point.z, hit.normal)));
     vec3 direction;
     bool do_refract = transmissionDirection(ir, hit.internal_reflection, r_in.direction, normal, direction);
     if (do_refract) {
