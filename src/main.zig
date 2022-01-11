@@ -98,11 +98,11 @@ pub fn main() anyerror!void {
 
     draw_api.handleWindowResize(window);
     defer draw_api.noHandleWindowResize(window);
-
     var octree: Octree = blk: {
-        const min_point = za.Vec3.new(-5.0, -5.0, -5.0);
-        var builder = Octree.Builder.init(allocator);
-        break :blk try builder.withFloats(min_point, 10.0).withInts(5, 100).build(8 * 5);
+        const min_point = za.Vec3.new(0.0, -1.5, -1.0);
+        const floats = Octree.Floats.init(min_point, 2.0);
+        const ints = Octree.Ints.init(4, 100);
+        break :blk try Octree.init(allocator, 2000000, floats, ints);
     };
     defer octree.deinit();
 

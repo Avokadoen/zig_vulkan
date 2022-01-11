@@ -94,6 +94,15 @@ pub const Floats = extern struct {
     scale: f32,
     inv_scale: f32,
     inv_cell_count: f32,
+
+    pub fn init(min_point: Vec3, scale: f32) Floats {
+        return Floats{
+            .min_point = [4]f32{ min_point[0], min_point[1], min_point[2], 0.0 },
+            .scale = scale,
+            .inv_scale = 1.0 / scale,
+            .inv_cell_count = undefined,
+        };
+    }
 };
 
 // storage buffer, binding: 8
@@ -101,6 +110,14 @@ pub const Ints = extern struct {
     max_depth: i32,
     max_iter: i32,
     cell_count: i32,
+
+    pub fn init(max_depth: i32, max_iter: i32) Ints {
+        return Ints{
+            .max_depth = max_depth,
+            .max_iter = max_iter,
+            .cell_count = undefined,
+        };
+    }
 };
 
 // storage buffer, binding: 2
@@ -110,6 +127,7 @@ pub const Node = extern struct {
         parent,
         leaf,
     };
+
     @"type": Type,
     value: u32,
 };

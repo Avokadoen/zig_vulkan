@@ -72,9 +72,8 @@ pub fn init(allocator: Allocator, ctx: Context, octree: Octree, target_texture: 
     errdefer comp_pipeline.deinit(ctx);
 
     const camera = blk: {
-        var builder = Camera.Builder.init(75, target_texture.image_extent.width, target_texture.image_extent.height);
-        const c = try builder.setOrigin(za.Vec3.new(0, -0.5, -0.3)).setViewportHeight(2).build();
-        break :blk c;
+        var c_config = Camera.Config{ .origin = za.Vec3.new(0, 0, 0), .normal_speed = 0.5, .viewport_height = 2, .samples_per_pixel = 1, .max_bounce = 4 };
+        break :blk Camera.init(75, target_texture.image_extent.width, target_texture.image_extent.height, c_config);
     };
 
     {
@@ -101,11 +100,11 @@ pub fn init(allocator: Allocator, ctx: Context, octree: Octree, target_texture: 
     }
     {
         const albedos = [_]gpu_types.Albedo{ .{
-            .color = za.Vec4.new(1, 0, 0, 1),
+            .color = za.Vec4.new(0.5, 0.2, 0, 1),
         }, .{
             .color = za.Vec4.new(0.4, 0, 0.4, 1),
         }, .{
-            .color = za.Vec4.new(0.0, 1.0, 1.0, 1),
+            .color = za.Vec4.new(0.0, 0.6, 0.6, 1),
         } };
         try comp_pipeline.storage_buffers[2].transfer(ctx, gpu_types.Albedo, albedos[0..]);
     }
