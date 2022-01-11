@@ -16,6 +16,7 @@ const render2d = @import("render2d/render2d.zig");
 // TODO: API topology
 const VoxelRT = @import("voxel_rt/VoxelRT.zig");
 const Octree = @import("voxel_rt/Octree.zig");
+const vox = VoxelRT.vox;
 
 pub const application_name = "zig vulkan";
 
@@ -106,12 +107,25 @@ pub fn main() anyerror!void {
     };
     defer octree.deinit();
 
-    // octree.insert(&za.Vec3.new(0, 0, 0.8), 0);
-    octree.insert(0, 0, 0, 0);
-    octree.insert(1, 0, 0, 1);
-    octree.insert(2, 0, 0, 2);
-    octree.insert(0, 1, 0, 0);
-    octree.insert(1, 2, 0, 2);
+    // const model = try vox.load(false, allocator, "../assets/models/monu10.vox");
+    // defer model.deinit();
+    // // Test what we are loading
+    // const y_mod = @floatToInt(u8, octree.dimensions[1] - 1);
+    // for (model.xyzi_chunks[0]) |xyzi, i| {
+    //     try octree.insert(xyzi.x, y_mod - xyzi.z, xyzi.y, @intCast(u32, i % 3));
+    // }
+    {
+        var i: u32 = 0;
+        while (i < std.math.pow(u32, 2, 4)) : (i += 1) {
+            var j: u32 = 0;
+            while (j < std.math.pow(u32, 2, 4)) : (j += 1) {
+                var k: u32 = 0;
+                while (k < std.math.pow(u32, 2, 4)) : (k += 3) {
+                    try octree.insert(i, j, k, j % 3);
+                }
+            }
+        }
+    }
 
     var voxel_rt = try VoxelRT.init(allocator, ctx, octree, &draw_api.state.subo.ubo.my_texture, .{});
     defer voxel_rt.deinit(ctx);

@@ -11,6 +11,8 @@ const Camera = @import("Camera.zig");
 const Octree = @import("Octree.zig");
 const gpu_types = @import("gpu_types.zig");
 
+pub const vox = @import("vox/loader.zig");
+
 const default_material_buffer = 10;
 const default_albedo_buffer = 10;
 const default_metal_buffer = 10;
