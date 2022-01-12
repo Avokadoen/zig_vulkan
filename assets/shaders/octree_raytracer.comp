@@ -1,0 +1,480 @@
+#version 450
+
+#include "rand.comp"
+
+layout(local_size_x = 32, local_size_y = 32) in;
+layout(rgba32f, binding = 0) uniform image2D img_output;
+
+// Constants
+const int MAT_LAMBERTIAN = 0;
+const int MAT_METAL = 1;
+const int MAT_DIELECTRIC = 2;
+
+// See glsl 4.40 spec chapter 4.7.1 for info on infinity
+// https://www.khronos.org/registry/OpenGL/specs/gl/GLSLangSpec.4.40.pdf
+const float infinity = 0.001 / 0;
+const float pi = 3.14159265358; // 3.1415926535897932385
+
+bool IsNearZero(vec3 v) {
+    const float s = 0.000001;
+    return (abs(v.x) < s) && (abs(v.y) < s) && (abs(v.z) < s);
+}
+
+// TODO: fma
+// Source: http://jcgt.org/published/0007/04/01/
+// Input inv_view_dir: inverse view direction
+// Input alpha: roughness parameter
+// Input U: uniform random numbers
+// Output Ne: normal sampled with PDF D_Ve(Ne) = G1(Ve) * max(0, dot(Ve, Ne)) * D(Ne) / Ve.z
+vec3 SampleGGXVNDF(vec3 inv_view_dir, vec2 alpha, vec2 U) {
+    // transforming the view direction to the hemisphere configuration
+    vec3 Vh = normalize(vec3(alpha.x * inv_view_dir.x, alpha.y * inv_view_dir.y, inv_view_dir.z));
+    
+    // orthonormal basis (with special case if cross product is zero)
+    float lensq = fma(Vh.x, Vh.x, Vh.y * Vh.y);
+    vec3 T1 = lensq > 0 ? vec3(-Vh.y, Vh.x, 0) * inversesqrt(lensq) : vec3(1, 0, 0);
+    vec3 T2 = cross(Vh, T1);
+
+    // parameterization of the projected area
+    float r = sqrt(U.x);
+    float phi = 2.0 * pi * U.y;
+    float t1 = r * cos(phi);
+    float t2 = r * sin(phi);
+    float s = 0.5 * (1.0 + Vh.z);
+    t2 = fma((1.0 - s), sqrt(1.0 - t1 * t1), s * t2);
+    
+    // reprojection onto hemisphere
+    vec3 Nh = fma(vec3(t1), T1, fma(vec3(t2), T2, sqrt(max(0.0, 1.0 - t1 * t1 - t2 * t2)) * Vh));
+    
+    // transforming the normal back to the ellipsoid configuration
+    return normalize(vec3(alpha.x * Nh.x, alpha.y * Nh.y, max(0.0, Nh.z)));
+}
+
+struct Ray {
+    vec3 origin;
+    vec3 direction;
+};
+Ray CreateRay(vec3 origin, vec3 direction);
+vec3 RayAt(Ray r, float t);
+vec3 RayColor(Ray r);
+
+struct HitRecord {
+    vec3 point;
+    vec3 normal;
+    float t;
+    uint index; 
+    float internal_reflection;
+};
+
+layout(binding = 1) uniform CameraBuffer {
+    uint image_width;
+    uint image_height;
+
+    vec3 horizontal;
+    vec3 vertical;
+    vec3 lower_left_corner;
+    vec3 origin;
+    int padding;
+    int samples_per_pixel;
+    int max_bounce;
+} camera;
+Ray CameraGetRay(float u, float v);
+
+
+struct OctreeFloats {
+    vec4 min_point;
+    float scale;
+    float inv_scale;
+    float inv_cell_count;
+};
+layout (std430, binding = 7) buffer OctreeFloatsBuffer {
+    OctreeFloats octree_floats[];
+};
+struct OctreeInts {
+    int max_depth;
+    int max_iter;
+    int cell_count;
+};
+layout (std430, binding = 8) buffer OctreeIntsBuffer {
+    OctreeInts octree_ints[];
+};
+
+// Octree cell type
+const int EMPTY = 0;
+const int PARENT = 1; 
+const int LEAF = 2;
+struct Node {
+    // EMPTY    = not used,
+    // PARENT   = index to indirect cell
+    // LEAF     = index to material
+    uint type; 
+    uint value;
+};
+// Read about std here: https://www.khronos.org/opengl/wiki/Interface_Block_(GLSL)#Memory_layout
+layout (std430, binding = 2) buffer IndirectCellBuffer {
+    readonly Node indirect_cells[];
+};
+
+// Octree methods
+Node AccessIndirectCell(ivec3 i) { return indirect_cells[i.z + 2 * (i.y + 2 * i.x)]; }
+bool OctreeHit(Ray r, float t_min, float t_max, out HitRecord hit, out vec3 hit_c_min, out float hit_c_scale);
+bool CubeHit(vec3 cmin, float size, Ray r, float t_min, inout float t_max, out HitRecord hit);
+
+
+struct Material {
+    int type;
+    int type_index;
+    int albedo_index;
+};
+layout (std430, binding = 3) buffer MaterialBuffer {
+    readonly Material materials[];
+};
+bool ScatterLambertian(Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered);
+bool ScatterMetal(Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered);
+bool ScatterDielectric(Ray r_in, vec3 hit_c_min, float hit_c_scale, inout HitRecord hit, out vec3 attenuation, out Ray scattered);
+
+
+// std430 vec3 requires padding if no other variable present ..
+struct Albedo {
+    vec4 color;
+};
+layout (std430, binding = 4) buffer AlbedoBuffer {
+    readonly Albedo albedos[];
+};
+vec3 AlbedoColor(uint index);
+
+
+struct Metal {
+    float fuzz;
+};
+layout (std430, binding = 5) buffer MetalBuffer {
+    readonly Metal metal[];
+};
+
+struct Dielectric {
+    float internal_reflection;
+};
+layout (std430, binding = 6) buffer DielectricBuffer {
+    readonly Dielectric dielectric[];
+};
+
+void main() {
+    ivec2 pixel_coord = ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y);
+
+    vec3 color = vec3(0.0, 0.0, 0.0);
+    for (int sample_i = 0; sample_i < camera.samples_per_pixel; sample_i++) {  
+        float x = float(pixel_coord.x);
+        float y = float(pixel_coord.y);
+        // TODO: proper random (blue noise)
+        // TODO: remove division
+        float noise_x = hash12(vec2(x + sample_i, y) * 0.2 * float(sample_i > 0));
+        float u = (x + noise_x) / float(camera.image_width - 1);
+        float noise_y = hash12(vec2(x, y + sample_i) * 0.2 * float(sample_i > 0));
+        float v = (y + noise_y) / float(camera.image_height - 1);
+        Ray ray = CameraGetRay(u, v);
+        color += RayColor(ray);
+    }
+
+    color = sqrt(color / camera.samples_per_pixel);
+    color = clamp(color, 0, 1);
+    imageStore(img_output, pixel_coord, vec4(color, 1.0));
+}
+
+Ray CreateRay(vec3 origin, vec3 direction) {
+    return Ray(origin, normalize(direction));
+}
+
+vec3 RayAt(Ray r, float t) {
+    // instruction for: t * dir + origin
+    return fma(vec3(t), r.direction, r.origin);
+}
+
+vec3 RayColor(Ray r) {
+    HitRecord hit;
+    hit.internal_reflection = 1.0;
+    
+    Ray current_ray = r;
+    vec3 accumulative_attenuation = vec3(1.0);
+    int loop_count = 0;
+    
+    vec3 hit_c_min;
+    float hit_c_scale;
+
+    // TODO: min should be based on max_depth here  
+    while (loop_count < camera.max_bounce && OctreeHit(current_ray, 0.0003, infinity, hit, hit_c_min, hit_c_scale)){ 
+        loop_count += 1;
+
+        Ray scattered;
+        vec3 attenuation;
+
+        bool result = false;
+        switch (materials[hit.index].type) {
+        case MAT_LAMBERTIAN: 
+            result = ScatterLambertian(current_ray, hit, attenuation, scattered);
+            break;
+        case MAT_METAL: 
+            result = ScatterMetal(current_ray, hit, attenuation, scattered);
+            break;
+        case MAT_DIELECTRIC:
+            result = ScatterDielectric(current_ray, hit_c_min, hit_c_scale, hit, attenuation, scattered);
+            break;
+        default: 
+            result = false;
+            break;
+        }
+        if (!result) break;
+        
+        accumulative_attenuation *= attenuation;
+        current_ray = scattered;
+    }
+    if (loop_count > 0) return accumulative_attenuation;
+
+    float t = 0.5 * (current_ray.direction.y + 1.0);
+    vec3 background_color = fma(vec3(1.0 - t), vec3(1.0), t * vec3(0.5, 0.7, 1.0));
+    return background_color;
+}
+
+Ray CameraGetRay(float u, float v) {
+    vec3 ray_dir = fma(camera.horizontal, vec3(u), camera.lower_left_corner) + fma(vec3(v), camera.vertical, -camera.origin);
+    return CreateRay(camera.origin, ray_dir);
+}
+
+vec3 AlbedoColor(uint index) {
+    Material mat = materials[index];
+    return albedos[mat.albedo_index].color.xyz;
+}
+
+// TODO: Source: (Ray tracing gems 2) / Peter Shirley / http://jcgt.org/published/0007/03/04/
+bool CubeHit(vec3 cmin, float size, Ray r, float t_min, inout float t_max, out HitRecord hit) {
+    vec3 cmax = cmin + vec3(size);
+
+    vec3 inv_ray_dir = 1.0 / r.direction;
+    vec3 t_lower = (cmin - r.origin) * inv_ray_dir;
+    vec3 t_upper = (cmax - r.origin) * inv_ray_dir;
+
+    vec3 t_mins = vec3(min(t_lower, t_upper));
+    vec3 t_maxes = vec3(max(t_lower, t_upper));
+
+    float t_cube_min = t_min;
+    float t_cube_max = t_max;
+    for (int i = 0; i < 3; i++) {
+        t_cube_min = max(t_cube_min, t_mins[i]);
+        t_cube_max = min(t_cube_max, t_maxes[i]);
+    }
+    if (t_cube_min > t_cube_max) {
+        return false;
+    }
+
+    // store the exit t in t_max
+    t_max = t_cube_max;
+    hit.t = t_cube_min;
+    hit.point = RayAt(r, hit.t);
+    
+    float radius = size * 0.5;
+    vec3 center = cmin + vec3(radius);
+    
+    // TODO: improve this normal calculation :/
+    vec3 normal = hit.point - center;
+    vec3 abs_norm = abs(normal);
+    if (abs_norm.x < abs_norm.y || abs_norm.x < abs_norm.z) {
+        normal.x = 0;
+    }
+    if (abs_norm.y < abs_norm.x || abs_norm.y < abs_norm.z) {
+        normal.y = 0;
+    }
+    if (abs_norm.z < abs_norm.x || abs_norm.z < abs_norm.y) {
+        normal.z = 0;
+    }
+    normal = normalize(normal);
+    float not_front_face = float(!(dot(r.direction, normal) < 0)); 
+    hit.normal = normalize(normal * fma(-2.0, not_front_face, 1.0));
+
+    return true;
+}
+
+// Does a lookup in the octree and returns current Node
+// Should only be use in OctreeHit
+bool treeLookup(
+    vec3 voxel_coord,           // point we are doing lookup with in image coordinates
+    out float inv_pow_depth,    // depth of current lookup node
+    out vec3 grid_uv,           // uv coordinates of node in grid
+    out Node node
+) {
+    const vec3 indirect_cell_dim = vec3(octree_ints[0].cell_count * 2, 2, 2);
+    vec3 depth_coords = voxel_coord;
+    
+    node = Node(0, 0);
+    inv_pow_depth = 1;
+    grid_uv = vec3(0);
+   
+    for (float i = 0; i < octree_ints[0].max_depth; i++) {
+        inv_pow_depth = inv_pow_depth * 0.5;
+        vec3 point_uv = fract(depth_coords);
+        point_uv.x = (node.value + point_uv.x) * octree_floats[0].inv_cell_count;
+        vec3 pointf = round(fma(point_uv, indirect_cell_dim, vec3(-0.49999)));
+
+        vec3 added_uv = (mod(pointf, 2.0) * inv_pow_depth);
+        grid_uv += added_uv;
+
+        node = AccessIndirectCell(ivec3(pointf));
+        
+        // if node is not a parent
+        bool is_empty = node.type == EMPTY;
+        bool is_leaf = node.type == LEAF;
+        if (is_empty || is_leaf) { 
+            // Nothing more to lookup
+            return is_leaf;
+        } 
+
+        depth_coords = depth_coords * 2;
+    }
+    return false;
+}
+
+// Traverse octree and check for hits in leaf nodes
+bool OctreeHit(Ray r, float t_min, float t_max, out HitRecord hit, out vec3 hit_c_min, out float hit_c_scale) {
+    // this value dictate the minimum stretch of distance a ray can go for each iteration
+    // at 0.1 it will move atleast 10% of a given cell entry size 
+    const float base_t_advance = 0.01;
+
+    vec3 c_min = octree_floats[0].min_point.xyz;
+    float c_scale = octree_floats[0].scale;
+   
+    float inv_pow_depth = 0.5;
+    HitRecord c_hit;
+    c_hit.internal_reflection = 1.0; // air has 1.0 as internal_reflection
+
+    // record t size of octree relative to ray
+    float t_octree_max = t_max;
+    bool cube_hit = CubeHit(c_min, c_scale, r, t_min, t_octree_max, c_hit);
+    if (cube_hit == false) {
+        return false;
+    }
+    float t_stride = c_hit.t;
+     
+    for (int i = 0; i < octree_ints[0].max_iter && t_stride < t_octree_max; i++) { 
+        // TODO: something that makes sense here:
+        float min_t_advance = base_t_advance * inv_pow_depth;
+        vec3 world_point = RayAt(r, t_stride + min_t_advance);
+        vec3 lookup_point = (world_point - octree_floats[0].min_point.xyz) * octree_floats[0].inv_scale;
+
+        vec3 grid_uv;
+        Node node;
+        if (treeLookup(lookup_point, inv_pow_depth, grid_uv, node)) {
+            c_min = fma(grid_uv, vec3(octree_floats[0].scale), octree_floats[0].min_point.xyz);
+            c_scale = octree_floats[0].scale * inv_pow_depth;  
+            
+            t_min = t_stride;
+            t_stride = t_octree_max;
+            cube_hit = CubeHit(c_min, c_scale, r, t_min, t_stride, c_hit);
+            hit_c_min = c_min;
+            hit_c_scale = c_scale;
+            hit = c_hit;
+            hit.index = node.value;
+            return true;
+        }
+
+        // TODO: precision correction based on depth
+        c_min = fma(grid_uv, vec3(octree_floats[0].scale), octree_floats[0].min_point.xyz) - 0.00001;
+        c_scale = octree_floats[0].scale * inv_pow_depth + 0.00002;  
+        
+        t_min = t_stride;
+        t_stride = t_octree_max;
+        cube_hit = CubeHit(c_min, c_scale, r, t_min, t_stride, c_hit);
+    }
+    
+    return false;
+}
+
+// source: https://backend.orbit.dtu.dk/ws/portalfiles/portal/126824972/onb_frisvad_jgt2012_v2.pdf
+mat3 constructFrisvad(vec3 normal) {
+    mat3 ret;
+    ret[1] = normalize(normal); // TODO: normalize here is strictly not required and simply waste computation
+    // Handle the singularity
+    if(normal.z < -0.9999) {
+        ret[0] = vec3(0.0, -1.0, 0.0);
+        ret[2] = vec3(-1.0, 0.0, 0.0);
+    } else {
+        float a = 1.0 / (1.0 + normal.z);
+        float b = -normal.x * normal.y * a;
+        ret[0] = vec3(1.0 - normal.x * normal.x * a, b, -normal.x);
+        ret[2] = vec3(b, 1.0 - normal.y * normal.y * a, -normal.y);
+    }
+
+    return ret;
+}
+
+bool ScatterLambertian(Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
+    hit.internal_reflection = 1.0;
+    
+    vec3 scatter_dir = normalize(hit.normal + RandInHemisphere(hit.point.xy + hit.point.z, hit.normal));
+    if (IsNearZero(scatter_dir)) scatter_dir = hit.normal;
+    scattered = CreateRay(hit.point, scatter_dir);
+    attenuation = AlbedoColor(hit.index);
+    return true;
+}
+
+bool ScatterMetal(Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
+    hit.internal_reflection = 1.0;
+
+    vec3 reflected = reflect(r_in.direction, normalize(hit.normal));
+    Material mat = materials[hit.index];
+    float fuzz = metal[mat.type_index].fuzz;
+    scattered = CreateRay(hit.point, fma(reflected, vec3(fuzz), RandInHemisphere(hit.point.xy + hit.point.z, hit.normal)));
+    attenuation = AlbedoColor(hit.index);
+    return (dot(scattered.direction, hit.normal) > 0);
+}
+
+// Source: Ray tracing gems 2 page 107 (one of Bec's methods)
+/// defined the refraction direction if a refraction is needed based on n1, n2 and the angle between
+/// r_in and the normal
+/// This means that refrac_dir only gets defined if function returns true
+/// @param:
+///     - n1: internal reflection of impact material
+///     - n2: internal reflection of current material medium
+///     - ray_dir: the traveling ray direction
+///     - normal: normal vector of the impact surface
+///     - refrac_dir: poternial calculated penetration vector of r_in
+/// @return: bool that is true if refraction is calculated
+bool transmissionDirection(float n1, float n2, vec3 ray_dir, vec3 normal, out vec3 refrac_dir) {
+    float eta = n1/n2;
+    float c1 = -dot(ray_dir, normal);
+    float w = eta * c1;
+    float c2m = (w - eta) * (w + eta);
+    if (c2m < -1.0) {
+        return false;
+    }
+    refrac_dir = fma(vec3(eta), ray_dir, (w - sqrt(1.0 + c2m)) * normal);
+    return true;
+}
+
+bool ScatterDielectric(Ray r_in, vec3 hit_c_min, float hit_c_scale, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
+    attenuation = AlbedoColor(hit.index);
+
+    Material mat = materials[hit.index];
+    float ir = dielectric[mat.type_index].internal_reflection;
+    
+    // TODO: better noise (blue :))
+    // TODO: add property to glass: roughness (0 should be no noise)
+    const vec3 normal = normalize(fma(hit.normal, vec3(10), RandInHemisphere(hit.point.xy + hit.point.z, hit.normal)));
+    vec3 direction;
+    bool do_refract = transmissionDirection(ir, hit.internal_reflection, r_in.direction, normal, direction);
+    if (do_refract) {
+        scattered = CreateRay(hit.point, direction);
+        // HACK: move scattered ray out of current cube explicitly
+        {
+            float t_max = 9999.0;
+            HitRecord c_hit = hit;
+            CubeHit(hit_c_min, hit_c_scale, scattered, 0.0, t_max, c_hit);
+            scattered = CreateRay(RayAt(scattered, t_max), scattered.direction);
+        }
+        hit.internal_reflection = ir;
+    } else {
+        direction = reflect(r_in.direction, normal);
+        scattered = CreateRay(hit.point, direction);
+        hit.internal_reflection = 1.0;
+    }
+
+    return true;
+}
+

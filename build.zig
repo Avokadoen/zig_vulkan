@@ -206,8 +206,10 @@ pub fn build(b: *Builder) void {
     {
         const comp = shader_comp.add("assets/shaders/comp.comp");
         shader_move_step.add_abs_resource(comp) catch unreachable;
-        const rt = shader_comp.add("assets/shaders/raytracer.comp");
-        shader_move_step.add_abs_resource(rt) catch unreachable;
+        const o_rt = shader_comp.add("assets/shaders/octree_raytracer.comp");
+        shader_move_step.add_abs_resource(o_rt) catch unreachable;
+        const b_rt = shader_comp.add("assets/shaders/brick_raytracer.comp");
+        shader_move_step.add_abs_resource(b_rt) catch unreachable;
     }
 
     exe.step.dependOn(&shader_comp.step);

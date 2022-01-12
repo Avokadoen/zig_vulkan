@@ -66,7 +66,7 @@ struct HitRecord {
     float internal_reflection;
 };
 
-layout(binding = 1) uniform CameraBuffer {
+layout(binding = 1) uniform Camera {
     uint image_width;
     uint image_height;
 
@@ -80,46 +80,35 @@ layout(binding = 1) uniform CameraBuffer {
 } camera;
 Ray CameraGetRay(float u, float v);
 
-
-struct OctreeFloats {
-    vec4 min_point;
+layout (binding = 2) uniform BrickGridState {
+    uint dim_x;
+    uint dim_y;
+    uint dim_z;
     float scale;
-    float inv_scale;
-    float inv_cell_count;
-};
-layout (std430, binding = 7) buffer OctreeFloatsBuffer {
-    OctreeFloats octree_floats[];
-};
-struct OctreeInts {
-    int max_depth;
-    int max_iter;
-    int cell_count;
-};
-layout (std430, binding = 8) buffer OctreeIntsBuffer {
-    OctreeInts octree_ints[];
-};
+    vec4 min_point;
+} brick_grid;
 
-// Octree cell type
+// Grid types
 const int EMPTY = 0;
-const int PARENT = 1; 
-const int LEAF = 2;
-struct Node {
-    // EMPTY    = not used,
-    // PARENT   = index to indirect cell
-    // LEAF     = index to material
-    uint type; 
-    uint value;
+const int LOADED = 1; 
+const int UNLOADED = 2;
+struct GridEntry {
+    // 2 first bits are type, 30 next are data according to type
+    uint bits;
 };
-// Read about std here: https://www.khronos.org/opengl/wiki/Interface_Block_(GLSL)#Memory_layout
-layout (std430, binding = 2) buffer IndirectCellBuffer {
-    readonly Node indirect_cells[];
+layout (std430, binding = 7) buffer GridBuffer {
+    GridEntry entries[];
 };
 
-// Octree methods
-Node AccessIndirectCell(ivec3 i) { return indirect_cells[i.z + 2 * (i.y + 2 * i.x)]; }
-bool OctreeHit(Ray r, float t_min, float t_max, out HitRecord hit, out vec3 hit_c_min, out float hit_c_scale);
-bool CubeHit(vec3 cmin, float size, Ray r, float t_min, inout float t_max, out HitRecord hit);
-
+struct Brick {
+    // 512 bit voxel set mask
+    uint solid_mask[16];
+    // 24 bit material index + 8 bit lod index
+    uint indices;
+};
+layout (std430, binding = 8) buffer BrickBuffer {
+    Brick bricks[];
+};
 
 struct Material {
     int type;
@@ -134,7 +123,6 @@ bool ScatterMetal(Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray s
 bool ScatterDielectric(Ray r_in, vec3 hit_c_min, float hit_c_scale, inout HitRecord hit, out vec3 attenuation, out Ray scattered);
 
 
-// std430 vec3 requires padding if no other variable present ..
 struct Albedo {
     vec4 color;
 };
@@ -152,16 +140,16 @@ layout (std430, binding = 5) buffer MetalBuffer {
 };
 
 struct Dielectric {
+    // TODO: fuzz: IR: defined reflection/refraction ratio
+    //             fuzz should define reflection/refraction ray spread
     float internal_reflection;
 };
 layout (std430, binding = 6) buffer DielectricBuffer {
     readonly Dielectric dielectric[];
 };
 
-int sample_i = 0;
-vec3 RngSample(vec3 point) {
-    return fma(point, vec3(100), vec3(sample_i * 6));
-}
+bool CubeHit(vec3 cmin, float size, Ray r, float t_min, inout float t_max, out HitRecord hit);
+
 
 void main() {
     ivec2 pixel_coord = ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y);
@@ -205,34 +193,33 @@ vec3 RayColor(Ray r) {
     vec3 hit_c_min;
     float hit_c_scale;
 
-    // TODO: min should be based on max_depth here  
-    while (loop_count < camera.max_bounce && OctreeHit(current_ray, 0.0003, infinity, hit, hit_c_min, hit_c_scale)){ 
-        loop_count += 1;
+    // while (loop_count < camera.max_bounce && OctreeHit(current_ray, 0.0003, infinity, hit, hit_c_min, hit_c_scale)){ 
+    //     loop_count += 1;
 
-        Ray scattered;
-        vec3 attenuation;
+    //     Ray scattered;
+    //     vec3 attenuation;
 
-        bool result = false;
-        switch (materials[hit.index].type) {
-        case MAT_LAMBERTIAN: 
-            result = ScatterLambertian(current_ray, hit, attenuation, scattered);
-            break;
-        case MAT_METAL: 
-            result = ScatterMetal(current_ray, hit, attenuation, scattered);
-            break;
-        case MAT_DIELECTRIC:
-            result = ScatterDielectric(current_ray, hit_c_min, hit_c_scale, hit, attenuation, scattered);
-            break;
-        default: 
-            result = false;
-            break;
-        }
-        if (!result) break;
+    //     bool result = false;
+    //     switch (materials[hit.index].type) {
+    //     case MAT_LAMBERTIAN: 
+    //         result = ScatterLambertian(current_ray, hit, attenuation, scattered);
+    //         break;
+    //     case MAT_METAL: 
+    //         result = ScatterMetal(current_ray, hit, attenuation, scattered);
+    //         break;
+    //     case MAT_DIELECTRIC:
+    //         result = ScatterDielectric(current_ray, hit_c_min, hit_c_scale, hit, attenuation, scattered);
+    //         break;
+    //     default: 
+    //         result = false;
+    //         break;
+    //     }
+    //     if (!result) break;
         
-        accumulative_attenuation *= attenuation;
-        current_ray = scattered;
-    }
-    if (loop_count > 0) return accumulative_attenuation;
+    //     accumulative_attenuation *= attenuation;
+    //     current_ray = scattered;
+    // }
+    // if (loop_count > 0) return accumulative_attenuation;
 
     float t = 0.5 * (current_ray.direction.y + 1.0);
     vec3 background_color = fma(vec3(1.0 - t), vec3(1.0), t * vec3(0.5, 0.7, 1.0));
@@ -297,99 +284,6 @@ bool CubeHit(vec3 cmin, float size, Ray r, float t_min, inout float t_max, out H
     return true;
 }
 
-// Does a lookup in the octree and returns current Node
-// Should only be use in OctreeHit
-bool treeLookup(
-    vec3 voxel_coord,           // point we are doing lookup with in image coordinates
-    out float inv_pow_depth,    // depth of current lookup node
-    out vec3 grid_uv,           // uv coordinates of node in grid
-    out Node node
-) {
-    const vec3 indirect_cell_dim = vec3(octree_ints[0].cell_count * 2, 2, 2);
-    vec3 depth_coords = voxel_coord;
-    
-    node = Node(0, 0);
-    inv_pow_depth = 1;
-    grid_uv = vec3(0);
-   
-    for (float i = 0; i < octree_ints[0].max_depth; i++) {
-        inv_pow_depth = inv_pow_depth * 0.5;
-        vec3 point_uv = fract(depth_coords);
-        point_uv.x = (node.value + point_uv.x) * octree_floats[0].inv_cell_count;
-        vec3 pointf = round(fma(point_uv, indirect_cell_dim, vec3(-0.49999)));
-
-        vec3 added_uv = (mod(pointf, 2.0) * inv_pow_depth);
-        grid_uv += added_uv;
-
-        node = AccessIndirectCell(ivec3(pointf));
-        
-        // if node is not a parent
-        bool is_empty = node.type == EMPTY;
-        bool is_leaf = node.type == LEAF;
-        if (is_empty || is_leaf) { 
-            // Nothing more to lookup
-            return is_leaf;
-        } 
-
-        depth_coords = depth_coords * 2;
-    }
-    return false;
-}
-
-// Traverse octree and check for hits in leaf nodes
-bool OctreeHit(Ray r, float t_min, float t_max, out HitRecord hit, out vec3 hit_c_min, out float hit_c_scale) {
-    // this value dictate the minimum stretch of distance a ray can go for each iteration
-    // at 0.1 it will move atleast 10% of a given cell entry size 
-    const float base_t_advance = 0.01;
-
-    vec3 c_min = octree_floats[0].min_point.xyz;
-    float c_scale = octree_floats[0].scale;
-   
-    float inv_pow_depth = 0.5;
-    HitRecord c_hit;
-    c_hit.internal_reflection = 1.0; // air has 1.0 as internal_reflection
-
-    // record t size of octree relative to ray
-    float t_octree_max = t_max;
-    bool cube_hit = CubeHit(c_min, c_scale, r, t_min, t_octree_max, c_hit);
-    if (cube_hit == false) {
-        return false;
-    }
-    float t_stride = c_hit.t;
-     
-    for (int i = 0; i < octree_ints[0].max_iter && t_stride < t_octree_max; i++) { 
-        // TODO: something that makes sense here:
-        float min_t_advance = base_t_advance * inv_pow_depth;
-        vec3 world_point = RayAt(r, t_stride + min_t_advance);
-        vec3 lookup_point = (world_point - octree_floats[0].min_point.xyz) * octree_floats[0].inv_scale;
-
-        vec3 grid_uv;
-        Node node;
-        if (treeLookup(lookup_point, inv_pow_depth, grid_uv, node)) {
-            c_min = fma(grid_uv, vec3(octree_floats[0].scale), octree_floats[0].min_point.xyz);
-            c_scale = octree_floats[0].scale * inv_pow_depth;  
-            
-            t_min = t_stride;
-            t_stride = t_octree_max;
-            cube_hit = CubeHit(c_min, c_scale, r, t_min, t_stride, c_hit);
-            hit_c_min = c_min;
-            hit_c_scale = c_scale;
-            hit = c_hit;
-            hit.index = node.value;
-            return true;
-        }
-
-        // TODO: precision correction based on depth
-        c_min = fma(grid_uv, vec3(octree_floats[0].scale), octree_floats[0].min_point.xyz) - 0.00001;
-        c_scale = octree_floats[0].scale * inv_pow_depth + 0.00002;  
-        
-        t_min = t_stride;
-        t_stride = t_octree_max;
-        cube_hit = CubeHit(c_min, c_scale, r, t_min, t_stride, c_hit);
-    }
-    
-    return false;
-}
 
 // source: https://backend.orbit.dtu.dk/ws/portalfiles/portal/126824972/onb_frisvad_jgt2012_v2.pdf
 mat3 constructFrisvad(vec3 normal) {
