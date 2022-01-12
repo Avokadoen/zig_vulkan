@@ -6,12 +6,12 @@ layout(local_size_x = 32, local_size_y = 32) in;
 layout(rgba32f, binding = 0) uniform image2D img_output;
 
 // Constants
-// See glsl 4.40 spec chapter 4.7.1 for info on infinity
-// https://www.khronos.org/registry/OpenGL/specs/gl/GLSLangSpec.4.40.pdf
 const int MAT_LAMBERTIAN = 0;
 const int MAT_METAL = 1;
 const int MAT_DIELECTRIC = 2;
 
+// See glsl 4.40 spec chapter 4.7.1 for info on infinity
+// https://www.khronos.org/registry/OpenGL/specs/gl/GLSLangSpec.4.40.pdf
 const float infinity = 0.001 / 0;
 const float pi = 3.14159265358; // 3.1415926535897932385
 
@@ -64,7 +64,6 @@ struct HitRecord {
     float t;
     uint index; 
     float internal_reflection;
-    bool front_face;
 };
 
 layout(binding = 1) uniform CameraBuffer {
@@ -115,10 +114,11 @@ struct Node {
 layout (std430, binding = 2) buffer IndirectCellBuffer {
     readonly Node indirect_cells[];
 };
+
 // Octree methods
 Node AccessIndirectCell(ivec3 i) { return indirect_cells[i.z + 2 * (i.y + 2 * i.x)]; }
 bool OctreeHit(Ray r, float t_min, float t_max, out HitRecord hit, out vec3 hit_c_min, out float hit_c_scale);
-bool CubeHit(vec3 cmin, float size, Ray r, float t_min, inout float t_max, inout HitRecord hit, out float dot_p);
+bool CubeHit(vec3 cmin, float size, Ray r, float t_min, inout float t_max, out HitRecord hit);
 
 
 struct Material {
@@ -196,6 +196,8 @@ vec3 RayAt(Ray r, float t) {
 
 vec3 RayColor(Ray r) {
     HitRecord hit;
+    hit.internal_reflection = 1.0;
+    
     Ray current_ray = r;
     vec3 accumulative_attenuation = vec3(1.0);
     int loop_count = 0;
@@ -247,12 +249,11 @@ vec3 AlbedoColor(uint index) {
     return albedos[mat.albedo_index].color.xyz;
 }
 
-// TODO: inout HitRecord only for internal reflection ...
 // TODO: Source: (Ray tracing gems 2) / Peter Shirley / http://jcgt.org/published/0007/03/04/
-bool CubeHit(vec3 cmin, float size, Ray r, float t_min, inout float t_max, inout HitRecord hit, out float dot_p) {
+bool CubeHit(vec3 cmin, float size, Ray r, float t_min, inout float t_max, out HitRecord hit) {
     vec3 cmax = cmin + vec3(size);
 
-    vec3 inv_ray_dir = 1 / r.direction;
+    vec3 inv_ray_dir = 1.0 / r.direction;
     vec3 t_lower = (cmin - r.origin) * inv_ray_dir;
     vec3 t_upper = (cmax - r.origin) * inv_ray_dir;
 
@@ -277,16 +278,21 @@ bool CubeHit(vec3 cmin, float size, Ray r, float t_min, inout float t_max, inout
     float radius = size * 0.5;
     vec3 center = cmin + vec3(radius);
     
+    // TODO: improve this normal calculation :/
     vec3 normal = hit.point - center;
     vec3 abs_norm = abs(normal);
-    float keep_x = float(abs_norm.x >= abs_norm.y && abs_norm.x >= abs_norm.z);
-    float keep_y = float(abs_norm.y > abs_norm.x && abs_norm.y > abs_norm.z);
-    float keep_z = float(abs_norm.z > abs_norm.x && abs_norm.z > abs_norm.y); 
-    normal = normalize(vec3(normal.x * keep_x, normal.y * keep_y, normal.z * keep_z));
-    dot_p = dot(r.direction, normal);
-    hit.front_face = dot_p < 0; 
-    hit.normal = normalize(normal * fma(-2, int(!hit.front_face), 1));
-    hit.internal_reflection = hit.internal_reflection;
+    if (abs_norm.x < abs_norm.y || abs_norm.x < abs_norm.z) {
+        normal.x = 0;
+    }
+    if (abs_norm.y < abs_norm.x || abs_norm.y < abs_norm.z) {
+        normal.y = 0;
+    }
+    if (abs_norm.z < abs_norm.x || abs_norm.z < abs_norm.y) {
+        normal.z = 0;
+    }
+    normal = normalize(normal);
+    float not_front_face = float(!(dot(r.direction, normal) < 0)); 
+    hit.normal = normalize(normal * fma(-2.0, not_front_face, 1.0));
 
     return true;
 }
@@ -310,13 +316,12 @@ bool treeLookup(
         inv_pow_depth = inv_pow_depth * 0.5;
         vec3 point_uv = fract(depth_coords);
         point_uv.x = (node.value + point_uv.x) * octree_floats[0].inv_cell_count;
-        // TODO: modulo indirect_cell_dim 
-        ivec3 point = ivec3(round(fma(point_uv, indirect_cell_dim, vec3(-0.500001))));
+        vec3 pointf = round(fma(point_uv, indirect_cell_dim, vec3(-0.49999)));
 
-        vec3 added_uv = (mod(point, 2) * inv_pow_depth);
+        vec3 added_uv = (mod(pointf, 2.0) * inv_pow_depth);
         grid_uv += added_uv;
 
-        node = AccessIndirectCell(point);
+        node = AccessIndirectCell(ivec3(pointf));
         
         // if node is not a parent
         bool is_empty = node.type == EMPTY;
@@ -333,44 +338,40 @@ bool treeLookup(
 
 // Traverse octree and check for hits in leaf nodes
 bool OctreeHit(Ray r, float t_min, float t_max, out HitRecord hit, out vec3 hit_c_min, out float hit_c_scale) {
-    const float base_t_advance = 0.0001;
+    // this value dictate the minimum stretch of distance a ray can go for each iteration
+    // at 0.1 it will move atleast 10% of a given cell entry size 
+    const float base_t_advance = 0.01;
+
     vec3 c_min = octree_floats[0].min_point.xyz;
     float c_scale = octree_floats[0].scale;
-    HitRecord c_hit;
-    float dot_p;
+   
     float inv_pow_depth = 0.5;
-
+    HitRecord c_hit;
     c_hit.internal_reflection = 1.0; // air has 1.0 as internal_reflection
 
     // record t size of octree relative to ray
     float t_octree_max = t_max;
-    bool cube_hit = CubeHit(c_min, c_scale, r, t_min, t_octree_max, c_hit, dot_p);
+    bool cube_hit = CubeHit(c_min, c_scale, r, t_min, t_octree_max, c_hit);
+    if (cube_hit == false) {
+        return false;
+    }
     float t_stride = c_hit.t;
-    
+     
     for (int i = 0; i < octree_ints[0].max_iter && t_stride < t_octree_max; i++) { 
         // TODO: something that makes sense here:
-        float min_t_advance = max(base_t_advance * (inv_pow_depth + 0.1), 0.000001);  // * (1 - dot_p + 0.1)
+        float min_t_advance = base_t_advance * inv_pow_depth;
         vec3 world_point = RayAt(r, t_stride + min_t_advance);
         vec3 lookup_point = (world_point - octree_floats[0].min_point.xyz) * octree_floats[0].inv_scale;
-        // TODO: This hack checks explicitly if lookup is not in octree, this should
-        //       be handled through other means ...
-        if (fract(lookup_point) - lookup_point != vec3(0.0)) { 
-            return false;
-        }
 
         vec3 grid_uv;
         Node node;
         if (treeLookup(lookup_point, inv_pow_depth, grid_uv, node)) {
-            // TODO: code should be restructured to not need this branch as it is the 
-            //       same code as some code further down
-            if (i > 0) {
-                c_min = fma(grid_uv, vec3(octree_floats[0].scale), octree_floats[0].min_point.xyz);
-                c_scale = octree_floats[0].scale * inv_pow_depth;  
-                
-                t_min = t_stride;
-                t_stride = t_octree_max;
-                cube_hit = CubeHit(c_min, c_scale, r, t_min, t_stride, c_hit, dot_p);
-            }
+            c_min = fma(grid_uv, vec3(octree_floats[0].scale), octree_floats[0].min_point.xyz);
+            c_scale = octree_floats[0].scale * inv_pow_depth;  
+            
+            t_min = t_stride;
+            t_stride = t_octree_max;
+            cube_hit = CubeHit(c_min, c_scale, r, t_min, t_stride, c_hit);
             hit_c_min = c_min;
             hit_c_scale = c_scale;
             hit = c_hit;
@@ -384,7 +385,7 @@ bool OctreeHit(Ray r, float t_min, float t_max, out HitRecord hit, out vec3 hit_
         
         t_min = t_stride;
         t_stride = t_octree_max;
-        cube_hit = CubeHit(c_min, c_scale, r, t_min, t_stride, c_hit, dot_p);
+        cube_hit = CubeHit(c_min, c_scale, r, t_min, t_stride, c_hit);
     }
     
     return false;
@@ -469,8 +470,7 @@ bool ScatterDielectric(Ray r_in, vec3 hit_c_min, float hit_c_scale, inout HitRec
         {
             float t_max = 9999.0;
             HitRecord c_hit = hit;
-            float dot_p;
-            CubeHit(hit_c_min, hit_c_scale, scattered, 0.0, t_max, c_hit, dot_p);
+            CubeHit(hit_c_min, hit_c_scale, scattered, 0.0, t_max, c_hit);
             scattered = CreateRay(RayAt(scattered, t_max), scattered.direction);
         }
         hit.internal_reflection = ir;
