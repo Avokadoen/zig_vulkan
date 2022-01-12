@@ -15,6 +15,7 @@ const render2d = @import("render2d/render2d.zig");
 
 // TODO: API topology
 const VoxelRT = @import("voxel_rt/VoxelRT.zig");
+const BrickGrid = @import("voxel_rt/BrickGrid.zig");
 const Octree = @import("voxel_rt/Octree.zig");
 const vox = VoxelRT.vox;
 
@@ -99,35 +100,21 @@ pub fn main() anyerror!void {
 
     draw_api.handleWindowResize(window);
     defer draw_api.noHandleWindowResize(window);
-    var octree: Octree = blk: {
-        const min_point = za.Vec3.new(0.0, -1.5, -1.0);
-        const floats = Octree.Floats.init(min_point, 2.0);
-        const ints = Octree.Ints.init(4, 100);
-        break :blk try Octree.init(allocator, 2000000, floats, ints);
-    };
-    defer octree.deinit();
 
-    // const model = try vox.load(false, allocator, "../assets/models/monu10.vox");
+    var grid = try BrickGrid.init(allocator, 10, 10, 10, .{});
+    defer grid.deinit();
+
+    grid.insert(79, 79, 79, 0);
+
+    // const model = try vox.load(false, allocator, "../assets/models/castle.vox");
     // defer model.deinit();
     // // Test what we are loading
     // const y_mod = @floatToInt(u8, octree.dimensions[1] - 1);
-    // for (model.xyzi_chunks[0]) |xyzi, i| {
-    //     try octree.insert(xyzi.x, y_mod - xyzi.z, xyzi.y, @intCast(u32, i % 3));
+    // for (model.xyzi_chunks[0]) |xyzi| {
+    //     try octree.insert(xyzi.x + 1, (y_mod - xyzi.z), xyzi.y + 1, @intCast(u32, 1));
     // }
-    {
-        var i: u32 = 0;
-        while (i < std.math.pow(u32, 2, 4)) : (i += 1) {
-            var j: u32 = 0;
-            while (j < std.math.pow(u32, 2, 4)) : (j += 1) {
-                var k: u32 = 0;
-                while (k < std.math.pow(u32, 2, 4)) : (k += 3) {
-                    try octree.insert(i, j, k, j % 3);
-                }
-            }
-        }
-    }
 
-    var voxel_rt = try VoxelRT.init(allocator, ctx, octree, &draw_api.state.subo.ubo.my_texture, .{});
+    var voxel_rt = try VoxelRT.init(allocator, ctx, grid, &draw_api.state.subo.ubo.my_texture, .{});
     defer voxel_rt.deinit(ctx);
 
     var prev_frame = std.time.milliTimestamp();

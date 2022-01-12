@@ -25,29 +25,6 @@ const type_binding_map = std.ComptimeStringMap(MapValue, .{
     .{ @typeName(Ints), MapValue{ .binding = 8, .size = @sizeOf(Ints) } },
 });
 
-// get all BufferConfig objects generated from type_binding_map
-pub fn allBufferConfigs() [type_binding_map.kvs.len]BufferConfig {
-    // TODO: assign a buffer size for each type ..
-    comptime var buffer_config: [type_binding_map.kvs.len]BufferConfig = undefined;
-    inline for (type_binding_map.kvs) |type_binding, i| {
-        buffer_config[i] = BufferConfig{
-            .size = type_binding.value.size,
-            .constant = false, // TODO
-        };
-    }
-    return buffer_config;
-}
-
-pub fn typeBinding(comptime T: type) u32 {
-    return type_binding_map.get(@typeName(T)) orelse {
-        @compileError(@typeName(T) ++ " not part of shader types");
-    };
-}
-
-pub fn typeBufferIndex(comptime T: type) u32 {
-    return typeBinding(T) - 2;
-}
-
 // Camera uniform is defined in Camera.zig
 
 // storage buffer, binding: 3

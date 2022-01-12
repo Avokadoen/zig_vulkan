@@ -106,15 +106,24 @@ pub fn traverse(self: *Octree, comptime visitor: VisitorFn, at: *const Vec3) usi
         .value = 0,
     };
 
+    // var inv_pow_depth: f32 = 1;
+    // var grid_uv = za.Vec3.zero();
+
     var index: usize = 0;
     var i: usize = 0;
     while (i < self.ints.max_depth) : (i += 1) {
+        // inv_pow_depth = inv_pow_depth * 0.5;
         var point_uv = depth_coords - @floor(depth_coords);
         point_uv[0] = (@intToFloat(f32, node.value) + point_uv[0]) * self.floats.inv_cell_count;
 
         var pointf = @round(point_uv * self.indirect_cell_dim - half);
         const point: IVec3 = [3]i32{ @floatToInt(i32, pointf[0]), @floatToInt(i32, pointf[1]), @floatToInt(i32, pointf[2]) };
         index = @intCast(usize, point[2] + 2 * (point[1] + 2 * point[0]));
+
+        // grid_uv += za.Vec3.scale(@mod(pointf, za.Vec3.new(2, 2, 2)), inv_pow_depth);
+
+        // const cell = @floor(@intToFloat(f32, index) * @as(f32, 1.0 / 8.0));
+        // std.debug.print("cell: {d}\n", .{cell});
 
         // call visitor function inline
         const abort = @call(.{ .modifier = .always_inline }, visitor, .{ self, &self.indirect_cells[index], i });
@@ -124,6 +133,7 @@ pub fn traverse(self: *Octree, comptime visitor: VisitorFn, at: *const Vec3) usi
         node = self.indirect_cells[index];
         depth_coords *= two;
     }
+    // std.debug.print("grid_uv: {d} {d} {d}\n", .{ grid_uv[0], grid_uv[1], grid_uv[2] });
     return index;
 }
 
