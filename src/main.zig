@@ -29,7 +29,8 @@ var activate_sprint: bool = false;
 var call_translate: u8 = 0;
 var camera_translate = za.Vec3.zero();
 
-var call_turn = false;
+var call_yaw = false;
+var call_pitch = false;
 var mouse_delta = za.Vec2.zero();
 
 pub fn main() anyerror!void {
@@ -101,10 +102,25 @@ pub fn main() anyerror!void {
     draw_api.handleWindowResize(window);
     defer draw_api.noHandleWindowResize(window);
 
-    var grid = try BrickGrid.init(allocator, 10, 10, 10, .{});
+    var grid = try BrickGrid.init(allocator, 10, 5, 10, .{ .min_point = [3]f32{ -5, -2.5, -15 } });
     defer grid.deinit();
 
-    grid.insert(79, 79, 79, 0);
+    grid.insert(8, 0, 79, 0);
+    grid.insert(15, 7, 79, 0);
+    grid.insert(71, 0, 79, 0);
+    grid.insert(79, 7, 79, 0);
+    // var i: usize = 0;
+    // while (i < 39) : (i += 1) {
+    //     var j: usize = 0;
+    //     while (j < 10) : (j += 1) {
+    //         var k: usize = 0;
+    //         while (k < 10) : (k += 1) {
+    //             grid.insert(i, j, 79 - k, 0);
+    //         }
+    //     }
+    // }
+
+    // grid.brickHit(za.Vec3.new(9, 3.5, 0.5), za.Vec3.norm(za.Vec3.new(-1, -0.3, 0.2)));
 
     // const model = try vox.load(false, allocator, "../assets/models/castle.vox");
     // defer model.deinit();
@@ -134,13 +150,18 @@ pub fn main() anyerror!void {
             }
             voxel_rt.camera.translate(dt, camera_translate);
         }
-        if (call_turn) {
+        if (call_yaw) {
             voxel_rt.camera.turnYaw(-mouse_delta[0] * dt);
+        }
+        if (call_pitch) {
             voxel_rt.camera.turnPitch(mouse_delta[1] * dt);
         }
-        if (call_translate > 0 or call_turn) {
+        if (call_translate > 0 or call_yaw or call_pitch) {
             try voxel_rt.debug(ctx);
-            call_turn = false;
+            call_yaw = false;
+            call_pitch = false;
+            mouse_delta[0] = 0;
+            mouse_delta[1] = 0;
         }
 
         {
@@ -241,8 +262,9 @@ fn cursorPosInputFn(event: input.CursorPosEvent) void {
 
     // let prev_event be defined before processing input
     if (State.prev_event) |p_event| {
-        mouse_delta[0] = @floatCast(f32, event.x - p_event.x);
-        mouse_delta[1] = @floatCast(f32, event.y - p_event.y);
-        call_turn = true;
+        mouse_delta[0] += @floatCast(f32, event.x - p_event.x);
+        mouse_delta[1] += @floatCast(f32, event.y - p_event.y);
     }
+    call_yaw = call_yaw or mouse_delta[0] < -0.00001 or mouse_delta[0] > 0.00001;
+    call_pitch = call_pitch or mouse_delta[1] < -0.00001 or mouse_delta[1] > 0.00001;
 }
