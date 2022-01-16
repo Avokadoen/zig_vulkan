@@ -17,6 +17,7 @@ const render2d = @import("render2d/render2d.zig");
 const VoxelRT = @import("voxel_rt/VoxelRT.zig");
 const BrickGrid = @import("voxel_rt/BrickGrid.zig");
 const Octree = @import("voxel_rt/Octree.zig");
+const gpu_types = @import("voxel_rt/gpu_types.zig");
 const vox = VoxelRT.vox;
 
 pub const application_name = "zig vulkan";
@@ -58,7 +59,7 @@ pub fn main() anyerror!void {
 
     // zig fmt: off
     // Create a windowed mode window
-    window = glfw.Window.create(800, 600, application_name, null, null, 
+    window = glfw.Window.create(1920, 1080, application_name, null, null, 
     .{ 
         .center_cursor = true, 
         .client_api = .no_api,
@@ -84,7 +85,7 @@ pub fn main() anyerror!void {
     var my_sprite: render2d.Sprite = undefined;
     var draw_api = blk: {
         var init_api = try render2d.init(allocator, ctx, 1);
-        my_texture = try init_api.loadTexture("../assets/images/tiger.jpg"[0..]);
+        my_texture = try init_api.loadEmptyTexture(1280, 720);
 
         {
             const window_size = try window.getSize();
@@ -102,33 +103,15 @@ pub fn main() anyerror!void {
     draw_api.handleWindowResize(window);
     defer draw_api.noHandleWindowResize(window);
 
-    var grid = try BrickGrid.init(allocator, 10, 5, 10, .{ .min_point = [3]f32{ -5, -2.5, -15 } });
+    var grid = try BrickGrid.init(allocator, 20, 10, 20, .{ .min_point = [3]f32{ -5, -19, -6 } });
     defer grid.deinit();
 
-    grid.insert(8, 0, 79, 0);
-    grid.insert(15, 7, 79, 0);
-    grid.insert(71, 0, 79, 0);
-    grid.insert(79, 7, 79, 0);
-    // var i: usize = 0;
-    // while (i < 39) : (i += 1) {
-    //     var j: usize = 0;
-    //     while (j < 10) : (j += 1) {
-    //         var k: usize = 0;
-    //         while (k < 10) : (k += 1) {
-    //             grid.insert(i, j, 79 - k, 0);
-    //         }
-    //     }
-    // }
-
-    // grid.brickHit(za.Vec3.new(9, 3.5, 0.5), za.Vec3.norm(za.Vec3.new(-1, -0.3, 0.2)));
-
-    // const model = try vox.load(false, allocator, "../assets/models/castle.vox");
-    // defer model.deinit();
-    // // Test what we are loading
-    // const y_mod = @floatToInt(u8, octree.dimensions[1] - 1);
-    // for (model.xyzi_chunks[0]) |xyzi| {
-    //     try octree.insert(xyzi.x + 1, (y_mod - xyzi.z), xyzi.y + 1, @intCast(u32, 1));
-    // }
+    const model = try vox.load(false, allocator, "../assets/models/nature.vox");
+    defer model.deinit();
+    // Test what we are loading
+    for (model.xyzi_chunks[0]) |xyzi, i| {
+        grid.insert(xyzi.x, xyzi.z, xyzi.y, @intCast(u8, @rem(i, 3)));
+    }
 
     var voxel_rt = try VoxelRT.init(allocator, ctx, grid, &draw_api.state.subo.ubo.my_texture, .{});
     defer voxel_rt.deinit(ctx);

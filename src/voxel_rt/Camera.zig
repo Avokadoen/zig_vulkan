@@ -4,7 +4,7 @@ const Vec3 = @Vector(3, f32);
 
 const default_viewport_height = 2;
 const default_samples_per_pixel = 4;
-const default_turn_rate = 0.8;
+const default_turn_rate = 0.1;
 const default_normal_speed = 1;
 // how much to multiply normal speed in the event sprint is missing
 const default_sprint_scale = 2;

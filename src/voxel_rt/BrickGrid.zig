@@ -3,6 +3,8 @@
 
 // TODO: move types?
 
+const Material = @import("gpu_types.zig").Material;
+
 // pub const Unloaded = packed struct {
 //     lod_color: u24,
 //     flags: u6,
@@ -19,10 +21,13 @@ pub const GridEntry = packed struct {
     data: u30,
 };
 
+const unset_material = std.math.maxInt(u24);
+
 // buffer binding: 8
 pub const Brick = packed struct {
     /// maps to a voxel grid of 8x8x8
     solid_mask: i512,
+    // index for index
     material_index: u24,
     lod_material_index: u8,
 };
@@ -64,23 +69,35 @@ allocator: Allocator,
 
 grid: []GridEntry,
 bricks: []Brick,
+
+// TODO: buckets to track possible material slices for a brick
+//       i.e N 8 buckets, M 16 buckets .. X 512 buckets
+material_indices: []u8,
+
 active_bricks: usize,
+voxel_dim: [3]u32,
 device_state: Device,
 
 /// Initialize a BrickGrid that can be raytraced 
 /// @param:
-///     - allocator:    used to allocate bricks and the grid, also to clean up these in deinit
-///     - dim_x:        how many bricks *maps* (or chunks) in x dimension
-///     - dim_y:        how many bricks *maps* (or chunks) in y dimension
-///     - dim_z:        how many bricks *maps* (or chunks) in z dimension
-///     - brick_alloc:  how many bricks *maps* should be allocated on the host and device
+///     - allocator: used to allocate bricks and the grid, also to clean up these in deinit
+///     - dim_x:     how many bricks *maps* (or chunks) in x dimension
+///     - dim_y:     how many bricks *maps* (or chunks) in y dimension
+///     - dim_z:     how many bricks *maps* (or chunks) in z dimension
+///     - config:    config options for the brickmap
 pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Config) !BrickGrid {
     const grid = try allocator.alloc(GridEntry, dim_x * dim_y * dim_z);
+    errdefer allocator.free(grid);
     std.mem.set(GridEntry, grid, .{ .@"type" = .empty, .data = 0 });
 
-    const brick_alloc = config.brick_alloc orelse (try std.math.divCeil(usize, grid.len, 2));
+    const brick_alloc = config.brick_alloc orelse grid.len;
     const bricks = try allocator.alloc(Brick, brick_alloc);
-    std.mem.set(Brick, bricks, .{ .solid_mask = 0, .material_index = 0, .lod_material_index = 0 });
+    errdefer allocator.free(bricks);
+    std.mem.set(Brick, bricks, .{ .solid_mask = 0, .material_index = unset_material, .lod_material_index = 0 });
+
+    const material_indices = try allocator.alloc(u8, bricks.len * 512);
+    errdefer allocator.free(material_indices);
+    std.mem.set(u8, material_indices, 0);
 
     const min_point_base_t = blk: {
         const min_point = config.min_point orelse default_min_point;
@@ -115,27 +132,56 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         break :blk biggest_axis * 8;
     };
 
-    return BrickGrid{ .allocator = allocator, .grid = grid, .bricks = bricks, .active_bricks = 0, .device_state = Device{
-        .dim_x = dim_x,
-        .dim_y = dim_y,
-        .dim_z = dim_z,
-        .max_ray_iteration = max_ray_iteration,
-        .min_point_base_t = min_point_base_t,
-        .max_point_scale = max_point_scale,
-    } };
+    const voxel_dim = [3]u32{ dim_x * 8, dim_y * 8, dim_z * 8 };
+
+    // zig fmt: off
+    return BrickGrid{ 
+        .allocator = allocator, 
+        .grid = grid, 
+        .bricks = bricks, 
+        .material_indices = material_indices, 
+        .active_bricks = 0, 
+        .voxel_dim = voxel_dim, 
+        .device_state = Device{
+            .dim_x = dim_x,
+            .dim_y = dim_y,
+            .dim_z = dim_z,
+            .max_ray_iteration = max_ray_iteration,
+            .min_point_base_t = min_point_base_t,
+            .max_point_scale = max_point_scale,
+        } 
+    };
+    // zig fmt: on
 }
 
 /// Clean up host memory, does not account for device
 pub fn deinit(self: BrickGrid) void {
     self.allocator.free(self.grid);
     self.allocator.free(self.bricks);
+    self.allocator.free(self.material_indices);
+}
+
+pub const InsertError = error{ OutOfBoundsX, OutOfBoundsY, OutOfBoundsZ };
+pub fn safeInsert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u32) InsertError!void {
+    if (x < 0 or x >= self.voxel_dim[0]) {
+        return InsertError.OutOfBoundsX; // x was out of bounds
+    }
+    if (y < 0 or y >= self.voxel_dim[1]) {
+        return InsertError.OutOfBoundsY; // y was out of bounds
+    }
+    if (z < 0 or z >= self.voxel_dim[2]) {
+        return InsertError.OutOfBoundsZ; // z was out of bounds
+    }
+    @call(.{ .modifier = .always_inline }, insert, .{ self, x, y, z, material_index });
 }
 
 /// Insert a brick at coordinate x y z
-pub fn insert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u32) void {
-    _ = material_index;
+/// this function will cause panics if you insert out of bounds, use safeInsert
+/// if bound checks are required
+pub fn insert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u8) void {
+    const actual_y = self.device_state.dim_y * 8 - 1 - y;
 
-    const grid_index = self.gridAt(x, y, z);
+    const grid_index = self.gridAt(x, actual_y, z);
     var entry = self.grid[grid_index];
 
     // if entry is empty we need to populate the entry first
@@ -151,15 +197,44 @@ pub fn insert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u3
     var brick = self.bricks[@intCast(usize, entry.data)];
 
     // set the voxel to exist
-    const nth_bit = brickAt(x, y, z);
-    brick.solid_mask |= @as(i512, 1) << nth_bit;
+    const nth_bit = brickAt(x, actual_y, z);
+    const was_set = brick.solid_mask & @as(i512, 1) << nth_bit;
 
     // set the color information for the given voxel
-    // TODO: color/material index stuff ...
+    { // shift material position voxels that are after this voxel
+        if (brick.material_index == unset_material) {
+            brick.material_index = (@intCast(u24, self.active_bricks) - 1);
+        }
+        const brick_index = brick.material_index * 512;
+        const bits_before = countBits(brick.solid_mask, nth_bit);
+        const bits_total = countBits(brick.solid_mask, 512);
+        var i: u32 = bits_total;
+        if (was_set == 0) {
+            while (i > bits_before) : (i -= 1) {
+                const base_index = brick_index + i;
+                self.material_indices[base_index] = self.material_indices[base_index - 1];
+            }
+        }
+        self.material_indices[brick_index + bits_before] = material_index;
+    }
+
+    // set voxel to set
+    brick.solid_mask |= @as(i512, 1) << nth_bit;
 
     // store changes
     self.bricks[@intCast(usize, entry.data)] = brick;
     self.grid[grid_index] = entry;
+}
+
+inline fn countBits(bits: i512, range_to: u32) u32 {
+    var bit = bits;
+    var count: i512 = 0;
+    var i: u32 = 0;
+    while (i < range_to and bit != 0) : (i += 1) {
+        count += bit & 1;
+        bit = bit >> 1;
+    }
+    return @intCast(u32, count);
 }
 
 // TODO: test
@@ -178,78 +253,4 @@ inline fn gridAt(self: BrickGrid, x: usize, y: usize, z: usize) usize {
     const grid_y: u32 = @intCast(u32, y / 8);
     const grid_z: u32 = @intCast(u32, z / 8);
     return @intCast(usize, grid_x + self.device_state.dim_x * (grid_z + self.device_state.dim_z * grid_y));
-}
-
-// TODO: remove/move any code under this comment
-
-const Vec3 = @Vector(3, f32);
-const IVec3 = @Vector(3, i32);
-
-fn isInGrid(self: BrickGrid, point: IVec3) bool {
-    return point[0] >= 0 and point[0] < self.device_state.dim_x and point[1] >= 0 and point[1] < self.device_state.dim_y and point[2] >= 0 and point[2] < self.device_state.dim_z;
-}
-
-fn posToIndex(self: BrickGrid, pos: IVec3) usize {
-    return @intCast(usize, @intCast(u32, pos[0]) + self.device_state.dim_x * (@intCast(u32, pos[2]) + self.device_state.dim_z * @intCast(u32, pos[1])));
-}
-
-fn defineStepAndAxis(
-    dir: Vec3,
-    fposition: Vec3,
-    position: IVec3,
-    delta: Vec3,
-    pos_step: *IVec3,
-    axis_t: *Vec3,
-    axis_value: usize,
-) void {
-    const a = axis_value;
-    if (dir[a] < 0) {
-        pos_step.*[a] = -1;
-        axis_t.*[a] = (fposition[a] - @intToFloat(f32, position[a])) * delta[a];
-    } else {
-        pos_step.*[a] = 1;
-        axis_t.*[a] = (@intToFloat(f32, position[a]) + 1 - fposition[a]) * delta[a];
-    }
-}
-
-/// Traverses the brick grid and calculates any potential hit with the grid
-pub fn brickHit(self: BrickGrid, fposition: Vec3, r_direction: Vec3) void {
-    // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
-    // initialize values
-    var position: IVec3 = [3]i32{ @floatToInt(i32, fposition[0]), @floatToInt(i32, fposition[1]), @floatToInt(i32, fposition[2]) };
-    const delta = @fabs(@splat(3, @as(f32, 1.0)) / r_direction);
-    var pos_step: IVec3 = undefined;
-    var axis_t: Vec3 = undefined;
-    {
-        // define x
-        defineStepAndAxis(r_direction, fposition, position, delta, &pos_step, &axis_t, 0);
-        // define y
-        defineStepAndAxis(r_direction, fposition, position, delta, &pos_step, &axis_t, 1);
-        // define z
-        defineStepAndAxis(r_direction, fposition, position, delta, &pos_step, &axis_t, 2);
-    }
-
-    std.debug.print("starting search\n", .{});
-    // DDA loop
-    while (self.isInGrid(position)) {
-        const index = self.posToIndex(position);
-        const entry = self.grid[index];
-        if (entry.@"type" != .empty) {
-            std.debug.print("found a brick at {d} {d} {d}\n", .{ position[0], position[1], position[2] });
-            break;
-        }
-
-        var axis: usize = undefined;
-        if (axis_t[0] < axis_t[1] and axis_t[0] < axis_t[2]) {
-            axis = 0;
-        } else if (axis_t[1] < axis_t[2]) {
-            axis = 1;
-        } else {
-            axis = 2;
-        }
-        position[axis] += pos_step[axis];
-        axis_t[axis] += delta[axis];
-        std.debug.print("new position {d} {d} {d}\n", .{ position[0], position[1], position[2] });
-    }
-    std.debug.print("ending search\n", .{});
 }

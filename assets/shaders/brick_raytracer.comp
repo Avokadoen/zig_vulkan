@@ -1,6 +1,6 @@
 #version 450
 
-#extension GL_EXT_debug_printf : disable
+#extension GL_EXT_debug_printf : enable
 // debugPrintfEXT("hello world %f", 1.0);
 
 #include "rand.comp"
@@ -102,30 +102,37 @@ struct GridEntry {
     uint bits;
 };
 layout (std430, binding = 7) buffer GridBuffer {
-    GridEntry grid_entries[];
+    readonly GridEntry grid_entries[];
 };
 
 struct Brick {
     // 512 bit voxel set mask
     int solid_mask[16];
     // 24 bit material index + 8 bit lod index
-    uint indices;
+    int indices;
 };
 layout (std430, binding = 8) buffer BrickBuffer {
-    Brick bricks[];
+    readonly Brick bricks[];
 };
 
+layout (std430, binding = 9) buffer MaterialIndicesBuffer {
+    // one entry hold 4 indices
+    readonly uint material_indices[];
+};
+
+
+// material is represented by 32 bits:
 struct Material {
-    int type;
-    int type_index;
-    int albedo_index;
+    int type;          // 2 left most bits
+    int type_index;   // 15 shifted 2 bits
+    int albedo_index; // 15 shifted 17 bits
 };
 layout (std430, binding = 3) buffer MaterialBuffer {
-    readonly Material materials[];
+    readonly int materials[];
 };
-bool ScatterLambertian(Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered);
-bool ScatterMetal(Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered);
-bool ScatterDielectric(Ray r_in, vec3 hit_c_min, float hit_c_scale, inout HitRecord hit, out vec3 attenuation, out Ray scattered);
+bool ScatterLambertian(Material material, Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered);
+bool ScatterMetal(Material material, Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered);
+bool ScatterDielectric(Material material, Ray r_in, vec3 hit_c_min, inout HitRecord hit, out vec3 attenuation, out Ray scattered);
 
 
 struct Albedo {
@@ -153,17 +160,20 @@ layout (std430, binding = 6) buffer DielectricBuffer {
     readonly Dielectric dielectric[];
 };
 
-bool BrickHit(Ray r, float t_brick_max, vec3 delta, Brick brick, ivec3 brick_position, inout HitRecord hit);
-bool GridHit(Ray r, float t_min, float t_max, out HitRecord hit);
+bool BrickHit(Ray r, float t_brick_max, vec3 delta, Brick brick, ivec3 brick_position, out vec3 hit_min, inout HitRecord hit);
+bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit);
 
 // slab hit tests
 bool FastInstersect(vec3 p0, vec3 p1, Ray r);
-bool AdvIntersect(const bool calc_hit, vec3 p0, vec3 p1, Ray r, float t_min, inout float t_max, out HitRecord hit);
+bool AdvIntersect(vec3 p0, vec3 p1, Ray r, float t_min, inout float t_max, inout HitRecord hit);
 
 // TODO: higher level grid optimization
 // TODO: re-enable hack in ScatterDielectric
 // TODO: test splitting scale and point & base t and point in brick grid
 // TODO: normals are trivially calculated in DDA ...
+// TODO: plane intersection test is faster than cube
+// TODO: bug with refract vs reflect in diel
+// TODO: store the current chunk index we stand in for further sampling and bounces!
 
 void main() {
     ivec2 pixel_coord = ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y);
@@ -205,32 +215,34 @@ vec3 RayColor(Ray r) {
     int loop_count = 0;
     
     // TODO
-    vec3 hit_c_min;
-    float hit_c_scale;
-
-    while (loop_count < camera.max_bounce && GridHit(current_ray, 0.00001, infinity, hit)){ 
+    vec3 hit_v_min;
+    while (loop_count < camera.max_bounce && GridHit(current_ray, 0.00001, infinity, hit_v_min, hit)){ 
         loop_count += 1;
 
         Ray scattered;
         vec3 attenuation;
-
         bool result = false;
-        switch (materials[hit.index].type) {
+        const int material_bits = materials[hit.index];
+        const Material material = Material(
+            material_bits & 3,  // type
+            bitfieldExtract(material_bits, 2, 15), // material index
+            bitfieldExtract(material_bits, 17, 15) // albedo color
+        );
+        switch (material.type) {
         case MAT_LAMBERTIAN: 
-            result = ScatterLambertian(current_ray, hit, attenuation, scattered);
+            result = ScatterLambertian(material, current_ray, hit, attenuation, scattered);
             break;
         case MAT_METAL: 
-            result = ScatterMetal(current_ray, hit, attenuation, scattered);
+            result = ScatterMetal(material, current_ray, hit, attenuation, scattered);
             break;
         case MAT_DIELECTRIC:
-            result = ScatterDielectric(current_ray, hit_c_min, hit_c_scale, hit, attenuation, scattered);
+            result = ScatterDielectric(material, current_ray, hit_v_min, hit, attenuation, scattered);
             break;
         default: 
             result = false;
             break;
         }
         if (!result) break;
-        
         accumulative_attenuation *= attenuation;
         current_ray = scattered;
     }
@@ -264,11 +276,11 @@ void defineStepAndAxis(vec3 dir, vec3 fposition, ivec3 position, vec3 delta, int
     }
 }
 
-bool BrickHit(Ray r, float t_min, float t_brick_max, vec3 delta, Brick brick, vec3 brick_position, inout HitRecord hit) {
+bool BrickHit(Ray r, float t_min, float t_brick_max, vec3 delta, Brick brick, vec3 brick_position, out vec3 hit_min, inout HitRecord hit) {
     // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
     /// get position in brick space from global position
     /// caller should make sure that p is in fact inside the grid
-    vec3 fposition = (RayAt(r, hit.t + 0.00001) - brick_position) * 8;
+    vec3 fposition = (RayAt(r, hit.t + 0.0001) - brick_position) * 8;
     ivec3 position = ivec3(fposition);
 
     ivec3 pos_step;
@@ -289,11 +301,47 @@ bool BrickHit(Ray r, float t_min, float t_brick_max, vec3 delta, Brick brick, ve
         const int mask_offset = bit_offset % 32;
         const int set_bit = bitfieldExtract(brick.solid_mask[mask_index], mask_offset, 1);
         if (set_bit != 0) {
+            { // calculate material data
+                int bits_before = 0;
+                // find and assign material index
+                for (int i = 0; i < mask_index; i++) {
+                    bits_before += bitCount(brick.solid_mask[i]);
+                }
+                // bitfieldExtract(brick.solid_mask[mask_index], 0, mask_offset)
+                // causes a weird bug where brick.solid_mask[mask_index] = 3, mask_offset = 1
+                // results in -1 which in turn results in 32 bit set which is wrong.
+                // this is a work around where we simply create a bitmask for solid_mask
+                int maskmask = 0;
+                for (int i = 0; i < mask_offset; i++) {
+                    maskmask |= 1 << i;
+                }
+                bits_before += bitCount(brick.solid_mask[mask_index] & maskmask);
+
+                const int material_index_index = (bits_before * 8) / 32;
+                const int material_index_bit_offset = (bits_before * 8) % 32;
+
+                const uint brick_offset = bitfieldExtract(brick.indices, 0, 24) * 128;
+                debugPrintfEXT("brick_offset: %d", brick_offset);
+                hit.index = bitfieldExtract(material_indices[material_index_index + brick_offset], material_index_bit_offset, 8);
+            }
+
+            // TODO: HACK: calculate T by doing advanced cube hit ...
             const vec3 cube_min = brick_position + (position * 0.125);
             const vec3 cube_max = cube_min + vec3(0.125) + 0.00001;
-            HitRecord rtr_hit;
-            AdvIntersect(false, cube_min, cube_max, r, t_min, t_brick_max, rtr_hit);
-            hit = rtr_hit;
+            AdvIntersect(cube_min, cube_max, r, t_min, t_brick_max, hit);
+            
+            // TODO: use a determenistic t from DDA
+            hit.point = RayAt(r, hit.t - faccuracy);
+            const vec3 center = cube_min + vec3(0.0625); // 0.125 / 2
+            vec3 normal = hit.point - center;
+            const vec3 abs_normal = abs(normal);
+            normal.x = normal.x * int(abs_normal.x >= abs_normal.y && abs_normal.x >= abs_normal.z);
+            normal.y = normal.y * int(abs_normal.y >= abs_normal.x && abs_normal.y >= abs_normal.z);
+            normal.z = normal.z * int(abs_normal.z >= abs_normal.x && abs_normal.z >= abs_normal.y);
+            hit.normal = normalize(normal);
+
+            hit_min = cube_min;
+
             return true;
         }
         
@@ -310,15 +358,16 @@ bool BrickHit(Ray r, float t_min, float t_brick_max, vec3 delta, Brick brick, ve
 }
 
 /// Traverses the brick grid and calculates any potential hit with the grid
-bool GridHit(Ray r, float t_min, float t_max, out HitRecord hit) {
+bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit) {
     // min point *and* base t value
     const vec3 g_min = brick_grid.min_point_base_t.xyz;
     const vec3 g_max = brick_grid.max_point_scale.xyz;
     const float b_base_t = brick_grid.min_point_base_t.w;
    
     float t_grid_max = t_max;
-    const bool brick_hit = AdvIntersect(false, g_min, g_max, r, t_min, t_grid_max, hit);
-    if (brick_hit == false) {
+    HitRecord hit_grid;
+    const bool grid_hit = AdvIntersect(g_min, g_max, r, t_min, t_grid_max, hit_grid);
+    if (grid_hit == false) {
         return false;
     }
 
@@ -326,7 +375,7 @@ bool GridHit(Ray r, float t_min, float t_max, out HitRecord hit) {
     
     /// get position in grid space from global position
     /// caller should make sure that p is in fact inside the grid
-    const vec3 fposition = RayAt(r, hit.t + 0.00001) - g_min;
+    const vec3 fposition = RayAt(r, hit_grid.t + 0.0001) - g_min;
     ivec3 position = ivec3(fposition);
 
     // in the event of a axis of direction is 0 we get infinity according to 
@@ -355,13 +404,15 @@ bool GridHit(Ray r, float t_min, float t_max, out HitRecord hit) {
             const vec3 brick_max = brick_min + vec3(brick_grid.max_point_scale.w); 
             float brick_t_max = t_grid_max;
             // progress hit.t
-            AdvIntersect(false, brick_min, brick_max, r, t_min, brick_t_max, hit);
+            AdvIntersect(brick_min, brick_max, r, t_min, brick_t_max, hit);
             
             // check if ray hits any voxel in the brick
             const uint brick_index = bitfieldExtract(bits, 2, 30);
-            if (BrickHit(r, t_min, brick_t_max, delta, bricks[brick_index], brick_min, hit)) {
+            
+            if (BrickHit(r, t_min, brick_t_max, delta, bricks[brick_index], brick_min, hit_min, hit)) {
                 return true;
             }
+            
         }
 
         const int y_smallest = int(axis_t.y < axis_t.x && axis_t.y < axis_t.z);
@@ -382,9 +433,8 @@ Ray CameraGetRay(float u, float v) {
     return CreateRay(camera.origin, ray_dir);
 }
 
-vec3 AlbedoColor(uint index) {
-    Material mat = materials[index];
-    return albedos[mat.albedo_index].color.xyz;
+vec3 AlbedoColor(Material material) {
+    return albedos[material.albedo_index].color.xyz;
 }
 
 float maxComponent(vec3 v) {
@@ -404,7 +454,7 @@ bool FastInstersect(vec3 p0, vec3 p1, Ray r) {
 /// Test if a ray intersect with min point p0 and max p1 of a slab
 /// This function will also computes the ray t_min and t_max and register a hit in a record in the event of an intersection
 /// If calc_hit is false: only compute t values (t_min is still stored in hit.t)
-bool AdvIntersect(const bool calc_hit, vec3 p0, vec3 p1, Ray r, float t_min, inout float t_max, out HitRecord hit) {
+bool AdvIntersect(vec3 p0, vec3 p1, Ray r, float t_min, inout float t_max, inout HitRecord hit) {
     const vec3 inv_ray_dir = 1 / r.direction; 
     const vec3 t_lower = (p0 - r.origin) * inv_ray_dir;
     const vec3 t_upper = (p1 - r.origin) * inv_ray_dir;
@@ -425,28 +475,6 @@ bool AdvIntersect(const bool calc_hit, vec3 p0, vec3 p1, Ray r, float t_min, ino
     // store the exit t in t_max
     hit.t = t_cube_min; 
     t_max = t_cube_max;
-    
-    if (calc_hit) {
-        hit.point = RayAt(r, hit.t);
-        vec3 center = (p1 - p0) * vec3(0.5);
-
-        // TODO: improve this normal calculation :/
-        //       also: probably broken when not a cube
-        vec3 normal = hit.point - center;
-        vec3 abs_norm = abs(normal);
-        if (abs_norm.x < abs_norm.y || abs_norm.x < abs_norm.z) {
-            normal.x = 0;
-        }
-        if (abs_norm.y < abs_norm.x || abs_norm.y < abs_norm.z) {
-            normal.y = 0;
-        }
-        if (abs_norm.z < abs_norm.x || abs_norm.z < abs_norm.y) {
-            normal.z = 0;
-        }
-        normal = normalize(normal);
-        float not_front_face = float(!(dot(r.direction, normal) < 0)); 
-        hit.normal = normalize(normal * fma(-2.0, not_front_face, 1.0));
-    }
 
     return true;
 }
@@ -470,24 +498,23 @@ mat3 constructFrisvad(vec3 normal) {
     return ret;
 }
 
-bool ScatterLambertian(Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
+bool ScatterLambertian(Material material, Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
     hit.internal_reflection = 1.0;
     
-    vec3 scatter_dir = normalize(hit.normal + RandInHemisphere(hit.point.xy + hit.point.z, hit.normal));
+    vec3 scatter_dir = hit.normal + RandInHemisphere(hit.point.xy + hit.point.z, hit.normal);
     if (IsNearZero(scatter_dir)) scatter_dir = hit.normal;
     scattered = CreateRay(hit.point, scatter_dir);
-    attenuation = AlbedoColor(hit.index);
+    attenuation = AlbedoColor(material);
     return true;
 }
 
-bool ScatterMetal(Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
+bool ScatterMetal(Material material, Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
     hit.internal_reflection = 1.0;
 
     vec3 reflected = reflect(r_in.direction, normalize(hit.normal));
-    Material mat = materials[hit.index];
-    float fuzz = metal[mat.type_index].fuzz;
+    float fuzz = metal[material.type_index].fuzz;
     scattered = CreateRay(hit.point, fma(reflected, vec3(fuzz), RandInHemisphere(hit.point.xy + hit.point.z, hit.normal)));
-    attenuation = AlbedoColor(hit.index);
+    attenuation = AlbedoColor(material);
     return (dot(scattered.direction, hit.normal) > 0);
 }
 
@@ -514,27 +541,26 @@ bool transmissionDirection(float n1, float n2, vec3 ray_dir, vec3 normal, out ve
     return true;
 }
 
-bool ScatterDielectric(Ray r_in, vec3 hit_c_min, float hit_c_scale, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
-    attenuation = AlbedoColor(hit.index);
+bool ScatterDielectric(Material material, Ray r_in, vec3 hit_c_min, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
+    attenuation = AlbedoColor(material);
 
-    Material mat = materials[hit.index];
-    float ir = dielectric[mat.type_index].internal_reflection;
+    float ir = dielectric[material.type_index].internal_reflection;
     
     // TODO: better noise (blue :))
     // TODO: add property to glass: roughness (0 should be no noise)
-    const vec3 normal = normalize(fma(hit.normal, vec3(10), RandInHemisphere(hit.point.xy + hit.point.z, hit.normal)));
+    const vec3 normal = normalize(fma(hit.normal, vec3(2), RandInHemisphere(hit.point.xy + hit.point.z, hit.normal)));
     vec3 direction;
     bool do_refract = transmissionDirection(ir, hit.internal_reflection, r_in.direction, normal, direction);
     if (do_refract) {
         scattered = CreateRay(hit.point, direction);
         // TODO: we can remove this if we find the correct t_min for GridHit in calculate raycolor
         // HACK: move scattered ray out of current cube explicitly
-        // {
-        //     float t_max = 9999.0;
-        //     HitRecord c_hit = hit;
-        //     AdvIntersect(hit_c_min, hit_c_min + vec3(hit_c_scale), scattered, 0.0, t_max, c_hit);
-        //     scattered = CreateRay(RayAt(scattered, t_max), scattered.direction);
-        // }
+        {
+            float t_max = 9999.0;
+            HitRecord c_hit = hit;
+            AdvIntersect(hit_c_min, hit_c_min + vec3(0.125), scattered, 0.0, t_max, c_hit);
+            scattered = CreateRay(RayAt(scattered, t_max), scattered.direction);
+        }
         hit.internal_reflection = ir;
     } else {
         direction = reflect(r_in.direction, normal);

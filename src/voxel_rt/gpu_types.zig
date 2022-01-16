@@ -29,23 +29,23 @@ const type_binding_map = std.ComptimeStringMap(MapValue, .{
 
 // storage buffer, binding: 3
 /// Materials define how a ray should interact with a given voxel
-pub const Material = extern struct {
+pub const Material = packed struct {
     /// Type is the main attribute of a material and define reflection and refraction behaviour
-    pub const Type = enum(i32) {
+    pub const Type = enum(u2) {
         /// normal diffuse material
-        lambertian,
+        lambertian = 0,
         /// shiny material with fuzz
-        metal,
+        metal = 1,
         /// glass and other see through material
-        dielectric,
+        dielectric = 2,
     };
 
     @"type": Type,
     /// index in the type array
     /// i.e: type = material, type_index = 0 points to index 0 in metal array
-    type_index: i32,
+    type_index: u15,
     /// index to the color of the voxel
-    albedo_index: i32,
+    albedo_index: u15,
 };
 
 // TODO: convert to push constants: Albedo, Metal, Dielectric

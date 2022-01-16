@@ -55,9 +55,14 @@ vec3 hash32(vec2 p, float min, float max) {
     );
 }
 vec3 RandInHemisphere(vec2 co, vec3 normal) {
+    const int max_loops = 8; 
     vec3 in_unit_sphere = RandVec3(co, -1, 1);
-    while (dot(in_unit_sphere, in_unit_sphere) >= 1) {
-        in_unit_sphere = RandVec3(co, -1, 1);
+    int i = 0;
+    while (i < max_loops && dot(in_unit_sphere, in_unit_sphere) >= 1) {
+        i += 1;
+        float last_iter = float(i != max_loops - 1);
+        float not_last_iter = 1 - last_iter;
+        in_unit_sphere = RandVec3(co, -1, 1) * not_last_iter + normal * last_iter;
     }
     if (dot(in_unit_sphere, normal) > 0.0) // In the same hemisphere as the normal
         return in_unit_sphere;

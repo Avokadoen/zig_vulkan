@@ -103,6 +103,27 @@ pub const InitializedApi = struct {
         return handle;
     }
 
+    // TODO: HACK: init a empty texture for compute, see issue https://github.com/Avokadoen/zig_vulkan/issues/62
+    pub fn loadEmptyTexture(self: *Self, width: i32, height: i32) !TextureHandle {
+        const image = stbi.Image{
+            .width = width,
+            .height = height,
+            .channels = 4,
+            .data = try self.allocator.alloc(stbi.Pixel, @intCast(usize, width * height)),
+        };
+        errdefer self.allocator.free(image.data);
+
+        try self.images.append(image);
+        const handle = TextureHandle{
+            .id = @intCast(c_int, self.images.items.len - 1),
+            .width = @intToFloat(f32, image.width),
+            .height = @intToFloat(f32, image.height),
+        };
+        try self.db_ptr.*.uv_meta.append(handle);
+
+        return handle;
+    }
+
     /// Create a new sprite 
     pub fn createSprite(self: *Self, texture: TextureHandle, position: Vec2, rotation: f32, size: Vec2) !Sprite {
         if (self.prepared_to_draw) {
