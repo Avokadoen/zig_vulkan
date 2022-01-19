@@ -103,18 +103,31 @@ pub fn main() anyerror!void {
     draw_api.handleWindowResize(window);
     defer draw_api.noHandleWindowResize(window);
 
-    var grid = try BrickGrid.init(allocator, 20, 10, 20, .{ .min_point = [3]f32{ -5, -19, -6 } });
+    const v = 10;
+    var grid = try BrickGrid.init(allocator, 10 * v, 20, 10 * v, .{ .min_point = [3]f32{ -5, -12, -10 } });
     defer grid.deinit();
 
-    const model = try vox.load(false, allocator, "../assets/models/nature.vox");
-    defer model.deinit();
+    const monu10 = try vox.load(false, allocator, "../assets/models/monu1.vox");
+    defer monu10.deinit();
+
+    var albedo_color: [256]gpu_types.Albedo = undefined;
+    var materials: [256]gpu_types.Material = undefined;
+    for (monu10.rgba_chunk) |rgba, i| {
+        const index = i;
+        albedo_color[index] = .{ .color = za.Vec4.new(@intToFloat(f32, rgba.r) / 255, @intToFloat(f32, rgba.g) / 255, @intToFloat(f32, rgba.b) / 255, @intToFloat(f32, rgba.a) / 255) };
+        materials[index] = .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = @intCast(u15, index) };
+    }
+
     // Test what we are loading
-    for (model.xyzi_chunks[0]) |xyzi, i| {
-        grid.insert(xyzi.x, xyzi.z, xyzi.y, @intCast(u8, @rem(i, 3)));
+    for (monu10.xyzi_chunks[0]) |xyzi| {
+        grid.insert(xyzi.x, xyzi.z, xyzi.y, xyzi.color_index);
     }
 
     var voxel_rt = try VoxelRT.init(allocator, ctx, grid, &draw_api.state.subo.ubo.my_texture, .{});
     defer voxel_rt.deinit(ctx);
+
+    try voxel_rt.pushAlbedo(ctx, albedo_color[0..]);
+    try voxel_rt.pushMaterials(ctx, materials[0..]);
 
     var prev_frame = std.time.milliTimestamp();
     try window.setInputMode(glfw.Window.InputMode.cursor, glfw.Window.InputModeCursor.disabled);

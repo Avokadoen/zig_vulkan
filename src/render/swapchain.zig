@@ -37,9 +37,10 @@ pub const ViewportScissor = struct {
 // TODO: mutex! : the data is shared between rendering implementation and pipeline
 //                pipeline will attempt to update the data in the event of rescale which might lead to RC
 pub const Data = struct {
+    allocator: Allocator,
     swapchain: vk.SwapchainKHR,
-    images: ArrayList(vk.Image),
-    image_views: ArrayList(vk.ImageView),
+    images: []vk.Image,
+    image_views: []vk.ImageView,
     format: vk.Format,
     extent: vk.Extent2D,
     support_details: SupportDetails,
@@ -47,7 +48,7 @@ pub const Data = struct {
     // create a swapchain data struct, caller must make sure to call deinit
     pub fn init(allocator: Allocator, ctx: Context, old_swapchain: ?vk.SwapchainKHR) !Data {
         const support_details = try SupportDetails.init(allocator, ctx.vki, ctx.physical_device, ctx.surface);
-        errdefer support_details.deinit();
+        errdefer support_details.deinit(allocator);
 
         const sc_create_info = blk1: {
             if (support_details.capabilities.max_image_count <= 0) {
@@ -105,18 +106,25 @@ pub const Data = struct {
         const swapchain_khr = try ctx.vkd.createSwapchainKHR(ctx.logical_device, &sc_create_info, null);
         const swapchain_images = blk: {
             var image_count: u32 = 0;
+
             // TODO: handle incomplete
             _ = try ctx.vkd.getSwapchainImagesKHR(ctx.logical_device, swapchain_khr, &image_count, null);
-            var images = try ArrayList(vk.Image).initCapacity(allocator, image_count);
+
+            var images = try allocator.alloc(vk.Image, image_count);
+            errdefer allocator.free(images);
+
             // TODO: handle incomplete
-            _ = try ctx.vkd.getSwapchainImagesKHR(ctx.logical_device, swapchain_khr, &image_count, images.items.ptr);
-            images.items.len = image_count;
+            _ = try ctx.vkd.getSwapchainImagesKHR(ctx.logical_device, swapchain_khr, &image_count, images.ptr);
+            images.len = image_count;
             break :blk images;
         };
+        errdefer allocator.free(swapchain_images);
 
         const image_views = blk: {
-            const image_view_count = swapchain_images.items.len;
-            var views = try ArrayList(vk.ImageView).initCapacity(allocator, image_view_count);
+            const image_view_count = swapchain_images.len;
+            var views = try allocator.alloc(vk.ImageView, image_view_count);
+            errdefer allocator.free(views);
+
             const components = vk.ComponentMapping{
                 .r = .identity,
                 .g = .identity,
@@ -135,21 +143,22 @@ pub const Data = struct {
                 while (i < image_view_count) : (i += 1) {
                     const create_info = vk.ImageViewCreateInfo{
                         .flags = .{},
-                        .image = swapchain_images.items[i],
+                        .image = swapchain_images[i],
                         .view_type = .@"2d",
                         .format = sc_create_info.image_format,
                         .components = components,
                         .subresource_range = subresource_range,
                     };
-                    const view = try ctx.vkd.createImageView(ctx.logical_device, &create_info, null);
-                    views.appendAssumeCapacity(view);
+                    views[i] = try ctx.vkd.createImageView(ctx.logical_device, &create_info, null);
                 }
             }
 
             break :blk views;
         };
+        errdefer allocator.free(image_views);
 
         return Data{
+            .allocator = allocator,
             .swapchain = swapchain_khr,
             .images = swapchain_images,
             .image_views = image_views,
@@ -160,12 +169,12 @@ pub const Data = struct {
     }
 
     pub fn deinit(self: Data, ctx: Context) void {
-        for (self.image_views.items) |view| {
+        for (self.image_views) |view| {
             ctx.vkd.destroyImageView(ctx.logical_device, view, null);
         }
-        self.image_views.deinit();
-        self.images.deinit();
-        self.support_details.deinit();
+        self.allocator.free(self.image_views);
+        self.allocator.free(self.images);
+        self.support_details.deinit(self.allocator);
 
         ctx.vkd.destroySwapchainKHR(ctx.logical_device, self.swapchain, null);
     }
@@ -175,8 +184,8 @@ pub const SupportDetails = struct {
     const Self = @This();
 
     capabilities: vk.SurfaceCapabilitiesKHR,
-    formats: ArrayList(vk.SurfaceFormatKHR),
-    present_modes: ArrayList(vk.PresentModeKHR),
+    formats: []vk.SurfaceFormatKHR,
+    present_modes: []vk.PresentModeKHR,
 
     /// caller has to make sure to also call deinit
     pub fn init(allocator: Allocator, vki: dispatch.Instance, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !Self {
@@ -189,12 +198,12 @@ pub const SupportDetails = struct {
             return error.NoSurfaceFormatsSupported;
         }
         const formats = blk: {
-            var formats = try ArrayList(vk.SurfaceFormatKHR).initCapacity(allocator, format_count);
-            _ = try vki.getPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count, formats.items.ptr);
-            formats.items.len = format_count;
+            var formats = try allocator.alloc(vk.SurfaceFormatKHR, format_count);
+            _ = try vki.getPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count, formats.ptr);
+            formats.len = format_count;
             break :blk formats;
         };
-        errdefer formats.deinit();
+        errdefer allocator.free(formats);
 
         var present_modes_count: u32 = 0;
         _ = try vki.getPhysicalDeviceSurfacePresentModesKHR(device, surface, &present_modes_count, null);
@@ -202,12 +211,12 @@ pub const SupportDetails = struct {
             return error.NoPresentModesSupported;
         }
         const present_modes = blk: {
-            var present_modes = try ArrayList(vk.PresentModeKHR).initCapacity(allocator, present_modes_count);
-            _ = try vki.getPhysicalDeviceSurfacePresentModesKHR(device, surface, &present_modes_count, present_modes.items.ptr);
-            present_modes.items.len = present_modes_count;
+            var present_modes = try allocator.alloc(vk.PresentModeKHR, present_modes_count);
+            _ = try vki.getPhysicalDeviceSurfacePresentModesKHR(device, surface, &present_modes_count, present_modes.ptr);
+            present_modes.len = present_modes_count;
             break :blk present_modes;
         };
-        errdefer present_modes.deinit();
+        errdefer allocator.free(present_modes);
 
         return Self{
             .capabilities = capabilities,
@@ -219,19 +228,19 @@ pub const SupportDetails = struct {
     pub fn selectSwapChainFormat(self: Self) vk.SurfaceFormatKHR {
         // TODO: in some cases this is a valid state?
         //       if so return error here instead ...
-        std.debug.assert(self.formats.items.len > 0);
+        std.debug.assert(self.formats.len > 0);
 
-        for (self.formats.items) |format| {
+        for (self.formats) |format| {
             if (format.format == .b8g8r8a8_srgb and format.color_space == .srgb_nonlinear_khr) {
                 return format;
             }
         }
 
-        return self.formats.items[0];
+        return self.formats[0];
     }
 
     pub fn selectSwapchainPresentMode(self: Self) vk.PresentModeKHR {
-        for (self.present_modes.items) |present_mode| {
+        for (self.present_modes) |present_mode| {
             if (present_mode == .mailbox_khr) {
                 return present_mode;
             }
@@ -259,8 +268,8 @@ pub const SupportDetails = struct {
         }
     }
 
-    pub fn deinit(self: Self) void {
-        self.formats.deinit();
-        self.present_modes.deinit();
+    pub fn deinit(self: Self, allocator: Allocator) void {
+        allocator.free(self.formats);
+        allocator.free(self.present_modes);
     }
 };

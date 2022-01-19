@@ -89,4 +89,18 @@ pub const Chunk = struct {
         b: u8,
         a: u8,
     };
+
+    // Extension chunks below
+
+    // pub const Material = struct {
+    //     pub const Type = enum {
+    //         diffuse,
+    //         metal,
+    //         glass,
+    //         emit
+    //     };
+
+    //     @"type": Type,
+
+    // }
 };

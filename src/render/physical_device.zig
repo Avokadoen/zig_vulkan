@@ -169,7 +169,7 @@ fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.Phys
 
     const swapchain_score: i32 = blk: {
         if (swapchain.SupportDetails.init(allocator, vki, device, surface)) |ok| {
-            defer ok.deinit();
+            defer ok.deinit(allocator);
             break :blk 10;
         } else |_| {
             break :blk -1000;

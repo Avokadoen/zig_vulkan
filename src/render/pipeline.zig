@@ -236,7 +236,7 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                 errdefer self.allocator.free(command_buffers);
 
                 const images_in_flight = blk: {
-                    var images_in_flight = try self.allocator.alloc(vk.Fence, self.sc_data.images.items.len);
+                    var images_in_flight = try self.allocator.alloc(vk.Fence, self.sc_data.images.len);
                     var i: usize = 0;
                     while (i < images_in_flight.len) : (i += 1) {
                         images_in_flight[i] = .null_handle;
@@ -512,8 +512,8 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
 
 inline fn createFramebuffers(allocator: Allocator, ctx: Context, swapchain_data: *const swapchain.Data, render_pass: vk.RenderPass, prev_framebuffer: ?[]vk.Framebuffer) ![]vk.Framebuffer {
     const image_views = swapchain_data.image_views;
-    var framebuffers = prev_framebuffer orelse try allocator.alloc(vk.Framebuffer, image_views.items.len);
-    for (image_views.items) |view, i| {
+    var framebuffers = prev_framebuffer orelse try allocator.alloc(vk.Framebuffer, image_views.len);
+    for (image_views) |view, i| {
         const attachments = [_]vk.ImageView{
             view,
         };
@@ -964,11 +964,16 @@ pub const ComputeDrawPipeline = struct {
         // zig fmt: on
         // TODO: allow varying local thread size, error if x_ or y_ dispatch have decimal values
         // compute shader has 16 thread in x and y, we calculate inverse at compile time
-        const local_thread_factor: f32 = comptime blk: {
+        const local_thread_factor_x: f32 = comptime blk: {
             break :blk 1.0 / 32.0;
         };
-        const x_dispatch = @ceil(@intToFloat(f32, self.target_texture.image_extent.width) * local_thread_factor);
-        const y_dispatch = @ceil(@intToFloat(f32, self.target_texture.image_extent.height) * local_thread_factor);
+        const local_thread_factor_y: f32 = comptime blk: {
+            break :blk 1.0 / 32.0;
+        };
+        const img_width = self.target_texture.image_extent.width;
+        const img_height = self.target_texture.image_extent.height;
+        const x_dispatch = @ceil(@intToFloat(f32, img_width) * local_thread_factor_x);
+        const y_dispatch = @ceil(@intToFloat(f32, img_height) * local_thread_factor_y);
         ctx.vkd.cmdDispatch(self.command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
         try ctx.vkd.endCommandBuffer(self.command_buffer);
     }

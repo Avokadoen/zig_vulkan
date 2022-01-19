@@ -13,10 +13,10 @@ const gpu_types = @import("gpu_types.zig");
 
 pub const vox = @import("vox/loader.zig");
 
-const default_material_buffer = 10;
-const default_albedo_buffer = 10;
-const default_metal_buffer = 10;
-const default_dielectric_buffer = 10;
+const default_material_buffer = 256;
+const default_albedo_buffer = 256;
+const default_metal_buffer = 256;
+const default_dielectric_buffer = 256;
 
 pub const Config = struct {
     material_buffer: ?u64 = null,
@@ -56,7 +56,7 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: BrickGrid, target_te
     errdefer comp_pipeline.deinit(ctx);
 
     const camera = blk: {
-        var c_config = Camera.Config{ .origin = za.Vec3.new(0.0, 0.0, 0.0), .normal_speed = 2, .viewport_height = 2, .samples_per_pixel = 4, .max_bounce = 4 };
+        var c_config = Camera.Config{ .origin = za.Vec3.new(0.0, 0.0, 0.0), .normal_speed = 2, .viewport_height = 2, .samples_per_pixel = 2, .max_bounce = 4 };
         break :blk Camera.init(75, target_texture.image_extent.width, target_texture.image_extent.height, c_config);
     };
 
@@ -67,33 +67,6 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: BrickGrid, target_te
     {
         const grid_data = [_]BrickGrid.Device{brick_grid.device_state};
         try comp_pipeline.uniform_buffers[1].transfer(ctx, BrickGrid.Device, grid_data[0..]);
-    }
-
-    {
-        const materials = [_]gpu_types.Material{ .{
-            .@"type" = .lambertian,
-            .type_index = 0,
-            .albedo_index = 0,
-        }, .{
-            .@"type" = .metal,
-            .type_index = 0,
-            .albedo_index = 1,
-        }, .{
-            .@"type" = .dielectric,
-            .type_index = 0,
-            .albedo_index = 2,
-        } };
-        try comp_pipeline.storage_buffers[0].transfer(ctx, gpu_types.Material, materials[0..]);
-    }
-    {
-        const albedos = [_]gpu_types.Albedo{ .{
-            .color = za.Vec4.new(0.5, 0.2, 0, 1),
-        }, .{
-            .color = za.Vec4.new(0.4, 0, 0.4, 1),
-        }, .{
-            .color = za.Vec4.new(0.0, 0.6, 0.6, 1),
-        } };
-        try comp_pipeline.storage_buffers[1].transfer(ctx, gpu_types.Albedo, albedos[0..]);
     }
     {
         const metals = [_]gpu_types.Metal{.{
@@ -119,6 +92,16 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: BrickGrid, target_te
         .comp_pipeline = comp_pipeline 
     };
     // zig fmt: on
+}
+
+/// push the materials to GPU
+pub fn pushMaterials(self: VoxelRT, ctx: Context, materials: []const gpu_types.Material) !void {
+    try self.comp_pipeline.storage_buffers[0].transfer(ctx, gpu_types.Material, materials);
+}
+
+/// push the albedo to GPU
+pub fn pushAlbedo(self: VoxelRT, ctx: Context, albedos: []const gpu_types.Albedo) !void {
+    try self.comp_pipeline.storage_buffers[1].transfer(ctx, gpu_types.Albedo, albedos);
 }
 
 pub fn debug(self: *VoxelRT, ctx: Context) !void {

@@ -42,10 +42,11 @@ pub const ParseError = error{
 // zig fmt: on
 pub fn parseBuffer(comptime strict: bool, allocator: Allocator, buffer: []const u8) !Vox {
     if (strict == true) {
-        validateHeader(buffer);
+        try validateHeader(buffer);
     }
 
     var vox = Vox.init(allocator);
+    errdefer vox.deinit();
 
     // insert main node
     try vox.generic_chunks.append(try chunkFrom(buffer[8..]));
@@ -90,11 +91,10 @@ pub fn parseBuffer(comptime strict: bool, allocator: Allocator, buffer: []const 
     // TODO: pos will cause out of bounds easily, make code more robust!
     var model: usize = 0;
     while (model < num_models) : (model += 1) {
-
         // parse SIZE chunk
         {
             if (strict) {
-                if (buffer[pos..4] != "SIZE") {
+                if (!std.mem.eql(u8, buffer[pos .. pos + 4], "SIZE")) {
                     return ParseError.ExpectedSizeHeader;
                 }
             }
@@ -120,7 +120,7 @@ pub fn parseBuffer(comptime strict: bool, allocator: Allocator, buffer: []const 
         // parse XYZI chunk
         {
             if (strict) {
-                if (buffer[pos..4] != "XYZI") {
+                if (!std.mem.eql(u8, buffer[pos .. pos + 4], "XYZI")) {
                     return ParseError.ExpectedXyziHeader;
                 }
             }
@@ -151,28 +151,47 @@ pub fn parseBuffer(comptime strict: bool, allocator: Allocator, buffer: []const 
         }
     }
 
-    // check if it is probable that there is a RGBA chunk remaining
-    if (buffer.len - pos > 256) {
-        if (strict) {
-            if (buffer[pos..4] != "RGBA") {
-                return ParseError.ExpectedRgbaHeader;
-            }
-        }
-        // parse generic chunk
-        try vox.generic_chunks.append(try chunkFrom(buffer[pos..]));
-        pos += chunk_stride;
+    var rgba_set: bool = false;
+    while (pos < buffer.len) {
+        // Parse potential extensions and RGBA
+        switch (buffer[pos]) {
+            'R' => {
+                // check if it is probable that there is a RGBA chunk remaining
+                if (strict) {
+                    if (!std.mem.eql(u8, buffer[pos .. pos + 4], "RGBA")) {
+                        return ParseError.ExpectedRgbaHeader;
+                    }
+                }
+                // parse generic chunk
+                try vox.generic_chunks.append(try chunkFrom(buffer[pos..]));
+                pos += chunk_stride;
 
-        var i: usize = 0;
-        while (i < 255) : (i += 1) {
-            vox.rgba_chunk[i] = Chunk.RgbaElement{
-                .r = buffer[pos],
-                .g = buffer[pos + 1],
-                .b = buffer[pos + 2],
-                .a = buffer[pos + 3],
-            };
-            pos += 4;
+                vox.rgba_chunk[0] = Chunk.RgbaElement{
+                    .r = 0,
+                    .g = 0,
+                    .b = 0,
+                    .a = 1,
+                };
+                var i: usize = 1;
+                while (i < 255) : (i += 1) {
+                    vox.rgba_chunk[i] = Chunk.RgbaElement{
+                        .r = buffer[pos],
+                        .g = buffer[pos + 1],
+                        .b = buffer[pos + 2],
+                        .a = buffer[pos + 3],
+                    };
+                    pos += 4;
+                }
+                rgba_set = true;
+            },
+            else => {
+                // skip bytes
+                pos += 4;
+            },
         }
-    } else {
+    }
+
+    if (rgba_set == false) {
         const default = @ptrCast(*const [256]Chunk.RgbaElement, &default_rgba);
         std.mem.copy(Chunk.RgbaElement, vox.rgba_chunk[0..], default[0..]);
     }
