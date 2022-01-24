@@ -328,8 +328,9 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, vec3 bri
                 const int material_index_index = (bits_before * 8) / 32;
                 const int material_index_bit_offset = (bits_before * 8) % 32;
 
-                const uint brick_offset = bitfieldExtract(brick.indices, 0, 24) * 128;
-                hit.index = bitfieldExtract(material_indices[material_index_index + brick_offset], material_index_bit_offset, 8);
+                // perform material lookup
+                const uint material_brick_offset = bitfieldExtract(brick.indices, 0, 24);
+                hit.index = bitfieldExtract(material_indices[material_index_index + material_brick_offset], material_index_bit_offset, 8);
             }
             const float scale = brick_grid.max_point_scale.w * 0.125;
             hit.t = fma(t_value, scale, hit.t);
@@ -374,6 +375,8 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
     if (!AdvIntersect(g_min, g_max, r, t_min, t_grid_max, hit_grid)) {
         return false;
     }
+    // HACK: workaround for precision issues with t being too low for "penetrating" grid 
+    hit_grid.t += 0.000005;
 
     // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
     
@@ -483,7 +486,8 @@ bool AdvIntersect(vec3 p0, vec3 p1, Ray r, float t_min, inout float t_max, inout
 bool ScatterLambertian(Material material, Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
     hit.internal_reflection = 1.0;
 
-    vec3 scatter_dir = normalize(hit.normal * 0.1 + RandInHemisphere(hit.point.xy, hit.normal));
+    // TODO: better random hemisphere
+    vec3 scatter_dir = normalize(hit.normal + RandVec3(hit.point.xy + hit.point.z, -0.4, 0.4));
     scattered = CreateRay(hit.point, scatter_dir);
 
     attenuation = AlbedoColor(material);
@@ -529,8 +533,8 @@ bool ScatterDielectric(Material material, Ray r_in, vec3 hit_c_min, inout HitRec
     float ir = dielectric[material.type_index].internal_reflection;
     
     // TODO: better noise (blue :))
-    // TODO: add property to glass: roughness (0 should be no noise)
-    const vec3 normal = normalize(fma(hit.normal, vec3(2), RandInHemisphere(hit.point.xy + hit.point.z, hit.normal)));
+    // TODO: add property to glass: roughness (0 should be no noise/rng)
+    const vec3 normal = normalize(hit.normal + RandVec3(hit.point.xy + hit.point.z, -0.4, 0.4));
     vec3 direction;
     bool do_refract = transmissionDirection(ir, hit.internal_reflection, r_in.direction, normal, direction);
     if (do_refract) {

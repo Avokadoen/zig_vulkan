@@ -13,16 +13,11 @@ const gpu_types = @import("gpu_types.zig");
 
 pub const vox = @import("vox/loader.zig");
 
-const default_material_buffer = 256;
-const default_albedo_buffer = 256;
-const default_metal_buffer = 256;
-const default_dielectric_buffer = 256;
-
 pub const Config = struct {
-    material_buffer: ?u64 = null,
-    albedo_buffer: ?u64 = null,
-    metal_buffer: ?u64 = null,
-    dielectric_buffer: ?u64 = null,
+    material_buffer: u64 = 256,
+    albedo_buffer: u64 = 256,
+    metal_buffer: u64 = 256,
+    dielectric_buffer: u64 = 256,
 };
 
 const VoxelRT = @This();
@@ -41,10 +36,10 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: BrickGrid, target_te
             @sizeOf(BrickGrid.Device),
         };
         const storage_sizes = [_]u64{
-            @sizeOf(gpu_types.Material) * (config.material_buffer orelse default_material_buffer),
-            @sizeOf(gpu_types.Albedo) * (config.albedo_buffer orelse default_albedo_buffer),
-            @sizeOf(gpu_types.Metal) * (config.metal_buffer orelse default_metal_buffer),
-            @sizeOf(gpu_types.Dielectric) * (config.dielectric_buffer orelse default_dielectric_buffer),
+            @sizeOf(gpu_types.Material) * config.material_buffer,
+            @sizeOf(gpu_types.Albedo) * config.albedo_buffer,
+            @sizeOf(gpu_types.Metal) * config.metal_buffer,
+            @sizeOf(gpu_types.Dielectric) * config.dielectric_buffer,
             @sizeOf(BrickGrid.GridEntry) * brick_grid.grid.len,
             @sizeOf(BrickGrid.Brick) * brick_grid.bricks.len,
             @sizeOf(u8) * brick_grid.material_indices.len,
@@ -56,7 +51,7 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: BrickGrid, target_te
     errdefer comp_pipeline.deinit(ctx);
 
     const camera = blk: {
-        var c_config = Camera.Config{ .origin = za.Vec3.new(0.0, 0.0, 0.0), .normal_speed = 2, .viewport_height = 2, .samples_per_pixel = 2, .max_bounce = 4 };
+        var c_config = Camera.Config{ .origin = za.Vec3.new(0.0, 0.0, 0.0), .normal_speed = 2, .viewport_height = 2, .samples_per_pixel = 4, .max_bounce = 3 };
         break :blk Camera.init(75, target_texture.image_extent.width, target_texture.image_extent.height, c_config);
     };
 

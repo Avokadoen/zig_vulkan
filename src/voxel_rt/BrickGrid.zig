@@ -1,7 +1,9 @@
 // This file contains an implementaion of "Real-time Ray tracing and Editing of Large Voxel Scenes"
 // source: https://dspace.library.uu.nl/handle/1874/315917
 
-// TODO: move types?
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
 
 const Material = @import("gpu_types.zig").Material;
 
@@ -10,6 +12,7 @@ const Material = @import("gpu_types.zig").Material;
 //     flags: u6,
 // };
 
+// TODO: move types?
 // buffer binding: 7
 pub const GridEntry = packed struct {
     pub const Type = enum(u2) {
@@ -46,22 +49,17 @@ pub const Device = extern struct {
     max_point_scale: [4]f32,
 };
 
-const default_scale: f32 = 1.0;
-const default_base_t: f32 = 0.01;
-const default_min_point = [3]f32{ 0.0, 0.0, 0.0 };
-
 pub const Config = struct {
     // Default value is enough to define half of all bricks
     brick_alloc: ?usize = null,
-    base_t: ?f32 = null,
-    min_point: ?[3]f32 = null,
     // Default is enough to iter paralell the longest axis
     max_ray_iteration: ?u32 = null,
-    scale: ?f32 = null,
-};
 
-const std = @import("std");
-const Allocator = std.mem.Allocator;
+    base_t: f32 = 0.01,
+    min_point: [3]f32 = [_]f32{ 0.0, 0.0, 0.0 },
+    scale: f32 = 1.0,
+    material_indices_per_brick: usize = 192,
+};
 
 const BrickGrid = @This();
 
@@ -70,8 +68,9 @@ allocator: Allocator,
 grid: []GridEntry,
 bricks: []Brick,
 
-// TODO: buckets to track possible material slices for a brick
-//       i.e N 8 buckets, M 16 buckets .. X 512 buckets
+// TODO: ability to configure a size less then all voxels in the grid
+bucket_storage: BucketStorage,
+// assigned through a bucket
 material_indices: []u8,
 
 active_bricks: usize,
@@ -95,13 +94,13 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     errdefer allocator.free(bricks);
     std.mem.set(Brick, bricks, .{ .solid_mask = 0, .material_index = unset_material, .lod_material_index = 0 });
 
-    const material_indices = try allocator.alloc(u8, bricks.len * 512);
+    const material_indices = try allocator.alloc(u8, bricks.len * config.material_indices_per_brick);
     errdefer allocator.free(material_indices);
     std.mem.set(u8, material_indices, 0);
 
     const min_point_base_t = blk: {
-        const min_point = config.min_point orelse default_min_point;
-        const base_t = config.base_t orelse default_base_t;
+        const min_point = config.min_point;
+        const base_t = config.base_t;
         var result: [4]f32 = undefined;
         for (min_point) |axis, i| {
             result[i] = axis;
@@ -110,7 +109,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         break :blk result;
     };
     const max_point_scale = blk: {
-        const scale = config.scale orelse default_scale;
+        const scale = config.scale;
         // zig fmt: off
         var result = [4]f32{ 
             min_point_base_t[0] + @intToFloat(f32, dim_x) * scale, 
@@ -134,11 +133,16 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 
     const voxel_dim = [3]u32{ dim_x * 8, dim_y * 8, dim_z * 8 };
 
+    const bucket_segments = try std.math.divFloor(usize, material_indices.len, 1024.0);
+    const bucket_storage = try BucketStorage.init(allocator, brick_alloc, bucket_segments);
+    errdefer bucket_storage.deinit();
+
     // zig fmt: off
     return BrickGrid{ 
         .allocator = allocator, 
         .grid = grid, 
         .bricks = bricks, 
+        .bucket_storage = bucket_storage,
         .material_indices = material_indices, 
         .active_bricks = 0, 
         .voxel_dim = voxel_dim, 
@@ -159,6 +163,7 @@ pub fn deinit(self: BrickGrid) void {
     self.allocator.free(self.grid);
     self.allocator.free(self.bricks);
     self.allocator.free(self.material_indices);
+    self.bucket_storage.deinit();
 }
 
 pub const InsertError = error{ OutOfBoundsX, OutOfBoundsY, OutOfBoundsZ };
@@ -194,31 +199,34 @@ pub fn insert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u8
         self.active_bricks += 1;
     }
 
-    var brick = self.bricks[@intCast(usize, entry.data)];
+    const brick_index = @intCast(usize, entry.data);
+    var brick = self.bricks[brick_index];
 
     // set the voxel to exist
     const nth_bit = brickAt(x, actual_y, z);
-    const was_set = brick.solid_mask & @as(i512, 1) << nth_bit;
 
     // set the color information for the given voxel
     { // shift material position voxels that are after this voxel
-        if (brick.material_index == unset_material) {
-            brick.material_index = (@intCast(u24, self.active_bricks) - 1);
-        }
-        const brick_index = brick.material_index * 512;
+        const voxels_in_brick = countBits(brick.solid_mask, 512);
+        // TODO: error
+        const bucket = self.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.material_indices) catch {
+            std.debug.panic("no more buckets", .{});
+        };
+        brick.material_index = @intCast(u24, bucket.start_index);
+
+        // move all color data
         const bits_before = countBits(brick.solid_mask, nth_bit);
-        const bits_total = countBits(brick.solid_mask, 512);
-        var i: u32 = bits_total;
-        if (was_set == 0) {
-            while (i > bits_before) : (i -= 1) {
-                const base_index = brick_index + i;
-                self.material_indices[base_index] = self.material_indices[base_index - 1];
-            }
+        var i: u32 = voxels_in_brick;
+        while (i > bits_before) : (i -= 1) {
+            const base_index = brick.material_index + i;
+            self.material_indices[base_index] = self.material_indices[base_index - 1];
         }
-        self.material_indices[brick_index + bits_before] = material_index;
+
+        self.material_indices[brick.material_index + bits_before] = material_index;
+        brick.material_index /= 4;
     }
 
-    // set voxel to set
+    // set voxel
     brick.solid_mask |= @as(i512, 1) << nth_bit;
 
     // store changes
@@ -254,3 +262,152 @@ inline fn gridAt(self: BrickGrid, x: usize, y: usize, z: usize) usize {
     const grid_z: u32 = @intCast(u32, z / 8);
     return @intCast(usize, grid_x + self.device_state.dim_x * (grid_z + self.device_state.dim_z * grid_y));
 }
+
+/// used by the brick grid to pack brick material data closer to eachother
+const Bucket = struct {
+    pub const Entry = packed struct {
+        start_index: u32,
+    };
+    free: ArrayList(Entry),
+    occupied: ArrayList(?Entry),
+
+    /// check for any existing null elements to replace before doing a normal append
+    /// returns index of item
+    pub inline fn appendOccupied(self: *Bucket, item: Entry) !usize {
+        // replace first null element with item
+        for (self.occupied.items) |elem, i| {
+            if (elem == null) {
+                self.occupied.items[i] = item;
+                return i;
+            }
+        }
+        // append to list if no null item in list
+        try self.occupied.append(item);
+        return self.occupied.items.len - 1;
+    }
+};
+
+const BucketRequestError = error{
+    NoSuitableBucket,
+};
+const BucketStorage = struct {
+    // the smallest bucket size in 2^n
+    const min_2_pow_size = 8; // 256;
+
+    pub const Index = packed struct {
+        bucket_index: u16,
+        element_index: u16,
+    };
+
+    allocator: Allocator,
+    // used to find the active bucked for a given brick index
+    index: []?Index,
+    buckets: [2]Bucket,
+
+    // TODO: allow configuring the distribution of buckets
+    /// init a bucket storage.
+    /// caller must make sure to call deinit
+    /// segments_1024 defined how many 1024 segments should be stored.
+    /// one segment will be split into: 2 * 256, 1 * 512
+    pub inline fn init(allocator: Allocator, brick_count: usize, segments_1024: usize) !BucketStorage {
+        std.debug.assert(segments_1024 > 0);
+
+        var buckets: [2]Bucket = undefined;
+
+        var prev_indices: u32 = 0;
+        { // init first bucket
+            // zig fmt: off
+            buckets[0] = Bucket{ 
+                .free = try ArrayList(Bucket.Entry).initCapacity(allocator, 2 * segments_1024), 
+                .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_1024) 
+            };
+            // zig fmt: on
+            const bucket_size = 256;
+            var j: usize = 0;
+            while (j < 2 * segments_1024) : (j += 1) {
+                buckets[0].free.appendAssumeCapacity(.{ .start_index = prev_indices });
+                prev_indices += bucket_size;
+            }
+        }
+        {
+            comptime var i: usize = 1;
+            inline while (i < buckets.len) : (i += 1) {
+                // zig fmt: off
+                buckets[i] = Bucket{ 
+                    .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments_1024), 
+                    .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_1024 / 2) 
+                };
+                // zig fmt: on
+                const bucket_size = try std.math.powi(u32, 2, min_2_pow_size + i);
+                var j: usize = 0;
+                while (j < segments_1024) : (j += 1) {
+                    buckets[i].free.appendAssumeCapacity(.{ .start_index = prev_indices });
+                    prev_indices += bucket_size;
+                }
+            }
+        }
+
+        const index = try allocator.alloc(?Index, brick_count);
+        errdefer allocator.free(index);
+        std.mem.set(?Index, index, null);
+
+        return BucketStorage{
+            .allocator = allocator,
+            .index = index,
+            .buckets = buckets,
+        };
+    }
+
+    // return brick's bucket
+    // function handles assigning new buckets as needed and will transfer material indices to new slot in the event
+    // that a new bucket is required
+    // returns error if there is no more buckets of appropriate size
+    pub inline fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_offset: usize, material_indices: []u8) !Bucket.Entry {
+        // check if brick already have assigned a bucket
+        if (self.index[brick_index]) |index| {
+            const bucket_size = try std.math.powi(usize, 2, min_2_pow_size + index.bucket_index);
+            // if bucket size is insufficent
+            if (bucket_size > voxel_offset) {
+                return self.buckets[index.bucket_index].occupied.items[index.element_index].?;
+            }
+
+            // free previous bucket
+            const previous_bucket = self.buckets[index.bucket_index].occupied.items[index.element_index].?;
+            try self.buckets[index.bucket_index].free.append(previous_bucket);
+            self.buckets[index.bucket_index].occupied.items[index.element_index] = null;
+
+            // find a bucket with increased size that is free
+            var i: usize = index.bucket_index + 1;
+            while (i < self.buckets.len) : (i += 1) {
+                if (self.buckets[i].free.items.len > 0) {
+                    const bucket = self.buckets[i].free.pop();
+                    const oc_index = try self.buckets[i].appendOccupied(bucket);
+                    self.index[brick_index] = Index{ .bucket_index = @intCast(u16, i), .element_index = @intCast(u16, oc_index) };
+
+                    // copy material indices to new bucket
+                    std.mem.copy(u8, material_indices[bucket.start_index..], material_indices[previous_bucket.start_index .. previous_bucket.start_index + bucket_size]);
+                    return bucket;
+                }
+            }
+        } else {
+            // fetch the smallest free bucket
+            for (self.buckets) |*bucket, i| {
+                if (bucket.free.items.len > 0) {
+                    const take = bucket.free.pop();
+                    const oc_index = try bucket.appendOccupied(take);
+                    self.index[brick_index] = Index{ .bucket_index = @intCast(u16, i), .element_index = @intCast(u16, oc_index) };
+                    return take;
+                }
+            }
+        }
+        return BucketRequestError.NoSuitableBucket; // no free bucket big enough to store brick color data
+    }
+
+    pub inline fn deinit(self: BucketStorage) void {
+        self.allocator.free(self.index);
+        for (self.buckets) |bucket| {
+            bucket.free.deinit();
+            bucket.occupied.deinit();
+        }
+    }
+};
