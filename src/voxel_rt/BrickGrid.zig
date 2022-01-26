@@ -292,7 +292,9 @@ const BucketRequestError = error{
 };
 const BucketStorage = struct {
     // the smallest bucket size in 2^n
-    const min_2_pow_size = 8; // 256;
+    const bucket_count = 3;
+    // max bucket is always the size of brick which is 2^9
+    const min_2_pow_size = 9 - (bucket_count - 1);
 
     pub const Index = packed struct {
         bucket_index: u16,
@@ -302,7 +304,7 @@ const BucketStorage = struct {
     allocator: Allocator,
     // used to find the active bucked for a given brick index
     index: []?Index,
-    buckets: [2]Bucket,
+    buckets: [bucket_count]Bucket,
 
     // TODO: allow configuring the distribution of buckets
     /// init a bucket storage.
@@ -312,7 +314,7 @@ const BucketStorage = struct {
     pub inline fn init(allocator: Allocator, brick_count: usize, segments_1024: usize) !BucketStorage {
         std.debug.assert(segments_1024 > 0);
 
-        var buckets: [2]Bucket = undefined;
+        var buckets: [bucket_count]Bucket = undefined;
 
         var prev_indices: u32 = 0;
         { // init first bucket
@@ -322,7 +324,7 @@ const BucketStorage = struct {
                 .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_1024) 
             };
             // zig fmt: on
-            const bucket_size = 256;
+            const bucket_size = try std.math.powi(u32, 2, min_2_pow_size);
             var j: usize = 0;
             while (j < 2 * segments_1024) : (j += 1) {
                 buckets[0].free.appendAssumeCapacity(.{ .start_index = prev_indices });
