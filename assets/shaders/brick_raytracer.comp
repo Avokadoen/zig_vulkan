@@ -413,6 +413,7 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
 
             // check if ray hits any voxel in the brick
             if (BrickHit(r, t_min, t_grid_max, delta, bricks[brick_index], brick_min, hit)) {
+                hit_min = brick_min;
                 return true;
             }
         }
@@ -499,7 +500,7 @@ bool ScatterMetal(Material material, Ray r_in, inout HitRecord hit, out vec3 att
 
     vec3 reflected = reflect(r_in.direction, hit.normal);
     float fuzz = metal[material.type_index].fuzz;
-    scattered = CreateRay(hit.point, fma(reflected, vec3(fuzz), RandInHemisphere(hit.point.xy + hit.point.z, hit.normal)));
+    scattered = CreateRay(hit.point, reflected + RandVec3(hit.point.xy + hit.point.z, -fuzz, fuzz));
     attenuation = AlbedoColor(material);
     return (dot(scattered.direction, hit.normal) > 0);
 }
