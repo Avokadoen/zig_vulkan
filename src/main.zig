@@ -19,6 +19,7 @@ const BrickGrid = @import("voxel_rt/BrickGrid.zig");
 const Octree = @import("voxel_rt/Octree.zig");
 const gpu_types = @import("voxel_rt/gpu_types.zig");
 const vox = VoxelRT.vox;
+const Terrain = @import("voxel_rt/terrain/Terrain.zig");
 
 pub const application_name = "zig vulkan";
 
@@ -103,25 +104,35 @@ pub fn main() anyerror!void {
     draw_api.handleWindowResize(window);
     defer draw_api.noHandleWindowResize(window);
 
-    const v = 1;
-    var grid = try BrickGrid.init(allocator, 10 * v, 20, 10 * v, .{ .min_point = [3]f32{ -5, -12, -10 } });
+    var grid = try BrickGrid.init(allocator, 64, 32, 64, .{ .min_point = [3]f32{ -16, -7, -16 } });
     defer grid.deinit();
 
     const model = try vox.load(false, allocator, "../assets/models/monu10.vox");
     defer model.deinit();
 
+    const terrain_material_data = Terrain.getMaterialData();
     var albedo_color: [256]gpu_types.Albedo = undefined;
     var materials: [256]gpu_types.Material = undefined;
-    for (model.rgba_chunk) |rgba, i| {
-        const index = i;
+    // insert terrain color
+    for (terrain_material_data.color) |color, i| {
+        albedo_color[i] = color;
+    }
+    // insert terrain materials
+    for (terrain_material_data.materials) |material, i| {
+        materials[i] = material;
+    }
+    const terrain_len = terrain_material_data.materials.len;
+    for (model.rgba_chunk[terrain_len..]) |rgba, i| {
+        const index = i + terrain_len;
         albedo_color[index] = .{ .color = za.Vec4.new(@intToFloat(f32, rgba.r) / 255, @intToFloat(f32, rgba.g) / 255, @intToFloat(f32, rgba.b) / 255, @intToFloat(f32, rgba.a) / 255) };
         materials[index] = .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = @intCast(u15, index) };
     }
 
     // Test what we are loading
     for (model.xyzi_chunks[0]) |xyzi| {
-        grid.insert(xyzi.x, xyzi.z, xyzi.y, xyzi.color_index);
+        grid.insert(@intCast(usize, xyzi.x) + 256, @intCast(usize, xyzi.z) + 16 * 7, @intCast(usize, xyzi.y) + 256, xyzi.color_index);
     }
+    _ = Terrain.init(0, 4, 20, &grid);
 
     var voxel_rt = try VoxelRT.init(allocator, ctx, grid, &draw_api.state.subo.ubo.my_texture, .{});
     defer voxel_rt.deinit(ctx);

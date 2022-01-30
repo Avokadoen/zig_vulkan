@@ -24,15 +24,12 @@ pub const GridEntry = packed struct {
     data: u30,
 };
 
-const unset_material = std.math.maxInt(u24);
-
 // buffer binding: 8
 pub const Brick = packed struct {
     /// maps to a voxel grid of 8x8x8
     solid_mask: i512,
-    // index for index
-    material_index: u24,
-    lod_material_index: u8,
+    material_index: u32,
+    lod_material_index: u32,
 };
 
 // uniform binding: 2
@@ -50,7 +47,7 @@ pub const Device = extern struct {
 };
 
 pub const Config = struct {
-    // Default value is enough to define half of all bricks
+    // Default value is all bricks
     brick_alloc: ?usize = null,
     // Default is enough to iter paralell the longest axis
     max_ray_iteration: ?u32 = null,
@@ -58,7 +55,7 @@ pub const Config = struct {
     base_t: f32 = 0.01,
     min_point: [3]f32 = [_]f32{ 0.0, 0.0, 0.0 },
     scale: f32 = 1.0,
-    material_indices_per_brick: usize = 192,
+    material_indices_per_brick: usize = 256,
 };
 
 const BrickGrid = @This();
@@ -92,9 +89,9 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     const brick_alloc = config.brick_alloc orelse grid.len;
     const bricks = try allocator.alloc(Brick, brick_alloc);
     errdefer allocator.free(bricks);
-    std.mem.set(Brick, bricks, .{ .solid_mask = 0, .material_index = unset_material, .lod_material_index = 0 });
+    std.mem.set(Brick, bricks, .{ .solid_mask = 0, .material_index = 0, .lod_material_index = 0 });
 
-    const material_indices = try allocator.alloc(u8, bricks.len * config.material_indices_per_brick);
+    const material_indices = try allocator.alloc(u8, bricks.len * std.math.min(512, config.material_indices_per_brick));
     errdefer allocator.free(material_indices);
     std.mem.set(u8, material_indices, 0);
 
@@ -133,7 +130,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 
     const voxel_dim = [3]u32{ dim_x * 8, dim_y * 8, dim_z * 8 };
 
-    const bucket_segments = try std.math.divFloor(usize, material_indices.len, 1024.0);
+    const bucket_segments = try std.math.divFloor(usize, std.math.max(2048, material_indices.len), 2048.0);
     const bucket_storage = try BucketStorage.init(allocator, brick_alloc, bucket_segments);
     errdefer bucket_storage.deinit();
 
@@ -184,7 +181,7 @@ pub fn safeInsert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index
 /// this function will cause panics if you insert out of bounds, use safeInsert
 /// if bound checks are required
 pub fn insert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u8) void {
-    const actual_y = self.device_state.dim_y * 8 - 1 - y;
+    const actual_y = ((self.device_state.dim_y * 8) - 1) - y;
 
     const grid_index = self.gridAt(x, actual_y, z);
     var entry = self.grid[grid_index];
@@ -207,19 +204,22 @@ pub fn insert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u8
 
     // set the color information for the given voxel
     { // shift material position voxels that are after this voxel
+        const was_set: bool = (brick.solid_mask & @as(i512, 1) << nth_bit) != 0;
         const voxels_in_brick = countBits(brick.solid_mask, 512);
         // TODO: error
-        const bucket = self.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.material_indices) catch {
-            std.debug.panic("no more buckets", .{});
+        const bucket = self.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.material_indices, was_set) catch {
+            std.debug.panic("at {d} {d} {d} no more buckets", .{ x, y, z });
         };
-        brick.material_index = @intCast(u24, bucket.start_index);
+        brick.material_index = bucket.start_index;
 
         // move all color data
         const bits_before = countBits(brick.solid_mask, nth_bit);
-        var i: u32 = voxels_in_brick;
-        while (i > bits_before) : (i -= 1) {
-            const base_index = brick.material_index + i;
-            self.material_indices[base_index] = self.material_indices[base_index - 1];
+        if (was_set == false) {
+            var i: u32 = voxels_in_brick;
+            while (i > bits_before) : (i -= 1) {
+                const base_index = brick.material_index + i;
+                self.material_indices[base_index] = self.material_indices[base_index - 1];
+            }
         }
 
         self.material_indices[brick.material_index + bits_before] = material_index;
@@ -292,7 +292,7 @@ const BucketRequestError = error{
 };
 const BucketStorage = struct {
     // the smallest bucket size in 2^n
-    const bucket_count = 3;
+    const bucket_count = 4;
     // max bucket is always the size of brick which is 2^9
     const min_2_pow_size = 9 - (bucket_count - 1);
 
@@ -309,10 +309,10 @@ const BucketStorage = struct {
     // TODO: allow configuring the distribution of buckets
     /// init a bucket storage.
     /// caller must make sure to call deinit
-    /// segments_1024 defined how many 1024 segments should be stored.
+    /// segments_2048 defined how many 2048 segments should be stored.
     /// one segment will be split into: 2 * 256, 1 * 512
-    pub inline fn init(allocator: Allocator, brick_count: usize, segments_1024: usize) !BucketStorage {
-        std.debug.assert(segments_1024 > 0);
+    pub inline fn init(allocator: Allocator, brick_count: usize, segments_2048: usize) !BucketStorage {
+        std.debug.assert(segments_2048 > 0);
 
         var buckets: [bucket_count]Bucket = undefined;
 
@@ -320,32 +320,44 @@ const BucketStorage = struct {
         { // init first bucket
             // zig fmt: off
             buckets[0] = Bucket{ 
-                .free = try ArrayList(Bucket.Entry).initCapacity(allocator, 2 * segments_1024), 
-                .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_1024) 
+                .free = try ArrayList(Bucket.Entry).initCapacity(allocator, 2 * segments_2048), 
+                .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048) 
             };
             // zig fmt: on
             const bucket_size = try std.math.powi(u32, 2, min_2_pow_size);
             var j: usize = 0;
-            while (j < 2 * segments_1024) : (j += 1) {
+            while (j < 2 * segments_2048) : (j += 1) {
                 buckets[0].free.appendAssumeCapacity(.{ .start_index = prev_indices });
                 prev_indices += bucket_size;
             }
         }
         {
             comptime var i: usize = 1;
-            inline while (i < buckets.len) : (i += 1) {
+            inline while (i < buckets.len - 1) : (i += 1) {
                 // zig fmt: off
                 buckets[i] = Bucket{ 
-                    .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments_1024), 
-                    .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_1024 / 2) 
+                    .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments_2048), 
+                    .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048 / 2) 
                 };
                 // zig fmt: on
                 const bucket_size = try std.math.powi(u32, 2, min_2_pow_size + i);
                 var j: usize = 0;
-                while (j < segments_1024) : (j += 1) {
+                while (j < segments_2048) : (j += 1) {
                     buckets[i].free.appendAssumeCapacity(.{ .start_index = prev_indices });
                     prev_indices += bucket_size;
                 }
+            }
+            // zig fmt: off
+            buckets[buckets.len-1] = Bucket{ 
+                .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments_2048 * 3), 
+                .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048) 
+            };
+            // zig fmt: on
+            const bucket_size = 512;
+            var j: usize = 0;
+            while (j < segments_2048 * 3) : (j += 1) {
+                buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = prev_indices });
+                prev_indices += bucket_size;
             }
         }
 
@@ -364,12 +376,12 @@ const BucketStorage = struct {
     // function handles assigning new buckets as needed and will transfer material indices to new slot in the event
     // that a new bucket is required
     // returns error if there is no more buckets of appropriate size
-    pub inline fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_offset: usize, material_indices: []u8) !Bucket.Entry {
+    pub inline fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_offset: usize, material_indices: []u8, was_set: bool) !Bucket.Entry {
         // check if brick already have assigned a bucket
         if (self.index[brick_index]) |index| {
             const bucket_size = try std.math.powi(usize, 2, min_2_pow_size + index.bucket_index);
-            // if bucket size is insufficent
-            if (bucket_size > voxel_offset) {
+            // if bucket size is insufficent, or if voxel was set before, no change required
+            if (bucket_size > voxel_offset or was_set) {
                 return self.buckets[index.bucket_index].occupied.items[index.element_index].?;
             }
 
@@ -402,6 +414,7 @@ const BucketStorage = struct {
                 }
             }
         }
+        std.debug.assert(was_set == false);
         return BucketRequestError.NoSuitableBucket; // no free bucket big enough to store brick color data
     }
 

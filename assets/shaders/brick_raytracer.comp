@@ -78,8 +78,8 @@ layout (std430, binding = 7) buffer GridBuffer {
 struct Brick {
     // 512 bit voxel set mask
     int solid_mask[16];
-    // 24 bit material index + 8 bit lod index
-    int indices;
+    uint material_index;
+    uint lod_index;
 };
 layout (std430, binding = 8) buffer BrickBuffer {
     readonly Brick bricks[];
@@ -130,7 +130,7 @@ layout (std430, binding = 6) buffer DielectricBuffer {
     readonly Dielectric dielectric[];
 };
 
-bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, vec3 brick_position, inout HitRecord hit);
+bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout vec3 brick_position, inout HitRecord hit);
 bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit);
 
 // slab hit tests
@@ -281,7 +281,7 @@ void defineStepAndAxis(vec3 dir, vec3 fposition, ivec3 position, vec3 delta, int
     }
 }
 
-bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, vec3 brick_position, inout HitRecord hit) {
+bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout vec3 brick_position, inout HitRecord hit) {
     // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
     /// get position in brick space from global position
     /// caller should make sure that p is in fact inside the grid
@@ -329,16 +329,15 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, vec3 bri
                 const int material_index_bit_offset = (bits_before * 8) % 32;
 
                 // perform material lookup
-                const uint material_brick_offset = bitfieldExtract(brick.indices, 0, 24);
-                hit.index = bitfieldExtract(material_indices[material_index_index + material_brick_offset], material_index_bit_offset, 8);
+                hit.index = bitfieldExtract(material_indices[material_index_index + brick.material_index], material_index_bit_offset, 8);
             }
             const float scale = brick_grid.max_point_scale.w * 0.125;
             hit.t = fma(t_value, scale, hit.t);
             hit.point = RayAt(r, hit.t - faccuracy);
 
             { // normal calculation
-                const vec3 cube_min = brick_position + (position * scale);
-                const vec3 center = cube_min + vec3(scale * 0.5); // 0.125 / 2
+                brick_position += (position * scale);
+                const vec3 center = brick_position + vec3(scale * 0.5); // 0.125 / 2
                 vec3 normal = hit.point - center;
                 const vec3 abs_normal = abs(normal);
                 normal.x = normal.x * int(abs_normal.x >= abs_normal.y && abs_normal.x >= abs_normal.z);
@@ -376,7 +375,7 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
         return false;
     }
     // HACK: workaround for precision issues with t being too low for "penetrating" grid 
-    hit_grid.t += 0.000005;
+    hit_grid.t += 0.00001;
 
     // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
     
@@ -407,7 +406,7 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
         uint bits = grid_entries[index].bits;
         uint entry_type = bitfieldExtract(bits, 0, 2);
         if(bits != 0) { // TODO: actually check type
-            const vec3 brick_min = g_min + position;
+            vec3 brick_min = g_min + position;
             const uint brick_index = bitfieldExtract(bits, 2, 30);
             hit.t = fma(t_value, brick_grid.max_point_scale.w, hit_grid.t);
 
