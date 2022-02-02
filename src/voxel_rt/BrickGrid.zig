@@ -13,7 +13,6 @@ const Material = @import("gpu_types.zig").Material;
 // };
 
 // TODO: move types?
-// buffer binding: 7
 pub const GridEntry = packed struct {
     pub const Type = enum(u2) {
         empty = 0,
@@ -24,7 +23,6 @@ pub const GridEntry = packed struct {
     data: u30,
 };
 
-// buffer binding: 8
 pub const Brick = packed struct {
     /// maps to a voxel grid of 8x8x8
     solid_mask: i512,
@@ -223,6 +221,9 @@ pub fn insert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u8
         }
 
         self.material_indices[brick.material_index + bits_before] = material_index;
+
+        // material indices is stored as 32bit on GPU and 8bit on CPU
+        // we divide by for to store the correct *GPU* index
         brick.material_index /= 4;
     }
 
@@ -292,7 +293,7 @@ const BucketRequestError = error{
 };
 const BucketStorage = struct {
     // the smallest bucket size in 2^n
-    const bucket_count = 4;
+    const bucket_count = 6;
     // max bucket is always the size of brick which is 2^9
     const min_2_pow_size = 9 - (bucket_count - 1);
 

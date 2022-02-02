@@ -26,9 +26,8 @@ camera: Camera,
 brick_grid: BrickGrid,
 comp_pipeline: render.ComputeDrawPipeline,
 
-/// init VoxelRT, api takes ownership of the octree
+/// init VoxelRT, api takes ownership of the brick_grid
 pub fn init(allocator: Allocator, ctx: Context, brick_grid: BrickGrid, target_texture: *render.Texture, config: Config) !VoxelRT {
-    // place holder test compute pipeline
     var comp_pipeline = blk: {
         const Compute = render.ComputeDrawPipeline;
         const uniform_sizes = [_]u64{
@@ -95,12 +94,12 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: BrickGrid, target_te
 }
 
 /// push the materials to GPU
-pub fn pushMaterials(self: VoxelRT, ctx: Context, materials: []const gpu_types.Material) !void {
+pub inline fn pushMaterials(self: VoxelRT, ctx: Context, materials: []const gpu_types.Material) !void {
     try self.comp_pipeline.storage_buffers[0].transfer(ctx, gpu_types.Material, materials);
 }
 
 /// push the albedo to GPU
-pub fn pushAlbedo(self: VoxelRT, ctx: Context, albedos: []const gpu_types.Albedo) !void {
+pub inline fn pushAlbedo(self: VoxelRT, ctx: Context, albedos: []const gpu_types.Albedo) !void {
     try self.comp_pipeline.storage_buffers[1].transfer(ctx, gpu_types.Albedo, albedos);
 }
 

@@ -157,8 +157,8 @@ vec3 vec3ToSrgb(vec3 value) {
 }
 
 void main() {
-    ivec2 pixel_coord = ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y);
-    ivec2 image_size = imageSize(img_output);
+    const ivec2 pixel_coord = ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y);
+    const ivec2 image_size = imageSize(img_output);
     if (pixel_coord.x >= image_size.x || pixel_coord.y >= image_size.y) {
         // don't ray trace discarded pixels
         return;
@@ -166,14 +166,14 @@ void main() {
 
     vec3 color = vec3(0.0, 0.0, 0.0);
     for (int sample_i = 0; sample_i < camera.samples_per_pixel; sample_i++) {  
-        float x = float(pixel_coord.x);
-        float y = float(pixel_coord.y);
+        const float x = float(pixel_coord.x);
+        const float y = float(pixel_coord.y);
         // TODO: proper random (blue noise)
         // TODO: remove division
-        float noise_x = hash12(vec2(x + sample_i, y) * 0.2 * float(sample_i > 0));
-        float u = (x + noise_x) / float(camera.image_width - 1);
-        float noise_y = hash12(vec2(x, y + sample_i) * 0.2 * float(sample_i > 0));
-        float v = (y + noise_y) / float(camera.image_height - 1);
+        const float noise_x = hash12(vec2(x + sample_i, y) * 0.2 * float(sample_i > 0));
+        const float u = (x + noise_x) / float(camera.image_width - 1);
+        const float noise_y = hash12(vec2(x, y + sample_i) * 0.2 * float(sample_i > 0));
+        const float v = (y + noise_y) / float(camera.image_height - 1);
         Ray ray = CameraGetRay(u, v);
         color += RayColor(ray);
     }
@@ -274,10 +274,10 @@ void defineStepAndAxis(vec3 dir, vec3 fposition, ivec3 position, vec3 delta, int
     const int a = axis_value;
     if (dir[a] < 0) {
         pos_step[a] = -1;
-        axis_t[a] = ((fposition[a] - position[a]) * delta[a]) * brick_grid.max_point_scale.w;
+        axis_t[a] = ((fposition[a] - position[a]) * delta[a]);
     } else {
         pos_step[a] = 1;
-        axis_t[a] = ((position[a] + 1 - fposition[a]) * delta[a]) * brick_grid.max_point_scale.w;
+        axis_t[a] = ((position[a] + 1 - fposition[a]) * delta[a]);
     }
 }
 
@@ -285,19 +285,17 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
     // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
     /// get position in brick space from global position
     /// caller should make sure that p is in fact inside the grid
-    vec3 fposition = (RayAt(r, hit.t + 0.0001) - brick_position) * 8;
+    const vec3 fposition = (RayAt(r, hit.t + 0.0001) - brick_position) * 8;
     ivec3 position = ivec3(fposition);
 
     ivec3 pos_step;
     vec3 axis_t;
-    {
-        // define x
-        defineStepAndAxis(r.direction, fposition, position, delta, 0, pos_step, axis_t);
-        // define y
-        defineStepAndAxis(r.direction, fposition, position, delta, 1, pos_step, axis_t);
-        // define z
-        defineStepAndAxis(r.direction, fposition, position, delta, 2, pos_step, axis_t);
-    }
+    // define x
+    defineStepAndAxis(r.direction, fposition, position, delta, 0, pos_step, axis_t);
+    // define y
+    defineStepAndAxis(r.direction, fposition, position, delta, 1, pos_step, axis_t);
+    // define z
+    defineStepAndAxis(r.direction, fposition, position, delta, 2, pos_step, axis_t);
 
     // DDA loop
     float t_value = 0;
@@ -352,7 +350,7 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
         const int y_smallest = int(axis_t.y < axis_t.x && axis_t.y < axis_t.z);
         const int z_smallest = 2 * int(axis_t.z < axis_t.x && axis_t.z < axis_t.y);
         // set axis, 0 if x smallest, 1 if y is smallest or 2 if z is smallest
-        int axis = y_smallest + z_smallest;
+        const int axis = y_smallest + z_smallest;
         
         t_value = axis_t[axis];
         position[axis] += pos_step[axis];
@@ -386,18 +384,16 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
 
     // in the event of a axis of direction is 0 we get infinity according to 
     // float specification IEEE 754 (division by 0 is defined as resulting in infinity value)
-    vec3 delta = abs(1.0 / r.direction);
+    const vec3 delta = abs(1.0 / r.direction);
 
     ivec3 pos_step;
     vec3 axis_t;
-    {
-        // define x
-        defineStepAndAxis(r.direction, fposition, position, delta, 0, pos_step, axis_t);
-        // define y
-        defineStepAndAxis(r.direction, fposition, position, delta, 1, pos_step, axis_t);
-        // define z
-        defineStepAndAxis(r.direction, fposition, position, delta, 2, pos_step, axis_t);
-    }
+    // define x
+    defineStepAndAxis(r.direction, fposition, position, delta, 0, pos_step, axis_t);
+    // define y
+    defineStepAndAxis(r.direction, fposition, position, delta, 1, pos_step, axis_t);
+    // define z
+    defineStepAndAxis(r.direction, fposition, position, delta, 2, pos_step, axis_t);
 
     // DDA loop
     float t_value = 0;
@@ -420,7 +416,7 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
         const int y_smallest = int(axis_t.y < axis_t.x && axis_t.y < axis_t.z);
         const int z_smallest = 2 * int(axis_t.z < axis_t.x && axis_t.z < axis_t.y);
         // set axis, 0 if x smallest, 1 if y is smallest or 2 if z is smallest
-        int axis = y_smallest + z_smallest;
+        const int axis = y_smallest + z_smallest;
         
         t_value = axis_t[axis];
         position[axis] += pos_step[axis];
@@ -432,7 +428,7 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
 
 
 Ray CameraGetRay(float u, float v) {
-    vec3 ray_dir = fma(camera.horizontal, vec3(u), camera.lower_left_corner) + fma(vec3(v), camera.vertical, -camera.origin);
+    const vec3 ray_dir = fma(camera.horizontal, vec3(u), camera.lower_left_corner) + fma(vec3(v), camera.vertical, -camera.origin);
     return CreateRay(camera.origin, ray_dir);
 }
 
@@ -516,10 +512,10 @@ bool ScatterMetal(Material material, Ray r_in, inout HitRecord hit, out vec3 att
 ///     - refrac_dir: poternial calculated penetration vector of r_in
 /// @return: bool that is true if refraction is calculated
 bool transmissionDirection(float n1, float n2, vec3 ray_dir, vec3 normal, out vec3 refrac_dir) {
-    float eta = n1/n2;
-    float c1 = -dot(ray_dir, normal);
-    float w = eta * c1;
-    float c2m = (w - eta) * (w + eta);
+    const float eta = n1/n2;
+    const float c1 = -dot(ray_dir, normal);
+    const float w = eta * c1;
+    const float c2m = (w - eta) * (w + eta);
     if (c2m < -1.0) {
         return false;
     }
@@ -530,13 +526,13 @@ bool transmissionDirection(float n1, float n2, vec3 ray_dir, vec3 normal, out ve
 bool ScatterDielectric(Material material, Ray r_in, vec3 hit_c_min, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
     attenuation = AlbedoColor(material);
 
-    float ir = dielectric[material.type_index].internal_reflection;
+    const float ir = dielectric[material.type_index].internal_reflection;
     
     // TODO: better noise (blue :))
     // TODO: add property to glass: roughness (0 should be no noise/rng)
     const vec3 normal = normalize(hit.normal + RandVec3(hit.point.xy + hit.point.z, -0.4, 0.4));
     vec3 direction;
-    bool do_refract = transmissionDirection(ir, hit.internal_reflection, r_in.direction, normal, direction);
+    const bool do_refract = transmissionDirection(ir, hit.internal_reflection, r_in.direction, normal, direction);
     if (do_refract) {
         scattered = CreateRay(hit.point, direction);
         // TODO: we can remove this if we find the correct t_min for GridHit in calculate raycolor

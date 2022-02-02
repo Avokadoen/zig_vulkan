@@ -68,14 +68,14 @@ pub fn init(seed: u64, scale: f32, ocean_level: usize, grid: *BrickGrid) Terrain
             const height = @floatToInt(usize, std.math.min(perlin.smoothNoise(f32, point), 1) * terrain_max_height);
 
             var i_y: usize = 0;
-
             if (ocean_level > height) {
+                i_y = height;
                 while (i_y < ocean_level) : (i_y += 1) {
                     grid.*.insert(i_x, i_y, i_z, 0); // insert water
                 }
                 i_y = ocean_level;
             }
-
+            i_y = 0;
             while (i_y < height) : (i_y += 1) {
                 const material_value = za.lerp(f32, 1, 3.4, @intToFloat(f32, i_y) * inv_terrain_max_height) + perlin.rng.float(f32) * 0.5;
                 const material_index = @intToEnum(Material, @floatToInt(u8, @floor(material_value))).getMaterialIndex(perlin.rng);
