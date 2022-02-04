@@ -35,6 +35,8 @@ var call_yaw = false;
 var call_pitch = false;
 var mouse_delta = za.Vec2.zero();
 
+var push_terrain_changes = true;
+
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
 
@@ -104,24 +106,23 @@ pub fn main() anyerror!void {
     draw_api.handleWindowResize(window);
     defer draw_api.noHandleWindowResize(window);
 
-    var grid = try BrickGrid.init(allocator, 64, 32, 64, .{ .min_point = [3]f32{ -16, -7, -16 } });
+    var grid = try BrickGrid.init(allocator, 32, 32, 32, .{ .min_point = [3]f32{ -16, -16, -16 } });
     defer grid.deinit();
 
     const model = try vox.load(false, allocator, "../assets/models/monu10.vox");
     defer model.deinit();
 
-    const terrain_material_data = Terrain.getMaterialData();
     var albedo_color: [256]gpu_types.Albedo = undefined;
     var materials: [256]gpu_types.Material = undefined;
     // insert terrain color
-    for (terrain_material_data.color) |color, i| {
+    for (Terrain.color_data) |color, i| {
         albedo_color[i] = color;
     }
     // insert terrain materials
-    for (terrain_material_data.materials) |material, i| {
+    for (Terrain.material_data) |material, i| {
         materials[i] = material;
     }
-    const terrain_len = terrain_material_data.materials.len;
+    const terrain_len = Terrain.material_data.len;
     for (model.rgba_chunk[terrain_len..]) |rgba, i| {
         const index = i + terrain_len;
         albedo_color[index] = .{ .color = za.Vec4.new(@intToFloat(f32, rgba.r) / 255, @intToFloat(f32, rgba.g) / 255, @intToFloat(f32, rgba.b) / 255, @intToFloat(f32, rgba.a) / 255) };
@@ -130,9 +131,9 @@ pub fn main() anyerror!void {
 
     // Test what we are loading
     for (model.xyzi_chunks[0]) |xyzi| {
-        grid.insert(@intCast(usize, xyzi.x) + 256, @intCast(usize, xyzi.z) + 16 * 7, @intCast(usize, xyzi.y) + 256, xyzi.color_index);
+        grid.insert(@intCast(usize, xyzi.x), @intCast(usize, xyzi.z), @intCast(usize, xyzi.y), xyzi.color_index);
     }
-    _ = Terrain.init(0, 4, 20, &grid);
+    _ = Terrain.init(420, 4, 20, &grid);
 
     var voxel_rt = try VoxelRT.init(allocator, ctx, grid, &draw_api.state.subo.ubo.my_texture, .{});
     defer voxel_rt.deinit(ctx);
@@ -164,11 +165,14 @@ pub fn main() anyerror!void {
             voxel_rt.camera.turnPitch(mouse_delta[1] * dt);
         }
         if (call_translate > 0 or call_yaw or call_pitch) {
-            try voxel_rt.debug(ctx);
+            try voxel_rt.debugMoveCamera(ctx);
             call_yaw = false;
             call_pitch = false;
             mouse_delta[0] = 0;
             mouse_delta[1] = 0;
+        }
+        if (push_terrain_changes) {
+            try voxel_rt.debugUpdateTerrain(ctx);
         }
 
         {
@@ -208,13 +212,12 @@ fn keyInputFn(event: input.KeyEvent) void {
                 call_translate += 1;
                 camera_translate[1] += 1;
             },
-            input.Key.left_shift => {
-                activate_sprint = true;
-            },
+            input.Key.left_shift => activate_sprint = true,
             input.Key.space => {
                 call_translate += 1;
                 camera_translate[1] -= 1;
             },
+            input.Key.t => push_terrain_changes = !push_terrain_changes,
             input.Key.escape => window.setShouldClose(true),
             else => {},
         }

@@ -54,23 +54,166 @@ pub const Config = struct {
     min_point: [3]f32 = [_]f32{ 0.0, 0.0, 0.0 },
     scale: f32 = 1.0,
     material_indices_per_brick: usize = 256,
+    workers_count: usize = 6,
+};
+
+/// Parallel workers that does insert and remove work on the grid
+/// each worker get one kernel thread
+const GridWorker = struct {
+    /// a FIFO queue of jobs for a given worker
+    const JobQueue = std.fifo.LinearFifo(Job, .Dynamic);
+
+    pub const Insert = struct { x: usize, y: usize, z: usize, material_index: u8 };
+    pub const JobTag = enum {
+        insert,
+        // remove,
+    };
+    pub const Job = union(JobTag) {
+        insert: Insert,
+        // remove: struct {
+        //     x: usize,
+        //     y: usize,
+        //     z: usize,
+        // },
+    };
+
+    grid: *State,
+
+    wake_mutex: std.Thread.Mutex,
+    wake_event: std.Thread.Condition,
+
+    // FIFO list
+    job_mutex: std.Thread.Mutex,
+    job_queue: JobQueue,
+
+    kill_self: bool = false,
+
+    pub fn init(grid: *State, allocator: Allocator, initial_queue_capacity: usize) !GridWorker {
+        var job_queue = JobQueue.init(allocator);
+        try job_queue.ensureTotalCapacity(initial_queue_capacity);
+        return GridWorker{ .grid = grid, .wake_mutex = .{}, .wake_event = .{}, .job_mutex = .{}, .job_queue = job_queue };
+    }
+
+    // TODO: handle if out of job slots
+    pub fn registerJob(self: *GridWorker, job: Job) void {
+        self.job_mutex.lock();
+        self.job_queue.writeItem(job) catch {}; // TODO: report error somehow?
+        self.job_mutex.unlock();
+
+        self.wake_event.signal();
+    }
+
+    pub fn work(self: *GridWorker) void {
+        while (self.kill_self == false) {
+            self.wake_mutex.lock();
+            defer self.wake_mutex.unlock();
+
+            // if there is work to be done
+            self.job_mutex.lock();
+            const next = self.job_queue.readItem();
+            self.job_mutex.unlock();
+
+            if (next) |job| {
+                switch (job) {
+                    .insert => |insert_job| {
+                        self.performInsert(insert_job);
+                    },
+                }
+            } else {
+                self.wake_event.wait(&self.wake_mutex);
+            }
+        }
+
+        self.job_queue.deinit();
+    }
+
+    // perform a insert in the grid
+    fn performInsert(self: *GridWorker, insert_job: Insert) void {
+        const actual_y = ((self.grid.device_state.dim_y * 8) - 1) - insert_job.y;
+
+        const grid_index = gridAt(self.grid.*.device_state, insert_job.x, actual_y, insert_job.z);
+        var entry = self.grid.grid[grid_index];
+
+        // if entry is empty we need to populate the entry first
+        if (entry.@"type" == .empty) {
+            self.grid.active_bricks_mutex.lock();
+            entry = GridEntry{
+                // TODO: loaded, or unloaded ??
+                .@"type" = .loaded,
+                .data = @intCast(u30, self.grid.active_bricks),
+            };
+            self.grid.*.active_bricks += 1;
+            self.grid.*.active_bricks_mutex.unlock();
+        }
+
+        const brick_index = @intCast(usize, entry.data);
+        var brick = self.grid.bricks[brick_index];
+
+        // set the voxel to exist
+        const nth_bit = brickAt(insert_job.x, actual_y, insert_job.z);
+
+        // set the color information for the given voxel
+        { // shift material position voxels that are after this voxel
+            const was_set: bool = (brick.solid_mask & @as(i512, 1) << nth_bit) != 0;
+            const voxels_in_brick = countBits(brick.solid_mask, 512);
+            // TODO: error
+            // std.debug.print("heisenbug\n", .{});
+            const bucket = self.grid.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.grid.*.material_indices, was_set) catch {
+                std.debug.panic("at {d} {d} {d} no more buckets", .{ insert_job.x, insert_job.y, insert_job.z });
+            };
+            brick.material_index = bucket.start_index;
+
+            // move all color data
+            const bits_before = countBits(brick.solid_mask, nth_bit);
+            if (was_set == false) {
+                var i: u32 = voxels_in_brick;
+                while (i > bits_before) : (i -= 1) {
+                    const base_index = brick.material_index + i;
+                    self.grid.*.material_indices[base_index] = self.grid.material_indices[base_index - 1];
+                }
+            }
+
+            self.grid.*.material_indices[brick.material_index + bits_before] = insert_job.material_index;
+
+            // material indices is stored as 32bit on GPU and 8bit on CPU
+            // we divide by for to store the correct *GPU* index
+            brick.material_index /= 4;
+        }
+
+        // set voxel
+        brick.solid_mask |= @as(i512, 1) << nth_bit;
+
+        // store changes
+        self.grid.*.bricks[@intCast(usize, entry.data)] = brick;
+        self.grid.*.grid[grid_index] = entry;
+    }
+};
+
+// In order to share BrickGrid data with workers, we want the data on the heap
+const State = struct {
+    grid: []GridEntry,
+    bricks: []Brick,
+
+    // TODO: ability to configure a size less then all voxels in the grid
+    bucket_storage: BucketStorage,
+    // assigned through a bucket
+    material_indices: []u8,
+
+    active_bricks_mutex: std.Thread.Mutex,
+    /// how many bricks are used in the grid, keep in mind that this is used in a multithread context
+    active_bricks: usize,
+
+    device_state: Device,
 };
 
 const BrickGrid = @This();
 
 allocator: Allocator,
+// grid state that is shared with the workers
+state: *State,
 
-grid: []GridEntry,
-bricks: []Brick,
-
-// TODO: ability to configure a size less then all voxels in the grid
-bucket_storage: BucketStorage,
-// assigned through a bucket
-material_indices: []u8,
-
-active_bricks: usize,
-voxel_dim: [3]u32,
-device_state: Device,
+worker_threads: []std.Thread,
+workers: []GridWorker,
 
 /// Initialize a BrickGrid that can be raytraced 
 /// @param:
@@ -126,21 +269,19 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         break :blk biggest_axis * 8;
     };
 
-    const voxel_dim = [3]u32{ dim_x * 8, dim_y * 8, dim_z * 8 };
-
     const bucket_segments = try std.math.divFloor(usize, std.math.max(2048, material_indices.len), 2048.0);
     const bucket_storage = try BucketStorage.init(allocator, brick_alloc, bucket_segments);
     errdefer bucket_storage.deinit();
 
-    // zig fmt: off
-    return BrickGrid{ 
-        .allocator = allocator, 
-        .grid = grid, 
-        .bricks = bricks, 
+    const state = try allocator.create(State);
+    errdefer allocator.destroy(state);
+    state.* = .{
+        .grid = grid,
+        .bricks = bricks,
         .bucket_storage = bucket_storage,
-        .material_indices = material_indices, 
-        .active_bricks = 0, 
-        .voxel_dim = voxel_dim, 
+        .material_indices = material_indices,
+        .active_bricks_mutex = .{},
+        .active_bricks = 0,
         .device_state = Device{
             .dim_x = dim_x,
             .dim_y = dim_y,
@@ -148,102 +289,69 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
             .max_ray_iteration = max_ray_iteration,
             .min_point_base_t = min_point_base_t,
             .max_point_scale = max_point_scale,
-        } 
+        },
+    };
+
+    std.debug.assert(config.workers_count > 0);
+    var workers = try allocator.alloc(GridWorker, config.workers_count);
+    errdefer allocator.free(workers);
+
+    var worker_threads = try allocator.alloc(std.Thread, config.workers_count);
+    errdefer allocator.free(worker_threads);
+    for (worker_threads) |*thread, i| {
+        workers[i] = try GridWorker.init(state, allocator, 4096);
+        thread.* = try std.Thread.spawn(.{}, GridWorker.work, .{&workers[i]});
+    }
+
+    // zig fmt: off
+    return BrickGrid{ 
+        .allocator = allocator, 
+        .state = state,
+        .worker_threads = worker_threads,
+        .workers = workers,
     };
     // zig fmt: on
 }
 
 /// Clean up host memory, does not account for device
 pub fn deinit(self: BrickGrid) void {
-    self.allocator.free(self.grid);
-    self.allocator.free(self.bricks);
-    self.allocator.free(self.material_indices);
-    self.bucket_storage.deinit();
+    // signal each worker to finish
+    for (self.workers) |*worker| {
+        worker.*.kill_self = true;
+        worker.wake_event.signal();
+    }
+    // wait for each worker thread to finish
+    for (self.worker_threads) |thread| {
+        thread.join();
+    }
+
+    self.allocator.free(self.state.grid);
+    self.allocator.free(self.state.bricks);
+    self.allocator.free(self.state.material_indices);
+    self.state.bucket_storage.deinit();
+    self.allocator.destroy(self.state);
+
+    self.allocator.free(self.worker_threads);
+    self.allocator.free(self.workers);
 }
 
-pub const InsertError = error{ OutOfBoundsX, OutOfBoundsY, OutOfBoundsZ };
-pub fn safeInsert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u32) InsertError!void {
-    if (x < 0 or x >= self.voxel_dim[0]) {
-        return InsertError.OutOfBoundsX; // x was out of bounds
-    }
-    if (y < 0 or y >= self.voxel_dim[1]) {
-        return InsertError.OutOfBoundsY; // y was out of bounds
-    }
-    if (z < 0 or z >= self.voxel_dim[2]) {
-        return InsertError.OutOfBoundsZ; // z was out of bounds
-    }
-    @call(.{ .modifier = .always_inline }, insert, .{ self, x, y, z, material_index });
-}
-
-/// Insert a brick at coordinate x y z
-/// this function will cause panics if you insert out of bounds, use safeInsert
-/// if bound checks are required
+/// Asynchrounsly insert a brick at coordinate x y z
+/// this function will cause panics if you insert out of bounds
+/// if bound checks are required, currently no way of checking if insert completes
 pub fn insert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u8) void {
-    const actual_y = ((self.device_state.dim_y * 8) - 1) - y;
-
-    const grid_index = self.gridAt(x, actual_y, z);
-    var entry = self.grid[grid_index];
-
-    // if entry is empty we need to populate the entry first
-    if (entry.@"type" == .empty) {
-        entry = GridEntry{
-            // TODO: loaded, or unloaded ??
-            .@"type" = .loaded,
-            .data = @intCast(u30, self.active_bricks),
-        };
-        self.active_bricks += 1;
-    }
-
-    const brick_index = @intCast(usize, entry.data);
-    var brick = self.bricks[brick_index];
-
-    // set the voxel to exist
-    const nth_bit = brickAt(x, actual_y, z);
-
-    // set the color information for the given voxel
-    { // shift material position voxels that are after this voxel
-        const was_set: bool = (brick.solid_mask & @as(i512, 1) << nth_bit) != 0;
-        const voxels_in_brick = countBits(brick.solid_mask, 512);
-        // TODO: error
-        const bucket = self.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.material_indices, was_set) catch {
-            std.debug.panic("at {d} {d} {d} no more buckets", .{ x, y, z });
-        };
-        brick.material_index = bucket.start_index;
-
-        // move all color data
-        const bits_before = countBits(brick.solid_mask, nth_bit);
-        if (was_set == false) {
-            var i: u32 = voxels_in_brick;
-            while (i > bits_before) : (i -= 1) {
-                const base_index = brick.material_index + i;
-                self.material_indices[base_index] = self.material_indices[base_index - 1];
-            }
-        }
-
-        self.material_indices[brick.material_index + bits_before] = material_index;
-
-        // material indices is stored as 32bit on GPU and 8bit on CPU
-        // we divide by for to store the correct *GPU* index
-        brick.material_index /= 4;
-    }
-
-    // set voxel
-    brick.solid_mask |= @as(i512, 1) << nth_bit;
-
-    // store changes
-    self.bricks[@intCast(usize, entry.data)] = brick;
-    self.grid[grid_index] = entry;
-}
-
-inline fn countBits(bits: i512, range_to: u32) u32 {
-    var bit = bits;
-    var count: i512 = 0;
-    var i: u32 = 0;
-    while (i < range_to and bit != 0) : (i += 1) {
-        count += bit & 1;
-        bit = bit >> 1;
-    }
-    return @intCast(u32, count);
+    // find a workers that should be assigned insert
+    const worker_index = blk: {
+        const actual_y = ((self.state.device_state.dim_y * 8) - 1) - y;
+        const index = gridAt(self.state.*.device_state, x, actual_y, z);
+        const worker_segments = self.state.bricks.len / self.workers.len;
+        break :blk (index / worker_segments) - 1;
+    };
+    self.workers[worker_index].registerJob(GridWorker.Job{ .insert = .{
+        .x = x,
+        .y = y,
+        .z = z,
+        .material_index = material_index,
+    } });
 }
 
 // TODO: test
@@ -257,11 +365,23 @@ inline fn brickAt(x: usize, y: usize, z: usize) u9 {
 
 // TODO: test
 /// get grid index from global index coordinates
-inline fn gridAt(self: BrickGrid, x: usize, y: usize, z: usize) usize {
+inline fn gridAt(device_state: Device, x: usize, y: usize, z: usize) usize {
     const grid_x: u32 = @intCast(u32, x / 8);
     const grid_y: u32 = @intCast(u32, y / 8);
     const grid_z: u32 = @intCast(u32, z / 8);
-    return @intCast(usize, grid_x + self.device_state.dim_x * (grid_z + self.device_state.dim_z * grid_y));
+    return @intCast(usize, grid_x + device_state.dim_x * (grid_z + device_state.dim_z * grid_y));
+}
+
+/// count the set bits of a i512, up to range_to (exclusive)
+inline fn countBits(bits: i512, range_to: u32) u32 {
+    var bit = bits;
+    var count: i512 = 0;
+    var i: u32 = 0;
+    while (i < range_to and bit != 0) : (i += 1) {
+        count += bit & 1;
+        bit = bit >> 1;
+    }
+    return @intCast(u32, count);
 }
 
 /// used by the brick grid to pack brick material data closer to eachother
@@ -306,6 +426,7 @@ const BucketStorage = struct {
     // used to find the active bucked for a given brick index
     index: []?Index,
     buckets: [bucket_count]Bucket,
+    bucket_mutexes: [bucket_count]std.Thread.Mutex,
 
     // TODO: allow configuring the distribution of buckets
     /// init a bucket storage.
@@ -314,6 +435,9 @@ const BucketStorage = struct {
     /// one segment will be split into: 2 * 256, 1 * 512
     pub inline fn init(allocator: Allocator, brick_count: usize, segments_2048: usize) !BucketStorage {
         std.debug.assert(segments_2048 > 0);
+
+        var bucket_mutexes: [bucket_count]std.Thread.Mutex = undefined;
+        std.mem.set(std.Thread.Mutex, bucket_mutexes[0..], .{});
 
         var buckets: [bucket_count]Bucket = undefined;
 
@@ -370,6 +494,7 @@ const BucketStorage = struct {
             .allocator = allocator,
             .index = index,
             .buckets = buckets,
+            .bucket_mutexes = bucket_mutexes,
         };
     }
 
@@ -381,7 +506,7 @@ const BucketStorage = struct {
         // check if brick already have assigned a bucket
         if (self.index[brick_index]) |index| {
             const bucket_size = try std.math.powi(usize, 2, min_2_pow_size + index.bucket_index);
-            // if bucket size is insufficent, or if voxel was set before, no change required
+            // if bucket size is sufficent, or if voxel was set before, no change required
             if (bucket_size > voxel_offset or was_set) {
                 return self.buckets[index.bucket_index].occupied.items[index.element_index].?;
             }
@@ -394,6 +519,9 @@ const BucketStorage = struct {
             // find a bucket with increased size that is free
             var i: usize = index.bucket_index + 1;
             while (i < self.buckets.len) : (i += 1) {
+                self.bucket_mutexes[i].lock();
+                defer self.bucket_mutexes[i].unlock();
+
                 if (self.buckets[i].free.items.len > 0) {
                     const bucket = self.buckets[i].free.pop();
                     const oc_index = try self.buckets[i].appendOccupied(bucket);
@@ -407,6 +535,9 @@ const BucketStorage = struct {
         } else {
             // fetch the smallest free bucket
             for (self.buckets) |*bucket, i| {
+                self.bucket_mutexes[i].lock();
+                defer self.bucket_mutexes[i].unlock();
+
                 if (bucket.free.items.len > 0) {
                     const take = bucket.free.pop();
                     const oc_index = try bucket.appendOccupied(take);

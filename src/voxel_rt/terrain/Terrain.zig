@@ -41,9 +41,9 @@ perlin: Perlin,
 pub fn init(seed: u64, scale: f32, ocean_level: usize, grid: *BrickGrid) Terrain {
     const perlin = Perlin.init(seed);
     const voxel_dim = [3]f32{
-        @intToFloat(f32, grid.device_state.dim_x * 8),
-        @intToFloat(f32, grid.device_state.dim_y * 8),
-        @intToFloat(f32, grid.device_state.dim_z * 8),
+        @intToFloat(f32, grid.state.device_state.dim_x * 8),
+        @intToFloat(f32, grid.state.device_state.dim_y * 8),
+        @intToFloat(f32, grid.state.device_state.dim_z * 8),
     };
     const point_mod = [3]f32{
         (1 / voxel_dim[0]) * scale,
@@ -92,47 +92,42 @@ pub fn init(seed: u64, scale: f32, ocean_level: usize, grid: *BrickGrid) Terrain
     };
 }
 
-pub const MaterialData = struct {
-    color: []const gpu_types.Albedo,
-    materials: []const gpu_types.Material,
+/// color information expect by terrain to exist from 0.. in the albedo buffer
+pub const color_data = [_]gpu_types.Albedo{
+    // water
+    .{ .color = za.Vec4.new(0.117, 0.45, 0.85, 1.0) },
+    // grass 1
+    .{ .color = za.Vec4.new(0.0, 0.6, 0.0, 1.0) },
+    // grass 2
+    .{ .color = za.Vec4.new(0.0, 0.5019, 0.0, 1.0) },
+    // dirt 1
+    .{ .color = za.Vec4.new(0.3019, 0.149, 0, 1.0) },
+    // dirt 2
+    .{ .color = za.Vec4.new(0.4, 0.2, 0, 1.0) },
+    // rock 1
+    .{ .color = za.Vec4.new(0.275, 0.275, 0.275, 1.0) },
+    // rock 2
+    .{ .color = za.Vec4.new(0.225, 0.225, 0.225, 1.0) },
+    // iron
+    .{ .color = za.Vec4.new(0.6, 0.337, 0.282, 1.0) },
 };
-pub inline fn getMaterialData() MaterialData {
-    return MaterialData{
-        .color = &[_]gpu_types.Albedo{
-            // water
-            .{ .color = za.Vec4.new(0.117, 0.45, 0.85, 1.0) },
-            // grass 1
-            .{ .color = za.Vec4.new(0.0, 0.6, 0.0, 1.0) },
-            // grass 2
-            .{ .color = za.Vec4.new(0.0, 0.5019, 0.0, 1.0) },
-            // dirt 1
-            .{ .color = za.Vec4.new(0.3019, 0.149, 0, 1.0) },
-            // dirt 2
-            .{ .color = za.Vec4.new(0.4, 0.2, 0, 1.0) },
-            // rock 1
-            .{ .color = za.Vec4.new(0.275, 0.275, 0.275, 1.0) },
-            // rock 2
-            .{ .color = za.Vec4.new(0.225, 0.225, 0.225, 1.0) },
-            // iron
-            .{ .color = za.Vec4.new(0.6, 0.337, 0.282, 1.0) },
-        },
-        .materials = &[_]gpu_types.Material{
-            // water
-            .{ .@"type" = .dielectric, .type_index = 0, .albedo_index = 0 },
-            // grass 1
-            .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 1 },
-            // grass 2
-            .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 2 },
-            // dirt 1
-            .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 3 },
-            // dirt 2
-            .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 4 },
-            // rock
-            .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 5 },
-            // rock
-            .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 6 },
-            // iron
-            .{ .@"type" = .metal, .type_index = 0, .albedo_index = 4 },
-        },
-    };
-}
+
+/// material information expect by terrain to exist from 0.. in the material buffer
+pub const material_data = [_]gpu_types.Material{
+    // water
+    .{ .@"type" = .dielectric, .type_index = 0, .albedo_index = 0 },
+    // grass 1
+    .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 1 },
+    // grass 2
+    .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 2 },
+    // dirt 1
+    .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 3 },
+    // dirt 2
+    .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 4 },
+    // rock
+    .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 5 },
+    // rock
+    .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 6 },
+    // iron
+    .{ .@"type" = .metal, .type_index = 0, .albedo_index = 4 },
+};

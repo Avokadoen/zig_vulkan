@@ -99,7 +99,7 @@ pub fn activateSprint(self: *Camera) void {
     self.movement_speed = self.normal_speed * self.sprint_speed;
 }
 
-/// set camera movement speed to sprint
+/// set camera movement speed to normal speed
 pub fn disableSprint(self: *Camera) void {
     self.movement_speed = self.normal_speed;
 }
