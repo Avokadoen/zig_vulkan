@@ -4,6 +4,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const AtomicCount = std.atomic.Atomic(usize);
 
 const State = @import("State.zig");
 const Worker = @import("Worker.zig");
@@ -29,9 +30,6 @@ allocator: Allocator,
 // grid state that is shared with the workers
 state: *State,
 
-// how long since we last forced workers to verify no work load
-last_poll: f32,
-poll_delay: f32,
 worker_threads: []std.Thread,
 workers: []Worker,
 
@@ -100,8 +98,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         .bricks = bricks,
         .bucket_storage = bucket_storage,
         .material_indices = material_indices,
-        .active_bricks_mutex = .{},
-        .active_bricks = 0,
+        .active_bricks = AtomicCount.init(0),
         .device_state = State.Device{
             .dim_x = dim_x,
             .dim_y = dim_y,
@@ -127,29 +124,17 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     return BrickGrid{ 
         .allocator = allocator, 
         .state = state,
-        .last_poll = 0,
-        .poll_delay = config.poll_delay,
         .worker_threads = worker_threads,
         .workers = workers,
     };
     // zig fmt: on
 }
 
-pub fn pollWorkers(self: *BrickGrid, delta_time: f32) void {
-    self.last_poll += delta_time;
-    if (self.last_poll > self.poll_delay) {
-        self.last_poll = 0;
-        for (self.workers) |*worker| {
-            worker.wake_event.signal();
-        }
-    }
-}
-
 /// Clean up host memory, does not account for device
 pub fn deinit(self: BrickGrid) void {
     // signal each worker to finish
     for (self.workers) |*worker| {
-        worker.*.kill_self = true;
+        worker.*.shutdown.store(true, .SeqCst);
         worker.wake_event.signal();
     }
     // wait for each worker thread to finish

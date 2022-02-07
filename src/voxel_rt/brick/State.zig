@@ -1,4 +1,6 @@
 const std = @import("std");
+const AtomicCount = std.atomic.Atomic(usize);
+
 const BucketStorage = @import("./BucketStorage.zig");
 
 // uniform binding: 2
@@ -48,8 +50,7 @@ bucket_storage: BucketStorage,
 // assigned through a bucket
 material_indices: []u8,
 
-active_bricks_mutex: std.Thread.Mutex,
 /// how many bricks are used in the grid, keep in mind that this is used in a multithread context
-active_bricks: usize,
+active_bricks: AtomicCount,
 
 device_state: Device,

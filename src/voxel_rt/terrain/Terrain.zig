@@ -30,8 +30,8 @@ const Material = enum(u8) {
     }
 };
 
-/// populate a voxel grid with terrain based on perlin noise
-pub fn generate(seed: u64, scale: f32, ocean_level: usize, grid: *BrickGrid) void { // TODO: return Terrain
+/// populate a voxel grid with perlin noise terrain on CPU
+pub fn generateCpu(seed: u64, scale: f32, ocean_level: usize, grid: *BrickGrid) void { // TODO: return Terrain
     const perlin = Perlin.init(seed);
 
     const voxel_dim = [3]f32{

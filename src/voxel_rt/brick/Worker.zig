@@ -9,6 +9,7 @@ const Worker = @This();
 
 /// a FIFO queue of jobs for a given worker
 const JobQueue = std.fifo.LinearFifo(Job, .Dynamic);
+const ShutdownSignal = std.atomic.Atomic(bool);
 
 pub const Insert = struct { x: usize, y: usize, z: usize, material_index: u8 };
 pub const JobTag = enum {
@@ -24,22 +25,33 @@ pub const Job = union(JobTag) {
     // },
 };
 
+allocator: Allocator,
+
 id: usize,
 grid: *State,
 
 wake_mutex: std.Thread.Mutex,
 wake_event: std.Thread.Condition,
 
-// FIFO list
 job_mutex: std.Thread.Mutex,
-job_queue: JobQueue,
+job_queue: *JobQueue,
 
-kill_self: bool = false,
+shutdown: ShutdownSignal,
 
 pub fn init(id: usize, grid: *State, allocator: Allocator, initial_queue_capacity: usize) !Worker {
-    var job_queue = JobQueue.init(allocator);
+    var job_queue = try allocator.create(JobQueue);
+    job_queue.* = JobQueue.init(allocator);
     try job_queue.ensureTotalCapacity(initial_queue_capacity);
-    return Worker{ .id = id, .grid = grid, .wake_mutex = .{}, .wake_event = .{}, .job_mutex = .{}, .job_queue = job_queue };
+    return Worker{
+        .allocator = allocator,
+        .id = id,
+        .grid = grid,
+        .wake_mutex = .{},
+        .wake_event = .{},
+        .job_mutex = .{},
+        .job_queue = job_queue,
+        .shutdown = ShutdownSignal.init(false),
+    };
 }
 
 pub fn registerJob(self: *Worker, job: Job) void {
@@ -51,29 +63,23 @@ pub fn registerJob(self: *Worker, job: Job) void {
 }
 
 pub fn work(self: *Worker) void {
-    while (self.kill_self == false) {
-        self.wake_mutex.lock();
-        defer self.wake_mutex.unlock();
-
-        // if there is work to be done
+    while (self.shutdown.load(.SeqCst) == false) {
         self.job_mutex.lock();
-        const next = self.job_queue.readItem();
-        self.job_mutex.unlock();
-
-        if (next) |job| {
+        while (self.job_queue.*.readItem()) |job| {
+            self.job_mutex.unlock();
             switch (job) {
                 .insert => |insert_job| {
                     self.performInsert(insert_job);
                 },
             }
-        } else {
-            std.debug.print("worker {d} going to sleep, no work\n", .{self.id});
-            self.wake_event.wait(&self.wake_mutex);
-            std.debug.print("worker {d} waking up\n", .{self.id});
+            self.job_mutex.lock();
         }
+        defer self.job_mutex.unlock();
+        self.wake_event.wait(&self.job_mutex);
     }
 
     self.job_queue.deinit();
+    self.allocator.destroy(self.job_queue);
 }
 
 // perform a insert in the grid
@@ -85,14 +91,13 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
 
     // if entry is empty we need to populate the entry first
     if (entry.@"type" == .empty) {
-        self.grid.active_bricks_mutex.lock();
+        // atomically fetch previous brick count and then add 1 to count
+        const active_bricks = self.grid.*.active_bricks.fetchAdd(1, .SeqCst);
         entry = State.GridEntry{
             // TODO: loaded, or unloaded ??
             .@"type" = .loaded,
-            .data = @intCast(u30, self.grid.active_bricks),
+            .data = @intCast(u30, active_bricks),
         };
-        self.grid.*.active_bricks += 1;
-        self.grid.*.active_bricks_mutex.unlock();
     }
 
     const brick_index = @intCast(usize, entry.data);

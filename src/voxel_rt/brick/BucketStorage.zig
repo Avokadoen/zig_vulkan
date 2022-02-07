@@ -46,7 +46,12 @@ allocator: Allocator,
 // used to find the active bucked for a given brick index
 index: []?Index,
 buckets: [bucket_count]Bucket,
-bucket_mutexes: [bucket_count]std.Thread.Mutex,
+
+// TODO: a single mutex for all of the storage is wastefull,
+//       previous attempts to split this causes race conditions in getBrickBucket
+//       which causes bricks to be assigned color data of other bricks so for now we
+//       hack it and use a single mutex :(
+storage_mutex: std.Thread.Mutex,
 
 // TODO: allow configuring the distribution of buckets
 /// init a bucket storage.
@@ -114,7 +119,7 @@ pub inline fn init(allocator: Allocator, brick_count: usize, segments_2048: usiz
         .allocator = allocator,
         .index = index,
         .buckets = buckets,
-        .bucket_mutexes = bucket_mutexes,
+        .storage_mutex = .{},
     };
 }
 
@@ -123,6 +128,9 @@ pub inline fn init(allocator: Allocator, brick_count: usize, segments_2048: usiz
 // that a new bucket is required
 // returns error if there is no more buckets of appropriate size
 pub inline fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_offset: usize, material_indices: []u8, was_set: bool) !Bucket.Entry {
+    self.storage_mutex.lock();
+    defer self.storage_mutex.unlock();
+
     // check if brick already have assigned a bucket
     if (self.index[brick_index]) |index| {
         const bucket_size = try std.math.powi(usize, 2, min_2_pow_size + index.bucket_index);
@@ -132,44 +140,38 @@ pub inline fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_off
         }
 
         // free previous bucket
-        self.bucket_mutexes[index.bucket_index].lock();
         const previous_bucket = self.buckets[index.bucket_index].occupied.items[index.element_index].?;
         try self.buckets[index.bucket_index].free.append(previous_bucket);
         self.buckets[index.bucket_index].occupied.items[index.element_index] = null;
-        self.bucket_mutexes[index.bucket_index].unlock();
 
         // find a bucket with increased size that is free
         var i: usize = index.bucket_index + 1;
         while (i < self.buckets.len) : (i += 1) {
-            self.bucket_mutexes[i].lock();
             if (self.buckets[i].free.items.len > 0) {
                 // do bucket stuff to rel
                 const bucket = self.buckets[i].free.pop();
                 const oc_index = try self.buckets[i].appendOccupied(bucket);
-                self.bucket_mutexes[i].unlock();
 
-                self.index[brick_index] = Index{ .bucket_index = @intCast(u16, i), .element_index = @intCast(u16, oc_index) };
+                self.index[brick_index] = Index{
+                    .bucket_index = @intCast(u16, i),
+                    .element_index = @intCast(u16, oc_index),
+                };
 
                 // copy material indices to new bucket
                 std.mem.copy(u8, material_indices[bucket.start_index..], material_indices[previous_bucket.start_index .. previous_bucket.start_index + bucket_size]);
                 return bucket;
             }
-            self.bucket_mutexes[i].unlock();
         }
     } else {
         // fetch the smallest free bucket
         for (self.buckets) |*bucket, i| {
-            self.bucket_mutexes[i].lock();
-
             if (bucket.free.items.len > 0) {
                 const take = bucket.free.pop();
                 const oc_index = try bucket.appendOccupied(take);
-                self.bucket_mutexes[i].unlock();
 
                 self.index[brick_index] = Index{ .bucket_index = @intCast(u16, i), .element_index = @intCast(u16, oc_index) };
                 return take;
             }
-            self.bucket_mutexes[i].unlock();
         }
     }
     std.debug.assert(was_set == false);
