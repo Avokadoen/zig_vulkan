@@ -63,7 +63,7 @@ pub const Image = struct {
 
         const char_ptr = std.mem.alignPointer(self.data.ptr, 2);
 
-        const error_code = c.stbi_write_png(use_path.ptr, self.width, self.height, self.channels + 1, char_ptr, self.width * (self.channels + 1));
+        const error_code = c.stbi_write_png(use_path.ptr, self.width, self.height, self.channels, char_ptr, self.width * self.channels);
         if (error_code == 0) {
             return error.StbiFailedWrite; // error scenarios are not specified :(
         }
