@@ -28,6 +28,9 @@ image_memory: vk.DeviceMemory,
 format: vk.Format,
 sampler: vk.Sampler,
 
+comptime layout: vk.ImageLayout = .general,
+
+// TODO: comptime send_to_device: bool to disable all useless transfer
 pub fn init(ctx: Context, command_pool: vk.CommandPool, comptime layout: vk.ImageLayout, comptime T: type, config: Config(T)) !Texture {
     const image_extent = vk.Extent2D{
         .width = config.width,
@@ -42,7 +45,7 @@ pub fn init(ctx: Context, command_pool: vk.CommandPool, comptime layout: vk.Imag
         .host_coherent_bit = true,
     });
     defer staging_buffer.deinit(ctx);
-    try staging_buffer.transfer(ctx, T, config.data);
+    try staging_buffer.transferToDevice(ctx, T, config.data);
 
     const image = blk: {
         // TODO: make sure we use correct usage bits https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkImageUsageFlagBits.html
@@ -84,7 +87,9 @@ pub fn init(ctx: Context, command_pool: vk.CommandPool, comptime layout: vk.Imag
 
     try ctx.vkd.bindImageMemory(ctx.logical_device, image, image_memory, 0);
     try transitionImageLayout(ctx, command_pool, image, .@"undefined", .transfer_dst_optimal);
-    try copyImageToBuffer(ctx, command_pool, image, staging_buffer.buffer, image_extent);
+
+    // TODO: this is not always desireable
+    try copyBufferToImage(ctx, command_pool, image, staging_buffer.buffer, image_extent);
 
     try transitionImageLayout(ctx, command_pool, image, .transfer_dst_optimal, layout);
 
@@ -145,6 +150,7 @@ pub fn init(ctx: Context, command_pool: vk.CommandPool, comptime layout: vk.Imag
         .image_memory = image_memory,
         .format = config.format,
         .sampler = sampler,
+        .layout = layout,
     };
 }
 
@@ -153,6 +159,78 @@ pub fn deinit(self: Texture, ctx: Context) void {
     ctx.vkd.destroyImageView(ctx.logical_device, self.image_view, null);
     ctx.vkd.destroyImage(ctx.logical_device, self.image, null);
     ctx.vkd.freeMemory(ctx.logical_device, self.image_memory, null);
+}
+
+pub fn copyToHost(self: Texture, ctx: Context, comptime T: type, buffer: []T) !void {
+    var staging_buffer = try GpuBufferMemory.init(ctx, self.image_size, .{
+        .transfer_dst_bit = true,
+    }, .{
+        .host_visible_bit = true,
+        .host_coherent_bit = true,
+    });
+    defer staging_buffer.deinit(ctx);
+
+    try transitionImageLayout(ctx, ctx.gfx_cmd_pool, self.image, self.layout, .transfer_src_optimal);
+    const command_buffer = try vk_utils.beginOneTimeCommandBuffer(ctx, ctx.gfx_cmd_pool);
+    {
+        const region = vk.BufferImageCopy{
+            .buffer_offset = 0,
+            .buffer_row_length = 0,
+            .buffer_image_height = 0,
+            .image_subresource = vk.ImageSubresourceLayers{
+                .aspect_mask = .{
+                    .color_bit = true,
+                },
+                .mip_level = 0,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            },
+            .image_offset = .{
+                .x = 0,
+                .y = 0,
+                .z = 0,
+            },
+            .image_extent = .{
+                .width = self.image_extent.width,
+                .height = self.image_extent.height,
+                .depth = 1,
+            },
+        };
+        ctx.vkd.cmdCopyImageToBuffer(command_buffer, self.image, .transfer_src_optimal, staging_buffer.buffer, 1, @ptrCast([*]const vk.BufferImageCopy, &region));
+    }
+    try vk_utils.endOneTimeCommandBuffer(ctx, ctx.gfx_cmd_pool, command_buffer);
+    try transitionImageLayout(ctx, ctx.gfx_cmd_pool, self.image, .transfer_src_optimal, self.layout);
+
+    try staging_buffer.transferFromDevice(ctx, T, buffer);
+}
+
+pub const TransitionBarrier = struct {
+    transition: TransitionBits,
+    barrier: vk.ImageMemoryBarrier,
+};
+pub inline fn getImageTransitionBarrier(image: vk.Image, comptime old_layout: vk.ImageLayout, comptime new_layout: vk.ImageLayout) TransitionBarrier {
+    const transition = getTransitionBits(old_layout, new_layout);
+    return TransitionBarrier{
+        .transition = transition,
+        .barrier = vk.ImageMemoryBarrier{
+            .src_access_mask = transition.src_mask,
+            .dst_access_mask = transition.dst_mask,
+            .old_layout = old_layout,
+            .new_layout = new_layout,
+            .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+            .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+            .image = image,
+            .subresource_range = vk.ImageSubresourceRange{
+                .aspect_mask = .{
+                    .color_bit = true,
+                },
+                .base_mip_level = 0,
+                .level_count = 1,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            },
+        },
+    };
 }
 
 const TransitionBits = struct {
@@ -195,6 +273,14 @@ fn getTransitionBits(comptime old_layout: vk.ImageLayout, comptime new_layout: v
                 .transfer_bit = true,
             };
         },
+        .transfer_src_optimal => {
+            transition_bits.src_mask = .{
+                .transfer_read_bit = true,
+            };
+            transition_bits.src_stage = .{
+                .transfer_bit = true,
+            };
+        },
         else => {
             @compileError("unsupported old_layout \"" ++ @tagName(old_layout) ++ "\"");
         },
@@ -230,40 +316,19 @@ fn getTransitionBits(comptime old_layout: vk.ImageLayout, comptime new_layout: v
                 .transfer_bit = true,
             };
         },
+        .transfer_src_optimal => {
+            transition_bits.dst_mask = .{
+                .transfer_read_bit = true,
+            };
+            transition_bits.dst_stage = .{
+                .transfer_bit = true,
+            };
+        },
         else => {
             @compileError("unsupported new_layout \"" ++ @tagName(new_layout) ++ "\"");
         },
     }
     return transition_bits;
-}
-
-pub const TransitionBarrier = struct {
-    transition: TransitionBits,
-    barrier: vk.ImageMemoryBarrier,
-};
-pub inline fn getImageTransitionBarrier(image: vk.Image, comptime old_layout: vk.ImageLayout, comptime new_layout: vk.ImageLayout) TransitionBarrier {
-    const transition = getTransitionBits(old_layout, new_layout);
-    return TransitionBarrier{
-        .transition = transition,
-        .barrier = vk.ImageMemoryBarrier{
-            .src_access_mask = transition.src_mask,
-            .dst_access_mask = transition.dst_mask,
-            .old_layout = old_layout,
-            .new_layout = new_layout,
-            .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-            .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-            .image = image,
-            .subresource_range = vk.ImageSubresourceRange{
-                .aspect_mask = .{
-                    .color_bit = true,
-                },
-                .base_mip_level = 0,
-                .level_count = 1,
-                .base_array_layer = 0,
-                .layer_count = 1,
-            },
-        },
-    };
 }
 
 inline fn transitionImageLayout(ctx: Context, command_pool: vk.CommandPool, image: vk.Image, comptime old_layout: vk.ImageLayout, comptime new_layout: vk.ImageLayout) !void {
@@ -292,7 +357,7 @@ inline fn transitionImageLayout(ctx: Context, command_pool: vk.CommandPool, imag
 }
 
 // TODO: find a suitable location for this functio
-inline fn copyImageToBuffer(ctx: Context, command_pool: vk.CommandPool, image: vk.Image, buffer: vk.Buffer, image_extent: vk.Extent2D) !void {
+inline fn copyBufferToImage(ctx: Context, command_pool: vk.CommandPool, image: vk.Image, buffer: vk.Buffer, image_extent: vk.Extent2D) !void {
     const command_buffer = try vk_utils.beginOneTimeCommandBuffer(ctx, command_pool);
     {
         const region = vk.BufferImageCopy{

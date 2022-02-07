@@ -57,17 +57,17 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, target_t
 
     {
         const camera_data = [_]Camera.Device{camera.d_camera};
-        try comp_pipeline.uniform_buffers[0].transfer(ctx, Camera.Device, camera_data[0..]);
+        try comp_pipeline.uniform_buffers[0].transferToDevice(ctx, Camera.Device, camera_data[0..]);
     }
     {
         const grid_data = [_]GridState.Device{brick_grid.state.device_state};
-        try comp_pipeline.uniform_buffers[1].transfer(ctx, GridState.Device, grid_data[0..]);
+        try comp_pipeline.uniform_buffers[1].transferToDevice(ctx, GridState.Device, grid_data[0..]);
     }
     {
         const metals = [_]gpu_types.Metal{.{
             .fuzz = 0.45,
         }};
-        try comp_pipeline.storage_buffers[2].transfer(ctx, gpu_types.Metal, metals[0..]);
+        try comp_pipeline.storage_buffers[2].transferToDevice(ctx, gpu_types.Metal, metals[0..]);
     }
     {
         const dielectrics = [_]gpu_types.Dielectric{
@@ -78,12 +78,12 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, target_t
                 .internal_reflection = 1.52, // glass
             },
         };
-        try comp_pipeline.storage_buffers[3].transfer(ctx, gpu_types.Dielectric, dielectrics[0..]);
+        try comp_pipeline.storage_buffers[3].transferToDevice(ctx, gpu_types.Dielectric, dielectrics[0..]);
     }
 
-    try comp_pipeline.storage_buffers[4].transfer(ctx, GridState.GridEntry, brick_grid.state.grid);
-    try comp_pipeline.storage_buffers[5].transfer(ctx, GridState.Brick, brick_grid.state.bricks);
-    try comp_pipeline.storage_buffers[6].transfer(ctx, u8, brick_grid.state.material_indices);
+    try comp_pipeline.storage_buffers[4].transferToDevice(ctx, GridState.GridEntry, brick_grid.state.grid);
+    try comp_pipeline.storage_buffers[5].transferToDevice(ctx, GridState.Brick, brick_grid.state.bricks);
+    try comp_pipeline.storage_buffers[6].transferToDevice(ctx, u8, brick_grid.state.material_indices);
 
     // zig fmt: off
     return VoxelRT{ 
@@ -96,24 +96,24 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, target_t
 
 /// push the materials to GPU
 pub inline fn pushMaterials(self: VoxelRT, ctx: Context, materials: []const gpu_types.Material) !void {
-    try self.comp_pipeline.storage_buffers[0].transfer(ctx, gpu_types.Material, materials);
+    try self.comp_pipeline.storage_buffers[0].transferToDevice(ctx, gpu_types.Material, materials);
 }
 
 /// push the albedo to GPU
 pub inline fn pushAlbedo(self: VoxelRT, ctx: Context, albedos: []const gpu_types.Albedo) !void {
-    try self.comp_pipeline.storage_buffers[1].transfer(ctx, gpu_types.Albedo, albedos);
+    try self.comp_pipeline.storage_buffers[1].transferToDevice(ctx, gpu_types.Albedo, albedos);
 }
 
 /// a temporary way of pushing camera changes 
 pub fn debugMoveCamera(self: *VoxelRT, ctx: Context) !void {
     const camera_data = [_]Camera.Device{self.camera.d_camera};
-    try self.comp_pipeline.uniform_buffers[0].transfer(ctx, Camera.Device, camera_data[0..]);
+    try self.comp_pipeline.uniform_buffers[0].transferToDevice(ctx, Camera.Device, camera_data[0..]);
 }
 
 pub fn debugUpdateTerrain(self: *VoxelRT, ctx: Context) !void {
-    try self.comp_pipeline.storage_buffers[4].transfer(ctx, GridState.GridEntry, self.brick_grid.state.grid);
-    try self.comp_pipeline.storage_buffers[5].transfer(ctx, GridState.Brick, self.brick_grid.state.bricks);
-    try self.comp_pipeline.storage_buffers[6].transfer(ctx, u8, self.brick_grid.state.material_indices);
+    try self.comp_pipeline.storage_buffers[4].transferToDevice(ctx, GridState.GridEntry, self.brick_grid.state.grid);
+    try self.comp_pipeline.storage_buffers[5].transferToDevice(ctx, GridState.Brick, self.brick_grid.state.bricks);
+    try self.comp_pipeline.storage_buffers[6].transferToDevice(ctx, u8, self.brick_grid.state.material_indices);
 }
 
 // compute the next frame and draw it to target texture, note that it will not draw to any window

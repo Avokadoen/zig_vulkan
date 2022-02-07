@@ -65,7 +65,7 @@ pub fn copy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, size: v
 }
 
 /// Transfer data from host to device
-pub fn transfer(self: *GpuBufferMemory, ctx: Context, comptime T: type, data: []const T) !void {
+pub fn transferToDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, data: []const T) !void {
     // transfer empty data slice is NOP
     if (data.len <= 0) return;
 
@@ -82,6 +82,19 @@ pub fn transfer(self: *GpuBufferMemory, ctx: Context, comptime T: type, data: []
     }
     ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
     self.len = @intCast(u32, data.len);
+}
+
+pub fn transferFromDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, data: []T) !void {
+    var gpu_mem = try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, self.size, .{});
+    const gpu_mem_start = @ptrToInt(gpu_mem);
+
+    var i: usize = 0;
+    var offset: usize = 0;
+    while (offset + @sizeOf(T) <= self.size and i < data.len) : (i += 1) {
+        offset = @sizeOf(T) * i;
+        data[i] = @intToPtr(*T, gpu_mem_start + offset).*;
+    }
+    ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
 }
 
 /// Transfer data from host to device, allows you to send multiple chunks of data in the same buffer.

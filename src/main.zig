@@ -132,8 +132,8 @@ pub fn main() anyerror!void {
     for (model.xyzi_chunks[0]) |xyzi| {
         grid.insert(@intCast(usize, xyzi.x), @intCast(usize, xyzi.z), @intCast(usize, xyzi.y), xyzi.color_index);
     }
-    const terrain_thread = try std.Thread.spawn(.{}, terrain.generateCpu, .{ 420, 4, 20, &grid });
-    defer terrain_thread.join();
+
+    try terrain.generateGpu(ctx, allocator, 420, 4, 20, &grid);
 
     var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, &draw_api.state.subo.ubo.my_texture, .{});
     defer voxel_rt.deinit(ctx);
@@ -176,7 +176,6 @@ pub fn main() anyerror!void {
         }
 
         {
-            //
             try voxel_rt.compute(ctx);
 
             // Render 2d stuff

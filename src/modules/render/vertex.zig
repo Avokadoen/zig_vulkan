@@ -37,7 +37,7 @@ pub inline fn createDefaultVertexBuffer(ctx: Context, command_pool: vk.CommandPo
     });
     defer staging_buffer.deinit(ctx);
     // zig type inference is failing, so cast is needed currently
-    try staging_buffer.transfer(ctx, Vertex, @as([]Vertex, vertices[0..]));
+    try staging_buffer.transferToDevice(ctx, Vertex, @as([]Vertex, vertices[0..]));
 
     var vertex_buffer = try GpuBufferMemory.init(ctx, buffer_size, .{
         .transfer_dst_bit = true,
@@ -63,7 +63,7 @@ pub inline fn createDefaultIndicesBuffer(ctx: Context, command_pool: vk.CommandP
     });
     defer staging_buffer.deinit(ctx);
     // zig type inference is failing, so cast is needed currently
-    try staging_buffer.transfer(ctx, Index, @as([]Index, indices[0..]));
+    try staging_buffer.transferToDevice(ctx, Index, @as([]Index, indices[0..]));
 
     var index_buffer = try GpuBufferMemory.init(ctx, buffer_size, .{
         .transfer_dst_bit = true,
