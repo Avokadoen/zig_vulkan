@@ -210,6 +210,8 @@ pub fn build(b: *Builder) void {
         shader_move_step.add_abs_resource(o_rt) catch unreachable;
         const b_rt = shader_comp.add("assets/shaders/brick_raytracer.comp");
         shader_move_step.add_abs_resource(b_rt) catch unreachable;
+        const gen_height = shader_comp.add("assets/shaders/height_map_gen.comp");
+        shader_move_step.add_abs_resource(gen_height) catch unreachable;
     }
 
     exe.step.dependOn(&shader_comp.step);
