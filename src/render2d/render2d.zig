@@ -52,6 +52,7 @@ pub fn init(allocator: Allocator, context: render.Context, init_capacity: usize)
         .swapchain = swapchain,
         .view = sc.ViewportScissor.init(swapchain.extent),
         .db_ptr = db_ptr,
+        .empty_image_indices = std.ArrayList(usize).init(allocator),
         .images = std.ArrayList(stbi.Image).init(allocator),
         .image_paths = std.StringArrayHashMap(TextureHandle).init(allocator),
     };
@@ -76,6 +77,8 @@ pub const InitializedApi = struct {
     view: sc.ViewportScissor,
     db_ptr: *DB,
 
+    // used to keep track of images loaded by loadEmptyTexture
+    empty_image_indices: std.ArrayList(usize),
     images: std.ArrayList(stbi.Image),
     image_paths: std.StringArrayHashMap(TextureHandle),
 
@@ -100,6 +103,29 @@ pub const InitializedApi = struct {
         try self.db_ptr.*.uv_meta.append(handle);
 
         try self.image_paths.put(path, handle);
+        return handle;
+    }
+
+    // TODO: HACK: init a empty texture for compute, see issue https://github.com/Avokadoen/zig_vulkan/issues/62
+    pub fn loadEmptyTexture(self: *Self, width: i32, height: i32) !TextureHandle {
+        const image = stbi.Image{
+            .width = width,
+            .height = height,
+            .channels = 4,
+            .data = try self.allocator.alloc(stbi.Pixel, @intCast(usize, width * height)),
+        };
+        errdefer self.allocator.free(image.data);
+
+        try self.images.append(image);
+        const handle = TextureHandle{
+            .id = @intCast(c_int, self.images.items.len - 1),
+            .width = @intToFloat(f32, image.width),
+            .height = @intToFloat(f32, image.height),
+        };
+        try self.db_ptr.*.uv_meta.append(handle);
+
+        try self.empty_image_indices.append(self.images.items.len - 1);
+
         return handle;
     }
 
@@ -187,7 +213,17 @@ pub const InitializedApi = struct {
 
         // clear original images
         self.image_paths.deinit();
+        for (self.images.items) |image, i| {
+            const index = [_]usize{i};
+            if (std.mem.indexOf(usize, self.empty_image_indices.items, index[0..])) |some| {
+                _ = some;
+                self.allocator.free(image.data);
+            } else {
+                image.deinit();
+            }
+        }
         self.images.deinit();
+        self.empty_image_indices.deinit();
 
         const mega_image = stbi.Image{
             .width = @intCast(i32, mega_size.width),
@@ -209,7 +245,7 @@ pub const InitializedApi = struct {
             .ctx = self.ctx,
             .image = mega_image,
             .viewport = self.view.viewport[0],
-            .buffer_count = self.swapchain.images.items.len,
+            .buffer_count = self.swapchain.images.len,
             .buffer_sizes = buffer_sizes[0..],
         };
         var api = DrawApi(gpu_update_rate){ .state = .{
@@ -232,7 +268,7 @@ pub const InitializedApi = struct {
         };
         try api.state.db_ptr.generateUvBuffer(mega_uvs);
 
-        for (api.state.swapchain.images.items) |_, i| {
+        for (api.state.swapchain.images) |_, i| {
             const buffers = api.state.subo.*.ubo.storage_buffers[i];
             try api.state.db_ptr.*.uv_buffer.handleDeviceTransfer(self.ctx, &buffers[4]);
         }
@@ -311,7 +347,7 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
                         user_ctx.*.update_frame_count = 0;
                     }
 
-                    const image_count = user_ctx.*.state.swapchain.images.items.len;
+                    const image_count = user_ctx.*.state.swapchain.images.len;
                     if (user_ctx.*.update_frame_count < image_count) {
                         const buffers = user_ctx.*.state.subo.ubo.storage_buffers[image_index];
                         user_ctx.*.state.db_ptr.*.positions.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[0]) catch {};

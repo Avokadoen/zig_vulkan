@@ -1,6 +1,6 @@
 #version 450
 
-// Shader from: https://github.com/Avokadoen/tdt4230_project_raytracing
+#include "rand.comp"
 
 layout(local_size_x = 32, local_size_y = 32) in;
 layout(rgba32f, binding = 0) uniform image2D img_output;
@@ -50,72 +50,6 @@ vec3 SampleGGXVNDF(vec3 inv_view_dir, vec2 alpha, vec2 U) {
     return normalize(vec3(alpha.x * Nh.x, alpha.y * Nh.y, max(0.0, Nh.z)));
 }
 
-
-float Rand(float co) { return fract(sin(co*(91.3458)) * 47453.5453); }
-float Rand(vec2 co){ return fract(sin(dot(co.xy, vec2(12.9898,78.233))) * 43758.5453); }
-float Rand(vec3 co){ return Rand(co.xy+Rand(co.z)); }
-float Rand(vec2 co, float min, float max) {
-    return min + (max - min) * Rand(co);
-}
-vec3 RandVec3(vec2 co) {
-    float x = Rand(co);
-    float y = Rand(vec2(co.x + x, co.y + x));
-    float z = Rand(vec2(co.x + y, co.y + y));
-    return vec3(x, y, z);
-}
-vec3 RandVec3(vec2 co, float min, float max) {
-    float x = Rand(co, min, max);
-    float y = Rand(vec2(co.x + x, co.y + x), min, max);
-    float z = Rand(vec2(co.x + y, co.y + y), min, max);
-    return vec3(x, y, z);
-}
-// Source: https://www.shadertoy.com/view/4djSRW
-float hash12(vec2 p) {
-	vec3 p3  = fract(vec3(p.xyx) * .1031);
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
-}
-float hash12(vec2 p, float min, float max) {
-    return fma(hash12(p), (max - min), min) ;
-}
-float hash13(vec3 p3)
-{
-	p3  = fract(p3 * .1031);
-    p3 += dot(p3, p3.zyx + 31.32);
-    return fract((p3.x + p3.y) * p3.z);
-}
-vec2 hash23(vec3 p3)
-{
-	p3 = fract(p3 * vec3(.1031, .1030, .0973));
-    p3 += dot(p3, p3.yzx+33.33);
-    return fract((p3.xx+p3.yz)*p3.zy);
-}
-vec3 hash32(vec2 p)
-{
-	vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973));
-    p3 += dot(p3, p3.yxz + 33.33);
-    return fract((p3.xxy + p3.yzz) * p3.zyx);
-}
-vec3 hash32(vec2 p, float min, float max) {
-    vec3 rng = hash32(p);
-    float min_max_diff = max - min;
-    return vec3(
-        fma(rng.x, min_max_diff, min), 
-        fma(rng.y, min_max_diff, min), 
-        fma(rng.z, min_max_diff, min)
-    );
-}
-vec3 RandInHemisphere(vec2 co, vec3 normal) {
-    vec3 in_unit_sphere = RandVec3(co, -1, 1);
-    while (dot(in_unit_sphere, in_unit_sphere) >= 1) {
-        in_unit_sphere = RandVec3(co, -1, 1);
-    }
-    if (dot(in_unit_sphere, normal) > 0.0) // In the same hemisphere as the normal
-        return in_unit_sphere;
-    else
-        return -in_unit_sphere;
-}
-
 struct Ray {
     vec3 origin;
     vec3 direction;
@@ -129,24 +63,22 @@ struct HitRecord {
     vec3 normal;
     float t;
     uint index; 
-    bool front_face;
+    float internal_reflection;
 };
 
-struct Camera {
-    int image_width;
-    int image_height;
+layout(binding = 1) uniform CameraBuffer {
+    uint image_width;
+    uint image_height;
 
     vec3 horizontal;
     vec3 vertical;
-
     vec3 lower_left_corner;
     vec3 origin;
-
+    int padding;
     int samples_per_pixel;
     int max_bounce;
-};
-uniform Camera camera;
-Ray CameraGetRay(Camera camera, float u, float v);
+} camera;
+Ray CameraGetRay(float u, float v);
 
 
 struct OctreeFloats {
@@ -155,7 +87,7 @@ struct OctreeFloats {
     float inv_scale;
     float inv_cell_count;
 };
-layout (shared, binding = 5) buffer OctreeFloatsBuffer {
+layout (std430, binding = 7) buffer OctreeFloatsBuffer {
     OctreeFloats octree_floats[];
 };
 struct OctreeInts {
@@ -163,7 +95,7 @@ struct OctreeInts {
     int max_iter;
     int cell_count;
 };
-layout (shared, binding = 6) buffer OctreeIntsBuffer {
+layout (std430, binding = 8) buffer OctreeIntsBuffer {
     OctreeInts octree_ints[];
 };
 
@@ -175,39 +107,38 @@ struct Node {
     // EMPTY    = not used,
     // PARENT   = index to indirect cell
     // LEAF     = index to material
-    uint value;
     uint type; 
+    uint value;
 };
 // Read about std here: https://www.khronos.org/opengl/wiki/Interface_Block_(GLSL)#Memory_layout
-layout (shared, binding = 0) buffer IndirectCellBuffer {
+layout (std430, binding = 2) buffer IndirectCellBuffer {
     readonly Node indirect_cells[];
 };
+
 // Octree methods
 Node AccessIndirectCell(ivec3 i) { return indirect_cells[i.z + 2 * (i.y + 2 * i.x)]; }
-bool OctreeHit(Ray r, float t_min, float t_max, out HitRecord hit);
-bool CubeHit(vec3 cmin, float size, Ray r, float t_min, inout float t_max, out HitRecord hit, out float dot_p);
+bool OctreeHit(Ray r, float t_min, float t_max, out HitRecord hit, out vec3 hit_c_min, out float hit_c_scale);
+bool CubeHit(vec3 cmin, float size, Ray r, float t_min, inout float t_max, out HitRecord hit);
 
 
 struct Material {
     int type;
-    int attribute_index;
+    int type_index;
     int albedo_index;
 };
-layout (std430, binding = 1) buffer MaterialBuffer {
+layout (std430, binding = 3) buffer MaterialBuffer {
     readonly Material materials[];
 };
-bool ScatterLambertian(Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scattered);
-bool ScatterMetal(Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scattered);
-bool ScatterDielectric(Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scattered);
+bool ScatterLambertian(Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered);
+bool ScatterMetal(Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered);
+bool ScatterDielectric(Ray r_in, vec3 hit_c_min, float hit_c_scale, inout HitRecord hit, out vec3 attenuation, out Ray scattered);
 
 
 // std430 vec3 requires padding if no other variable present ..
 struct Albedo {
-    float x;
-    float y;
-    float z;
+    vec4 color;
 };
-layout (std430, binding = 2) buffer AlbedoBuffer {
+layout (std430, binding = 4) buffer AlbedoBuffer {
     readonly Albedo albedos[];
 };
 vec3 AlbedoColor(uint index);
@@ -216,35 +147,31 @@ vec3 AlbedoColor(uint index);
 struct Metal {
     float fuzz;
 };
-layout (std430, binding = 3) buffer MetalBuffer {
+layout (std430, binding = 5) buffer MetalBuffer {
     readonly Metal metal[];
 };
 
-
 struct Dielectric {
-    float ir;
+    float internal_reflection;
 };
-layout (std430, binding = 4) buffer DielectricBuffer {
+layout (std430, binding = 6) buffer DielectricBuffer {
     readonly Dielectric dielectric[];
 };
-
-int sample_i = 0;
-vec3 RngSample(vec3 point) {
-    return fma(point, vec3(100), vec3(sample_i * 6));
-}
 
 void main() {
     ivec2 pixel_coord = ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y);
 
     vec3 color = vec3(0.0, 0.0, 0.0);
-    for (int sample_i = 0; sample_i < camera.samples_per_pixel; sample_i++) {
-        
+    for (int sample_i = 0; sample_i < camera.samples_per_pixel; sample_i++) {  
         float x = float(pixel_coord.x);
         float y = float(pixel_coord.y);
+        // TODO: proper random (blue noise)
         // TODO: remove division
-        float u = (x + hash12(vec2(x + sample_i, y) * 0.2)) / float(camera.image_width - 1);
-        float v = (y + hash12(vec2(x, y + sample_i) * 0.2)) / float(camera.image_height - 1);
-        Ray ray = CameraGetRay(camera, u, v);
+        float noise_x = hash12(vec2(x + sample_i, y) * 0.2 * float(sample_i > 0));
+        float u = (x + noise_x) / float(camera.image_width - 1);
+        float noise_y = hash12(vec2(x, y + sample_i) * 0.2 * float(sample_i > 0));
+        float v = (y + noise_y) / float(camera.image_height - 1);
+        Ray ray = CameraGetRay(u, v);
         color += RayColor(ray);
     }
 
@@ -262,15 +189,19 @@ vec3 RayAt(Ray r, float t) {
     return fma(vec3(t), r.direction, r.origin);
 }
 
-// TODO: This function has way too much branching for glsl ...
 vec3 RayColor(Ray r) {
     HitRecord hit;
+    hit.internal_reflection = 1.0;
+    
     Ray current_ray = r;
     vec3 accumulative_attenuation = vec3(1.0);
     int loop_count = 0;
+    
+    vec3 hit_c_min;
+    float hit_c_scale;
 
     // TODO: min should be based on max_depth here  
-    while (loop_count < camera.max_bounce && OctreeHit(current_ray, 0.0003, infinity, hit)){ 
+    while (loop_count < camera.max_bounce && OctreeHit(current_ray, 0.0003, infinity, hit, hit_c_min, hit_c_scale)){ 
         loop_count += 1;
 
         Ray scattered;
@@ -285,7 +216,7 @@ vec3 RayColor(Ray r) {
             result = ScatterMetal(current_ray, hit, attenuation, scattered);
             break;
         case MAT_DIELECTRIC:
-            result = ScatterDielectric(current_ray, hit, attenuation, scattered);
+            result = ScatterDielectric(current_ray, hit_c_min, hit_c_scale, hit, attenuation, scattered);
             break;
         default: 
             result = false;
@@ -303,22 +234,21 @@ vec3 RayColor(Ray r) {
     return background_color;
 }
 
-Ray CameraGetRay(Camera camera, float u, float v) {
+Ray CameraGetRay(float u, float v) {
     vec3 ray_dir = fma(camera.horizontal, vec3(u), camera.lower_left_corner) + fma(vec3(v), camera.vertical, -camera.origin);
     return CreateRay(camera.origin, ray_dir);
 }
 
 vec3 AlbedoColor(uint index) {
     Material mat = materials[index];
-    Albedo a = albedos[mat.albedo_index];
-    return vec3(a.x, a.y, a.z);
+    return albedos[mat.albedo_index].color.xyz;
 }
 
 // TODO: Source: (Ray tracing gems 2) / Peter Shirley / http://jcgt.org/published/0007/03/04/
-bool CubeHit(vec3 cmin, float size, Ray r, float t_min, inout float t_max, out HitRecord hit, out float dot_p) {
+bool CubeHit(vec3 cmin, float size, Ray r, float t_min, inout float t_max, out HitRecord hit) {
     vec3 cmax = cmin + vec3(size);
 
-    vec3 inv_ray_dir = 1 / r.direction;
+    vec3 inv_ray_dir = 1.0 / r.direction;
     vec3 t_lower = (cmin - r.origin) * inv_ray_dir;
     vec3 t_upper = (cmax - r.origin) * inv_ray_dir;
 
@@ -343,15 +273,21 @@ bool CubeHit(vec3 cmin, float size, Ray r, float t_min, inout float t_max, out H
     float radius = size * 0.5;
     vec3 center = cmin + vec3(radius);
     
+    // TODO: improve this normal calculation :/
     vec3 normal = hit.point - center;
     vec3 abs_norm = abs(normal);
-    float keep_x = float(abs_norm.x >= abs_norm.y && abs_norm.x >= abs_norm.z);
-    float keep_y = float(abs_norm.y > abs_norm.x && abs_norm.y > abs_norm.z);
-    float keep_z = float(abs_norm.z > abs_norm.x && abs_norm.z > abs_norm.y); 
-    normal = normalize(vec3(normal.x * keep_x, normal.y * keep_y, normal.z * keep_z));
-    dot_p = dot(r.direction, normal);
-    hit.front_face = dot_p < 0; 
-    hit.normal = normalize(normal * fma(-2, int(!hit.front_face), 1));
+    if (abs_norm.x < abs_norm.y || abs_norm.x < abs_norm.z) {
+        normal.x = 0;
+    }
+    if (abs_norm.y < abs_norm.x || abs_norm.y < abs_norm.z) {
+        normal.y = 0;
+    }
+    if (abs_norm.z < abs_norm.x || abs_norm.z < abs_norm.y) {
+        normal.z = 0;
+    }
+    normal = normalize(normal);
+    float not_front_face = float(!(dot(r.direction, normal) < 0)); 
+    hit.normal = normalize(normal * fma(-2.0, not_front_face, 1.0));
 
     return true;
 }
@@ -364,7 +300,7 @@ bool treeLookup(
     out vec3 grid_uv,           // uv coordinates of node in grid
     out Node node
 ) {
-    vec3 indirect_cell_dim = vec3(octree_ints[0].cell_count * 2, 2, 2);
+    const vec3 indirect_cell_dim = vec3(octree_ints[0].cell_count * 2, 2, 2);
     vec3 depth_coords = voxel_coord;
     
     node = Node(0, 0);
@@ -375,12 +311,12 @@ bool treeLookup(
         inv_pow_depth = inv_pow_depth * 0.5;
         vec3 point_uv = fract(depth_coords);
         point_uv.x = (node.value + point_uv.x) * octree_floats[0].inv_cell_count;
-        ivec3 point = ivec3(round(fma(point_uv, vec3(octree_ints[0].cell_count * 2, 2, 2), vec3(-0.5))));
+        vec3 pointf = round(fma(point_uv, indirect_cell_dim, vec3(-0.49999)));
 
-        vec3 added_uv = (mod(point, 2) * inv_pow_depth);
+        vec3 added_uv = (mod(pointf, 2.0) * inv_pow_depth);
         grid_uv += added_uv;
 
-        node = AccessIndirectCell(point);
+        node = AccessIndirectCell(ivec3(pointf));
         
         // if node is not a parent
         bool is_empty = node.type == EMPTY;
@@ -396,44 +332,43 @@ bool treeLookup(
 }
 
 // Traverse octree and check for hits in leaf nodes
-bool OctreeHit(Ray r, float t_min, float t_max, out HitRecord hit) {
-    const float base_t_advance = 0.0001;
+bool OctreeHit(Ray r, float t_min, float t_max, out HitRecord hit, out vec3 hit_c_min, out float hit_c_scale) {
+    // this value dictate the minimum stretch of distance a ray can go for each iteration
+    // at 0.1 it will move atleast 10% of a given cell entry size 
+    const float base_t_advance = 0.01;
+
     vec3 c_min = octree_floats[0].min_point.xyz;
     float c_scale = octree_floats[0].scale;
-    HitRecord c_hit;
-    float dot_p;
+   
     float inv_pow_depth = 0.5;
+    HitRecord c_hit;
+    c_hit.internal_reflection = 1.0; // air has 1.0 as internal_reflection
 
     // record t size of octree relative to ray
     float t_octree_max = t_max;
-    bool cube_hit = CubeHit(c_min, c_scale, r, t_min, t_octree_max, c_hit, dot_p);
+    bool cube_hit = CubeHit(c_min, c_scale, r, t_min, t_octree_max, c_hit);
+    if (cube_hit == false) {
+        return false;
+    }
     float t_stride = c_hit.t;
-    
+     
     for (int i = 0; i < octree_ints[0].max_iter && t_stride < t_octree_max; i++) { 
         // TODO: something that makes sense here:
-        float min_t_advance = max(base_t_advance * (inv_pow_depth + 0.1), 0.000001);  // * (1 - dot_p + 0.1)
+        float min_t_advance = base_t_advance * inv_pow_depth;
         vec3 world_point = RayAt(r, t_stride + min_t_advance);
         vec3 lookup_point = (world_point - octree_floats[0].min_point.xyz) * octree_floats[0].inv_scale;
-        // TODO: This hack checks explicitly if lookup is not in octree, this should
-        //       be handled through other means ...
-        if (fract(lookup_point) - lookup_point != vec3(0.0)) { 
-            return false;
-        }
 
         vec3 grid_uv;
         Node node;
         if (treeLookup(lookup_point, inv_pow_depth, grid_uv, node)) {
-            // TODO: code should be restructured to not need this branch as it is the 
-            //       same code as some code further down
-            if (i > 0) {
-                c_min = fma(grid_uv, vec3(octree_floats[0].scale), octree_floats[0].min_point.xyz);
-                c_scale = octree_floats[0].scale * inv_pow_depth;  
-                
-                t_min = t_stride;
-                t_stride = t_octree_max;
-                cube_hit = CubeHit(c_min, c_scale, r, t_min, t_stride, c_hit, dot_p);
-            }
-
+            c_min = fma(grid_uv, vec3(octree_floats[0].scale), octree_floats[0].min_point.xyz);
+            c_scale = octree_floats[0].scale * inv_pow_depth;  
+            
+            t_min = t_stride;
+            t_stride = t_octree_max;
+            cube_hit = CubeHit(c_min, c_scale, r, t_min, t_stride, c_hit);
+            hit_c_min = c_min;
+            hit_c_scale = c_scale;
             hit = c_hit;
             hit.index = node.value;
             return true;
@@ -445,7 +380,7 @@ bool OctreeHit(Ray r, float t_min, float t_max, out HitRecord hit) {
         
         t_min = t_stride;
         t_stride = t_octree_max;
-        cube_hit = CubeHit(c_min, c_scale, r, t_min, t_stride, c_hit, dot_p);
+        cube_hit = CubeHit(c_min, c_scale, r, t_min, t_stride, c_hit);
     }
     
     return false;
@@ -469,68 +404,77 @@ mat3 constructFrisvad(vec3 normal) {
     return ret;
 }
 
-bool ScatterLambertian(Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scattered) {
-    mat3 norm_perp = constructFrisvad(hit.normal);
-    vec3 norm_space_view = vec3(dot(r_in.direction, norm_perp[0]), dot(r_in.direction, norm_perp[1]), dot(r_in.direction, norm_perp[2]));
-    vec3 scatter_sample = SampleGGXVNDF(-norm_space_view, vec2(0.85, 0.85), hash23(RngSample(hit.point)));
-    vec3 scatter_dir = reflect(r_in.direction, scatter_sample);
-    scattered = CreateRay(hit.point, hit.normal + scatter_dir);
-
-    // vec3 scatter_dir = hit.normal + RandInHemisphere(hit.point.xy, hit.normal);
-    // if (IsNearZero(scatter_dir)) scatter_dir = hit.normal;
-    // scattered = CreateRay(hit.point, scatter_dir);
+bool ScatterLambertian(Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
+    hit.internal_reflection = 1.0;
+    
+    vec3 scatter_dir = normalize(hit.normal + RandInHemisphere(hit.point.xy + hit.point.z, hit.normal));
+    if (IsNearZero(scatter_dir)) scatter_dir = hit.normal;
+    scattered = CreateRay(hit.point, scatter_dir);
     attenuation = AlbedoColor(hit.index);
     return true;
 }
 
-bool ScatterMetal(Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scattered) {
+bool ScatterMetal(Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
+    hit.internal_reflection = 1.0;
+
     vec3 reflected = reflect(r_in.direction, normalize(hit.normal));
     Material mat = materials[hit.index];
-    float fuzz = metal[mat.attribute_index].fuzz;
-    scattered = CreateRay(hit.point, reflected + fuzz * RandInHemisphere(hit.point.xy, hit.normal));
+    float fuzz = metal[mat.type_index].fuzz;
+    scattered = CreateRay(hit.point, fma(reflected, vec3(fuzz), RandInHemisphere(hit.point.xy + hit.point.z, hit.normal)));
     attenuation = AlbedoColor(hit.index);
     return (dot(scattered.direction, hit.normal) > 0);
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-// Sclick Approximation
-float reflectance(float cosine, float ref_ratio) {
-    float r0 = pow((1 - ref_ratio) / (1 + ref_ratio), 2);
-    return fma(pow((1 - cosine), 5), (1 - r0), r0);
-}
-
-bool ScatterDielectric(Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scattered) {
-    attenuation = vec3(1.0, 1.0, 1.0);
-    Material mat = materials[hit.index];
-    float ir = dielectric[mat.attribute_index].ir;
-    float refraction_ratio = ir;
-    if(hit.front_face) {
-        refraction_ratio = (1.0/ir); 
-    } 
-
-    float cos_theta = min(dot(-r_in.direction, hit.normal), 1.0);
-    float sin_theta = sqrt(1.0 - cos_theta * cos_theta);
-
-    vec3 direction;
-    bool cannot_refract = refraction_ratio * sin_theta > 1.0;
-    bool should_reflect = reflectance(cos_theta, refraction_ratio) > Rand(hit.point.xy);
-    if (cannot_refract || should_reflect) {
-        direction = reflect(r_in.direction, hit.normal);
-    } else {
-        direction = refract(r_in.direction, hit.normal, refraction_ratio);
+// Source: Ray tracing gems 2 page 107 (one of Bec's methods)
+/// defined the refraction direction if a refraction is needed based on n1, n2 and the angle between
+/// r_in and the normal
+/// This means that refrac_dir only gets defined if function returns true
+/// @param:
+///     - n1: internal reflection of impact material
+///     - n2: internal reflection of current material medium
+///     - ray_dir: the traveling ray direction
+///     - normal: normal vector of the impact surface
+///     - refrac_dir: poternial calculated penetration vector of r_in
+/// @return: bool that is true if refraction is calculated
+bool transmissionDirection(float n1, float n2, vec3 ray_dir, vec3 normal, out vec3 refrac_dir) {
+    float eta = n1/n2;
+    float c1 = -dot(ray_dir, normal);
+    float w = eta * c1;
+    float c2m = (w - eta) * (w + eta);
+    if (c2m < -1.0) {
+        return false;
     }
-
-    scattered = CreateRay(hit.point, direction);
+    refrac_dir = fma(vec3(eta), ray_dir, (w - sqrt(1.0 + c2m)) * normal);
     return true;
 }
+
+bool ScatterDielectric(Ray r_in, vec3 hit_c_min, float hit_c_scale, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
+    attenuation = AlbedoColor(hit.index);
+
+    Material mat = materials[hit.index];
+    float ir = dielectric[mat.type_index].internal_reflection;
+    
+    // TODO: better noise (blue :))
+    // TODO: add property to glass: roughness (0 should be no noise)
+    const vec3 normal = normalize(fma(hit.normal, vec3(10), RandInHemisphere(hit.point.xy + hit.point.z, hit.normal)));
+    vec3 direction;
+    bool do_refract = transmissionDirection(ir, hit.internal_reflection, r_in.direction, normal, direction);
+    if (do_refract) {
+        scattered = CreateRay(hit.point, direction);
+        // HACK: move scattered ray out of current cube explicitly
+        {
+            float t_max = 9999.0;
+            HitRecord c_hit = hit;
+            CubeHit(hit_c_min, hit_c_scale, scattered, 0.0, t_max, c_hit);
+            scattered = CreateRay(RayAt(scattered, t_max), scattered.direction);
+        }
+        hit.internal_reflection = ir;
+    } else {
+        direction = reflect(r_in.direction, normal);
+        scattered = CreateRay(hit.point, direction);
+        hit.internal_reflection = 1.0;
+    }
+
+    return true;
+}
+

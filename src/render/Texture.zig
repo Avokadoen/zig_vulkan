@@ -118,9 +118,9 @@ pub fn init(ctx: Context, command_pool: vk.CommandPool, comptime layout: vk.Imag
         // const device_properties = ctx.vki.getPhysicalDeviceProperties(ctx.physical_device);
         const sampler_info = vk.SamplerCreateInfo{
             .flags = .{},
-            .mag_filter = .nearest, // not sure what the application would need
-            .min_filter = .nearest, // RT should use linear, pixel sim should be nearest
-            .mipmap_mode = .nearest,
+            .mag_filter = .linear, // not sure what the application would need
+            .min_filter = .linear, // RT should use linear, pixel sim should be nearest
+            .mipmap_mode = .linear,
             .address_mode_u = .repeat,
             .address_mode_v = .repeat,
             .address_mode_w = .repeat,

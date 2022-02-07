@@ -47,6 +47,7 @@ pub const Device = vk.DeviceWrapper(&[_]vk.DeviceCommand{
     .beginCommandBuffer, 
     .bindBufferMemory, 
     .bindImageMemory, 
+    .cmdBlitImage,
     .cmdBeginRenderPass, 
     .cmdBindDescriptorSets, 
     .cmdBindIndexBuffer,

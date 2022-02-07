@@ -203,8 +203,14 @@ pub fn build(b: *Builder) void {
         shader_move_step.add_abs_resource(frag) catch unreachable;
     }
 
-    const comp = shader_comp.add("assets/shaders/comp.comp");
-    shader_move_step.add_abs_resource(comp) catch unreachable;
+    {
+        const comp = shader_comp.add("assets/shaders/comp.comp");
+        shader_move_step.add_abs_resource(comp) catch unreachable;
+        const o_rt = shader_comp.add("assets/shaders/octree_raytracer.comp");
+        shader_move_step.add_abs_resource(o_rt) catch unreachable;
+        const b_rt = shader_comp.add("assets/shaders/brick_raytracer.comp");
+        shader_move_step.add_abs_resource(b_rt) catch unreachable;
+    }
 
     exe.step.dependOn(&shader_comp.step);
     exe.step.dependOn(&shader_move_step.step);
@@ -225,6 +231,9 @@ pub fn build(b: *Builder) void {
 
     var tests = b.addTest("src/test.zig");
     tests.setBuildMode(mode);
+
+    tests.addPackagePath("glfw", "deps/mach-glfw/src/main.zig");
+    tests.addPackagePath("zalgebra", "deps/zalgebra/src/main.zig");
 
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&tests.step);
