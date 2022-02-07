@@ -15,11 +15,10 @@ const render2d = @import("render2d/render2d.zig");
 
 // TODO: API topology
 const VoxelRT = @import("voxel_rt/VoxelRT.zig");
-const BrickGrid = @import("voxel_rt/BrickGrid.zig");
-const Octree = @import("voxel_rt/Octree.zig");
+const BrickGrid = @import("voxel_rt/brick/Grid.zig");
 const gpu_types = @import("voxel_rt/gpu_types.zig");
 const vox = VoxelRT.vox;
-const Terrain = @import("voxel_rt/terrain/Terrain.zig");
+const terrain = @import("voxel_rt/terrain/terrain.zig");
 
 pub const application_name = "zig vulkan";
 
@@ -106,7 +105,7 @@ pub fn main() anyerror!void {
     draw_api.handleWindowResize(window);
     defer draw_api.noHandleWindowResize(window);
 
-    var grid = try BrickGrid.init(allocator, 32, 32, 32, .{ .min_point = [3]f32{ -16, -16, -16 } });
+    var grid = try BrickGrid.init(allocator, 64, 64, 64, .{ .min_point = [3]f32{ -32, -32, -32 } });
     defer grid.deinit();
 
     const model = try vox.load(false, allocator, "../assets/models/monu10.vox");
@@ -115,14 +114,14 @@ pub fn main() anyerror!void {
     var albedo_color: [256]gpu_types.Albedo = undefined;
     var materials: [256]gpu_types.Material = undefined;
     // insert terrain color
-    for (Terrain.color_data) |color, i| {
+    for (terrain.color_data) |color, i| {
         albedo_color[i] = color;
     }
     // insert terrain materials
-    for (Terrain.material_data) |material, i| {
+    for (terrain.material_data) |material, i| {
         materials[i] = material;
     }
-    const terrain_len = Terrain.material_data.len;
+    const terrain_len = terrain.material_data.len;
     for (model.rgba_chunk[terrain_len..]) |rgba, i| {
         const index = i + terrain_len;
         albedo_color[index] = .{ .color = za.Vec4.new(@intToFloat(f32, rgba.r) / 255, @intToFloat(f32, rgba.g) / 255, @intToFloat(f32, rgba.b) / 255, @intToFloat(f32, rgba.a) / 255) };
@@ -133,9 +132,10 @@ pub fn main() anyerror!void {
     for (model.xyzi_chunks[0]) |xyzi| {
         grid.insert(@intCast(usize, xyzi.x), @intCast(usize, xyzi.z), @intCast(usize, xyzi.y), xyzi.color_index);
     }
-    _ = Terrain.init(420, 4, 20, &grid);
+    const terrain_thread = try std.Thread.spawn(.{}, terrain.generate, .{ 420, 4, 20, &grid });
+    defer terrain_thread.join();
 
-    var voxel_rt = try VoxelRT.init(allocator, ctx, grid, &draw_api.state.subo.ubo.my_texture, .{});
+    var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, &draw_api.state.subo.ubo.my_texture, .{});
     defer voxel_rt.deinit(ctx);
 
     try voxel_rt.pushAlbedo(ctx, albedo_color[0..]);
@@ -176,6 +176,7 @@ pub fn main() anyerror!void {
         }
 
         {
+            voxel_rt.brick_grid.*.pollWorkers(dt);
             //
             try voxel_rt.compute(ctx);
 

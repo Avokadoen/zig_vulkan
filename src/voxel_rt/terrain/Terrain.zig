@@ -1,7 +1,7 @@
 const std = @import("std");
 const za = @import("zalgebra");
 
-const BrickGrid = @import("../BrickGrid.zig");
+const BrickGrid = @import("../brick/Grid.zig");
 const gpu_types = @import("../gpu_types.zig");
 const Perlin = @import("perlin.zig").PerlinNoiseGenerator(256);
 
@@ -30,16 +30,10 @@ const Material = enum(u8) {
     }
 };
 
-const Terrain = @This();
-
-ocean_level: usize,
-scale: f32,
-grid: *BrickGrid,
-perlin: Perlin,
-
-// TODO: replace grid with VoxelRt
-pub fn init(seed: u64, scale: f32, ocean_level: usize, grid: *BrickGrid) Terrain {
+/// populate a voxel grid with terrain based on perlin noise
+pub fn generate(seed: u64, scale: f32, ocean_level: usize, grid: *BrickGrid) void { // TODO: return Terrain
     const perlin = Perlin.init(seed);
+
     const voxel_dim = [3]f32{
         @intToFloat(f32, grid.state.device_state.dim_x * 8),
         @intToFloat(f32, grid.state.device_state.dim_y * 8),
@@ -68,28 +62,20 @@ pub fn init(seed: u64, scale: f32, ocean_level: usize, grid: *BrickGrid) Terrain
             const height = @floatToInt(usize, std.math.min(perlin.smoothNoise(f32, point), 1) * terrain_max_height);
 
             var i_y: usize = 0;
-            if (ocean_level > height) {
-                i_y = height;
-                while (i_y < ocean_level) : (i_y += 1) {
-                    grid.*.insert(i_x, i_y, i_z, 0); // insert water
-                }
-                i_y = ocean_level;
-            }
-            i_y = 0;
             while (i_y < height) : (i_y += 1) {
                 const material_value = za.lerp(f32, 1, 3.4, @intToFloat(f32, i_y) * inv_terrain_max_height) + perlin.rng.float(f32) * 0.5;
                 const material_index = @intToEnum(Material, @floatToInt(u8, @floor(material_value))).getMaterialIndex(perlin.rng);
                 grid.*.insert(i_x, i_y, i_z, material_index);
             }
+            if (ocean_level > height) {
+                while (i_y < ocean_level) : (i_y += 1) {
+                    grid.*.insert(i_x, i_y, i_z, 0); // insert water
+                }
+            }
         }
     }
 
-    return Terrain{
-        .ocean_level = ocean_level,
-        .scale = scale,
-        .grid = grid,
-        .perlin = perlin,
-    };
+    std.debug.print("completed terrain tuff\n", .{});
 }
 
 /// color information expect by terrain to exist from 0.. in the albedo buffer
