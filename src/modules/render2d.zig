@@ -9,16 +9,16 @@ const stbi = @import("stbi");
 const glfw = @import("glfw");
 const vk = @import("vulkan");
 
-const render = @import("../render/render.zig");
+const render = @import("render.zig");
 const dispatch = render.dispatch;
 const sc = render.swapchain;
 const descriptor = render.descriptor;
 
-const knapsack = @import("knapsack.zig");
+const knapsack = @import("render2d/knapsack.zig");
 const bruteForceFn = knapsack.InitBruteForceWidthHeightFn(false).bruteForceWidthHeight;
 
-const DB = @import("DB.zig");
-const util_types = @import("util_types.zig");
+const DB = @import("render2d/DB.zig");
+const util_types = @import("render2d/util_types.zig");
 
 const Pipeline = render.PipelineTypesFn(void).Pipeline;
 const PipelineBuilder = render.PipelineTypesFn(void).PipelineBuilder;
@@ -28,8 +28,8 @@ pub const Rectangle = util_types.Rectangle;
 pub const UV = util_types.UV;
 pub const TextureHandle = util_types.TextureHandle;
 pub const BufferUpdateRate = util_types.BufferUpdateRate;
-pub const Camera = @import("Camera.zig");
-pub const Sprite = @import("Sprite.zig");
+pub const Camera = @import("render2d/Camera.zig");
+pub const Sprite = @import("render2d/Sprite.zig");
 
 pub const InvalidApiUseError = error{
     Invalidated,

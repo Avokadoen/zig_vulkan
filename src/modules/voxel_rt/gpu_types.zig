@@ -2,7 +2,7 @@ const std = @import("std");
 const Vec3 = @Vector(3, f32);
 const Vec4 = @Vector(4, f32);
 
-pub const BufferConfig = @import("../render/pipeline.zig").ComputeDrawPipeline.BufferConfig;
+pub const BufferConfig = @import("../render.zig").ComputeDrawPipeline.BufferConfig;
 
 // storage value that hold the binidng value in shader, and size of a given type
 const MapValue = struct {

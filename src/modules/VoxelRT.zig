@@ -4,15 +4,15 @@ const Allocator = std.mem.Allocator;
 const za = @import("zalgebra");
 const Vec2 = @Vector(2, f32);
 
-const render = @import("../render/render.zig");
+const render = @import("../modules/render.zig");
 const Context = render.Context;
 
-const Camera = @import("Camera.zig");
-const BrickGrid = @import("brick/Grid.zig");
-const GridState = @import("brick/State.zig");
-const gpu_types = @import("gpu_types.zig");
-
-pub const vox = @import("vox/loader.zig");
+pub const Camera = @import("voxel_rt/Camera.zig");
+pub const BrickGrid = @import("voxel_rt/brick/Grid.zig");
+pub const GridState = @import("voxel_rt/brick/State.zig");
+pub const gpu_types = @import("voxel_rt/gpu_types.zig");
+pub const terrain = @import("voxel_rt/terrain/terrain.zig");
+pub const vox = @import("voxel_rt/vox/loader.zig");
 
 pub const Config = struct {
     material_buffer: u64 = 256,

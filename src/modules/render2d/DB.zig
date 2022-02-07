@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const render = @import("../render/render.zig");
+const render = @import("../render.zig");
 const Context = render.Context;
 const GpuBufferMemory = render.GpuBufferMemory;
 

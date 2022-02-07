@@ -6,19 +6,19 @@ const ArrayList = std.ArrayList;
 const glfw = @import("glfw");
 const za = @import("zalgebra");
 
-const render = @import("render/render.zig");
+const render = @import("modules/render.zig");
 const swapchain = render.swapchain;
 const consts = render.consts;
 
-const input = @import("input.zig");
-const render2d = @import("render2d/render2d.zig");
+const input = @import("modules/input.zig");
+const render2d = @import("modules/render2d.zig");
 
 // TODO: API topology
-const VoxelRT = @import("voxel_rt/VoxelRT.zig");
-const BrickGrid = @import("voxel_rt/brick/Grid.zig");
-const gpu_types = @import("voxel_rt/gpu_types.zig");
+const VoxelRT = @import("modules/VoxelRT.zig");
+const BrickGrid = VoxelRT.BrickGrid;
+const gpu_types = VoxelRT.gpu_types;
 const vox = VoxelRT.vox;
-const terrain = @import("voxel_rt/terrain/terrain.zig");
+const terrain = VoxelRT.terrain;
 
 pub const application_name = "zig vulkan";
 
