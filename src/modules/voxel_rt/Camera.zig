@@ -120,7 +120,15 @@ pub fn turnPitch(self: *Camera, angle: f32) void {
     const h_angle = angle * self.turn_rate;
     const i = std.math.sin(h_angle);
     const w = std.math.cos(h_angle);
+    const prev_pitch = self.pitch;
     self.pitch = self.pitch.mult(za.Quat{ .w = w, .x = i, .y = 0.0, .z = 0.0 });
+
+    // arbitrary restrict rotation so that camera does not become inversed
+    const euler_x_rotation = self.pitch.extractRotation()[0];
+    if (std.math.fabs(euler_x_rotation) >= 90) {
+        self.pitch = prev_pitch;
+    }
+
     self.propogatePitchChange();
 }
 
