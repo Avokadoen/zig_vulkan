@@ -87,8 +87,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         break :blk biggest_axis * 8;
     };
 
-    const bucket_segments = try std.math.divFloor(usize, std.math.max(2048, material_indices.len), 2048.0);
-    const bucket_storage = try BucketStorage.init(allocator, brick_alloc, bucket_segments);
+    const bucket_storage = try BucketStorage.init(allocator, brick_alloc, material_indices.len);
     errdefer bucket_storage.deinit();
 
     const state = try allocator.create(State);
@@ -150,6 +149,22 @@ pub fn deinit(self: BrickGrid) void {
 
     self.allocator.free(self.worker_threads);
     self.allocator.free(self.workers);
+}
+
+/// Force workers to sleep.
+/// Can be useful if spurvious changes to the grid cause thread contention
+pub fn sleepWorkers(self: *BrickGrid) void {
+    for (self.workers) |*worker| {
+        worker.*.sleep.store(true, .SeqCst);
+    }
+}
+
+/// Wake workers after forcing sleep.
+pub fn wakeWorkers(self: *BrickGrid) void {
+    for (self.workers) |*worker| {
+        worker.*.sleep.store(false, .SeqCst);
+        worker.*.wake_event.signal();
+    }
 }
 
 /// Asynchrounsly (thread safe) insert a brick at coordinate x y z

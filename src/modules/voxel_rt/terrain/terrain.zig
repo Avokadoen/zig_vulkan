@@ -8,6 +8,7 @@ const render = @import("../../render.zig");
 const Context = render.Context;
 
 const BrickGrid = @import("../brick/Grid.zig");
+
 const gpu_types = @import("../gpu_types.zig");
 const Perlin = @import("perlin.zig").PerlinNoiseGenerator(256);
 
@@ -37,8 +38,13 @@ const Material = enum(u8) {
 };
 
 /// populate a voxel grid with perlin noise terrain on CPU
-pub fn generateCpu(seed: u64, scale: f32, ocean_level: usize, grid: *BrickGrid) void { // TODO: return Terrain
-    const perlin = Perlin.init(seed);
+pub fn generateCpu(comptime threads_count: usize, allocator: Allocator, seed: u64, scale: f32, ocean_level: usize, grid: *BrickGrid) !void { // TODO: return Terrain
+    const perlin = blk: {
+        var p = try allocator.create(Perlin);
+        p.* = Perlin.init(seed);
+        break :blk p;
+    };
+    defer allocator.destroy(perlin);
 
     const voxel_dim = [3]f32{
         @intToFloat(f32, grid.state.device_state.dim_x * 8),
@@ -50,38 +56,64 @@ pub fn generateCpu(seed: u64, scale: f32, ocean_level: usize, grid: *BrickGrid) 
         (1 / voxel_dim[1]) * scale,
         (1 / voxel_dim[2]) * scale,
     };
-    const terrain_max_height: f32 = voxel_dim[1] * 0.5;
-    const inv_terrain_max_height = 1.0 / terrain_max_height;
-    var point: [3]f32 = undefined;
-    var x: f32 = 0;
-    while (x < voxel_dim[0]) : (x += 1) {
-        const i_x = @floatToInt(usize, x);
 
-        var z: f32 = 0;
-        while (z < voxel_dim[2]) : (z += 1) {
-            const i_z = @floatToInt(usize, z);
+    // create our gen function
+    const insert_job_gen_fn = struct {
+        pub fn insert(thread_id: usize, perlin_: *const Perlin, voxel_dim_: [3]f32, point_mod_: [3]f32, ocean_level_v: usize, grid_: *BrickGrid) void {
+            const thread_segment_size: f32 = if (threads_count == 0) voxel_dim_[0] else @ceil(voxel_dim_[0] / @intToFloat(f32, threads_count));
 
-            point[0] = x * point_mod[0];
-            point[1] = 0;
-            point[2] = z * point_mod[2];
+            const terrain_max_height: f32 = voxel_dim_[1] * 0.5;
+            const inv_terrain_max_height = 1.0 / terrain_max_height;
 
-            const height = @floatToInt(usize, std.math.min(perlin.smoothNoise(f32, point), 1) * terrain_max_height);
+            var point: [3]f32 = undefined;
+            const thread_x_begin = thread_segment_size * @intToFloat(f32, thread_id);
+            const thread_x_end = std.math.min(thread_x_begin + thread_segment_size, voxel_dim_[0]);
+            var x: f32 = thread_x_begin;
+            while (x < thread_x_end) : (x += 1) {
+                const i_x = @floatToInt(usize, x);
 
-            var i_y: usize = 0;
-            while (i_y < height) : (i_y += 1) {
-                const material_value = za.lerp(f32, 1, 3.4, @intToFloat(f32, i_y) * inv_terrain_max_height) + perlin.rng.float(f32) * 0.5;
-                const material_index = @intToEnum(Material, @floatToInt(u8, @floor(material_value))).getMaterialIndex(perlin.rng);
-                grid.*.insert(i_x, i_y, i_z, material_index);
-            }
-            if (ocean_level > height) {
-                while (i_y < ocean_level) : (i_y += 1) {
-                    grid.*.insert(i_x, i_y, i_z, 0); // insert water
+                var z: f32 = 0;
+                while (z < voxel_dim_[2]) : (z += 1) {
+                    const i_z = @floatToInt(usize, z);
+
+                    point[0] = x * point_mod_[0];
+                    point[1] = 0;
+                    point[2] = z * point_mod_[2];
+
+                    const height = @floatToInt(usize, std.math.min(perlin_.smoothNoise(f32, point), 1) * terrain_max_height);
+
+                    var i_y: usize = height / 2;
+                    while (i_y < height) : (i_y += 1) {
+                        const material_value = za.lerp(f32, 1, 3.4, @intToFloat(f32, i_y) * inv_terrain_max_height) + perlin_.rng.float(f32) * 0.5;
+                        const material_index = @intToEnum(Material, @floatToInt(u8, @floor(material_value))).getMaterialIndex(perlin_.rng);
+                        grid_.*.insert(i_x, i_y, i_z, material_index);
+                    }
+                    while (i_y < ocean_level_v) : (i_y += 1) {
+                        grid_.*.insert(i_x, i_y, i_z, 0); // insert water
+                    }
                 }
             }
         }
+    }.insert;
+
+    const m = std.time.milliTimestamp();
+
+    if (threads_count == 0) {
+        // run on main thread
+        @call(.{ .modifier = .always_inline }, insert_job_gen_fn, .{ 0, perlin, voxel_dim, point_mod, ocean_level, grid });
+    } else {
+        var threads: [threads_count]std.Thread = undefined;
+        comptime var i = 0;
+        inline while (i < threads_count) : (i += 1) {
+            threads[i] = try std.Thread.spawn(.{}, insert_job_gen_fn, .{ i, perlin, voxel_dim, point_mod, ocean_level, grid });
+        }
+        i = 0;
+        inline while (i < threads_count) : (i += 1) {
+            threads[i].join();
+        }
     }
 
-    std.debug.print("completed terrain tuff\n", .{});
+    std.debug.print("completed terrain tuff in {d} seconds\n", .{@divFloor(std.time.milliTimestamp() - m, std.time.ms_per_s)});
 }
 
 // generate terrain, utilize gpu to generate the inital height map
@@ -134,6 +166,7 @@ pub fn generateGpu(ctx: Context, allocator: Allocator, seed: u32, scale: f32, oc
         .queue_family_indices = &[1]u32{ctx.queue_indices.graphics},
         .format = .r8g8b8a8_unorm,
     });
+    defer target_texture.deinit();
 
     var comp_pipeline = blk: {
         const Compute = render.ComputeDrawPipeline;
@@ -147,11 +180,12 @@ pub fn generateGpu(ctx: Context, allocator: Allocator, seed: u32, scale: f32, oc
     defer comp_pipeline.deinit(ctx);
 
     const terrain_gen_data = [1]TerrainUniform{.{
-        .offset_scale = [_]f32{ 0, 0, 0, 20 },
+        .offset_scale = [_]f32{ 0, 0, 0, scale },
         .seed = 0,
     }};
     try comp_pipeline.uniform_buffers[0].transferToDevice(ctx, TerrainUniform, terrain_gen_data[0..]);
 
+    // TODO: possible race condtion here (no synch to ensure completion before transfer)
     try comp_pipeline.compute(ctx);
     try target_texture.copyToHost(ctx, stbi.Pixel, target_image.data);
 
@@ -159,6 +193,7 @@ pub fn generateGpu(ctx: Context, allocator: Allocator, seed: u32, scale: f32, oc
     const terrain_max_height: f32 = voxel_dim[1] * 0.5;
     const inv_terrain_max_height = 1.0 / terrain_max_height;
     const image_width = @intCast(usize, target_image.width);
+
     for (target_image.data) |pixel, i| {
         const i_x = i % image_width;
         const i_z = i / image_width;

@@ -34,7 +34,7 @@ var call_yaw = false;
 var call_pitch = false;
 var mouse_delta = za.Vec2.zero();
 
-var push_terrain_changes = true;
+var push_terrain_changes = false;
 
 pub fn main() anyerror!void {
     const stderr = std.io.getStdErr().writer();
@@ -62,13 +62,13 @@ pub fn main() anyerror!void {
     // zig fmt: off
     // Create a windowed mode window
     window = glfw.Window.create(1920, 1080, application_name, null, null, 
-    .{ 
-        .center_cursor = true, 
-        .client_api = .no_api,
-        // .maximized = true,
-        // .scale_to_monitor = true,
-        .focused = true, 
-    }
+        .{ 
+            .center_cursor = true, 
+            .client_api = .no_api,
+            // .maximized = true,
+            // .scale_to_monitor = true,
+            .focused = true, 
+        }
     ) catch |err| {
         try stderr.print("failed to create window, code: {}", .{err});
         return;
@@ -105,8 +105,14 @@ pub fn main() anyerror!void {
     draw_api.handleWindowResize(window);
     defer draw_api.noHandleWindowResize(window);
 
-    var grid = try BrickGrid.init(allocator, 64, 64, 64, .{ .min_point = [3]f32{ -32, -32, -32 } });
+    var grid = try BrickGrid.init(allocator, 32, 32, 32, .{
+        .min_point = [3]f32{ -16, -16, -16 },
+        .material_indices_per_brick = 256,
+    });
     defer grid.deinit();
+
+    // force workers to sleep while terrain generate
+    grid.sleepWorkers();
 
     const model = try vox.load(false, allocator, "../assets/models/monu10.vox");
     defer model.deinit();
@@ -133,7 +139,9 @@ pub fn main() anyerror!void {
         grid.insert(@intCast(usize, xyzi.x), @intCast(usize, xyzi.z), @intCast(usize, xyzi.y), xyzi.color_index);
     }
 
-    try terrain.generateGpu(ctx, allocator, 420, 4, 20, &grid);
+    // generate terrain on CPU
+    try terrain.generateCpu(8, allocator, 420, 4, 20, &grid);
+    grid.wakeWorkers();
 
     var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, &draw_api.state.subo.ubo.my_texture, .{});
     defer voxel_rt.deinit(ctx);
@@ -173,9 +181,10 @@ pub fn main() anyerror!void {
         }
         if (push_terrain_changes) {
             try voxel_rt.debugUpdateTerrain(ctx);
+            push_terrain_changes = false;
         }
 
-        {
+        { // render stuff
             try voxel_rt.compute(ctx);
 
             // Render 2d stuff

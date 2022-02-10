@@ -9,7 +9,7 @@ const Worker = @This();
 
 /// a FIFO queue of jobs for a given worker
 const JobQueue = std.fifo.LinearFifo(Job, .Dynamic);
-const ShutdownSignal = std.atomic.Atomic(bool);
+const Signal = std.atomic.Atomic(bool);
 
 pub const Insert = struct { x: usize, y: usize, z: usize, material_index: u8 };
 pub const JobTag = enum {
@@ -36,7 +36,8 @@ wake_event: std.Thread.Condition,
 job_mutex: std.Thread.Mutex,
 job_queue: *JobQueue,
 
-shutdown: ShutdownSignal,
+sleep: Signal,
+shutdown: Signal,
 
 pub fn init(id: usize, grid: *State, allocator: Allocator, initial_queue_capacity: usize) !Worker {
     var job_queue = try allocator.create(JobQueue);
@@ -50,7 +51,8 @@ pub fn init(id: usize, grid: *State, allocator: Allocator, initial_queue_capacit
         .wake_event = .{},
         .job_mutex = .{},
         .job_queue = job_queue,
-        .shutdown = ShutdownSignal.init(false),
+        .sleep = Signal.init(false),
+        .shutdown = Signal.init(false),
     };
 }
 
@@ -59,20 +61,27 @@ pub fn registerJob(self: *Worker, job: Job) void {
     self.job_queue.writeItem(job) catch {}; // TODO: report error somehow?
     self.job_mutex.unlock();
 
-    self.wake_event.signal();
+    if (self.sleep.load(.SeqCst) == false) {
+        self.wake_event.signal();
+    }
 }
 
 pub fn work(self: *Worker) void {
     while (self.shutdown.load(.SeqCst) == false) {
         self.job_mutex.lock();
-        while (self.job_queue.*.readItem()) |job| {
-            self.job_mutex.unlock();
-            switch (job) {
-                .insert => |insert_job| {
-                    self.performInsert(insert_job);
-                },
+        if (self.sleep.load(.SeqCst) == false) {
+            var i: usize = 0;
+            work_loop: while (self.job_queue.*.readItem()) |job| {
+                self.job_mutex.unlock();
+                switch (job) {
+                    .insert => |insert_job| {
+                        self.performInsert(insert_job);
+                    },
+                }
+                self.job_mutex.lock();
+                i += 1;
+                if (self.sleep.load(.SeqCst)) break :work_loop;
             }
-            self.job_mutex.lock();
         }
         defer self.job_mutex.unlock();
         self.wake_event.wait(&self.job_mutex);
