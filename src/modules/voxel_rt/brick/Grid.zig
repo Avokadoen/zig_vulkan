@@ -2,6 +2,7 @@
 // source: https://dspace.library.uu.nl/handle/1874/315917
 
 const std = @import("std");
+const math = std.math;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const AtomicCount = std.atomic.Atomic(usize);
@@ -20,8 +21,7 @@ pub const Config = struct {
     min_point: [3]f32 = [_]f32{ 0.0, 0.0, 0.0 },
     scale: f32 = 1.0,
     material_indices_per_brick: usize = 256,
-    workers_count: usize = 4,
-    poll_delay: f32 = 2,
+    workers_count: usize = 6,
 };
 
 const BrickGrid = @This();
@@ -41,7 +41,17 @@ workers: []Worker,
 ///     - dim_z:     how many bricks *maps* (or chunks) in z dimension
 ///     - config:    config options for the brickmap
 pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Config) !BrickGrid {
-    const grid = try allocator.alloc(State.GridEntry, dim_x * dim_y * dim_z);
+    const brick_count = dim_x * dim_y * dim_z;
+    std.debug.assert(brick_count != 0);
+
+    const higher_dim_x = @intToFloat(f64, dim_x) * 0.25;
+    const higher_dim_y = @intToFloat(f64, dim_y) * 0.25;
+    const higher_dim_z = @intToFloat(f64, dim_z) * 0.25;
+    const higher_order_grid = try allocator.alloc(u8, @floatToInt(usize, higher_dim_x * higher_dim_y * higher_dim_z));
+    errdefer allocator.free(higher_order_grid);
+    std.mem.set(u8, higher_order_grid, 0);
+
+    const grid = try allocator.alloc(State.GridEntry, brick_count);
     errdefer allocator.free(grid);
     std.mem.set(State.GridEntry, grid, .{ .@"type" = .empty, .data = 0 });
 
@@ -50,7 +60,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     errdefer allocator.free(bricks);
     std.mem.set(State.Brick, bricks, .{ .solid_mask = 0, .material_index = 0, .lod_material_index = 0 });
 
-    const material_indices = try allocator.alloc(u8, bricks.len * std.math.min(512, config.material_indices_per_brick));
+    const material_indices = try allocator.alloc(u8, bricks.len * math.min(512, config.material_indices_per_brick));
     errdefer allocator.free(material_indices);
     std.mem.set(u8, material_indices, 0);
 
@@ -93,6 +103,8 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     const state = try allocator.create(State);
     errdefer allocator.destroy(state);
     state.* = .{
+        .higher_order_grid_mutex = .{},
+        .higher_order_grid = higher_order_grid,
         .grid = grid,
         .bricks = bricks,
         .bucket_storage = bucket_storage,
@@ -102,6 +114,10 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
             .dim_x = dim_x,
             .dim_y = dim_y,
             .dim_z = dim_z,
+            .higher_dim_x = @floatToInt(u32, @ceil(higher_dim_x)),
+            .higher_dim_y = @floatToInt(u32, @ceil(higher_dim_y)),
+            .higher_dim_z = @floatToInt(u32, @ceil(higher_dim_z)),
+            .padding = 0,
             .max_ray_iteration = max_ray_iteration,
             .min_point_base_t = min_point_base_t,
             .max_point_scale = max_point_scale,

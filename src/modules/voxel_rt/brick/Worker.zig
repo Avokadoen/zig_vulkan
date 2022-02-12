@@ -107,6 +107,11 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
             .@"type" = .loaded,
             .data = @intCast(u30, active_bricks),
         };
+
+        const higher_grid_index = higherGridAt(self.grid.*.device_state, insert_job.x, actual_y, insert_job.z);
+        self.grid.higher_order_grid_mutex.lock();
+        defer self.grid.higher_order_grid_mutex.unlock();
+        self.grid.higher_order_grid[higher_grid_index] += 1;
     }
 
     const brick_index = @intCast(usize, entry.data);
@@ -166,6 +171,14 @@ inline fn gridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize
     const grid_y: u32 = @intCast(u32, y / 8);
     const grid_z: u32 = @intCast(u32, z / 8);
     return @intCast(usize, grid_x + device_state.dim_x * (grid_z + device_state.dim_z * grid_y));
+}
+
+/// get higher grid index from global index coordinates
+inline fn higherGridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize {
+    const higher_grid_x: u32 = @intCast(u32, x / (8 * 4));
+    const higher_grid_y: u32 = @intCast(u32, y / (8 * 4));
+    const higher_grid_z: u32 = @intCast(u32, z / (8 * 4));
+    return @intCast(usize, higher_grid_x + device_state.higher_dim_x * (higher_grid_z + device_state.higher_dim_z * higher_grid_y));
 }
 
 /// count the set bits of a i512, up to range_to (exclusive)

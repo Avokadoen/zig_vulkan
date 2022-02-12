@@ -57,21 +57,28 @@ layout (binding = 2) uniform BrickGridState {
     uint dim_x;
     uint dim_y;
     uint dim_z;
+    uint higher_dim_x;
+    uint higher_dim_y;
+    uint higher_dim_z;
+    uint padding; // not in use
     uint max_ray_iteration;
+
     // min point *and* base t value
     vec4 min_point_base_t;
     vec4 max_point_scale;
 } brick_grid;
 
+layout (std430, binding = 7) buffer HigherGridBuffer {
+    // one entry hold 4 entries
+    readonly uint higher_grid_entries[];
+};
+
 // Grid types
-const int EMPTY = 0;
-const int LOADED = 1; 
-const int UNLOADED = 2;
 struct GridEntry {
     // 2 first bits are type, 30 next are data according to type
     uint bits;
 };
-layout (std430, binding = 7) buffer GridBuffer {
+layout (std430, binding = 8) buffer GridBuffer {
     readonly GridEntry grid_entries[];
 };
 
@@ -81,11 +88,11 @@ struct Brick {
     uint material_index;
     uint lod_index;
 };
-layout (std430, binding = 8) buffer BrickBuffer {
+layout (std430, binding = 9) buffer BrickBuffer {
     readonly Brick bricks[];
 };
 
-layout (std430, binding = 9) buffer MaterialIndicesBuffer {
+layout (std430, binding = 10) buffer MaterialIndicesBuffer {
     // one entry hold 4 indices
     readonly uint material_indices[];
 };
@@ -130,6 +137,7 @@ layout (std430, binding = 6) buffer DielectricBuffer {
     readonly Dielectric dielectric[];
 };
 
+bool HigherGridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit);
 bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit);
 bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout vec3 brick_position, inout HitRecord hit);
 
@@ -257,6 +265,11 @@ vec3 RayColor(Ray r) {
     return background_color;
 }
 
+bool isInHigherGrid(ivec3 point) {
+    return point.x >= 0 && point.x < brick_grid.higher_dim_x 
+        && point.y >= 0 && point.y < brick_grid.higher_dim_y
+        && point.z >= 0 && point.z < brick_grid.higher_dim_z;
+}
 
 bool isInGrid(ivec3 point) {
     return point.x >= 0 && point.x < brick_grid.dim_x 
@@ -281,6 +294,64 @@ void defineStepAndAxis(vec3 dir, vec3 fposition, ivec3 position, vec3 delta, int
     }
 }
 
+bool HigherGridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit) {
+    // min point *and* base t value
+    const vec3 g_min = brick_grid.min_point_base_t.xyz;
+    const vec3 g_max = brick_grid.max_point_scale.xyz - vec3(0.001);
+    const float b_base_t = brick_grid.min_point_base_t.w;
+   
+    float t_grid_max = t_max;
+    HitRecord hit_grid;
+    if (!AdvIntersect(g_min, g_max, r, t_min, t_grid_max, hit_grid)) {
+        return false;
+    }
+    
+    // HACK: workaround for precision issues with t being too low for "penetrating" grid 
+    hit_grid.t += 0.001;
+
+    // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
+    
+    /// get position in higher grid space from global position
+    const vec3 fposition = (RayAt(r, hit_grid.t) - g_min) * 0.25;
+    ivec3 position = ivec3(fposition);
+
+    // in the event of a axis of direction is 0 we get infinity according to 
+    // float specification IEEE 754 (division by 0 is defined as resulting in infinity value)
+    const vec3 delta = abs(1.0 / r.direction);
+
+    ivec3 pos_step;
+    vec3 axis_t;
+    // define x
+    defineStepAndAxis(r.direction, fposition, position, delta, 0, pos_step, axis_t);
+    // define y
+    defineStepAndAxis(r.direction, fposition, position, delta, 1, pos_step, axis_t);
+    // define z
+    defineStepAndAxis(r.direction, fposition, position, delta, 2, pos_step, axis_t);
+
+    // DDA loop
+    float t_value = 0;
+    while (isInHigherGrid(position)) { 
+        uint index = position.x + brick_grid.higher_dim_x * (position.z + brick_grid.higher_dim_z * position.y);
+        uint entry = higher_grid_entries[uint(index / 4)];
+        int value_offset = int(index) % 4 * 8;
+        uint entry_value = bitfieldExtract(entry, value_offset, 8); 
+        if(entry_value > 0) {
+            return true;
+        }
+
+        const int y_smallest = int(axis_t.y < axis_t.x && axis_t.y < axis_t.z);
+        const int z_smallest = 2 * int(axis_t.z < axis_t.x && axis_t.z < axis_t.y);
+        // set axis, 0 if x smallest, 1 if y is smallest or 2 if z is smallest
+        const int axis = y_smallest + z_smallest;
+        
+        t_value = axis_t[axis];
+        position[axis] += pos_step[axis];
+        axis_t[axis] += delta[axis];
+    }   
+
+    return false;
+}
+
 /// Traverses the brick grid and calculates any potential hit with the grid
 bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit) {
     // min point *and* base t value
@@ -300,7 +371,6 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
     // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
     
     /// get position in grid space from global position
-    /// caller should make sure that p is in fact inside the grid
     const vec3 fposition = RayAt(r, hit_grid.t) - g_min;
     ivec3 position = ivec3(fposition);
 

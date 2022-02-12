@@ -105,9 +105,9 @@ pub fn main() anyerror!void {
     draw_api.handleWindowResize(window);
     defer draw_api.noHandleWindowResize(window);
 
-    var grid = try BrickGrid.init(allocator, 32, 32, 32, .{
-        .min_point = [3]f32{ -16, -16, -16 },
-        .material_indices_per_brick = 256,
+    var grid = try BrickGrid.init(allocator, 64, 64, 64, .{
+        .min_point = [3]f32{ -32, -32, -32 },
+        .material_indices_per_brick = 128,
     });
     defer grid.deinit();
 
@@ -127,6 +127,7 @@ pub fn main() anyerror!void {
     for (terrain.material_data) |material, i| {
         materials[i] = material;
     }
+
     const terrain_len = terrain.material_data.len;
     for (model.rgba_chunk[terrain_len..]) |rgba, i| {
         const index = i + terrain_len;
@@ -140,7 +141,7 @@ pub fn main() anyerror!void {
     }
 
     // generate terrain on CPU
-    try terrain.generateCpu(8, allocator, 420, 4, 20, &grid);
+    try terrain.generateCpu(6, allocator, 420, 4, 20, &grid);
     grid.wakeWorkers();
 
     var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, &draw_api.state.subo.ubo.my_texture, .{});
@@ -182,6 +183,8 @@ pub fn main() anyerror!void {
         if (push_terrain_changes) {
             try voxel_rt.debugUpdateTerrain(ctx);
             push_terrain_changes = false;
+            const origin = voxel_rt.camera.d_camera.origin;
+            std.debug.print("camera: {d} {d} {d}\n", .{ origin[0], origin[1], origin[2] });
         }
 
         { // render stuff

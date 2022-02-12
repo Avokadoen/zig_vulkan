@@ -1,5 +1,6 @@
 const std = @import("std");
 const AtomicCount = std.atomic.Atomic(usize);
+const Mutex = std.Thread.Mutex;
 
 const BucketStorage = @import("./BucketStorage.zig");
 
@@ -8,6 +9,10 @@ pub const Device = extern struct {
     dim_x: u32,
     dim_y: u32,
     dim_z: u32,
+    higher_dim_x: u32,
+    higher_dim_y: u32,
+    higher_dim_z: u32,
+    padding: u32,
     max_ray_iteration: u32,
     // holds the min point, and the base t advance
     // base t advance dictate the minimum stretch of distance a ray can go for each iteration
@@ -41,6 +46,11 @@ pub const Brick = packed struct {
 };
 
 const State = @This();
+
+higher_order_grid_mutex: Mutex,
+/// used to accelerate ray traversal over large empty distances 
+/// a entry is used to check if any brick in a 4x4x4 segment should be checked for hits or if nothing is set
+higher_order_grid: []u8,
 
 grid: []GridEntry,
 bricks: []Brick,

@@ -40,6 +40,7 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, target_t
             @sizeOf(gpu_types.Albedo) * config.albedo_buffer,
             @sizeOf(gpu_types.Metal) * config.metal_buffer,
             @sizeOf(gpu_types.Dielectric) * config.dielectric_buffer,
+            @sizeOf(u8) * brick_grid.state.higher_order_grid.len,
             @sizeOf(GridState.GridEntry) * brick_grid.state.grid.len,
             @sizeOf(GridState.Brick) * brick_grid.state.bricks.len,
             @sizeOf(u8) * brick_grid.state.material_indices.len,
@@ -81,9 +82,10 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, target_t
         try comp_pipeline.storage_buffers[3].transferToDevice(ctx, gpu_types.Dielectric, dielectrics[0..]);
     }
 
-    try comp_pipeline.storage_buffers[4].transferToDevice(ctx, GridState.GridEntry, brick_grid.state.grid);
-    try comp_pipeline.storage_buffers[5].transferToDevice(ctx, GridState.Brick, brick_grid.state.bricks);
-    try comp_pipeline.storage_buffers[6].transferToDevice(ctx, u8, brick_grid.state.material_indices);
+    try comp_pipeline.storage_buffers[4].transferToDevice(ctx, u8, brick_grid.state.higher_order_grid);
+    try comp_pipeline.storage_buffers[5].transferToDevice(ctx, GridState.GridEntry, brick_grid.state.grid);
+    try comp_pipeline.storage_buffers[6].transferToDevice(ctx, GridState.Brick, brick_grid.state.bricks);
+    try comp_pipeline.storage_buffers[7].transferToDevice(ctx, u8, brick_grid.state.material_indices);
 
     // zig fmt: off
     return VoxelRT{ 
@@ -111,9 +113,10 @@ pub fn debugMoveCamera(self: *VoxelRT, ctx: Context) !void {
 }
 
 pub fn debugUpdateTerrain(self: *VoxelRT, ctx: Context) !void {
-    try self.comp_pipeline.storage_buffers[4].transferToDevice(ctx, GridState.GridEntry, self.brick_grid.state.grid);
-    try self.comp_pipeline.storage_buffers[5].transferToDevice(ctx, GridState.Brick, self.brick_grid.state.bricks);
-    try self.comp_pipeline.storage_buffers[6].transferToDevice(ctx, u8, self.brick_grid.state.material_indices);
+    try self.comp_pipeline.storage_buffers[4].transferToDevice(ctx, u8, self.brick_grid.state.higher_order_grid);
+    try self.comp_pipeline.storage_buffers[5].transferToDevice(ctx, GridState.GridEntry, self.brick_grid.state.grid);
+    try self.comp_pipeline.storage_buffers[6].transferToDevice(ctx, GridState.Brick, self.brick_grid.state.bricks);
+    try self.comp_pipeline.storage_buffers[7].transferToDevice(ctx, u8, self.brick_grid.state.material_indices);
 }
 
 // compute the next frame and draw it to target texture, note that it will not draw to any window
