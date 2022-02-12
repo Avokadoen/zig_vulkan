@@ -138,7 +138,7 @@ layout (std430, binding = 6) buffer DielectricBuffer {
 };
 
 bool HigherGridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit);
-bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit);
+bool GridHit(Ray r, float t_min, float t_max, float current_t, vec3 delta, out vec3 hit_min, out HitRecord hit);
 bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout vec3 brick_position, inout HitRecord hit);
 
 // slab hit tests
@@ -214,7 +214,7 @@ vec3 RayColor(Ray r) {
 
     // TODO
     vec3 hit_v_min;
-    while (loop_count < camera.max_bounce && GridHit(current_ray, 0.00001, infinity, hit_v_min, hit)){         
+    while (loop_count < camera.max_bounce && HigherGridHit(current_ray, 0.00001, infinity, hit_v_min, hit)){         
         loop_count += 1;
 
         Ray scattered;
@@ -336,7 +336,10 @@ bool HigherGridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRec
         int value_offset = int(index) % 4 * 8;
         uint entry_value = bitfieldExtract(entry, value_offset, 8); 
         if(entry_value > 0) {
-            return true;
+            float current_t = fma(t_value, brick_grid.max_point_scale.w, hit_grid.t);
+            if(GridHit(r, t_min, t_max, current_t, delta, hit_min, hit)) {
+                return true;
+            }
         }
 
         const int y_smallest = int(axis_t.y < axis_t.x && axis_t.y < axis_t.z);
@@ -353,31 +356,13 @@ bool HigherGridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRec
 }
 
 /// Traverses the brick grid and calculates any potential hit with the grid
-bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit) {
-    // min point *and* base t value
-    const vec3 g_min = brick_grid.min_point_base_t.xyz;
-    const vec3 g_max = brick_grid.max_point_scale.xyz - vec3(0.001);
-    const float b_base_t = brick_grid.min_point_base_t.w;
-   
-    float t_grid_max = t_max;
-    HitRecord hit_grid;
-    if (!AdvIntersect(g_min, g_max, r, t_min, t_grid_max, hit_grid)) {
-        return false;
-    }
-    
-    // HACK: workaround for precision issues with t being too low for "penetrating" grid 
-    hit_grid.t += 0.001;
-
+bool GridHit(Ray r, float t_min, float t_max, float current_t, vec3 delta, out vec3 hit_min, out HitRecord hit) {
     // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
     
     /// get position in grid space from global position
-    const vec3 fposition = RayAt(r, hit_grid.t) - g_min;
+    const vec3 g_min = brick_grid.min_point_base_t.xyz;
+    const vec3 fposition = RayAt(r, current_t) - g_min;
     ivec3 position = ivec3(fposition);
-
-    // TODO: infinity cause tearing in the image?
-    // in the event of a axis of direction is 0 we get infinity according to 
-    // float specification IEEE 754 (division by 0 is defined as resulting in infinity value)
-    const vec3 delta = abs(1.0 / r.direction);
 
     ivec3 pos_step;
     vec3 axis_t;
@@ -397,10 +382,10 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
         if(bits != 0) { // TODO: actually check type
             vec3 brick_min = g_min + position;
             const uint brick_index = bitfieldExtract(bits, 2, 30);
-            hit.t = fma(t_value, brick_grid.max_point_scale.w, hit_grid.t);
+            hit.t = fma(t_value, brick_grid.max_point_scale.w, current_t);
 
             // check if ray hits any voxel in the brick
-            if (BrickHit(r, t_min, t_grid_max, delta, bricks[brick_index], brick_min, hit)) {
+            if (BrickHit(r, t_min, t_max, delta, bricks[brick_index], brick_min, hit)) {
                 hit_min = brick_min;
                 return true;
             }
