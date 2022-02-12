@@ -33,7 +33,7 @@ pub const BucketRequestError = error{
 const BucketStorage = @This();
 
 // the smallest bucket size in 2^n
-const bucket_count = 6;
+const bucket_count = 4;
 // max bucket is always the size of brick which is 2^9
 const min_2_pow_size = 9 - (bucket_count - 1);
 
@@ -56,9 +56,9 @@ storage_mutex: std.Thread.Mutex,
 /// init a bucket storage.
 /// caller must make sure to call deinit
 pub fn init(allocator: Allocator, brick_count: usize, material_indices_len: usize) !BucketStorage {
-    const segment_base_split: usize = 512 * bucket_count;
-    const segments = try std.math.divFloor(usize, std.math.max(segment_base_split, material_indices_len), segment_base_split);
+    std.debug.assert(material_indices_len > 2024);
 
+    const segments_2048 = try std.math.divFloor(usize, material_indices_len, 2048);
     var bucket_mutexes: [bucket_count]std.Thread.Mutex = undefined;
     std.mem.set(std.Thread.Mutex, bucket_mutexes[0..], .{});
 
@@ -68,13 +68,13 @@ pub fn init(allocator: Allocator, brick_count: usize, material_indices_len: usiz
     { // init first bucket
         // zig fmt: off
         buckets[0] = Bucket{ 
-            .free = try ArrayList(Bucket.Entry).initCapacity(allocator, 2 * segments), 
-            .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments) 
+            .free = try ArrayList(Bucket.Entry).initCapacity(allocator, 2 * segments_2048), 
+            .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048) 
         };
         // zig fmt: on
         const bucket_size = try std.math.powi(u32, 2, min_2_pow_size);
         var j: usize = 0;
-        while (j < 2 * segments) : (j += 1) {
+        while (j < 2 * segments_2048) : (j += 1) {
             buckets[0].free.appendAssumeCapacity(.{ .start_index = prev_indices });
             prev_indices += bucket_size;
         }
@@ -84,26 +84,26 @@ pub fn init(allocator: Allocator, brick_count: usize, material_indices_len: usiz
         inline while (i < buckets.len - 1) : (i += 1) {
             // zig fmt: off
             buckets[i] = Bucket{ 
-                .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments), 
-                .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments / 2) 
+                .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments_2048), 
+                .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048 / 2) 
             };
             // zig fmt: on
             const bucket_size = try std.math.powi(u32, 2, min_2_pow_size + i);
             var j: usize = 0;
-            while (j < segments) : (j += 1) {
+            while (j < segments_2048) : (j += 1) {
                 buckets[i].free.appendAssumeCapacity(.{ .start_index = prev_indices });
                 prev_indices += bucket_size;
             }
         }
         // zig fmt: off
         buckets[buckets.len-1] = Bucket{ 
-            .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments * 3), 
-            .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments) 
+            .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments_2048 * 3), 
+            .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048) 
         };
         // zig fmt: on
         const bucket_size = 512;
         var j: usize = 0;
-        while (j < segments * 3) : (j += 1) {
+        while (j < segments_2048 * 3) : (j += 1) {
             buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = prev_indices });
             prev_indices += bucket_size;
         }
@@ -125,7 +125,7 @@ pub fn init(allocator: Allocator, brick_count: usize, material_indices_len: usiz
 // function handles assigning new buckets as needed and will transfer material indices to new slot in the event
 // that a new bucket is required
 // returns error if there is no more buckets of appropriate size
-pub inline fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_offset: usize, material_indices: []u8, was_set: bool) !Bucket.Entry {
+pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_offset: usize, material_indices: []u8, was_set: bool) !Bucket.Entry {
     self.storage_mutex.lock();
     defer self.storage_mutex.unlock();
 
