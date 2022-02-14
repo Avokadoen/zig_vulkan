@@ -1,6 +1,6 @@
 #version 450
 
-#extension GL_EXT_debug_printf : disable
+#extension GL_EXT_debug_printf : enable
 // debugPrintfEXT("hello world %f", 1.0);
 
 #include "rand.comp"
@@ -138,7 +138,7 @@ layout (std430, binding = 6) buffer DielectricBuffer {
 };
 
 bool HigherGridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit);
-bool GridHit(Ray r, float t_min, float t_max, float current_t, vec3 delta, out vec3 hit_min, out HitRecord hit);
+bool GridHit(Ray r, float t_min, float t_max, float current_t, inout ivec3 position, inout vec3 axis_t, ivec3 pos_step, vec3 delta, out vec3 hit_min, out HitRecord hit);
 bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout vec3 brick_position, inout HitRecord hit);
 
 // slab hit tests
@@ -283,6 +283,15 @@ bool isInBrick(ivec3 point) {
         && point.z >= 0 && point.z < 8;
 }
 
+void defineAxis(vec3 dir, vec3 fposition, ivec3 position, vec3 delta, int axis_value, inout vec3 axis_t) {
+    const int a = axis_value;
+    if (dir[a] < 0) {
+        axis_t[a] = ((fposition[a] - position[a]) * delta[a]);
+    } else {
+        axis_t[a] = ((position[a] + 1 - fposition[a]) * delta[a]);
+    }
+}
+
 void defineStepAndAxis(vec3 dir, vec3 fposition, ivec3 position, vec3 delta, int axis_value, inout ivec3 pos_step, inout vec3 axis_t) {
     const int a = axis_value;
     if (dir[a] < 0) {
@@ -293,6 +302,8 @@ void defineStepAndAxis(vec3 dir, vec3 fposition, ivec3 position, vec3 delta, int
         axis_t[a] = ((position[a] + 1 - fposition[a]) * delta[a]);
     }
 }
+
+// TODO: ABS check in DDA, how has this even worked before!?
 
 bool HigherGridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit) {
     // min point *and* base t value
@@ -305,84 +316,89 @@ bool HigherGridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRec
     if (!AdvIntersect(g_min, g_max, r, t_min, t_grid_max, hit_grid)) {
         return false;
     }
-    
     // HACK: workaround for precision issues with t being too low for "penetrating" grid 
     hit_grid.t += 0.001;
 
     // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
-    
-    /// get position in higher grid space from global position
-    const vec3 fposition = (RayAt(r, hit_grid.t) - g_min) * 0.25;
-    ivec3 position = ivec3(fposition);
 
     // in the event of a axis of direction is 0 we get infinity according to 
     // float specification IEEE 754 (division by 0 is defined as resulting in infinity value)
     const vec3 delta = abs(1.0 / r.direction);
-
+    
+    // pos_step is common for both higher order grid and grid
     ivec3 pos_step;
-    vec3 axis_t;
-    // define x
-    defineStepAndAxis(r.direction, fposition, position, delta, 0, pos_step, axis_t);
-    // define y
-    defineStepAndAxis(r.direction, fposition, position, delta, 1, pos_step, axis_t);
-    // define z
-    defineStepAndAxis(r.direction, fposition, position, delta, 2, pos_step, axis_t);
+    // defined grid DDA variables
+    // get position in grid space from global position
+    const vec3 g_fposition = RayAt(r, hit_grid.t) - g_min;
+    ivec3 g_position = ivec3(g_fposition);
+    vec3 g_axis_t;
+    defineStepAndAxis(r.direction, g_fposition, g_position, delta, 0, pos_step, g_axis_t); // define x
+    defineStepAndAxis(r.direction, g_fposition, g_position, delta, 1, pos_step, g_axis_t); // define y
+    defineStepAndAxis(r.direction, g_fposition, g_position, delta, 2, pos_step, g_axis_t); // define z
+
+    // define higher order grid DDA variables
+    // get position in higher grid space from global position
+    const vec3 h_fposition = g_fposition * 0.25;
+    ivec3 h_position = ivec3(h_fposition);
+    vec3 h_axis_t;
+    defineAxis(r.direction, h_fposition, h_position, delta, 0, h_axis_t); // define x
+    defineAxis(r.direction, h_fposition, h_position, delta, 1, h_axis_t); // define y
+    defineAxis(r.direction, h_fposition, h_position, delta, 2, h_axis_t); // define z
 
     // DDA loop
     float t_value = 0;
-    while (isInHigherGrid(position)) { 
-        uint index = position.x + brick_grid.higher_dim_x * (position.z + brick_grid.higher_dim_z * position.y);
+    vec3 axis_t_delta = vec3(0);
+    ivec3 position_delta = ivec3(0);
+    while (isInHigherGrid(h_position)) { 
+        uint index = h_position.x + brick_grid.higher_dim_x * (h_position.z + brick_grid.higher_dim_z * h_position.y);
         uint entry = higher_grid_entries[uint(index / 4)];
         int value_offset = int(index) % 4 * 8;
         uint entry_value = bitfieldExtract(entry, value_offset, 8); 
         if(entry_value > 0) {
-            float current_t = fma(t_value, brick_grid.max_point_scale.w, hit_grid.t);
-            if(GridHit(r, t_min, t_max, current_t, delta, hit_min, hit)) {
+            ivec3 temp_g_position = h_position * 4;
+            vec3 temp_g_axis_t = h_axis_t * 4;
+            if(GridHit(r, t_min, t_max, 0, temp_g_position, temp_g_axis_t, pos_step, delta, hit_min, hit)) {
                 return true;
             }
         }
 
-        const int y_smallest = int(axis_t.y < axis_t.x && axis_t.y < axis_t.z);
-        const int z_smallest = 2 * int(axis_t.z < axis_t.x && axis_t.z < axis_t.y);
-        // set axis, 0 if x smallest, 1 if y is smallest or 2 if z is smallest
-        const int axis = y_smallest + z_smallest;
-        
-        t_value = axis_t[axis];
-        position[axis] += pos_step[axis];
-        axis_t[axis] += delta[axis];
+        { // higher order DDA
+            const vec3 abs_h_axis = abs(h_axis_t);
+            const int y_smallest = int(abs_h_axis.y < abs_h_axis.x && abs_h_axis.y < abs_h_axis.z);
+            const int z_smallest = 2 * int(abs_h_axis.z < abs_h_axis.x && abs_h_axis.z < abs_h_axis.y);
+            // set axis, 0 if x smallest, 1 if y is smallest or 2 if z is smallest
+            const int axis = y_smallest + z_smallest;
+
+            
+            h_position[axis] += pos_step[axis];
+            position_delta[axis] += pos_step[axis];
+
+            t_value = h_axis_t[axis];
+            h_axis_t[axis] += delta[axis];
+            axis_t_delta[axis] += delta[axis];
+        }
     }   
 
     return false;
 }
 
 /// Traverses the brick grid and calculates any potential hit with the grid
-bool GridHit(Ray r, float t_min, float t_max, float current_t, vec3 delta, out vec3 hit_min, out HitRecord hit) {
+bool GridHit(Ray r, float t_min, float t_max, float current_t, inout ivec3 position, inout vec3 axis_t, ivec3 pos_step, vec3 delta, out vec3 hit_min, out HitRecord hit) {
     // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
-    
-    /// get position in grid space from global position
-    const vec3 g_min = brick_grid.min_point_base_t.xyz;
-    const vec3 fposition = RayAt(r, current_t) - g_min;
-    ivec3 position = ivec3(fposition);
 
-    ivec3 pos_step;
-    vec3 axis_t;
-    // define x
-    defineStepAndAxis(r.direction, fposition, position, delta, 0, pos_step, axis_t);
-    // define y
-    defineStepAndAxis(r.direction, fposition, position, delta, 1, pos_step, axis_t);
-    // define z
-    defineStepAndAxis(r.direction, fposition, position, delta, 2, pos_step, axis_t);
-
+    debugPrintfEXT("position: %d, %d, %d", position.x, position.y, position.z);
     // DDA loop
-    float t_value = 0;
-    while (isInGrid(position)) { 
+    const ivec3 position_limit = ivec3(4);
+    ivec3 position_delta = ivec3(0);
+    float t_value = current_t;
+    while (isInGrid(position) && all(lessThan(position_delta, position_limit))) {
         uint index = position.x + brick_grid.dim_x * (position.z + brick_grid.dim_z * position.y);
         uint bits = grid_entries[index].bits;
         uint entry_type = bitfieldExtract(bits, 0, 2);
         if(bits != 0) { // TODO: actually check type
-            vec3 brick_min = g_min + position;
+            vec3 brick_min = brick_grid.min_point_base_t.xyz + position;
             const uint brick_index = bitfieldExtract(bits, 2, 30);
-            hit.t = fma(t_value, brick_grid.max_point_scale.w, current_t);
+            hit.t = t_value * brick_grid.max_point_scale.w;
 
             // check if ray hits any voxel in the brick
             if (BrickHit(r, t_min, t_max, delta, bricks[brick_index], brick_min, hit)) {
@@ -391,13 +407,15 @@ bool GridHit(Ray r, float t_min, float t_max, float current_t, vec3 delta, out v
             }
         }
 
-        const int y_smallest = int(axis_t.y < axis_t.x && axis_t.y < axis_t.z);
-        const int z_smallest = 2 * int(axis_t.z < axis_t.x && axis_t.z < axis_t.y);
+        const vec3 abs_axis_t = abs(axis_t);
+        const int y_smallest = int(abs_axis_t.y < abs_axis_t.x && abs_axis_t.y < abs_axis_t.z);
+        const int z_smallest = 2 * int(abs_axis_t.z < abs_axis_t.x && abs_axis_t.z < abs_axis_t.y);
         // set axis, 0 if x smallest, 1 if y is smallest or 2 if z is smallest
         const int axis = y_smallest + z_smallest;
         
         t_value = axis_t[axis];
         position[axis] += pos_step[axis];
+        position_delta[axis] += abs(pos_step[axis]);
         axis_t[axis] += delta[axis];
     }   
 
@@ -406,11 +424,11 @@ bool GridHit(Ray r, float t_min, float t_max, float current_t, vec3 delta, out v
 
 bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout vec3 brick_position, inout HitRecord hit) {
     // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
-    /// get position in brick space from global position
-    /// caller should make sure that p is in fact inside the grid
+    // get position in brick space from global position
     const vec3 fposition = (RayAt(r, hit.t + 0.0001) - brick_position) * 8;
     ivec3 position = ivec3(fposition);
 
+    // TODO: send pos_step
     ivec3 pos_step;
     vec3 axis_t;
     // define x
@@ -470,8 +488,9 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
             return true;
         }
         
-        const int y_smallest = int(axis_t.y < axis_t.x && axis_t.y < axis_t.z);
-        const int z_smallest = 2 * int(axis_t.z < axis_t.x && axis_t.z < axis_t.y);
+        const vec3 abs_axis_t = abs(axis_t);
+        const int y_smallest = int(abs_axis_t.y < abs_axis_t.x && abs_axis_t.y < abs_axis_t.z);
+        const int z_smallest = 2 * int(abs_axis_t.z < abs_axis_t.x && abs_axis_t.z < abs_axis_t.y);
         // set axis, 0 if x smallest, 1 if y is smallest or 2 if z is smallest
         const int axis = y_smallest + z_smallest;
         
