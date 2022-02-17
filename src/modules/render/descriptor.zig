@@ -202,12 +202,14 @@ pub const Descriptor = struct {
 // TODO: multiply projection and view on CPU (model is instanced (TODO) and has to be applied on GPU)
 // TODO: push constant instead?
 pub const Uniform = extern struct {
-    view: za.Mat4,
-    projection: za.Mat4,
+    const Mat4 = [4][4]f32;
+
+    view: Mat4,
+    projection: Mat4,
 
     pub fn init(viewport: vk.Viewport) Uniform {
         return .{
-            .view = za.Mat4.identity(),
+            .view = za.Mat4.identity().data,
             .projection = blk: {
                 const half_width = viewport.width * 0.5;
                 const half_height = viewport.height * 0.5;
@@ -217,7 +219,7 @@ pub const Uniform = extern struct {
                 const top: f32 = -half_height;
                 const z_near: f32 = -1000;
                 const z_far: f32 = 1000;
-                break :blk za.Mat4.orthographic(left, right, bottom, top, z_near, z_far);
+                break :blk za.Mat4.orthographic(left, right, bottom, top, z_near, z_far).data;
             },
         };
     }

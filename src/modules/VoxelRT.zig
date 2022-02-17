@@ -52,7 +52,13 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, target_t
     errdefer comp_pipeline.deinit(ctx);
 
     const camera = blk: {
-        var c_config = Camera.Config{ .origin = za.Vec3.new(0.0, 0.0, 0.0), .normal_speed = 2, .viewport_height = 2, .samples_per_pixel = 1, .max_bounce = 1 };
+        var c_config = Camera.Config{
+            .origin = za.Vec3.new(0.0, 0.0, 0.0).data,
+            .normal_speed = 2,
+            .viewport_height = 2,
+            .samples_per_pixel = 1,
+            .max_bounce = 1,
+        };
         break :blk Camera.init(75, target_texture.image_extent.width, target_texture.image_extent.height, c_config);
     };
 

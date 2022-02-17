@@ -216,21 +216,21 @@ pub fn generateGpu(ctx: Context, allocator: Allocator, seed: u32, scale: f32, oc
 /// color information expect by terrain to exist from 0.. in the albedo buffer
 pub const color_data = [_]gpu_types.Albedo{
     // water
-    .{ .color = za.Vec4.new(0.117, 0.45, 0.85, 1.0) },
+    .{ .color = za.Vec4.new(0.117, 0.45, 0.85, 1.0).data },
     // grass 1
-    .{ .color = za.Vec4.new(0.0, 0.6, 0.0, 1.0) },
+    .{ .color = za.Vec4.new(0.0, 0.6, 0.0, 1.0).data },
     // grass 2
-    .{ .color = za.Vec4.new(0.0, 0.5019, 0.0, 1.0) },
+    .{ .color = za.Vec4.new(0.0, 0.5019, 0.0, 1.0).data },
     // dirt 1
-    .{ .color = za.Vec4.new(0.3019, 0.149, 0, 1.0) },
+    .{ .color = za.Vec4.new(0.3019, 0.149, 0, 1.0).data },
     // dirt 2
-    .{ .color = za.Vec4.new(0.4, 0.2, 0, 1.0) },
+    .{ .color = za.Vec4.new(0.4, 0.2, 0, 1.0).data },
     // rock 1
-    .{ .color = za.Vec4.new(0.275, 0.275, 0.275, 1.0) },
+    .{ .color = za.Vec4.new(0.275, 0.275, 0.275, 1.0).data },
     // rock 2
-    .{ .color = za.Vec4.new(0.225, 0.225, 0.225, 1.0) },
+    .{ .color = za.Vec4.new(0.225, 0.225, 0.225, 1.0).data },
     // iron
-    .{ .color = za.Vec4.new(0.6, 0.337, 0.282, 1.0) },
+    .{ .color = za.Vec4.new(0.6, 0.337, 0.282, 1.0).data },
 };
 
 /// material information expect by terrain to exist from 0.. in the material buffer

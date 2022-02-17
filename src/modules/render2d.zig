@@ -402,7 +402,7 @@ fn CommonDrawAPI(comptime Self: type) type {
         /// program pipeline dynamically scale with window
         /// caller should make sure to call noHandleWindowResize
         pub fn handleWindowResize(self: *Self, window: glfw.Window) void {
-            window.setUserPointer(bool, &self.state.pipeline.requested_rescale_pipeline);
+            window.setUserPointer(@ptrCast(*anyopaque, &self.state.pipeline.requested_rescale_pipeline));
             _ = window.setFramebufferSizeCallback(framebufferSizeCallbackFn);
         }
 
@@ -418,7 +418,7 @@ pub fn framebufferSizeCallbackFn(window: glfw.Window, width: u32, height: u32) v
     _ = height;
 
     // get application pointer data, and set rescale to true to signal pipeline rescale
-    if (window.getUserPointer(*bool)) |rescale| {
+    if (window.getUserPointer(bool)) |rescale| {
         rescale.* = true;
     }
 }

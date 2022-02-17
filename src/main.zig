@@ -93,9 +93,9 @@ pub fn main() anyerror!void {
             const window_size = try window.getSize();
             const window_w = @intToFloat(f32, window_size.width);
             const window_h = @intToFloat(f32, window_size.height);
-            const scale = za.Vec2.new(window_w, window_h);
+            const scale = za.Vec2.new(window_w, window_h).data;
 
-            const pos = za.Vec2.new((window_w - scale[0]) * 0.5, (window_h - scale[1]) * 0.5);
+            const pos = za.Vec2.new((window_w - scale[0]) * 0.5, (window_h - scale[1]) * 0.5).data;
             my_sprite = try init_api.createSprite(my_texture, pos, 0, scale);
         }
         break :blk try init_api.initDrawApi(.{ .every_ms = 99999 });
@@ -131,7 +131,16 @@ pub fn main() anyerror!void {
     const terrain_len = terrain.material_data.len;
     for (model.rgba_chunk[terrain_len..]) |rgba, i| {
         const index = i + terrain_len;
-        albedo_color[index] = .{ .color = za.Vec4.new(@intToFloat(f32, rgba.r) / 255, @intToFloat(f32, rgba.g) / 255, @intToFloat(f32, rgba.b) / 255, @intToFloat(f32, rgba.a) / 255) };
+        albedo_color[index] = .{
+            // zig fmt: off
+            .color = za.Vec4.new(
+                @intToFloat(f32, rgba.r) / 255, 
+                @intToFloat(f32, rgba.g) / 255, 
+                @intToFloat(f32, rgba.b) / 255, 
+                @intToFloat(f32, rgba.a) / 255
+            ).data,
+            // zig fmt: on
+        };
         materials[index] = .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = @intCast(u15, index) };
     }
 
@@ -168,17 +177,17 @@ pub fn main() anyerror!void {
             voxel_rt.camera.translate(dt, camera_translate);
         }
         if (call_yaw) {
-            voxel_rt.camera.turnYaw(-mouse_delta[0] * dt);
+            voxel_rt.camera.turnYaw(-mouse_delta.x() * dt);
         }
         if (call_pitch) {
-            voxel_rt.camera.turnPitch(mouse_delta[1] * dt);
+            voxel_rt.camera.turnPitch(mouse_delta.y() * dt);
         }
         if (call_translate > 0 or call_yaw or call_pitch) {
             try voxel_rt.debugMoveCamera(ctx);
             call_yaw = false;
             call_pitch = false;
-            mouse_delta[0] = 0;
-            mouse_delta[1] = 0;
+            mouse_delta.data[0] = 0;
+            mouse_delta.data[1] = 0;
         }
         if (push_terrain_changes) {
             try voxel_rt.debugUpdateTerrain(ctx);
@@ -205,28 +214,28 @@ fn keyInputFn(event: input.KeyEvent) void {
         switch (event.key) {
             input.Key.w => {
                 call_translate += 1;
-                camera_translate[2] -= 1;
+                camera_translate.data[2] -= 1;
             },
             input.Key.s => {
                 call_translate += 1;
-                camera_translate[2] += 1;
+                camera_translate.data[2] += 1;
             },
             input.Key.d => {
                 call_translate += 1;
-                camera_translate[0] += 1;
+                camera_translate.data[0] += 1;
             },
             input.Key.a => {
                 call_translate += 1;
-                camera_translate[0] -= 1;
+                camera_translate.data[0] -= 1;
             },
             input.Key.left_control => {
                 call_translate += 1;
-                camera_translate[1] += 1;
+                camera_translate.data[1] += 1;
             },
             input.Key.left_shift => activate_sprint = true,
             input.Key.space => {
                 call_translate += 1;
-                camera_translate[1] -= 1;
+                camera_translate.data[1] -= 1;
             },
             input.Key.t => push_terrain_changes = !push_terrain_changes,
             input.Key.escape => window.setShouldClose(true),
@@ -236,30 +245,30 @@ fn keyInputFn(event: input.KeyEvent) void {
         switch (event.key) {
             input.Key.w => {
                 call_translate -= 1;
-                camera_translate[2] += 1;
+                camera_translate.data[2] += 1;
             },
             input.Key.s => {
                 call_translate -= 1;
-                camera_translate[2] -= 1;
+                camera_translate.data[2] -= 1;
             },
             input.Key.d => {
                 call_translate -= 1;
-                camera_translate[0] -= 1;
+                camera_translate.data[0] -= 1;
             },
             input.Key.a => {
                 call_translate -= 1;
-                camera_translate[0] += 1;
+                camera_translate.data[0] += 1;
             },
             input.Key.left_control => {
                 call_translate -= 1;
-                camera_translate[1] -= 1;
+                camera_translate.data[1] -= 1;
             },
             input.Key.left_shift => {
                 activate_sprint = false;
             },
             input.Key.space => {
                 call_translate -= 1;
-                camera_translate[1] += 1;
+                camera_translate.data[1] += 1;
             },
             else => {},
         }
@@ -283,9 +292,9 @@ fn cursorPosInputFn(event: input.CursorPosEvent) void {
 
     // let prev_event be defined before processing input
     if (State.prev_event) |p_event| {
-        mouse_delta[0] += @floatCast(f32, event.x - p_event.x);
-        mouse_delta[1] += @floatCast(f32, event.y - p_event.y);
+        mouse_delta.data[0] += @floatCast(f32, event.x - p_event.x);
+        mouse_delta.data[1] += @floatCast(f32, event.y - p_event.y);
     }
-    call_yaw = call_yaw or mouse_delta[0] < -0.00001 or mouse_delta[0] > 0.00001;
-    call_pitch = call_pitch or mouse_delta[1] < -0.00001 or mouse_delta[1] > 0.00001;
+    call_yaw = call_yaw or mouse_delta.x() < -0.00001 or mouse_delta.x() > 0.00001;
+    call_pitch = call_pitch or mouse_delta.y() < -0.00001 or mouse_delta.y() > 0.00001;
 }

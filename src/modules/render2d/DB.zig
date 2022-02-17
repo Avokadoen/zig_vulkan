@@ -93,8 +93,8 @@ pub fn getNewId(self: *DB) !Id {
         self.sprite_pool_size += 1;
     }
 
-    try self.positions.append(za.Vec2.zero());
-    try self.scales.append(za.Vec2.zero());
+    try self.positions.append(za.Vec2.zero().data);
+    try self.scales.append(za.Vec2.zero().data);
     try self.rotations.append(0);
     try self.uv_indices.append(0);
 
@@ -240,10 +240,10 @@ pub fn flush(self: *DB) void {
 pub inline fn generateUvBuffer(self: *DB, mega_uvs: []UV) !void {
     self.uv_buffer.delta.from = 0;
     for (mega_uvs) |uv| {
-        try self.uv_buffer.append(za.Vec2.new(uv.min[0], uv.max[1]));
+        try self.uv_buffer.append(za.Vec2.new(uv.min[0], uv.max[1]).data);
         try self.uv_buffer.append(uv.max);
         try self.uv_buffer.append(uv.min);
-        try self.uv_buffer.append(za.Vec2.new(uv.max[0], uv.min[1]));
+        try self.uv_buffer.append(za.Vec2.new(uv.max[0], uv.min[1]).data);
     }
     self.uv_buffer.delta.to = self.uv_buffer.storage.items.len - 1;
     self.uv_buffer.delta.has_changes = true;

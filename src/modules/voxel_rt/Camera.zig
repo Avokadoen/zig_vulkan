@@ -2,23 +2,14 @@ const std = @import("std");
 const za = @import("zalgebra");
 const Vec3 = @Vector(3, f32);
 
-const default_viewport_height = 2;
-const default_samples_per_pixel = 4;
-const default_turn_rate = 0.1;
-const default_normal_speed = 1;
-// how much to multiply normal speed in the event sprint is missing
-const default_sprint_scale = 2;
-const default_origin = za.Vec3.zero();
-const default_max_bounce = 4;
-
 pub const Config = struct {
-    viewport_height: ?f32 = null,
-    origin: ?Vec3 = null,
-    samples_per_pixel: ?i32 = null,
-    max_bounce: ?i32 = null,
-    turn_rate: ?f32 = null,
-    normal_speed: ?f32 = null,
-    sprint_speed: ?f32 = null,
+    viewport_height: f32 = 2,
+    origin: Vec3 = za.Vec3.zero().data,
+    samples_per_pixel: i32 = 4,
+    max_bounce: i32 = 4,
+    turn_rate: f32 = 0.1,
+    normal_speed: f32 = 1,
+    sprint_speed: f32 = 2,
 };
 
 const Camera = @This();
@@ -52,29 +43,28 @@ pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Conf
 
     const viewport_height = blk: {
         const theta = vertical_fov * math.pi * inv_180;
-        const height = config.viewport_height orelse default_viewport_height;
+        const height = config.viewport_height;
         break :blk height * math.tan(theta * 0.5);
     };
     const viewport_width = aspect_ratio * viewport_height;
-    const o = config.origin orelse default_origin;
 
     const forward = za.Vec3.forward();
-    const right = za.Vec3.norm(za.Vec3.cross(za.Vec3.up(), forward));
-    const up = za.Vec3.norm(za.Vec3.cross(forward, right));
+    const right = za.Vec3.up().cross(forward).norm();
+    const up = forward.cross(right).norm();
 
-    const horizontal = za.Vec3.scale(right, viewport_width);
-    const vertical = za.Vec3.scale(up, viewport_height);
+    const horizontal = right.scale(viewport_width);
+    const vertical = up.scale(viewport_height);
 
-    const lower_left_corner = o - za.Vec3.scale(horizontal, 0.5) - za.Vec3.scale(vertical, 0.5) - forward;
+    const lower_left_corner = config.origin - horizontal.scale(0.5).data - vertical.scale(0.5).data - forward.data;
 
     // TODO: Camera own texture ...
     // const render_texture = ;
 
-    const normal_speed = config.normal_speed orelse default_normal_speed;
+    const normal_speed = config.normal_speed;
     return Camera{
-        .turn_rate = config.turn_rate orelse default_turn_rate,
+        .turn_rate = config.turn_rate,
         .normal_speed = normal_speed,
-        .sprint_speed = config.sprint_speed orelse normal_speed * default_sprint_scale,
+        .sprint_speed = config.sprint_speed,
         .movement_speed = normal_speed,
         .viewport_width = viewport_width,
         .viewport_height = viewport_height,
@@ -84,12 +74,12 @@ pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Conf
         .d_camera = Device{
             .image_width = image_width,
             .image_height = image_height,
-            .horizontal = horizontal,
-            .vertical = vertical,
+            .horizontal = horizontal.data,
+            .vertical = vertical.data,
             .lower_left_corner = lower_left_corner,
-            .origin = o,
-            .samples_per_pixel = config.samples_per_pixel orelse default_samples_per_pixel,
-            .max_bounce = config.max_bounce orelse default_max_bounce,
+            .origin = config.origin,
+            .samples_per_pixel = config.samples_per_pixel,
+            .max_bounce = config.max_bounce,
         },
     };
 }
@@ -105,13 +95,13 @@ pub fn disableSprint(self: *Camera) void {
 }
 
 /// Move camera
-pub fn translate(self: *Camera, delta_time: f32, by: Vec3) void {
-    const norm = za.Vec3.norm(by);
-    const delta = self.orientation().rotateVec(za.Vec3.scale(norm, delta_time * self.movement_speed));
-    if (std.math.isNan(delta[0])) {
+pub fn translate(self: *Camera, delta_time: f32, by: za.Vec3) void {
+    const norm = by.norm();
+    const delta = self.orientation().rotateVec(norm.scale(delta_time * self.movement_speed));
+    if (std.math.isNan(delta.x())) {
         return;
     }
-    self.d_camera.origin += delta;
+    self.d_camera.origin += delta.data;
     self.propogatePitchChange();
 }
 
@@ -121,10 +111,10 @@ pub fn turnPitch(self: *Camera, angle: f32) void {
     const i = std.math.sin(h_angle);
     const w = std.math.cos(h_angle);
     const prev_pitch = self.pitch;
-    self.pitch = self.pitch.mult(za.Quat{ .w = w, .x = i, .y = 0.0, .z = 0.0 });
+    self.pitch = self.pitch.mul(za.Quat{ .w = w, .x = i, .y = 0.0, .z = 0.0 });
 
     // arbitrary restrict rotation so that camera does not become inversed
-    const euler_x_rotation = self.pitch.extractRotation()[0];
+    const euler_x_rotation = self.pitch.extractEulerAngles().x();
     if (std.math.fabs(euler_x_rotation) >= 90) {
         self.pitch = prev_pitch;
     }
@@ -136,12 +126,12 @@ pub fn turnYaw(self: *Camera, angle: f32) void {
     const h_angle = angle * self.turn_rate;
     const j = std.math.sin(h_angle);
     const w = std.math.cos(h_angle);
-    self.yaw = self.yaw.mult(za.Quat{ .w = w, .x = 0.0, .y = j, .z = 0.0 });
+    self.yaw = self.yaw.mul(za.Quat{ .w = w, .x = 0.0, .y = j, .z = 0.0 });
     self.propogatePitchChange();
 }
 
 pub inline fn orientation(self: Camera) za.Quat {
-    return self.yaw.mult(self.pitch).norm();
+    return self.yaw.mul(self.pitch).norm();
 }
 
 /// Get byte size of Camera's GPU data 
@@ -149,22 +139,23 @@ pub inline fn getGpuSize() u64 {
     return @sizeOf(Device);
 }
 
-inline fn forwardDir(self: Camera) Vec3 {
-    return za.Vec3.norm(self.orientation().rotateVec(za.Vec3.new(0, 0, 1)));
+inline fn forwardDir(self: Camera) za.Vec3 {
+    return self.orientation().rotateVec(za.Vec3.new(0, 0, 1));
 }
 
 inline fn propogatePitchChange(self: *Camera) void {
     const forward = self.forwardDir();
-    const right = za.Vec3.norm(za.Vec3.cross(za.Vec3.up(), forward));
-    const up = za.Vec3.norm(za.Vec3.cross(forward, right));
+    const right = za.Vec3.up().cross(forward).norm();
+    const up = forward.cross(right).norm();
 
-    self.d_camera.horizontal = za.Vec3.scale(right, self.viewport_width);
-    self.d_camera.vertical = za.Vec3.scale(up, self.viewport_height);
+    self.d_camera.horizontal = right.scale(self.viewport_width).data;
+    self.d_camera.vertical = up.scale(self.viewport_height).data;
     self.d_camera.lower_left_corner = self.lowerLeftCorner();
 }
 
 inline fn lowerLeftCorner(self: Camera) Vec3 {
-    return self.d_camera.origin - za.Vec3.scale(self.d_camera.horizontal, 0.5) - za.Vec3.scale(self.d_camera.vertical, 0.5) - self.forwardDir();
+    const @"0.5" = @splat(3, @as(f32, 0.5));
+    return self.d_camera.origin - self.d_camera.horizontal * @"0.5" - self.d_camera.vertical * @"0.5" - self.forwardDir().data;
 }
 
 // uniform Camera, binding: 1

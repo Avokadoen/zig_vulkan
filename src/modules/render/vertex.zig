@@ -16,16 +16,16 @@ pub const Vertex = struct {
 pub inline fn createDefaultVertexBuffer(ctx: Context, command_pool: vk.CommandPool) !GpuBufferMemory {
     var vertices = [_]Vertex{
         Vertex{
-            .pos = za.Vec2.new(-0.5, -0.5),
+            .pos = za.Vec2.new(-0.5, -0.5).data,
         }, // bottom left
         Vertex{
-            .pos = za.Vec2.new(0.5, -0.5),
+            .pos = za.Vec2.new(0.5, -0.5).data,
         }, // bottom right
         Vertex{
-            .pos = za.Vec2.new(-0.5, 0.5),
+            .pos = za.Vec2.new(-0.5, 0.5).data,
         }, // top left
         Vertex{
-            .pos = za.Vec2.new(0.5, 0.5),
+            .pos = za.Vec2.new(0.5, 0.5).data,
         }, // top right
     };
     const buffer_size = @sizeOf(Vertex) * vertices.len;
