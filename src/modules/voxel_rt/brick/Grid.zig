@@ -157,6 +157,7 @@ pub fn deinit(self: BrickGrid) void {
         thread.join();
     }
 
+    self.allocator.free(self.state.higher_order_grid);
     self.allocator.free(self.state.grid);
     self.allocator.free(self.state.bricks);
     self.allocator.free(self.state.material_indices);
