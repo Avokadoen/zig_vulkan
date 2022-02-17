@@ -9,7 +9,6 @@ const AtomicCount = std.atomic.Atomic(usize);
 
 const State = @import("State.zig");
 const Worker = @import("Worker.zig");
-const BucketStorage = @import("BucketStorage.zig");
 
 pub const Config = struct {
     // Default value is all bricks
@@ -41,8 +40,10 @@ workers: []Worker,
 ///     - dim_z:     how many bricks *maps* (or chunks) in z dimension
 ///     - config:    config options for the brickmap
 pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Config) !BrickGrid {
+    std.debug.assert(config.workers_count > 0);
+    std.debug.assert(dim_x * dim_y * dim_z > 0);
+
     const brick_count = dim_x * dim_y * dim_z;
-    std.debug.assert(brick_count != 0);
 
     const higher_dim_x = @intToFloat(f64, dim_x) * 0.25;
     const higher_dim_y = @intToFloat(f64, dim_y) * 0.25;
@@ -97,9 +98,6 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         break :blk biggest_axis * 8;
     };
 
-    const bucket_storage = try BucketStorage.init(allocator, brick_alloc, material_indices.len);
-    errdefer bucket_storage.deinit();
-
     const state = try allocator.create(State);
     errdefer allocator.destroy(state);
     state.* = .{
@@ -107,7 +105,6 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         .higher_order_grid = higher_order_grid,
         .grid = grid,
         .bricks = bricks,
-        .bucket_storage = bucket_storage,
         .material_indices = material_indices,
         .active_bricks = AtomicCount.init(0),
         .device_state = State.Device{
@@ -124,14 +121,13 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         },
     };
 
-    std.debug.assert(config.workers_count > 0);
     var workers = try allocator.alloc(Worker, config.workers_count);
     errdefer allocator.free(workers);
 
     var worker_threads = try allocator.alloc(std.Thread, config.workers_count);
     errdefer allocator.free(worker_threads);
     for (worker_threads) |*thread, i| {
-        workers[i] = try Worker.init(i, state, allocator, 4096);
+        workers[i] = try Worker.init(i, config.workers_count, state, allocator, 4096);
         thread.* = try std.Thread.spawn(.{}, Worker.work, .{&workers[i]});
     }
 
@@ -152,17 +148,17 @@ pub fn deinit(self: BrickGrid) void {
         worker.*.shutdown.store(true, .SeqCst);
         worker.wake_event.signal();
     }
-    // wait for each worker thread to finish
-    for (self.worker_threads) |thread| {
-        thread.join();
-    }
 
     self.allocator.free(self.state.higher_order_grid);
     self.allocator.free(self.state.grid);
     self.allocator.free(self.state.bricks);
     self.allocator.free(self.state.material_indices);
-    self.state.bucket_storage.deinit();
     self.allocator.destroy(self.state);
+
+    // wait for each worker thread to finish
+    for (self.worker_threads) |thread| {
+        thread.join();
+    }
 
     self.allocator.free(self.worker_threads);
     self.allocator.free(self.workers);

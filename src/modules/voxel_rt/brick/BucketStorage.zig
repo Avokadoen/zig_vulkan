@@ -2,6 +2,18 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 
+const IndexMapContext = struct {
+    pub fn hash(self: IndexMapContext, key: usize) u64 {
+        _ = self;
+        return @intCast(u64, key);
+    }
+    pub fn eql(self: IndexMapContext, a: usize, b: usize) bool {
+        _ = self;
+        return a == b;
+    }
+};
+const IndexMap = std.HashMap(usize, Index, IndexMapContext, 80);
+
 /// used by the brick grid to pack brick material data closer to eachother
 pub const Bucket = struct {
     pub const Entry = packed struct {
@@ -44,27 +56,21 @@ pub const Index = packed struct {
 
 allocator: Allocator,
 // used to find the active bucked for a given brick index
-index: []?Index,
+index: IndexMap,
 buckets: [bucket_count]Bucket,
-
-// TODO: a single mutex for all of the storage is wastefull,
-//       previous attempts to split this causes race conditions in getBrickBucket
-//       which causes bricks to be assigned color data of other bricks so for now we
-//       hack it and use a single mutex :(
-storage_mutex: std.Thread.Mutex,
 
 /// init a bucket storage.
 /// caller must make sure to call deinit
-pub fn init(allocator: Allocator, brick_count: usize, material_indices_len: usize) !BucketStorage {
-    std.debug.assert(material_indices_len > 2024);
+pub fn init(allocator: Allocator, start_index: u32, brick_count: usize, material_indices_len: usize) !BucketStorage {
+    std.debug.assert(material_indices_len > 2048);
 
-    const segments_2048 = try std.math.divFloor(usize, material_indices_len, 2048);
+    const segments_2048 = std.math.divFloor(usize, material_indices_len, 2048) catch unreachable;
     var bucket_mutexes: [bucket_count]std.Thread.Mutex = undefined;
     std.mem.set(std.Thread.Mutex, bucket_mutexes[0..], .{});
 
     var buckets: [bucket_count]Bucket = undefined;
 
-    var prev_indices: u32 = 0;
+    var prev_indices: u32 = start_index;
     { // init first bucket
         // zig fmt: off
         buckets[0] = Bucket{ 
@@ -109,15 +115,14 @@ pub fn init(allocator: Allocator, brick_count: usize, material_indices_len: usiz
         }
     }
 
-    const index = try allocator.alloc(?Index, brick_count);
-    errdefer allocator.free(index);
-    std.mem.set(?Index, index, null);
+    var index = IndexMap.init(allocator);
+    errdefer index.deinit();
+    try index.ensureUnusedCapacity(@intCast(u32, brick_count));
 
     return BucketStorage{
         .allocator = allocator,
         .index = index,
         .buckets = buckets,
-        .storage_mutex = .{},
     };
 }
 
@@ -126,11 +131,9 @@ pub fn init(allocator: Allocator, brick_count: usize, material_indices_len: usiz
 // that a new bucket is required
 // returns error if there is no more buckets of appropriate size
 pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_offset: usize, material_indices: []u8, was_set: bool) !Bucket.Entry {
-    self.storage_mutex.lock();
-    defer self.storage_mutex.unlock();
 
     // check if brick already have assigned a bucket
-    if (self.index[brick_index]) |index| {
+    if (self.index.get(brick_index)) |index| {
         const bucket_size = try std.math.powi(usize, 2, min_2_pow_size + index.bucket_index);
         // if bucket size is sufficent, or if voxel was set before, no change required
         if (bucket_size > voxel_offset or was_set) {
@@ -150,10 +153,10 @@ pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_offset: us
                 const bucket = self.buckets[i].free.pop();
                 const oc_index = try self.buckets[i].appendOccupied(bucket);
 
-                self.index[brick_index] = Index{
+                try self.index.put(brick_index, Index{
                     .bucket_index = @intCast(u6, i),
                     .element_index = @intCast(u26, oc_index),
-                };
+                });
 
                 // copy material indices to new bucket
                 std.mem.copy(u8, material_indices[bucket.start_index..], material_indices[previous_bucket.start_index .. previous_bucket.start_index + bucket_size]);
@@ -167,10 +170,11 @@ pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_offset: us
                 const take = bucket.free.pop();
                 const oc_index = try bucket.appendOccupied(take);
 
-                self.index[brick_index] = Index{
+                try self.index.put(brick_index, Index{
                     .bucket_index = @intCast(u6, i),
                     .element_index = @intCast(u26, oc_index),
-                };
+                });
+
                 return take;
             }
         }
@@ -179,8 +183,8 @@ pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_offset: us
     return BucketRequestError.NoSuitableBucket; // no free bucket big enough to store brick color data
 }
 
-pub inline fn deinit(self: BucketStorage) void {
-    self.allocator.free(self.index);
+pub inline fn deinit(self: *BucketStorage) void {
+    self.index.deinit();
     for (self.buckets) |bucket| {
         bucket.free.deinit();
         bucket.occupied.deinit();

@@ -55,8 +55,6 @@ higher_order_grid: []u8,
 grid: []GridEntry,
 bricks: []Brick,
 
-// TODO: ability to configure a size less then all voxels in the grid
-bucket_storage: BucketStorage,
 // assigned through a bucket
 material_indices: []u8,
 

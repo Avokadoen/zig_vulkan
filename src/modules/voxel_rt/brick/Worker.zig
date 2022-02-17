@@ -1,7 +1,10 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Mutex = std.Thread.Mutex;
+const Condition = std.Thread.Condition;
 
 const State = @import("State.zig");
+const BucketStorage = @import("BucketStorage.zig");
 
 /// Parallel workers that does insert and remove work on the grid
 /// each worker get one kernel thread
@@ -30,23 +33,48 @@ allocator: Allocator,
 id: usize,
 grid: *State,
 
-wake_mutex: std.Thread.Mutex,
-wake_event: std.Thread.Condition,
+// used to assign material index to a given brick
+bucket_storage: BucketStorage,
 
-job_mutex: std.Thread.Mutex,
+wake_mutex: Mutex,
+wake_event: Condition,
+
+job_mutex: Mutex,
 job_queue: *JobQueue,
 
 sleep: Signal,
 shutdown: Signal,
 
-pub fn init(id: usize, grid: *State, allocator: Allocator, initial_queue_capacity: usize) !Worker {
+pub fn init(id: usize, worker_count: usize, grid: *State, allocator: Allocator, initial_queue_capacity: usize) !Worker {
+    std.debug.assert(worker_count != 0);
+
     var job_queue = try allocator.create(JobQueue);
     job_queue.* = JobQueue.init(allocator);
+    errdefer job_queue.deinit();
     try job_queue.ensureTotalCapacity(initial_queue_capacity);
+
+    // calculate bricks in this worker's bucket
+    const bucket_storage = blk: {
+        var brick_count = std.math.divFloor(usize, grid.bricks.len, worker_count) catch unreachable; // assert(worker_count != 0)
+        var material_count = std.math.divFloor(usize, grid.material_indices.len, worker_count) catch unreachable;
+        // buckets store values segmenting using 2048 to split into different sizes. We rem 2048 to get a accurate length of the bucket
+        material_count -= material_count % 2048;
+        const start_index = @intCast(u32, material_count * id);
+
+        if (id == worker_count - 1) {
+            brick_count += std.math.rem(usize, grid.bricks.len, worker_count) catch unreachable;
+            material_count += std.math.rem(usize, grid.material_indices.len, worker_count) catch unreachable;
+        }
+
+        break :blk try BucketStorage.init(allocator, start_index, brick_count, material_count);
+    };
+    errdefer bucket_storage.deinit();
+
     return Worker{
         .allocator = allocator,
         .id = id,
         .grid = grid,
+        .bucket_storage = bucket_storage,
         .wake_mutex = .{},
         .wake_event = .{},
         .job_mutex = .{},
@@ -89,6 +117,7 @@ pub fn work(self: *Worker) void {
 
     self.job_queue.deinit();
     self.allocator.destroy(self.job_queue);
+    self.bucket_storage.deinit();
 }
 
 // perform a insert in the grid
@@ -126,7 +155,7 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
         const voxels_in_brick = countBits(brick.solid_mask, 512);
         // TODO: error
         // std.debug.print("heisenbug\n", .{});
-        const bucket = self.grid.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.grid.*.material_indices, was_set) catch {
+        const bucket = self.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.grid.*.material_indices, was_set) catch {
             std.debug.panic("at {d} {d} {d} no more buckets", .{ insert_job.x, insert_job.y, insert_job.z });
         };
         brick.material_index = bucket.start_index;
