@@ -11,10 +11,6 @@ const vk_utils = @import("vk_utils.zig");
 const validation_layer = @import("validation_layer.zig");
 const Context = @import("Context.zig");
 
-/// Type that share ABI with vkPhysicalDeviceFeatures and that has all values
-/// assigned to vkFALSE by default.
-pub const FalsePhysicalDeviceFeatures = vk_utils.GetFalseFeatures(vk.PhysicalDeviceFeatures);
-
 pub const QueueFamilyIndices = struct {
     compute: u32,
     graphics: u32,
@@ -202,7 +198,7 @@ pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
         };
     }
 
-    const device_features = FalsePhysicalDeviceFeatures{};
+    const device_features = vk.PhysicalDeviceFeatures{};
 
     const validation_layer_info = try validation_layer.Info.init(allocator, ctx.vkb);
 

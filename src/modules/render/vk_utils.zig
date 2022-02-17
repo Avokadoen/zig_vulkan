@@ -11,27 +11,6 @@ const dispatch = @import("dispatch.zig");
 
 const Context = @import("Context.zig");
 
-// TODO: support mixed types
-/// Construct VkPhysicalDeviceFeatures type with VkFalse as default field value 
-pub fn GetFalseFeatures(comptime T: type) type {
-    const features_type_info = @typeInfo(T).Struct;
-    var new_type_fields: [features_type_info.fields.len]std.builtin.TypeInfo.StructField = undefined;
-
-    inline for (features_type_info.fields) |field, i| {
-        new_type_fields[i] = field;
-        new_type_fields[i].default_value = @intCast(u32, vk.FALSE);
-    }
-
-    return @Type(.{
-        .Struct = .{
-            .layout = .Auto,
-            .fields = &new_type_fields,
-            .decls = &[_]std.builtin.TypeInfo.Declaration{},
-            .is_tuple = false,
-        },
-    });
-}
-
 /// Check if extensions are available on host instance
 pub fn isInstanceExtensionsPresent(allocator: Allocator, vkb: dispatch.Base, target_extensions: []const [*:0]const u8) !bool {
     // query extensions available
