@@ -145,8 +145,14 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 pub fn deinit(self: BrickGrid) void {
     // signal each worker to finish
     for (self.workers) |*worker| {
+        // signal shutdown
         worker.*.shutdown.store(true, .SeqCst);
+        // signal worker to wake up from idle state
         worker.wake_event.signal();
+    }
+    // wait for each worker thread to finish
+    for (self.worker_threads) |thread| {
+        thread.join();
     }
 
     self.allocator.free(self.state.higher_order_grid);
@@ -154,11 +160,6 @@ pub fn deinit(self: BrickGrid) void {
     self.allocator.free(self.state.bricks);
     self.allocator.free(self.state.material_indices);
     self.allocator.destroy(self.state);
-
-    // wait for each worker thread to finish
-    for (self.worker_threads) |thread| {
-        thread.join();
-    }
 
     self.allocator.free(self.worker_threads);
     self.allocator.free(self.workers);

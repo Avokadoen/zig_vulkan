@@ -95,7 +95,7 @@ pub fn registerJob(self: *Worker, job: Job) void {
 }
 
 pub fn work(self: *Worker) void {
-    while (self.shutdown.load(.SeqCst) == false) {
+    life_loop: while (self.shutdown.load(.SeqCst) == false) {
         self.job_mutex.lock();
         if (self.sleep.load(.SeqCst) == false) {
             var i: usize = 0;
@@ -108,6 +108,8 @@ pub fn work(self: *Worker) void {
                 }
                 self.job_mutex.lock();
                 i += 1;
+
+                if (self.shutdown.load(.SeqCst)) break :life_loop;
                 if (self.sleep.load(.SeqCst)) break :work_loop;
             }
         }
