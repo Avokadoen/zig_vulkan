@@ -5,6 +5,7 @@ const ArrayList = std.ArrayList;
 
 const glfw = @import("glfw");
 const za = @import("zalgebra");
+const tracy = @import("tracy.zig");
 
 const render = @import("modules/render.zig");
 const swapchain = render.swapchain;
@@ -37,6 +38,9 @@ var mouse_delta = za.Vec2.zero();
 var push_terrain_changes = false;
 
 pub fn main() anyerror!void {
+    const main_zone = tracy.ZoneN(@src(), "main");
+    defer main_zone.End();
+
     const stderr = std.io.getStdErr().writer();
 
     // create a gpa with default configuration

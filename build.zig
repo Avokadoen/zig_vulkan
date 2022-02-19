@@ -10,6 +10,7 @@ const ArrayList = std.ArrayList;
 const vkgen = @import("deps/vulkan-zig/generator/index.zig");
 const glfw = @import("deps/mach-glfw/build.zig");
 const stbi = @import("deps/stb_image/build.zig");
+const tracy = @import("deps/Zig-Tracy/build_tracy.zig");
 
 // TODO: this file could use a refactor pass or atleast some comments to make it more readable
 
@@ -216,6 +217,12 @@ pub fn build(b: *Builder) void {
 
     exe.step.dependOn(&shader_comp.step);
     exe.step.dependOn(&shader_move_step.step);
+
+    // link tracy if in debug mode and nothing else is specified
+    const no_tracy = b.option(bool, "no-tracy", "Force build to omit tracy") orelse false;
+    const tracy_enabled = !no_tracy and exe.build_mode == .Debug;
+    var tracy_path = if (tracy_enabled) @as([]const u8, "deps/Zig-Tracy/tracy-0.7.8") else null;
+    tracy.link(b, exe, tracy_path);
 
     const asset_move = AssetMoveStep.init(b) catch unreachable;
     exe.step.dependOn(&asset_move.step);
