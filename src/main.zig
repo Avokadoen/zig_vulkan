@@ -38,6 +38,8 @@ var mouse_delta = za.Vec2.zero();
 var push_terrain_changes = false;
 
 pub fn main() anyerror!void {
+    tracy.InitThread();
+    tracy.SetThreadName("main thread");
     const main_zone = tracy.ZoneN(@src(), "main");
     defer main_zone.End();
 
@@ -154,7 +156,7 @@ pub fn main() anyerror!void {
     }
 
     // generate terrain on CPU
-    try terrain.generateCpu(6, allocator, 420, 4, 20, &grid);
+    try terrain.generateCpu(4, allocator, 420, 4, 20, &grid);
     grid.wakeWorkers();
 
     var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, &draw_api.state.subo.ubo.my_texture, .{});
@@ -165,6 +167,7 @@ pub fn main() anyerror!void {
 
     var prev_frame = std.time.milliTimestamp();
     try window.setInputMode(glfw.Window.InputMode.cursor, glfw.Window.InputModeCursor.disabled);
+
     // Loop until the user closes the window
     while (!window.shouldClose()) {
         const current_frame = std.time.milliTimestamp();
@@ -210,6 +213,8 @@ pub fn main() anyerror!void {
         // Poll for and process events
         try glfw.pollEvents();
         prev_frame = current_frame;
+
+        tracy.FrameMark();
     }
 }
 

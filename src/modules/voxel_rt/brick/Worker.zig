@@ -3,6 +3,8 @@ const Allocator = std.mem.Allocator;
 const Mutex = std.Thread.Mutex;
 const Condition = std.Thread.Condition;
 
+const tracy = @import("../../../tracy.zig");
+
 const State = @import("State.zig");
 const BucketStorage = @import("BucketStorage.zig");
 
@@ -95,6 +97,23 @@ pub fn registerJob(self: *Worker, job: Job) void {
 }
 
 pub fn work(self: *Worker) void {
+    // do not create a thread name if it will not be used
+    const c_thread_name: [:0]const u8 = blk: {
+        if (tracy.enabled) {
+            // create thread name
+            var thread_name_buffer: [32:0]u8 = undefined;
+            const thread_name = std.fmt.bufPrint(thread_name_buffer[0..], "worker {d}", .{self.id}) catch std.debug.panic("failed to print thread name", .{});
+            break :blk std.cstr.addNullByte(self.allocator, thread_name) catch std.debug.panic("failed to add '0' sentinel", .{});
+        } else {
+            break :blk "worker";
+        }
+    };
+    defer if (tracy.enabled) self.allocator.free(c_thread_name);
+
+    tracy.SetThreadName(c_thread_name);
+    const worker_zone = tracy.ZoneN(@src(), "grid work");
+    defer worker_zone.End();
+
     life_loop: while (self.shutdown.load(.SeqCst) == false) {
         self.job_mutex.lock();
         if (self.sleep.load(.SeqCst) == false) {

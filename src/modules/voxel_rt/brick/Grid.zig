@@ -20,7 +20,7 @@ pub const Config = struct {
     min_point: [3]f32 = [_]f32{ 0.0, 0.0, 0.0 },
     scale: f32 = 1.0,
     material_indices_per_brick: usize = 256,
-    workers_count: usize = 6,
+    workers_count: usize = 4,
 };
 
 const BrickGrid = @This();

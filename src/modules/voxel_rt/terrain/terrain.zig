@@ -4,6 +4,8 @@ const Allocator = std.mem.Allocator;
 const za = @import("zalgebra");
 const stbi = @import("stbi");
 
+const tracy = @import("../../../tracy.zig");
+
 const render = @import("../../render.zig");
 const Context = render.Context;
 
@@ -39,6 +41,9 @@ const Material = enum(u8) {
 
 /// populate a voxel grid with perlin noise terrain on CPU
 pub fn generateCpu(comptime threads_count: usize, allocator: Allocator, seed: u64, scale: f32, ocean_level: usize, grid: *BrickGrid) !void { // TODO: return Terrain
+    const zone = tracy.ZoneNS(@src(), "generate terrain chunk", 1);
+    defer zone.End();
+
     const perlin = blk: {
         var p = try allocator.create(Perlin);
         p.* = Perlin.init(seed);
@@ -59,7 +64,11 @@ pub fn generateCpu(comptime threads_count: usize, allocator: Allocator, seed: u6
 
     // create our gen function
     const insert_job_gen_fn = struct {
-        pub fn insert(thread_id: usize, perlin_: *const Perlin, voxel_dim_: [3]f32, point_mod_: [3]f32, ocean_level_v: usize, grid_: *BrickGrid) void {
+        pub fn insert(thread_id: usize, thread_name: [:0]const u8, perlin_: *const Perlin, voxel_dim_: [3]f32, point_mod_: [3]f32, ocean_level_v: usize, grid_: *BrickGrid) void {
+            tracy.SetThreadName(thread_name.ptr);
+            const gen_zone = tracy.ZoneN(@src(), "terrain gen");
+            defer gen_zone.End();
+
             const thread_segment_size: f32 = if (threads_count == 0) voxel_dim_[0] else @ceil(voxel_dim_[0] / @intToFloat(f32, threads_count));
 
             const terrain_max_height: f32 = voxel_dim_[1] * 0.5;
@@ -96,8 +105,6 @@ pub fn generateCpu(comptime threads_count: usize, allocator: Allocator, seed: u6
         }
     }.insert;
 
-    const m = std.time.milliTimestamp();
-
     if (threads_count == 0) {
         // run on main thread
         @call(.{ .modifier = .always_inline }, insert_job_gen_fn, .{ 0, perlin, voxel_dim, point_mod, ocean_level, grid });
@@ -105,15 +112,14 @@ pub fn generateCpu(comptime threads_count: usize, allocator: Allocator, seed: u6
         var threads: [threads_count]std.Thread = undefined;
         comptime var i = 0;
         inline while (i < threads_count) : (i += 1) {
-            threads[i] = try std.Thread.spawn(.{}, insert_job_gen_fn, .{ i, perlin, voxel_dim, point_mod, ocean_level, grid });
+            const thread_name = std.fmt.comptimePrint("terrain thread {d}", .{i});
+            threads[i] = try std.Thread.spawn(.{}, insert_job_gen_fn, .{ i, thread_name, perlin, voxel_dim, point_mod, ocean_level, grid });
         }
         i = 0;
         inline while (i < threads_count) : (i += 1) {
             threads[i].join();
         }
     }
-
-    std.debug.print("completed terrain tuff in {d} seconds\n", .{@divFloor(std.time.milliTimestamp() - m, std.time.ms_per_s)});
 }
 
 // generate terrain, utilize gpu to generate the inital height map
