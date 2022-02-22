@@ -4,6 +4,8 @@ const vk = @import("vulkan");
 const vk_utils = @import("vk_utils.zig");
 const Context = @import("Context.zig");
 
+const tracy = @import("../../tracy.zig");
+
 /// Vulkan buffer abstraction
 const GpuBufferMemory = @This();
 
@@ -65,7 +67,10 @@ pub fn copy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, size: v
 }
 
 /// Transfer data from host to device
-pub fn transferToDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, data: []const T) !void {
+pub fn transferToDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, offset: usize, data: []const T) !void {
+    const transfer_zone = tracy.ZoneN(@src(), @src().fn_name);
+    defer transfer_zone.End();
+
     // transfer empty data slice is NOP
     if (data.len <= 0) return;
 
@@ -73,8 +78,9 @@ pub fn transferToDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, 
     if (self.size < size) {
         return error.InsufficentBufferSize; // size of buffer is less than data being transfered
     }
-    var gpu_mem = try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, size, .{});
-    const gpu_mem_start = @ptrToInt(gpu_mem);
+
+    const gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, size, .{})) orelse return error.FailedToMapGPUMem;
+    const gpu_mem_start = @ptrToInt(gpu_mem) + offset * @sizeOf(T);
     for (data) |element, i| {
         const mem_location = gpu_mem_start + i * @sizeOf(T);
         var ptr = @intToPtr(*T, mem_location);
@@ -85,7 +91,10 @@ pub fn transferToDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, 
 }
 
 pub fn transferFromDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, data: []T) !void {
-    var gpu_mem = try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, self.size, .{});
+    const transfer_zone = tracy.ZoneN(@src(), @src().fn_name);
+    defer transfer_zone.End();
+
+    const gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, self.size, .{})) orelse return error.FailedToMapGPUMem;
     const gpu_mem_start = @ptrToInt(gpu_mem);
 
     var i: usize = 0;
@@ -100,8 +109,10 @@ pub fn transferFromDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type
 /// Transfer data from host to device, allows you to send multiple chunks of data in the same buffer.
 /// offsets are index offsets, not byte offsets
 pub fn batchTransfer(self: *GpuBufferMemory, ctx: Context, comptime T: type, offsets: []usize, datas: [][]const T) !void {
-    if (offsets.len == 0) return;
+    const transfer_zone = tracy.ZoneN(@src(), @src().fn_name);
+    defer transfer_zone.End();
 
+    if (offsets.len == 0) return;
     if (offsets.len != datas.len) {
         return error.OffsetDataMismatch; // inconsistent offset and data size indicate a programatic error
     }
@@ -112,7 +123,7 @@ pub fn batchTransfer(self: *GpuBufferMemory, ctx: Context, comptime T: type, off
         return error.InsufficentBufferSize; // size of buffer is less than data being transfered
     }
 
-    var gpu_mem = try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, size, .{});
+    const gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, self.size, .{})) orelse return error.FailedToMapGPUMem;
     const gpu_mem_start = @ptrToInt(gpu_mem);
     for (offsets) |offset, i| {
         const byte_offset = offset * @sizeOf(T);

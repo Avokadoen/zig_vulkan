@@ -35,8 +35,6 @@ var call_yaw = false;
 var call_pitch = false;
 var mouse_delta = za.Vec2.zero();
 
-var push_terrain_changes = false;
-
 pub fn main() anyerror!void {
     tracy.InitThread();
     tracy.SetThreadName("main thread");
@@ -196,12 +194,7 @@ pub fn main() anyerror!void {
             mouse_delta.data[0] = 0;
             mouse_delta.data[1] = 0;
         }
-        if (push_terrain_changes) {
-            try voxel_rt.debugUpdateTerrain(ctx);
-            push_terrain_changes = false;
-            const origin = voxel_rt.camera.d_camera.origin;
-            std.debug.print("camera: {d} {d} {d}\n", .{ origin[0], origin[1], origin[2] });
-        }
+        try voxel_rt.updateGridDelta(ctx);
 
         { // render stuff
             try voxel_rt.compute(ctx);
@@ -246,7 +239,6 @@ fn keyInputFn(event: input.KeyEvent) void {
                 call_translate += 1;
                 camera_translate.data[1] -= 1;
             },
-            input.Key.t => push_terrain_changes = !push_terrain_changes,
             input.Key.escape => window.setShouldClose(true),
             else => {},
         }

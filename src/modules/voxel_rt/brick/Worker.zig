@@ -160,8 +160,9 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
 
         const higher_grid_index = higherGridAt(self.grid.*.device_state, insert_job.x, actual_y, insert_job.z);
         self.grid.higher_order_grid_mutex.lock();
-        defer self.grid.higher_order_grid_mutex.unlock();
-        self.grid.higher_order_grid[higher_grid_index] += 1;
+        self.grid.*.higher_order_grid[higher_grid_index] += 1;
+        self.grid.higher_order_grid_mutex.unlock();
+        self.grid.higher_order_grid_delta.registerDelta(higher_grid_index);
     }
 
     const brick_index = @intCast(usize, entry.data);
@@ -183,15 +184,20 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
 
         // move all color data
         const bits_before = countBits(brick.solid_mask, nth_bit);
+        const new_voxel_material_index = brick.material_index + bits_before;
         if (was_set == false) {
             var i: u32 = voxels_in_brick;
             while (i > bits_before) : (i -= 1) {
                 const base_index = brick.material_index + i;
                 self.grid.*.material_indices[base_index] = self.grid.material_indices[base_index - 1];
             }
+            // we need to sync all of the voxel material data between current and last brick voxel since it has been shifted
+            self.grid.material_indices_deltas[self.id].registerDelta(brick.material_index + voxels_in_brick);
         }
 
-        self.grid.*.material_indices[brick.material_index + bits_before] = insert_job.material_index;
+        // always register that the current voxel material has changed
+        self.grid.material_indices_deltas[self.id].registerDelta(new_voxel_material_index);
+        self.grid.*.material_indices[new_voxel_material_index] = insert_job.material_index;
 
         // material indices is stored as 32bit on GPU and 8bit on CPU
         // we divide by for to store the correct *GPU* index
@@ -202,8 +208,12 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
     brick.solid_mask |= @as(i512, 1) << nth_bit;
 
     // store changes
-    self.grid.*.bricks[@intCast(usize, entry.data)] = brick;
+    const bricks_index = @intCast(usize, entry.data);
+    self.grid.*.bricks[bricks_index] = brick;
+    self.grid.bricks_deltas[self.id].registerDelta(bricks_index);
+
     self.grid.*.grid[grid_index] = entry;
+    self.grid.grid_deltas[self.id].registerDelta(grid_index);
 }
 
 // TODO: test

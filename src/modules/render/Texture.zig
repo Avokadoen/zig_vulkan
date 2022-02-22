@@ -45,7 +45,7 @@ pub fn init(ctx: Context, command_pool: vk.CommandPool, comptime layout: vk.Imag
         .host_coherent_bit = true,
     });
     defer staging_buffer.deinit(ctx);
-    try staging_buffer.transferToDevice(ctx, T, config.data);
+    try staging_buffer.transferToDevice(ctx, T, 0, config.data);
 
     const image = blk: {
         // TODO: make sure we use correct usage bits https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkImageUsageFlagBits.html

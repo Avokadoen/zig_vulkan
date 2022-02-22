@@ -100,7 +100,30 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 
     const state = try allocator.create(State);
     errdefer allocator.destroy(state);
+
+    // initialize all delta structures
+    // these are used to track changes that should be pushed to GPU
+    var higher_order_grid_delta = try allocator.create(State.DeviceDataDelta);
+    errdefer allocator.destroy(higher_order_grid_delta);
+    higher_order_grid_delta.* = State.DeviceDataDelta.init();
+
+    var grid_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
+    errdefer allocator.free(grid_deltas);
+    std.mem.set(State.DeviceDataDelta, grid_deltas, State.DeviceDataDelta.init());
+
+    var bricks_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
+    errdefer allocator.free(bricks_deltas);
+    std.mem.set(State.DeviceDataDelta, bricks_deltas, State.DeviceDataDelta.init());
+
+    var material_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
+    errdefer allocator.free(material_indices_deltas);
+    std.mem.set(State.DeviceDataDelta, material_indices_deltas, State.DeviceDataDelta.init());
+
     state.* = .{
+        .higher_order_grid_delta = higher_order_grid_delta,
+        .grid_deltas = grid_deltas,
+        .bricks_deltas = bricks_deltas,
+        .material_indices_deltas = material_indices_deltas,
         .higher_order_grid_mutex = .{},
         .higher_order_grid = higher_order_grid,
         .grid = grid,
@@ -159,10 +182,16 @@ pub fn deinit(self: BrickGrid) void {
     self.allocator.free(self.state.grid);
     self.allocator.free(self.state.bricks);
     self.allocator.free(self.state.material_indices);
-    self.allocator.destroy(self.state);
+
+    self.allocator.destroy(self.state.higher_order_grid_delta);
+    self.allocator.free(self.state.grid_deltas);
+    self.allocator.free(self.state.bricks_deltas);
+    self.allocator.free(self.state.material_indices_deltas);
 
     self.allocator.free(self.worker_threads);
     self.allocator.free(self.workers);
+
+    self.allocator.destroy(self.state);
 }
 
 /// Force workers to sleep.
