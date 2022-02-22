@@ -70,8 +70,9 @@ pub fn init(allocator: Allocator, start_index: u32, brick_count: usize, material
 
     var buckets: [bucket_count]Bucket = undefined;
 
-    var prev_indices: u32 = start_index;
+    var cursor: u32 = start_index;
     { // init first bucket
+        const inital_index = cursor;
         // zig fmt: off
         buckets[0] = Bucket{ 
             .free = try ArrayList(Bucket.Entry).initCapacity(allocator, 2 * segments_2048), 
@@ -80,14 +81,18 @@ pub fn init(allocator: Allocator, start_index: u32, brick_count: usize, material
         // zig fmt: on
         const bucket_size = try std.math.powi(u32, 2, min_2_pow_size);
         var j: usize = 0;
-        while (j < 2 * segments_2048) : (j += 1) {
-            buckets[0].free.appendAssumeCapacity(.{ .start_index = prev_indices });
-            prev_indices += bucket_size;
+        while (j < segments_2048) : (j += 1) {
+            buckets[0].free.appendAssumeCapacity(.{ .start_index = cursor });
+            cursor += bucket_size;
+            buckets[0].free.appendAssumeCapacity(.{ .start_index = cursor });
+            cursor += 2048 - bucket_size;
         }
+        cursor = inital_index + bucket_size * 2;
     }
     {
         comptime var i: usize = 1;
         inline while (i < buckets.len - 1) : (i += 1) {
+            const inital_index = cursor;
             // zig fmt: off
             buckets[i] = Bucket{ 
                 .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments_2048), 
@@ -97,9 +102,10 @@ pub fn init(allocator: Allocator, start_index: u32, brick_count: usize, material
             const bucket_size = try std.math.powi(u32, 2, min_2_pow_size + i);
             var j: usize = 0;
             while (j < segments_2048) : (j += 1) {
-                buckets[i].free.appendAssumeCapacity(.{ .start_index = prev_indices });
-                prev_indices += bucket_size;
+                buckets[i].free.appendAssumeCapacity(.{ .start_index = cursor });
+                cursor += 2048;
             }
+            cursor = inital_index + bucket_size;
         }
         // zig fmt: off
         buckets[buckets.len-1] = Bucket{ 
@@ -109,9 +115,13 @@ pub fn init(allocator: Allocator, start_index: u32, brick_count: usize, material
         // zig fmt: on
         const bucket_size = 512;
         var j: usize = 0;
-        while (j < segments_2048 * 3) : (j += 1) {
-            buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = prev_indices });
-            prev_indices += bucket_size;
+        while (j < segments_2048) : (j += 1) {
+            buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = cursor });
+            cursor += bucket_size;
+            buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = cursor });
+            cursor += bucket_size;
+            buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = cursor });
+            cursor += 2048 - bucket_size * 2;
         }
     }
 
