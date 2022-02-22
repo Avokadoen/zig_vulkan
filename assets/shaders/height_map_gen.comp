@@ -12,7 +12,6 @@ layout(binding = 1) uniform GenerateData {
 
 void main() {	
     const vec2 image_size = imageSize(img_output);
-    vec3 gradiant; // discarded gradiant
     const vec2 offset = gen_data.offset_scale.xy * image_size;
     const vec3 pos = vec3(((gl_GlobalInvocationID.xy + offset) / image_size) * gen_data.offset_scale.w, 0);
     const float noise = cnoise(pos);
