@@ -109,9 +109,9 @@ pub fn main() anyerror!void {
     draw_api.handleWindowResize(window);
     defer draw_api.noHandleWindowResize(window);
 
-    var grid = try BrickGrid.init(allocator, 64, 64, 64, .{
-        .min_point = [3]f32{ -32, -32, -32 },
-        .material_indices_per_brick = 128,
+    var grid = try BrickGrid.init(allocator, 32, 32, 32, .{
+        .min_point = [3]f32{ -16, -16, -16 },
+        .material_indices_per_brick = 256,
     });
     defer grid.deinit();
 

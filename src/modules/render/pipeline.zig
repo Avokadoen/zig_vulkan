@@ -302,8 +302,6 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
         };
 
         pub const Pipeline = struct {
-            const Self = @This();
-
             allocator: Allocator,
 
             render_pass: vk.RenderPass,
@@ -340,7 +338,7 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
 
             /// Draw using pipeline
             /// transfer_fn can be used to update any relevant storage buffers or other data that are timing critical according to rendering
-            pub fn draw(self: *Self, ctx: Context, comptime transfer_fn: fn (image_index: usize, user_ctx: anytype) void, user_ctx: anytype) !void {
+            pub fn draw(self: *Pipeline, ctx: Context, comptime transfer_fn: fn (image_index: usize, user_ctx: anytype) void, user_ctx: anytype) !void {
                 const state = struct {
                     var current_frame: usize = 0;
                 };
@@ -426,7 +424,7 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
 
             /// Used to update the pipeline according to changes in the window spec
             /// This functions should only be called from the main thread (see glfwGetFramebufferSize)
-            fn rescalePipeline(self: *Self, allocator: Allocator, ctx: Context) !void {
+            fn rescalePipeline(self: *Pipeline, allocator: Allocator, ctx: Context) !void {
                 var window_size = try ctx.window_ptr.*.getFramebufferSize();
                 while (window_size.width == 0 or window_size.height == 0) {
                     window_size = try ctx.window_ptr.*.getFramebufferSize();
@@ -464,7 +462,7 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                 try self.recordCmdBufferFn(ctx, self);
             }
 
-            pub fn deinit(self: Self, ctx: Context) void {
+            pub fn deinit(self: Pipeline, ctx: Context) void {
                 self.wait_idle(ctx);
                 {
                     var i: usize = 0;
@@ -499,7 +497,7 @@ pub fn PipelineTypesFn(comptime RecordCommandUserDataType: type) type {
                 self.allocator.free(self.pipelines);
             }
 
-            inline fn wait_idle(self: Self, ctx: Context) void {
+            inline fn wait_idle(self: Pipeline, ctx: Context) void {
                 _ = ctx.vkd.waitForFences(ctx.logical_device, @intCast(u32, self.in_flight_fences.len), self.in_flight_fences.ptr, vk.TRUE, std.math.maxInt(u64)) catch |err| {
                     std.io.getStdErr().writer().print("waiting for fence failed: {}", .{err}) catch |e| switch (e) {
                         else => {}, // Discard print errors
@@ -570,8 +568,6 @@ pub const ComputeDrawPipeline = struct {
         storage_sizes: []const u64,
     };
 
-    const Self = @This();
-
     allocator: Allocator,
 
     pipeline_layout: vk.PipelineLayout,
@@ -598,8 +594,8 @@ pub const ComputeDrawPipeline = struct {
 
     /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
     /// texture should have a lifetime atleast the length of comptute pipeline
-    pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_texture: *Texture, state_config: StateConfigs) !Self {
-        var self: Self = undefined;
+    pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_texture: *Texture, state_config: StateConfigs) !ComputeDrawPipeline {
+        var self: ComputeDrawPipeline = undefined;
         self.allocator = allocator;
         self.target_texture = target_texture;
 
@@ -833,7 +829,7 @@ pub const ComputeDrawPipeline = struct {
         try self.recordCommands(ctx);
 
         // zig fmt: off
-        return Self{ 
+        return ComputeDrawPipeline{ 
             .allocator = self.allocator, 
             .pipeline_layout = self.pipeline_layout, 
             .pipeline = self.pipeline, 
@@ -850,7 +846,7 @@ pub const ComputeDrawPipeline = struct {
     }
 
     // TODO: sync
-    pub fn compute(self: Self, ctx: Context) !void {
+    pub fn compute(self: ComputeDrawPipeline, ctx: Context) !void {
         self.wait_idle(ctx);
 
         const wait_stages = vk.PipelineStageFlags{ .compute_shader_bit = true };
@@ -875,7 +871,7 @@ pub const ComputeDrawPipeline = struct {
 
     /// Used to update the pipeline according to changes in the window spec
     /// This functions should only be called from the main thread (see glfwGetFramebufferSize)
-    fn rescalePipeline(self: *Self, ctx: Context) !void {
+    fn rescalePipeline(self: *ComputeDrawPipeline, ctx: Context) !void {
         var window_size = try ctx.window_ptr.*.getFramebufferSize();
         while (window_size.width == 0 or window_size.height == 0) {
             window_size = try ctx.window_ptr.*.getFramebufferSize();
@@ -895,7 +891,7 @@ pub const ComputeDrawPipeline = struct {
         try self.recordCommands(ctx);
     }
 
-    pub fn deinit(self: Self, ctx: Context) void {
+    pub fn deinit(self: ComputeDrawPipeline, ctx: Context) void {
         self.wait_idle(ctx);
 
         ctx.vkd.destroyFence(ctx.logical_device, self.in_flight_fence, null);
@@ -920,7 +916,7 @@ pub const ComputeDrawPipeline = struct {
     }
 
     /// Wait for fence to signal complete 
-    pub inline fn wait_idle(self: Self, ctx: Context) void {
+    pub inline fn wait_idle(self: ComputeDrawPipeline, ctx: Context) void {
         _ = ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.in_flight_fence), vk.TRUE, std.math.maxInt(u64)) catch |err| {
             // ctx.writers.stderr.print("waiting for fence failed: {}", .{err}) catch |e| switch (e) {
             //     else => {}, // Discard print errors ...
@@ -929,7 +925,7 @@ pub const ComputeDrawPipeline = struct {
         };
     }
 
-    inline fn recordCommands(self: Self, ctx: Context) !void {
+    inline fn recordCommands(self: ComputeDrawPipeline, ctx: Context) !void {
         const image_use = Texture.getImageTransitionBarrier(self.target_texture.image, .general, .general);
         const command_begin_info = vk.CommandBufferBeginInfo{
             .flags = .{},

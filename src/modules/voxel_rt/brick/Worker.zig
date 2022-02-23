@@ -172,11 +172,11 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
     const nth_bit = brickAt(insert_job.x, actual_y, insert_job.z);
 
     // set the color information for the given voxel
-    { // shift material position voxels that are after this voxel
+    {
+        // shift material position voxels that are after this voxel
         const was_set: bool = (brick.solid_mask & @as(i512, 1) << nth_bit) != 0;
         const voxels_in_brick = countBits(brick.solid_mask, 512);
         // TODO: error
-        // std.debug.print("heisenbug\n", .{});
         const bucket = self.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.grid.*.material_indices, was_set) catch {
             std.debug.panic("at {d} {d} {d} no more buckets", .{ insert_job.x, insert_job.y, insert_job.z });
         };
