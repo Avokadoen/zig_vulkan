@@ -73,19 +73,16 @@ pub fn init(allocator: Allocator, start_index: u32, brick_count: usize, material
     var cursor: u32 = start_index;
     { // init first bucket
         const inital_index = cursor;
-        // zig fmt: off
-        buckets[0] = Bucket{ 
-            .free = try ArrayList(Bucket.Entry).initCapacity(allocator, 2 * segments_2048), 
-            .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048) 
+        buckets[0] = Bucket{
+            .free = try ArrayList(Bucket.Entry).initCapacity(allocator, 2 * segments_2048),
+            .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048),
         };
-        // zig fmt: on
         const bucket_size = try std.math.powi(u32, 2, min_2_pow_size);
         var j: usize = 0;
         while (j < segments_2048) : (j += 1) {
             buckets[0].free.appendAssumeCapacity(.{ .start_index = cursor });
-            cursor += bucket_size;
-            buckets[0].free.appendAssumeCapacity(.{ .start_index = cursor });
-            cursor += 2048 - bucket_size;
+            buckets[0].free.appendAssumeCapacity(.{ .start_index = cursor + bucket_size });
+            cursor += 2048;
         }
         cursor = inital_index + bucket_size * 2;
     }
@@ -93,12 +90,10 @@ pub fn init(allocator: Allocator, start_index: u32, brick_count: usize, material
         comptime var i: usize = 1;
         inline while (i < buckets.len - 1) : (i += 1) {
             const inital_index = cursor;
-            // zig fmt: off
-            buckets[i] = Bucket{ 
-                .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments_2048), 
-                .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048 / 2) 
+            buckets[i] = Bucket{
+                .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments_2048),
+                .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048 / 2),
             };
-            // zig fmt: on
             const bucket_size = try std.math.powi(u32, 2, min_2_pow_size + i);
             var j: usize = 0;
             while (j < segments_2048) : (j += 1) {
@@ -107,21 +102,18 @@ pub fn init(allocator: Allocator, start_index: u32, brick_count: usize, material
             }
             cursor = inital_index + bucket_size;
         }
-        // zig fmt: off
-        buckets[buckets.len-1] = Bucket{ 
-            .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments_2048 * 3), 
-            .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048) 
+
+        buckets[buckets.len - 1] = Bucket{
+            .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments_2048 * 3),
+            .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048),
         };
-        // zig fmt: on
         const bucket_size = 512;
         var j: usize = 0;
         while (j < segments_2048) : (j += 1) {
             buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = cursor });
-            cursor += bucket_size;
-            buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = cursor });
-            cursor += bucket_size;
-            buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = cursor });
-            cursor += 2048 - bucket_size * 2;
+            buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = cursor + bucket_size });
+            buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = cursor + bucket_size * 2 });
+            cursor += 2048;
         }
     }
 
@@ -141,7 +133,6 @@ pub fn init(allocator: Allocator, start_index: u32, brick_count: usize, material
 // that a new bucket is required
 // returns error if there is no more buckets of appropriate size
 pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_offset: usize, material_indices: []u8, was_set: bool) !Bucket.Entry {
-
     // check if brick already have assigned a bucket
     if (self.index.get(brick_index)) |index| {
         const bucket_size = try std.math.powi(usize, 2, min_2_pow_size + index.bucket_index);

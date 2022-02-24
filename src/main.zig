@@ -111,7 +111,7 @@ pub fn main() anyerror!void {
 
     var grid = try BrickGrid.init(allocator, 32, 32, 32, .{
         .min_point = [3]f32{ -16, -16, -16 },
-        .material_indices_per_brick = 256,
+        .material_indices_per_brick = 128,
     });
     defer grid.deinit();
 
@@ -193,6 +193,7 @@ pub fn main() anyerror!void {
             call_pitch = false;
             mouse_delta.data[0] = 0;
             mouse_delta.data[1] = 0;
+            // try voxel_rt.debugUpdateTerrain(ctx);
         }
         try voxel_rt.updateGridDelta(ctx);
 

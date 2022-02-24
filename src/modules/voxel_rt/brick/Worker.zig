@@ -59,7 +59,7 @@ pub fn init(id: usize, worker_count: usize, grid: *State, allocator: Allocator, 
     const bucket_storage = blk: {
         var brick_count = std.math.divFloor(usize, grid.bricks.len, worker_count) catch unreachable; // assert(worker_count != 0)
         var material_count = std.math.divFloor(usize, grid.material_indices.len, worker_count) catch unreachable;
-        // buckets store values segmenting using 2048 to split into different sizes. We rem 2048 to get a accurate length of the bucket
+        // buckets store values segmenting using 2048 to split into different sizes. We modulo 2048 to get an accurate length of the bucket
         material_count -= material_count % 2048;
         const start_index = @intCast(u32, material_count * id);
 
@@ -191,13 +191,14 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
                 const base_index = brick.material_index + i;
                 self.grid.*.material_indices[base_index] = self.grid.material_indices[base_index - 1];
             }
-            // we need to sync all of the voxel material data between current and last brick voxel since it has been shifted
-            self.grid.material_indices_deltas[self.id].registerDelta(brick.material_index + voxels_in_brick);
         }
+        self.grid.*.material_indices[new_voxel_material_index] = insert_job.material_index;
 
         // always register that the current voxel material has changed
-        self.grid.material_indices_deltas[self.id].registerDelta(new_voxel_material_index);
-        self.grid.*.material_indices[new_voxel_material_index] = insert_job.material_index;
+        const delta_from = new_voxel_material_index;
+        // we need to sync all of the voxel material data between current and last brick voxel since it has been shifted
+        const delta_to = if (was_set) new_voxel_material_index else brick.material_index + voxels_in_brick;
+        self.grid.material_indices_deltas[self.id].registerDeltaRange(delta_from, delta_to);
 
         // material indices is stored as 32bit on GPU and 8bit on CPU
         // we divide by for to store the correct *GPU* index

@@ -115,11 +115,20 @@ pub fn debugMoveCamera(self: *VoxelRT, ctx: Context) !void {
     try self.comp_pipeline.uniform_buffers[0].transferToDevice(ctx, Camera.Device, 0, camera_data[0..]);
 }
 
+/// Push all terrain data to GPU
+pub fn debugUpdateTerrain(self: *VoxelRT, ctx: Context) !void {
+    try self.comp_pipeline.storage_buffers[4].transferToDevice(ctx, u8, 0, self.brick_grid.state.higher_order_grid);
+    try self.comp_pipeline.storage_buffers[5].transferToDevice(ctx, GridState.GridEntry, 0, self.brick_grid.state.grid);
+    try self.comp_pipeline.storage_buffers[6].transferToDevice(ctx, GridState.Brick, 0, self.brick_grid.state.bricks);
+    try self.comp_pipeline.storage_buffers[7].transferToDevice(ctx, u8, 0, self.brick_grid.state.material_indices);
+}
+
 /// update grid device data based on changes 
 pub fn updateGridDelta(self: *VoxelRT, ctx: Context) !void {
     {
         const transfer_zone = tracy.ZoneN(@src(), "higher order transfer");
         defer transfer_zone.End();
+
         var delta = self.brick_grid.state.higher_order_grid_delta;
         delta.mutex.lock();
         defer delta.mutex.unlock();

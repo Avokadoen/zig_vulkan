@@ -45,6 +45,21 @@ pub const DeviceDataDelta = struct {
             self.to = delta_index + 1;
         }
     }
+
+    /// register a delta range
+    pub fn registerDeltaRange(self: *DeviceDataDelta, from: usize, to: usize) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        if (self.state == .active) {
+            self.from = std.math.min(self.from, from);
+            self.to = std.math.max(self.to, to + 1);
+        } else {
+            self.state = .active;
+            self.from = from;
+            self.to = to + 1;
+        }
+    }
 };
 
 // uniform binding: 2
