@@ -79,7 +79,7 @@ pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Conf
             .lower_left_corner = lower_left_corner,
             .origin = config.origin,
             .samples_per_pixel = config.samples_per_pixel,
-            .max_bounce = config.max_bounce,
+            .max_bounce = config.max_bounce + 1, // + 1 so that max bounce of 0 means only primary ray for the user of API ...
         },
     };
 }

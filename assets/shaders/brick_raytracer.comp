@@ -54,13 +54,22 @@ layout(binding = 1) uniform Camera {
 Ray CameraGetRay(float u, float v);
 
 layout (binding = 2) uniform BrickGridState {
+    // how many voxels in each axis
+    uint voxel_dim_x;
+    uint voxel_dim_y;
+    uint voxel_dim_z;
+    // how many bricks in each axis
     uint dim_x;
     uint dim_y;
     uint dim_z;
+    // how many higher order entries in each axis
     uint higher_dim_x;
     uint higher_dim_y;
     uint higher_dim_z;
-    uint padding; // not in use
+
+    uint padding1; // not in use
+    uint padding2; // not in use
+
     uint max_ray_iteration;
 
     // min point *and* base t value
@@ -212,7 +221,6 @@ vec3 RayColor(Ray r) {
     HitRecord shadow_hit;
     Ray shadow_ray;
 
-    // TODO
     vec3 hit_v_min;
     while (loop_count < camera.max_bounce && GridHit(current_ray, 0.00001, infinity, hit_v_min, hit)){         
         loop_count += 1;
@@ -283,14 +291,14 @@ bool isInBrick(ivec3 point) {
         && point.z >= 0 && point.z < 8;
 }
 
-void defineStepAndAxis(vec3 dir, vec3 fposition, ivec3 position, vec3 delta, int axis_value, inout ivec3 pos_step, inout vec3 axis_t) {
+float defineAxis(vec3 dir, vec3 fposition, ivec3 position, vec3 delta, int axis_value, inout ivec3 pos_step) {
     const int a = axis_value;
     if (dir[a] < 0) {
         pos_step[a] = -1;
-        axis_t[a] = ((fposition[a] - position[a]) * delta[a]);
+        return ((fposition[a] - float(position[a])) * delta[a]);
     } else {
         pos_step[a] = 1;
-        axis_t[a] = ((position[a] + 1 - fposition[a]) * delta[a]);
+        return ((float(position[a]) + 1 - fposition[a]) * delta[a]);
     }
 }
 
@@ -321,12 +329,9 @@ bool HigherGridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRec
 
     ivec3 pos_step;
     vec3 axis_t;
-    // define x
-    defineStepAndAxis(r.direction, fposition, position, delta, 0, pos_step, axis_t);
-    // define y
-    defineStepAndAxis(r.direction, fposition, position, delta, 1, pos_step, axis_t);
-    // define z
-    defineStepAndAxis(r.direction, fposition, position, delta, 2, pos_step, axis_t);
+    axis_t[0] = defineAxis(r.direction, fposition, position, delta, 0, pos_step);
+    axis_t[1] = defineAxis(r.direction, fposition, position, delta, 1, pos_step);
+    axis_t[2] = defineAxis(r.direction, fposition, position, delta, 2, pos_step);
 
     // DDA loop
     float t_value = 0;
@@ -374,26 +379,22 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
     const vec3 fposition = RayAt(r, hit_grid.t) - g_min;
     ivec3 position = ivec3(fposition);
 
-    // TODO: infinity cause tearing in the image?
     // in the event of a axis of direction is 0 we get infinity according to 
     // float specification IEEE 754 (division by 0 is defined as resulting in infinity value)
     const vec3 delta = abs(1.0 / r.direction);
 
     ivec3 pos_step;
     vec3 axis_t;
-    // define x
-    defineStepAndAxis(r.direction, fposition, position, delta, 0, pos_step, axis_t);
-    // define y
-    defineStepAndAxis(r.direction, fposition, position, delta, 1, pos_step, axis_t);
-    // define z
-    defineStepAndAxis(r.direction, fposition, position, delta, 2, pos_step, axis_t);
+    axis_t[0] = defineAxis(r.direction, fposition, position, delta, 0, pos_step);
+    axis_t[1] = defineAxis(r.direction, fposition, position, delta, 1, pos_step);
+    axis_t[2] = defineAxis(r.direction, fposition, position, delta, 2, pos_step);
 
     // DDA loop
     float t_value = 0;
     while (isInGrid(position)) { 
-        uint index = position.x + brick_grid.dim_x * (position.z + brick_grid.dim_z * position.y);
-        uint bits = grid_entries[index].bits;
-        uint entry_type = bitfieldExtract(bits, 0, 2);
+        const uint index = position.x + brick_grid.dim_x * (position.z + brick_grid.dim_z * position.y);
+        const uint bits = grid_entries[index].bits;
+        const uint entry_type = bitfieldExtract(bits, 0, 2);
         if(bits != 0) { // TODO: actually check type
             vec3 brick_min = g_min + position;
             const uint brick_index = bitfieldExtract(bits, 2, 30);
@@ -428,12 +429,9 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
 
     ivec3 pos_step;
     vec3 axis_t;
-    // define x
-    defineStepAndAxis(r.direction, fposition, position, delta, 0, pos_step, axis_t);
-    // define y
-    defineStepAndAxis(r.direction, fposition, position, delta, 1, pos_step, axis_t);
-    // define z
-    defineStepAndAxis(r.direction, fposition, position, delta, 2, pos_step, axis_t);
+    axis_t[0] = defineAxis(r.direction, fposition, position, delta, 0, pos_step);
+    axis_t[1] = defineAxis(r.direction, fposition, position, delta, 1, pos_step);
+    axis_t[2] = defineAxis(r.direction, fposition, position, delta, 2, pos_step);
 
     // DDA loop
     float t_value = 0;
@@ -484,7 +482,6 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
 
             return true;
         }
-        
         const int y_smallest = int(axis_t.y < axis_t.x && axis_t.y < axis_t.z);
         const int z_smallest = 2 * int(axis_t.z < axis_t.x && axis_t.z < axis_t.y);
         // set axis, 0 if x smallest, 1 if y is smallest or 2 if z is smallest

@@ -64,13 +64,22 @@ pub const DeviceDataDelta = struct {
 
 // uniform binding: 2
 pub const Device = extern struct {
+    // how many voxels in each axis
+    voxel_dim_x: u32,
+    voxel_dim_y: u32,
+    voxel_dim_z: u32,
+    // how many bricks in each axis
     dim_x: u32,
     dim_y: u32,
     dim_z: u32,
+    // how many higher order entries in each axis
     higher_dim_x: u32,
     higher_dim_y: u32,
     higher_dim_z: u32,
-    padding: u32,
+
+    padding1: u32, // not in use
+    padding2: u32, // not in use
+
     max_ray_iteration: u32,
     // holds the min point, and the base t advance
     // base t advance dictate the minimum stretch of distance a ray can go for each iteration
