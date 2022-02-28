@@ -148,7 +148,7 @@ layout (std430, binding = 6) buffer DielectricBuffer {
 
 bool HigherGridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit);
 bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit);
-bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout vec3 brick_position, inout HitRecord hit);
+bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, ivec3 pos_step, inout float t_value, inout vec3 axis_t, inout ivec3 position, inout HitRecord hit) ;
 
 // slab hit tests
 bool FastInstersect(vec3 p0, vec3 p1, Ray r);
@@ -279,16 +279,10 @@ bool isInHigherGrid(ivec3 point) {
         && point.z >= 0 && point.z < brick_grid.higher_dim_z;
 }
 
-bool isInGrid(ivec3 point) {
-    return point.x >= 0 && point.x < brick_grid.dim_x 
-        && point.y >= 0 && point.y < brick_grid.dim_y
-        && point.z >= 0 && point.z < brick_grid.dim_z;
-}
-
-bool isInBrick(ivec3 point) {
-    return point.x >= 0 && point.x < 8 
-        && point.y >= 0 && point.y < 8
-        && point.z >= 0 && point.z < 8;
+bool isInVoxelGrid(ivec3 point) {
+    return point.x >= 0 && point.x < brick_grid.voxel_dim_x 
+        && point.y >= 0 && point.y < brick_grid.voxel_dim_y
+        && point.z >= 0 && point.z < brick_grid.voxel_dim_z;
 }
 
 float defineAxis(vec3 dir, vec3 fposition, ivec3 position, vec3 delta, int axis_value, inout ivec3 pos_step) {
@@ -362,6 +356,7 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
     // min point *and* base t value
     const vec3 g_min = brick_grid.min_point_base_t.xyz;
     const vec3 g_max = brick_grid.max_point_scale.xyz - vec3(0.001);
+    const float scale = brick_grid.max_point_scale.w * 0.125;
     const float b_base_t = brick_grid.min_point_base_t.w;
    
     float t_grid_max = t_max;
@@ -375,8 +370,8 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
 
     // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
     
-    /// get position in grid space from global position
-    const vec3 fposition = RayAt(r, hit_grid.t) - g_min;
+    /// get position in voxel grid space from global position
+    const vec3 fposition = (RayAt(r, hit_grid.t) - g_min) * 8;
     ivec3 position = ivec3(fposition);
 
     // in the event of a axis of direction is 0 we get infinity according to 
@@ -391,53 +386,46 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
 
     // DDA loop
     float t_value = 0;
-    while (isInGrid(position)) { 
-        const uint index = position.x + brick_grid.dim_x * (position.z + brick_grid.dim_z * position.y);
+    while (isInVoxelGrid(position)) { 
+        const ivec3 brick_position = position / ivec3(8);
+        const uint index = brick_position.x + brick_grid.dim_x * (brick_position.z + brick_grid.dim_z * brick_position.y);
         const uint bits = grid_entries[index].bits;
         const uint entry_type = bitfieldExtract(bits, 0, 2);
         if(bits != 0) { // TODO: actually check type
-            vec3 brick_min = g_min + position;
             const uint brick_index = bitfieldExtract(bits, 2, 30);
-            hit.t = fma(t_value, brick_grid.max_point_scale.w, hit_grid.t);
+            hit.t = hit_grid.t;
 
             // check if ray hits any voxel in the brick
-            if (BrickHit(r, t_min, t_grid_max, delta, bricks[brick_index], brick_min, hit)) {
-                hit_min = brick_min;
+            if (BrickHit(r, t_min, t_grid_max, delta, bricks[brick_index], pos_step, t_value, axis_t, position, hit)) {
+                hit_min = fma(vec3(position), vec3(scale), g_min);
                 return true;
             }
         }
 
-        const int y_smallest = int(axis_t.y < axis_t.x && axis_t.y < axis_t.z);
-        const int z_smallest = 2 * int(axis_t.z < axis_t.x && axis_t.z < axis_t.y);
-        // set axis, 0 if x smallest, 1 if y is smallest or 2 if z is smallest
-        const int axis = y_smallest + z_smallest;
-        
-        t_value = axis_t[axis];
-        position[axis] += pos_step[axis];
-        axis_t[axis] += delta[axis];
+        ivec3 nth_brick = position / ivec3(8);
+        while (nth_brick == brick_position) {
+            const int y_smallest = int(axis_t.y < axis_t.x && axis_t.y < axis_t.z);
+            const int z_smallest = 2 * int(axis_t.z < axis_t.x && axis_t.z < axis_t.y);
+            // set axis, 0 if x smallest, 1 if y is smallest or 2 if z is smallest
+            const int axis = y_smallest + z_smallest;
+            
+            t_value = axis_t[axis];
+            position[axis] += pos_step[axis];
+            axis_t[axis] += delta[axis];
+            nth_brick[axis] = position[axis] / 8;
+        }
     }   
 
     return false;
 }
 
-bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout vec3 brick_position, inout HitRecord hit) {
-    // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
-    /// get position in brick space from global position
-    /// caller should make sure that p is in fact inside the grid
-    const vec3 fposition = (RayAt(r, hit.t + 0.0001) - brick_position) * 8;
-    ivec3 position = ivec3(fposition);
-
-    ivec3 pos_step;
-    vec3 axis_t;
-    axis_t[0] = defineAxis(r.direction, fposition, position, delta, 0, pos_step);
-    axis_t[1] = defineAxis(r.direction, fposition, position, delta, 1, pos_step);
-    axis_t[2] = defineAxis(r.direction, fposition, position, delta, 2, pos_step);
-
-    // DDA loop
-    float t_value = 0;
+bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, ivec3 pos_step, inout float t_value, inout vec3 axis_t, inout ivec3 position, inout HitRecord hit) {
+    ivec3 nth_brick = position / 8;
+    const ivec3 start_brick = nth_brick;
     // TODO:  && t_value <= t_max
-    while (isInBrick(position)) { 
-        const int bit_offset = position.x + 8 * (position.z + 8 * position.y);
+    while (nth_brick == start_brick && all(greaterThanEqual(position, ivec3(0)))) { 
+        const ivec3 brick_pos = position - (start_brick * 8);
+        const int bit_offset = brick_pos.x + 8 * (brick_pos.z + 8 * brick_pos.y);
         const int mask_index = bit_offset / 32;
         const int mask_offset = bit_offset % 32;
         const int set_bit = bitfieldExtract(brick.solid_mask[mask_index], mask_offset, 1);
@@ -465,13 +453,11 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
                 // perform material lookup
                 hit.index = bitfieldExtract(material_indices[material_index_index + brick.material_index], material_index_bit_offset, 8);
             }
-            const float scale = brick_grid.max_point_scale.w * 0.125;
-            hit.t = fma(t_value, scale, hit.t);
+            hit.t += t_value * 0.125;
             hit.point = RayAt(r, hit.t - faccuracy);
-
             { // normal calculation
-                brick_position += (position * scale);
-                const vec3 center = brick_position + vec3(scale * 0.5); // 0.125 / 2
+                const float scale = brick_grid.max_point_scale.w * 0.125;
+                const vec3 center = brick_grid.min_point_base_t.xyz + vec3(position) * scale + vec3(scale * 0.5); // 0.125 / 2
                 vec3 normal = hit.point - center;
                 const vec3 abs_normal = abs(normal);
                 normal.x = normal.x * int(abs_normal.x >= abs_normal.y && abs_normal.x >= abs_normal.z);
@@ -482,6 +468,7 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
 
             return true;
         }
+
         const int y_smallest = int(axis_t.y < axis_t.x && axis_t.y < axis_t.z);
         const int z_smallest = 2 * int(axis_t.z < axis_t.x && axis_t.z < axis_t.y);
         // set axis, 0 if x smallest, 1 if y is smallest or 2 if z is smallest
@@ -490,6 +477,7 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
         t_value = axis_t[axis];
         position[axis] += pos_step[axis];
         axis_t[axis] += delta[axis];
+        nth_brick[axis] = position[axis] / 8;
     }   
 
     return false;
