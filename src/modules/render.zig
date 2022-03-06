@@ -1,13 +1,9 @@
 /// library with utility wrappers around vulkan functions
-const pipelines = @import("render/pipeline.zig");
-
-pub const ComputeDrawPipeline = pipelines.ComputeDrawPipeline;
 pub const Context = @import("render/Context.zig");
-pub const PipelineTypesFn = pipelines.PipelineTypesFn;
 pub const GpuBufferMemory = @import("render/GpuBufferMemory.zig");
-// TODO: don't directly export tb data
-pub const Vertex = vertex.Vertex;
 
+pub const pipeline = @import("render/pipeline.zig");
+pub const Vertex = vertex.Vertex;
 pub const descriptor = @import("render/descriptor.zig");
 pub const consts = @import("render/consts.zig");
 pub const dispatch = @import("render/dispatch.zig");

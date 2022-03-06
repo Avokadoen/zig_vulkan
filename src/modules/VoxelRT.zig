@@ -8,6 +8,7 @@ const Vec2 = @Vector(2, f32);
 
 const render = @import("../modules/render.zig");
 const Context = render.Context;
+const ComputeDrawPipeline = render.pipeline.ComputeDrawPipeline;
 
 pub const Camera = @import("voxel_rt/Camera.zig");
 pub const BrickGrid = @import("voxel_rt/brick/Grid.zig");
@@ -27,12 +28,12 @@ const VoxelRT = @This();
 
 camera: Camera,
 brick_grid: *BrickGrid,
-comp_pipeline: render.ComputeDrawPipeline,
+comp_pipeline: ComputeDrawPipeline,
 
 /// init VoxelRT, api takes ownership of the brick_grid
 pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, target_texture: *render.Texture, config: Config) !VoxelRT {
     var comp_pipeline = blk: {
-        const Compute = render.ComputeDrawPipeline;
+        const Compute = ComputeDrawPipeline;
         const uniform_sizes = [_]u64{
             @sizeOf(Camera.Device),
             @sizeOf(GridState.Device),

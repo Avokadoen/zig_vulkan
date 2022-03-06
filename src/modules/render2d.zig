@@ -20,8 +20,9 @@ const bruteForceFn = knapsack.InitBruteForceWidthHeightFn(false).bruteForceWidth
 const DB = @import("render2d/DB.zig");
 const util_types = @import("render2d/util_types.zig");
 
-const Pipeline = render.PipelineTypesFn(void).Pipeline;
-const PipelineBuilder = render.PipelineTypesFn(void).PipelineBuilder;
+const pipeline2d = @import("render2d/pipeline.zig");
+const Pipeline = pipeline2d.PipelineTypesFn(void).Pipeline;
+const PipelineBuilder = pipeline2d.PipelineTypesFn(void).PipelineBuilder;
 
 // Exterior public types
 pub const Rectangle = util_types.Rectangle;
