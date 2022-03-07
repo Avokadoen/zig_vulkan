@@ -20,9 +20,7 @@ const bruteForceFn = knapsack.InitBruteForceWidthHeightFn(false).bruteForceWidth
 const DB = @import("render2d/DB.zig");
 const util_types = @import("render2d/util_types.zig");
 
-const pipeline2d = @import("render2d/pipeline.zig");
-const Pipeline = pipeline2d.PipelineTypesFn(void).Pipeline;
-const PipelineBuilder = pipeline2d.PipelineTypesFn(void).PipelineBuilder;
+const Pipeline = @import("render2d/Pipeline.zig");
 
 // Exterior public types
 pub const Rectangle = util_types.Rectangle;
@@ -262,11 +260,7 @@ pub const InitializedApi = struct {
         api.state.swapchain.* = self.swapchain;
         api.state.view.* = self.view;
         api.state.subo.* = try descriptor.SyncDescriptor.init(desc_config);
-        api.state.pipeline = blk: {
-            var pipe_builder = try PipelineBuilder.init(self.allocator, self.ctx, api.state.swapchain, @intCast(u32, self.db_ptr.*.len), api.state.view, api.state.subo, .{}, recordGfxCmdBuffers);
-            try pipe_builder.addPipeline("../../render2d_sprite.vert.spv", "../../render2d_common.frag.spv");
-            break :blk (try pipe_builder.build());
-        };
+        api.state.pipeline = try Pipeline.init(self.allocator, self.ctx, api.state.swapchain, @intCast(u32, self.db_ptr.*.len), api.state.view, api.state.subo);
         try api.state.db_ptr.generateUvBuffer(mega_uvs);
 
         for (api.state.swapchain.images) |_, i| {
@@ -374,7 +368,7 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
 fn CommonDrawAPI(comptime Self: type) type {
     return struct {
         // deinitialize sprite library
-        pub fn deinit(self: Self) void {
+        pub fn deinit(self: *Self) void {
             self.state.allocator.free(self.state.mega_image.data);
             self.state.pipeline.deinit(self.state.ctx);
             self.state.subo.deinit(self.state.ctx);
@@ -421,47 +415,5 @@ pub fn framebufferSizeCallbackFn(window: glfw.Window, width: u32, height: u32) v
     // get application pointer data, and set rescale to true to signal pipeline rescale
     if (window.getUserPointer(bool)) |rescale| {
         rescale.* = true;
-    }
-}
-
-/// record default commands for the render2D pipeline
-fn recordGfxCmdBuffers(ctx: render.Context, pipeline: *Pipeline) dispatch.BeginCommandBufferError!void {
-    const image = pipeline.sync_descript.ubo.my_texture.image;
-    const image_use = render.Texture.getImageTransitionBarrier(image, .general, .general);
-    const clear_color = [_]vk.ClearColorValue{
-        .{
-            .float_32 = [_]f32{ 0.0, 0.0, 0.0, 1.0 },
-        },
-    };
-    for (pipeline.command_buffers) |command_buffer, i| {
-        const command_begin_info = vk.CommandBufferBeginInfo{
-            .flags = .{},
-            .p_inheritance_info = null,
-        };
-        try ctx.vkd.beginCommandBuffer(command_buffer, &command_begin_info);
-
-        // make sure compute shader complet writer before beginning render pass
-        ctx.vkd.cmdPipelineBarrier(command_buffer, image_use.transition.src_stage, image_use.transition.dst_stage, vk.DependencyFlags{}, 0, undefined, 0, undefined, 1, @ptrCast([*]const vk.ImageMemoryBarrier, &image_use.barrier));
-        const render_begin_info = vk.RenderPassBeginInfo{
-            .render_pass = pipeline.render_pass,
-            .framebuffer = pipeline.framebuffers[i],
-            .render_area = .{ .offset = .{ .x = 0, .y = 0 }, .extent = pipeline.sc_data.extent },
-            .clear_value_count = clear_color.len,
-            .p_clear_values = @ptrCast([*]const vk.ClearValue, &clear_color),
-        };
-        ctx.vkd.cmdSetViewport(command_buffer, 0, pipeline.view.viewport.len, &pipeline.view.viewport);
-        ctx.vkd.cmdSetScissor(command_buffer, 0, pipeline.view.scissor.len, &pipeline.view.scissor);
-        ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.graphics, pipeline.pipelines[0]);
-        ctx.vkd.cmdBeginRenderPass(command_buffer, &render_begin_info, vk.SubpassContents.@"inline");
-
-        const buffer_offsets = [_]vk.DeviceSize{0};
-        ctx.vkd.cmdBindVertexBuffers(command_buffer, 0, 1, @ptrCast([*]const vk.Buffer, &pipeline.vertex_buffer.buffer), @ptrCast([*]const vk.DeviceSize, &buffer_offsets));
-        ctx.vkd.cmdBindIndexBuffer(command_buffer, pipeline.indices_buffer.buffer, 0, .uint32);
-        // TODO: Race Condition: sync_descript is not synced here
-        ctx.vkd.cmdBindDescriptorSets(command_buffer, .graphics, pipeline.pipeline_layout, 0, 1, @ptrCast([*]const vk.DescriptorSet, &pipeline.sync_descript.ubo.descriptor_sets[i]), 0, undefined);
-
-        ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, pipeline.instance_count, 0, 0, 0);
-        ctx.vkd.cmdEndRenderPass(command_buffer);
-        try ctx.vkd.endCommandBuffer(command_buffer);
     }
 }
