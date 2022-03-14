@@ -22,20 +22,28 @@ pub const RecordCmdBufferError = dispatch.BeginCommandBufferError;
 
 const Pipeline = @This();
 
-const PipeType = enum(usize) {
+// TODO use two different renderpasses depending on if last render or not
+
+pub const PipeType = enum(usize) {
     sprite = 0,
+    image,
+
+    pub inline fn asUsize(self: PipeType) usize {
+        return @intCast(usize, @enumToInt(self));
+    }
 };
-const pipe_type_count = @typeInfo(PipeType).Enum.fields.len;
+pub const pipe_type_count = @typeInfo(PipeType).Enum.fields.len;
 
 allocator: Allocator,
 
 render_pass: vk.RenderPass,
-pipeline_layout: vk.PipelineLayout,
+pipeline_layouts: [pipe_type_count]vk.PipelineLayout,
 pipelines: [pipe_type_count]vk.Pipeline,
 framebuffers: []vk.Framebuffer,
 
 // TODO: command buffers should be according to what we draw, and not directly related to pipeline?
-command_buffers: []vk.CommandBuffer,
+command_buffers: [pipe_type_count][]vk.CommandBuffer,
+s_descriptors: *[pipe_type_count]descriptor.SyncDescriptor,
 
 image_available_s: []vk.Semaphore,
 renderer_finished_s: []vk.Semaphore,
@@ -51,8 +59,6 @@ indices_buffer: GpuBufferMemory,
 sc_data: *swapchain.Data,
 view: *swapchain.ViewportScissor,
 
-sync_descript: *descriptor.SyncDescriptor,
-
 instance_count: u32,
 
 pub fn init(
@@ -61,36 +67,64 @@ pub fn init(
     sc_data: *swapchain.Data,
     instance_count: u32,
     view: *swapchain.ViewportScissor,
-    sync_descript: *descriptor.SyncDescriptor,
+    s_descriptors: *[pipe_type_count]descriptor.SyncDescriptor,
 ) !Pipeline {
-    const pipeline_layout = blk: {
-        const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
+    var pipeline_layouts: [pipe_type_count]vk.PipelineLayout = undefined;
+    {
+        const sprite_pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
             .set_layout_count = 1,
-            .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &sync_descript.ubo.descriptor_set_layout),
+            .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &s_descriptors[0].ubo.descriptor_set_layout),
             .push_constant_range_count = 0,
             .p_push_constant_ranges = undefined,
         };
-        break :blk try ctx.createPipelineLayout(pipeline_layout_info);
-    };
+        pipeline_layouts[0] = try ctx.createPipelineLayout(sprite_pipeline_layout_info);
+        errdefer ctx.destroyPipelineLayout(pipeline_layouts[0]);
+
+        const image_pipeline_layout_info = vk.PipelineLayoutCreateInfo{
+            .flags = .{},
+            .set_layout_count = 1,
+            .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &s_descriptors[1].ubo.descriptor_set_layout),
+            .push_constant_range_count = 0,
+            .p_push_constant_ranges = undefined,
+        };
+        pipeline_layouts[1] = try ctx.createPipelineLayout(image_pipeline_layout_info);
+        errdefer ctx.destroyPipelineLayout(pipeline_layouts[1]);
+    }
+    errdefer {
+        ctx.destroyPipelineLayout(pipeline_layouts[0]);
+        ctx.destroyPipelineLayout(pipeline_layouts[1]);
+    }
     const render_pass = try ctx.createRenderPass(sc_data.format);
 
     const exe_path = try std.fs.selfExePathAlloc(allocator);
     defer allocator.free(exe_path);
 
     var pipelines: [pipe_type_count]vk.Pipeline = undefined;
-    comptime std.debug.assert(pipe_type_count == 1); // code needs to be modified if pipeline type enum is changed!
+    comptime std.debug.assert(pipe_type_count == 2); // code needs to be modified if pipeline type enum is changed!
 
     try definePipeline(
         allocator,
         ctx,
         exe_path,
         view,
-        pipeline_layout,
+        pipeline_layouts[0],
         render_pass,
         "../../render2d_sprite.vert.spv",
         "../../render2d_common.frag.spv",
         &pipelines[0],
+    );
+
+    try definePipeline(
+        allocator,
+        ctx,
+        exe_path,
+        view,
+        pipeline_layouts[1],
+        render_pass,
+        "../../render2d_image.vert.spv",
+        "../../render2d_common.frag.spv",
+        &pipelines[1],
     );
 
     const framebuffers = try render.pipeline.createFramebuffers(allocator, ctx, sc_data, render_pass, null);
@@ -102,8 +136,18 @@ pub fn init(
     const indices_buffer = try vertex.createDefaultIndicesBuffer(ctx, ctx.gfx_cmd_pool);
     errdefer indices_buffer.deinit(ctx);
 
-    const command_buffers = try render.pipeline.createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, framebuffers.len, null);
-    errdefer allocator.free(command_buffers);
+    var command_buffers: [pipe_type_count][]vk.CommandBuffer = undefined;
+    var defined_buffers: usize = 0;
+    errdefer {
+        var i: usize = 0;
+        while (i < defined_buffers) : (i += 1) {
+            allocator.free(command_buffers[i]);
+        }
+    }
+    for (command_buffers) |*buffers| {
+        buffers.* = try render.pipeline.createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, framebuffers.len, null);
+        defined_buffers += 1;
+    }
 
     const images_in_flight = blk: {
         var images_in_flight = try allocator.alloc(vk.Fence, sc_data.images.len);
@@ -150,7 +194,7 @@ pub fn init(
         .allocator = allocator,
         .view = view,
         .render_pass = render_pass,
-        .pipeline_layout = pipeline_layout,
+        .pipeline_layouts = pipeline_layouts,
         .pipelines = pipelines,
         .framebuffers = framebuffers,
         .command_buffers = command_buffers,
@@ -161,7 +205,7 @@ pub fn init(
         .vertex_buffer = vertex_buffer,
         .indices_buffer = indices_buffer,
         .sc_data = sc_data,
-        .sync_descript = sync_descript,
+        .s_descriptors = s_descriptors,
         .instance_count = instance_count,
     };
     try recordCmdBuffers(ctx, &pipeline);
@@ -169,8 +213,20 @@ pub fn init(
 }
 
 /// Draw using pipeline
-/// transfer_fn can be used to update any relevant storage buffers or other data that are timing critical according to rendering
-pub fn draw(self: *Pipeline, ctx: Context, comptime transfer_fn: fn (image_index: usize, user_ctx: anytype) void, user_ctx: anytype) !void {
+/// Parameters:
+///     * ctx:              application render context
+///     * user_ctx:         data that should be used by transfer_fn 
+///     * progress_frame:   whether this is the last draw call in this render loop iteration
+///     * transfer_fn:      can be used to update any relevant storage buffers or other data that are timing critical according to rendering
+///     * pipe_type:        if the draw is 
+pub fn draw(
+    self: *Pipeline,
+    ctx: Context,
+    user_ctx: anytype,
+    comptime progress_frame: bool,
+    comptime transfer_fn: fn (image_index: usize, user_ctx: anytype) void,
+    comptime pipe_type: PipeType,
+) !void {
     const state = struct {
         var current_frame: usize = 0;
     };
@@ -209,15 +265,17 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime transfer_fn: fn (image_index
     self.images_in_flight[image_index] = self.in_flight_fences[state.current_frame];
 
     // if ubo is dirty
-    if (self.sync_descript.ubo.is_dirty[image_index]) {
-        // transfer data to gpu
-        var ubo_arr = [_]descriptor.Uniform{self.sync_descript.ubo.uniform_data};
-        // TODO: only transfer dirty part of data
-        try self.sync_descript.ubo.uniform_buffers[image_index].transferToDevice(ctx, descriptor.Uniform, 0, ubo_arr[0..]);
-        self.sync_descript.ubo.is_dirty[image_index] = false;
+    {
+        if (self.s_descriptors[pipe_type.asUsize()].ubo.is_dirty[image_index]) {
+            // transfer data to gpu
+            var ubo_arr = [_]descriptor.Uniform{self.s_descriptors[pipe_type.asUsize()].ubo.uniform_data};
+            // TODO: only transfer dirty part of data
+            try self.s_descriptors[pipe_type.asUsize()].ubo.uniform_buffers[image_index].transferToDevice(ctx, descriptor.Uniform, 0, ubo_arr[0..]);
+            self.s_descriptors[pipe_type.asUsize()].ubo.is_dirty[image_index] = false;
+        }
     }
 
-    transfer_fn(image_index, user_ctx);
+    @call(.{ .modifier = .always_inline }, transfer_fn, .{ image_index, user_ctx });
 
     const wait_stages = vk.PipelineStageFlags{ .color_attachment_output_bit = true };
     const submit_info = vk.SubmitInfo{
@@ -225,7 +283,7 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime transfer_fn: fn (image_index
         .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.image_available_s[state.current_frame]),
         .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &wait_stages),
         .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers[image_index]),
+        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers[pipe_type.asUsize()][image_index]),
         .signal_semaphore_count = 1,
         .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s[state.current_frame]),
     };
@@ -251,7 +309,9 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime transfer_fn: fn (image_index
         try self.rescalePipeline(self.allocator, ctx);
     }
 
-    state.current_frame = (state.current_frame + 1) % constants.max_frames_in_flight;
+    if (progress_frame) {
+        state.current_frame = (state.current_frame + 1) % constants.max_frames_in_flight;
+    }
 }
 
 /// Used to update the pipeline according to changes in the window spec
@@ -273,7 +333,14 @@ fn rescalePipeline(self: *Pipeline, allocator: Allocator, ctx: Context) !void {
     for (self.framebuffers) |framebuffer| {
         ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
     }
-    ctx.vkd.freeCommandBuffers(ctx.logical_device, ctx.gfx_cmd_pool, @intCast(u32, self.command_buffers.len), @ptrCast([*]const vk.CommandBuffer, self.command_buffers.ptr));
+    for (self.command_buffers) |command_buffers| {
+        ctx.vkd.freeCommandBuffers(
+            ctx.logical_device,
+            ctx.gfx_cmd_pool,
+            @intCast(u32, command_buffers.len),
+            @ptrCast([*]const vk.CommandBuffer, command_buffers.ptr),
+        );
+    }
     ctx.destroyRenderPass(self.render_pass);
 
     // recreate swapchain utilizing the old one
@@ -290,7 +357,9 @@ fn rescalePipeline(self: *Pipeline, allocator: Allocator, ctx: Context) !void {
     self.render_pass = try ctx.createRenderPass(self.sc_data.format);
     self.framebuffers = try render.pipeline.createFramebuffers(allocator, ctx, self.sc_data, self.render_pass, self.framebuffers);
 
-    self.command_buffers = try render.pipeline.createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers.len, self.command_buffers);
+    for (self.command_buffers) |*command_buffers| {
+        command_buffers.* = try render.pipeline.createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, self.framebuffers.len, command_buffers.*);
+    }
     try recordCmdBuffers(ctx, self);
 }
 
@@ -313,14 +382,24 @@ pub fn deinit(self: *Pipeline, ctx: Context) void {
     self.allocator.free(self.in_flight_fences);
     self.allocator.free(self.images_in_flight);
 
-    self.allocator.free(self.command_buffers);
+    for (self.command_buffers) |command_buffers| {
+        ctx.vkd.freeCommandBuffers(
+            ctx.logical_device,
+            ctx.gfx_cmd_pool,
+            @intCast(u32, command_buffers.len),
+            @ptrCast([*]const vk.CommandBuffer, command_buffers.ptr),
+        );
+        self.allocator.free(command_buffers);
+    }
 
     for (self.framebuffers) |framebuffer| {
         ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
     }
     self.allocator.free(self.framebuffers);
 
-    ctx.destroyPipelineLayout(self.pipeline_layout);
+    for (self.pipeline_layouts) |layout| {
+        ctx.destroyPipelineLayout(layout);
+    }
     ctx.destroyRenderPass(self.render_pass);
 
     for (self.pipelines) |*pipeline| {
@@ -338,43 +417,71 @@ inline fn wait_idle(self: Pipeline, ctx: Context) void {
 
 /// record commands for the pipeline
 inline fn recordCmdBuffers(ctx: render.Context, pipeline: *Pipeline) dispatch.BeginCommandBufferError!void {
-    const image = pipeline.sync_descript.ubo.my_texture.image;
-    const image_use = render.Texture.getImageTransitionBarrier(image, .general, .general);
-    const clear_color = [_]vk.ClearColorValue{
-        .{
-            .float_32 = [_]f32{ 0.0, 0.0, 0.0, 1.0 },
-        },
-    };
-    for (pipeline.command_buffers) |command_buffer, i| {
-        const command_begin_info = vk.CommandBufferBeginInfo{
-            .flags = .{},
-            .p_inheritance_info = null,
-        };
-        try ctx.vkd.beginCommandBuffer(command_buffer, &command_begin_info);
+    for (pipeline.command_buffers) |command_buffers, i| {
+        const image = pipeline.s_descriptors[i].ubo.my_texture.image;
+        const image_use = render.Texture.getImageTransitionBarrier(image, .general, .general);
+        // const clear_color = [_]vk.ClearColorValue{
+        //     .{
+        //         .float_32 = [_]f32{ 0.0, 0.0, 0.0, 1.0 },
+        //     },
+        // };
+        for (command_buffers) |command_buffer, j| {
+            const command_begin_info = vk.CommandBufferBeginInfo{
+                .flags = .{},
+                .p_inheritance_info = null,
+            };
+            try ctx.vkd.beginCommandBuffer(command_buffer, &command_begin_info);
 
-        // make sure compute shader complet writer before beginning render pass
-        ctx.vkd.cmdPipelineBarrier(command_buffer, image_use.transition.src_stage, image_use.transition.dst_stage, vk.DependencyFlags{}, 0, undefined, 0, undefined, 1, @ptrCast([*]const vk.ImageMemoryBarrier, &image_use.barrier));
-        const render_begin_info = vk.RenderPassBeginInfo{
-            .render_pass = pipeline.render_pass,
-            .framebuffer = pipeline.framebuffers[i],
-            .render_area = .{ .offset = .{ .x = 0, .y = 0 }, .extent = pipeline.sc_data.extent },
-            .clear_value_count = clear_color.len,
-            .p_clear_values = @ptrCast([*]const vk.ClearValue, &clear_color),
-        };
-        ctx.vkd.cmdSetViewport(command_buffer, 0, pipeline.view.viewport.len, &pipeline.view.viewport);
-        ctx.vkd.cmdSetScissor(command_buffer, 0, pipeline.view.scissor.len, &pipeline.view.scissor);
-        ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.graphics, pipeline.pipelines[0]);
-        ctx.vkd.cmdBeginRenderPass(command_buffer, &render_begin_info, vk.SubpassContents.@"inline");
+            // make sure compute shader complete write before beginning render pass
+            ctx.vkd.cmdPipelineBarrier(
+                command_buffer,
+                image_use.transition.src_stage,
+                image_use.transition.dst_stage,
+                vk.DependencyFlags{},
+                0,
+                undefined,
+                0,
+                undefined,
+                1,
+                @ptrCast([*]const vk.ImageMemoryBarrier, &image_use.barrier),
+            );
+            const render_begin_info = vk.RenderPassBeginInfo{
+                .render_pass = pipeline.render_pass,
+                .framebuffer = pipeline.framebuffers[j],
+                .render_area = .{ .offset = .{ .x = 0, .y = 0 }, .extent = pipeline.sc_data.extent },
+                .clear_value_count = 0,
+                .p_clear_values = undefined,
+            };
+            ctx.vkd.cmdSetViewport(command_buffer, 0, pipeline.view.viewport.len, &pipeline.view.viewport);
+            ctx.vkd.cmdSetScissor(command_buffer, 0, pipeline.view.scissor.len, &pipeline.view.scissor);
+            ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.graphics, pipeline.pipelines[i]);
+            {
+                ctx.vkd.cmdBeginRenderPass(command_buffer, &render_begin_info, vk.SubpassContents.@"inline");
+                const buffer_offsets = [_]vk.DeviceSize{0};
+                ctx.vkd.cmdBindVertexBuffers(command_buffer, 0, 1, @ptrCast([*]const vk.Buffer, &pipeline.vertex_buffer.buffer), @ptrCast([*]const vk.DeviceSize, &buffer_offsets));
+                ctx.vkd.cmdBindIndexBuffer(command_buffer, pipeline.indices_buffer.buffer, 0, .uint32);
 
-        const buffer_offsets = [_]vk.DeviceSize{0};
-        ctx.vkd.cmdBindVertexBuffers(command_buffer, 0, 1, @ptrCast([*]const vk.Buffer, &pipeline.vertex_buffer.buffer), @ptrCast([*]const vk.DeviceSize, &buffer_offsets));
-        ctx.vkd.cmdBindIndexBuffer(command_buffer, pipeline.indices_buffer.buffer, 0, .uint32);
-        // TODO: Race Condition: sync_descript is not synced here
-        ctx.vkd.cmdBindDescriptorSets(command_buffer, .graphics, pipeline.pipeline_layout, 0, 1, @ptrCast([*]const vk.DescriptorSet, &pipeline.sync_descript.ubo.descriptor_sets[i]), 0, undefined);
-
-        ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, pipeline.instance_count, 0, 0, 0);
-        ctx.vkd.cmdEndRenderPass(command_buffer);
-        try ctx.vkd.endCommandBuffer(command_buffer);
+                // TODO: Race Condition: sync_descript is not synced here
+                ctx.vkd.cmdBindDescriptorSets(
+                    command_buffer,
+                    .graphics,
+                    pipeline.pipeline_layouts[i],
+                    0,
+                    1,
+                    @ptrCast([*]const vk.DescriptorSet, &pipeline.s_descriptors[i].ubo.descriptor_sets[j]),
+                    0,
+                    undefined,
+                );
+                const instance_count = switch (i) {
+                    PipeType.sprite.asUsize() => pipeline.instance_count,
+                    PipeType.image.asUsize() => 1,
+                    else => unreachable,
+                };
+                ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, instance_count, 0, 0, 0);
+                ctx.vkd.cmdEndRenderPass(command_buffer);
+            }
+            try ctx.vkd.endCommandBuffer(command_buffer);
+        }
     }
 }
 

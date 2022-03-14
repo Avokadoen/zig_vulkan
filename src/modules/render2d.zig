@@ -21,11 +21,13 @@ const DB = @import("render2d/DB.zig");
 const util_types = @import("render2d/util_types.zig");
 
 const Pipeline = @import("render2d/Pipeline.zig");
+const PipeType = Pipeline.PipeType;
 
 // Exterior public types
 pub const Rectangle = util_types.Rectangle;
 pub const UV = util_types.UV;
 pub const TextureHandle = util_types.TextureHandle;
+pub const ImageHandle = util_types.ImageHandle;
 pub const BufferUpdateRate = util_types.BufferUpdateRate;
 pub const Camera = @import("render2d/Camera.zig");
 pub const Sprite = @import("render2d/Sprite.zig");
@@ -52,8 +54,9 @@ pub fn init(allocator: Allocator, context: render.Context, init_capacity: usize)
         .view = sc.ViewportScissor.init(swapchain.extent),
         .db_ptr = db_ptr,
         .empty_image_indices = std.ArrayList(usize).init(allocator),
-        .images = std.ArrayList(stbi.Image).init(allocator),
-        .image_paths = std.StringArrayHashMap(TextureHandle).init(allocator),
+        .sprite_images = std.ArrayList(stbi.Image).init(allocator),
+        .sprite_image_paths = std.StringArrayHashMap(TextureHandle).init(allocator),
+        .image_images = std.ArrayList(stbi.Image).init(allocator),
     };
 }
 
@@ -76,37 +79,42 @@ pub const InitializedApi = struct {
     view: sc.ViewportScissor,
     db_ptr: *DB,
 
-    // used to keep track of images loaded by loadEmptyTexture
+    // used to keep track of images loaded by loadEmptySpriteTexture
     empty_image_indices: std.ArrayList(usize),
-    images: std.ArrayList(stbi.Image),
-    image_paths: std.StringArrayHashMap(TextureHandle),
+    sprite_images: std.ArrayList(stbi.Image),
+    sprite_image_paths: std.StringArrayHashMap(TextureHandle),
 
-    /// loads a given texture using path relative to executable location. In the event of a success the returned value is an texture ID 
-    pub fn loadTexture(self: *Self, path: []const u8) !TextureHandle {
+    // TODO: MVP support 1 image, but should be N images
+    image_images: std.ArrayList(stbi.Image),
+
+    /// loads a given texture to be used by sprites using path relative to executable location. 
+    /// In the event of a success the returned value is an texture ID 
+    pub fn loadSpriteTexture(self: *Self, path: []const u8) !TextureHandle {
         if (self.prepared_to_draw) {
             return InvalidApiUseError.Invalidated; // this function can not be called after prepareDraw has been called
         }
-
-        if (self.image_paths.get(path)) |some| {
+        if (self.sprite_image_paths.get(path)) |some| {
             return some;
         }
-
         const image = try stbi.Image.from_file(self.allocator, path, stbi.DesiredChannels.STBI_rgb_alpha);
-        try self.images.append(image);
+        errdefer image.deinit();
+        try self.sprite_images.append(image);
+        errdefer _ = self.sprite_images.pop();
 
         const handle = TextureHandle{
-            .id = @intCast(c_int, self.images.items.len - 1),
+            .id = @intCast(c_int, self.sprite_images.items.len - 1),
             .width = @intToFloat(f32, image.width),
             .height = @intToFloat(f32, image.height),
         };
         try self.db_ptr.*.uv_meta.append(handle);
+        errdefer _ = self.db_ptr.*.uv_meta.pop();
 
-        try self.image_paths.put(path, handle);
+        try self.sprite_image_paths.put(path, handle);
         return handle;
     }
 
     // TODO: HACK: init a empty texture for compute, see issue https://github.com/Avokadoen/zig_vulkan/issues/62
-    pub fn loadEmptyTexture(self: *Self, width: i32, height: i32) !TextureHandle {
+    pub fn loadEmptySpriteTexture(self: *Self, width: i32, height: i32) !TextureHandle {
         const image = stbi.Image{
             .width = width,
             .height = height,
@@ -115,17 +123,37 @@ pub const InitializedApi = struct {
         };
         errdefer self.allocator.free(image.data);
 
-        try self.images.append(image);
+        try self.sprite_images.append(image);
         const handle = TextureHandle{
-            .id = @intCast(c_int, self.images.items.len - 1),
+            .id = @intCast(c_int, self.sprite_images.items.len - 1),
             .width = @intToFloat(f32, image.width),
             .height = @intToFloat(f32, image.height),
         };
         try self.db_ptr.*.uv_meta.append(handle);
 
-        try self.empty_image_indices.append(self.images.items.len - 1);
+        try self.empty_image_indices.append(self.sprite_images.items.len - 1);
 
         return handle;
+    }
+
+    /// Create a new Image 
+    pub fn createImage(self: *Self, path: []const u8) !ImageHandle {
+        std.debug.assert(self.image_images.items.len == 0); // Unimplemented, only support 1 image currently
+
+        if (self.prepared_to_draw) {
+            return InvalidApiUseError.Invalidated; // this function can not be called after prepareDraw has been called
+        }
+
+        const image = try stbi.Image.from_file(self.allocator, path, stbi.DesiredChannels.STBI_rgb_alpha);
+        errdefer image.deinit();
+
+        try self.image_images.append(image);
+        const id = self.image_images.items.len - 1;
+        return ImageHandle{
+            .id = id,
+            .width = image.width,
+            .height = image.height,
+        };
     }
 
     /// Create a new sprite 
@@ -160,10 +188,10 @@ pub const InitializedApi = struct {
         }
 
         // calculate position of each image registered
-        const packjobs = try self.allocator.alloc(knapsack.PackJob, self.images.items.len);
+        const packjobs = try self.allocator.alloc(knapsack.PackJob, self.sprite_images.items.len);
         defer self.allocator.free(packjobs);
 
-        for (self.images.items) |image, i| {
+        for (self.sprite_images.items) |image, i| {
             packjobs[i].id = i; // we will use id to identify the
             packjobs[i].width = @intCast(u32, image.width);
             packjobs[i].height = @intCast(u32, image.height);
@@ -175,7 +203,7 @@ pub const InitializedApi = struct {
         // place each texture in the mega texture
         var mega_data = try self.allocator.alloc(stbi.Pixel, mega_size.width * mega_size.height);
 
-        var mega_uvs = try self.allocator.alloc(UV, self.images.items.len);
+        var mega_uvs = try self.allocator.alloc(UV, self.sprite_images.items.len);
         defer self.allocator.free(mega_uvs);
 
         const mega_widthf = @intToFloat(f64, mega_size.width);
@@ -186,7 +214,7 @@ pub const InitializedApi = struct {
             const x_bound = packjob.x + packjob.width;
 
             // image we are moving from (src)
-            const image = self.images.items[packjob.id];
+            const image = self.sprite_images.items[packjob.id];
             mega_uvs[packjob.id] = .{ .min = [2]f32{
                 @floatCast(f32, @intToFloat(f64, packjob.x) / mega_widthf),
                 @floatCast(f32, @intToFloat(f64, packjob.y) / mega_heightf),
@@ -210,9 +238,9 @@ pub const InitializedApi = struct {
             }
         }
 
-        // clear original images
-        self.image_paths.deinit();
-        for (self.images.items) |image, i| {
+        // clear original sprite_images
+        self.sprite_image_paths.deinit();
+        for (self.sprite_images.items) |image, i| {
             const index = [_]usize{i};
             if (std.mem.indexOf(usize, self.empty_image_indices.items, index[0..])) |some| {
                 _ = some;
@@ -221,50 +249,66 @@ pub const InitializedApi = struct {
                 image.deinit();
             }
         }
-        self.images.deinit();
+        self.sprite_images.deinit();
         self.empty_image_indices.deinit();
 
-        const mega_image = stbi.Image{
+        const sprite_mega_image = stbi.Image{
             .width = @intCast(i32, mega_size.width),
             .height = @intCast(i32, mega_size.height),
             .channels = 4,
             .data = mega_data,
         };
 
-        const buffer_sizes = [_]u64{
-            @sizeOf(Vec2) * self.db_ptr.*.sprite_pool_size,
-            @sizeOf(Vec2) * self.db_ptr.*.sprite_pool_size,
-            @sizeOf(f32) * self.db_ptr.*.sprite_pool_size,
-            @sizeOf(c_int) * self.db_ptr.*.sprite_pool_size,
-            @sizeOf(Vec2) * mega_uvs.len * 4,
+        var api = DrawApi(gpu_update_rate){
+            .state = .{
+                .allocator = self.allocator,
+                .ctx = self.ctx,
+                .swapchain = try self.allocator.create(sc.Data),
+                .subos = try self.allocator.create([Pipeline.pipe_type_count]descriptor.SyncDescriptor),
+                .view = try self.allocator.create(sc.ViewportScissor),
+                .pipeline = undefined,
+                .sprite_mega_image = sprite_mega_image,
+                .image_images = self.image_images,
+                .db_ptr = self.db_ptr,
+            },
         };
-
-        const desc_config = render.descriptor.Config{
-            .allocator = self.allocator,
-            .ctx = self.ctx,
-            .image = mega_image,
-            .viewport = self.view.viewport[0],
-            .buffer_count = self.swapchain.images.len,
-            .buffer_sizes = buffer_sizes[0..],
-        };
-        var api = DrawApi(gpu_update_rate){ .state = .{
-            .allocator = self.allocator,
-            .ctx = self.ctx,
-            .swapchain = try self.allocator.create(sc.Data),
-            .subo = try self.allocator.create(descriptor.SyncDescriptor),
-            .view = try self.allocator.create(sc.ViewportScissor),
-            .pipeline = undefined,
-            .mega_image = mega_image,
-            .db_ptr = self.db_ptr,
-        } };
         api.state.swapchain.* = self.swapchain;
         api.state.view.* = self.view;
-        api.state.subo.* = try descriptor.SyncDescriptor.init(desc_config);
-        api.state.pipeline = try Pipeline.init(self.allocator, self.ctx, api.state.swapchain, @intCast(u32, self.db_ptr.*.len), api.state.view, api.state.subo);
+        {
+            const sprite_buffer_sizes = [_]u64{
+                @sizeOf(Vec2) * self.db_ptr.*.sprite_pool_size,
+                @sizeOf(Vec2) * self.db_ptr.*.sprite_pool_size,
+                @sizeOf(f32) * self.db_ptr.*.sprite_pool_size,
+                @sizeOf(c_int) * self.db_ptr.*.sprite_pool_size,
+                @sizeOf(Vec2) * mega_uvs.len * 4,
+            };
+            var desc_config = render.descriptor.Config{
+                .allocator = self.allocator,
+                .ctx = self.ctx,
+                .image = sprite_mega_image,
+                .viewport = self.view.viewport[0],
+                .buffer_count = self.swapchain.images.len,
+                .buffer_sizes = sprite_buffer_sizes[0..],
+            };
+            api.state.subos[0] = try descriptor.SyncDescriptor.init(desc_config);
+
+            desc_config.image = self.image_images.items[0]; // TODO: support none, and multiple images
+            const image_buffer_sizes = [0]u64{};
+            desc_config.buffer_sizes = image_buffer_sizes[0..];
+            api.state.subos[1] = try descriptor.SyncDescriptor.init(desc_config);
+        }
+        api.state.pipeline = try Pipeline.init(
+            self.allocator,
+            self.ctx,
+            api.state.swapchain,
+            @intCast(u32, self.db_ptr.*.len),
+            api.state.view,
+            api.state.subos,
+        );
         try api.state.db_ptr.generateUvBuffer(mega_uvs);
 
         for (api.state.swapchain.images) |_, i| {
-            const buffers = api.state.subo.*.ubo.storage_buffers[i];
+            const buffers = api.state.subos[0].ubo.storage_buffers[i];
             try api.state.db_ptr.*.uv_buffer.handleDeviceTransfer(self.ctx, &buffers[4]);
         }
 
@@ -282,12 +326,13 @@ const CommonDrawState = struct {
     // render specific state
     ctx: render.Context,
     swapchain: *sc.Data,
-    subo: *descriptor.SyncDescriptor,
+    subos: *[Pipeline.pipe_type_count]descriptor.SyncDescriptor,
     pipeline: Pipeline,
     view: *sc.ViewportScissor,
 
     // render2d specific state
-    mega_image: stbi.Image,
+    sprite_mega_image: stbi.Image,
+    image_images: std.ArrayList(stbi.Image),
     db_ptr: *DB,
 };
 
@@ -303,11 +348,11 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
 
                 /// draw with sprite api
                 pub inline fn draw(self: *Self) !void {
-                    try self.state.pipeline.draw(self.state.ctx, updateBuffers, &self);
+                    try self.state.pipeline.draw(self.state.ctx, &self, true, updateBuffers, .sprite);
                 }
 
                 fn updateBuffers(image_index: usize, user_ctx: anytype) void {
-                    const buffers = user_ctx.*.subo.ubo.storage_buffers[image_index];
+                    const buffers = user_ctx.*.subos[PipeType.sprite].ubo.storage_buffers[image_index];
                     user_ctx.*.state.db_ptr.*.positions.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[0]) catch {};
                     user_ctx.*.state.db_ptr.*.scales.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[1]) catch {};
                     user_ctx.*.state.db_ptr.*.rotations.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[2]) catch {};
@@ -331,10 +376,16 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
 
                 /// draw with sprite api
                 pub inline fn draw(self: *Self) !void {
-                    try self.state.pipeline.draw(self.state.ctx, updateBuffers, &self);
+                    try self.state.pipeline.draw(self.state.ctx, &self, false, updateSpriteBuffers, .sprite);
+                    try self.state.pipeline.draw(self.state.ctx, .{}, true, updateImageBuffers, .image);
                 }
 
-                fn updateBuffers(image_index: usize, user_ctx: anytype) void {
+                fn updateImageBuffers(image_index: usize, user_ctx: anytype) void {
+                    _ = image_index;
+                    _ = user_ctx;
+                }
+
+                fn updateSpriteBuffers(image_index: usize, user_ctx: anytype) void {
                     const current_frame = std.time.milliTimestamp();
                     user_ctx.*.last_update_counter += (current_frame - user_ctx.*.prev_frame);
 
@@ -344,7 +395,7 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
 
                     const image_count = user_ctx.*.state.swapchain.images.len;
                     if (user_ctx.*.update_frame_count < image_count) {
-                        const buffers = user_ctx.*.state.subo.ubo.storage_buffers[image_index];
+                        const buffers = user_ctx.*.state.subos[PipeType.sprite.asUsize()].ubo.storage_buffers[image_index];
                         user_ctx.*.state.db_ptr.*.positions.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[0]) catch {};
                         user_ctx.*.state.db_ptr.*.scales.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[1]) catch {};
                         user_ctx.*.state.db_ptr.*.rotations.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[2]) catch {};
@@ -369,17 +420,20 @@ fn CommonDrawAPI(comptime Self: type) type {
     return struct {
         // deinitialize sprite library
         pub fn deinit(self: *Self) void {
-            self.state.allocator.free(self.state.mega_image.data);
+            self.state.image_images.deinit();
+            self.state.allocator.free(self.state.sprite_mega_image.data);
             self.state.pipeline.deinit(self.state.ctx);
-            self.state.subo.deinit(self.state.ctx);
+            for (self.state.subos) |*subo| {
+                subo.deinit(self.state.ctx);
+            }
 
             self.state.db_ptr.*.deinit();
             self.state.swapchain.deinit(self.state.ctx);
 
             // destroy render pointers
+            self.state.allocator.free(self.state.subos);
             self.state.allocator.destroy(self.state.swapchain);
             self.state.allocator.destroy(self.state.view);
-            self.state.allocator.destroy(self.state.subo);
 
             // destroy sprite db ptr
             self.state.allocator.destroy(self.state.db_ptr);
@@ -390,7 +444,7 @@ fn CommonDrawAPI(comptime Self: type) type {
             return Camera{
                 .move_speed = move_speed,
                 .zoom_speed = zoom_speed,
-                .sync_desc_ptr = self.state.subo,
+                .sync_desc_ptr = self.state.subos[PipeType.sprite],
             };
         }
 

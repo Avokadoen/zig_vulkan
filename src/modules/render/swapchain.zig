@@ -9,6 +9,7 @@ const dispatch = @import("dispatch.zig");
 const physical_device = @import("physical_device.zig");
 const QueueFamilyIndices = physical_device.QueueFamilyIndices;
 const Context = @import("Context.zig");
+const Texture = @import("Texture.zig");
 
 pub const ViewportScissor = struct {
     viewport: [1]vk.Viewport,
@@ -119,6 +120,10 @@ pub const Data = struct {
             break :blk images;
         };
         errdefer allocator.free(swapchain_images);
+
+        for (swapchain_images) |image| {
+            try Texture.transitionImageLayout(ctx, ctx.gfx_cmd_pool, image, .@"undefined", .present_src_khr);
+        }
 
         const image_views = blk: {
             const image_view_count = swapchain_images.len;

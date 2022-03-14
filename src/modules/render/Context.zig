@@ -252,11 +252,11 @@ pub fn createRenderPass(self: Context, format: vk.Format) !vk.RenderPass {
             .samples = .{
                 .@"1_bit" = true,
             },
-            .load_op = .clear,
+            .load_op = .load,
             .store_op = .store,
             .stencil_load_op = .dont_care,
             .stencil_store_op = .dont_care,
-            .initial_layout = .@"undefined",
+            .initial_layout = .present_src_khr,
             .final_layout = .present_src_khr,
         },
     };

@@ -8,6 +8,12 @@ pub const TextureHandle = struct {
     height: f32,
 };
 
+pub const ImageHandle = struct {
+    id: usize,
+    width: i32,
+    height: i32,
+};
+
 pub const UV = struct {
     min: Vec2,
     max: Vec2,

@@ -107,9 +107,13 @@ pub const Descriptor = struct {
         const my_texture = try Texture.init(config.ctx, config.ctx.gfx_cmd_pool, .general, PixelType, texture_config);
         errdefer my_texture.deinit(config.ctx);
 
-        const uniform_buffers = try createShaderBuffers(config.allocator, Uniform, .{
-            .uniform_buffer_bit = true,
-        }, config.ctx, config.buffer_count);
+        const uniform_buffers = try createShaderBuffers(
+            config.allocator,
+            Uniform,
+            .{ .uniform_buffer_bit = true },
+            config.ctx,
+            config.buffer_count,
+        );
         errdefer {
             for (uniform_buffers) |buffer| {
                 buffer.deinit(config.ctx);
@@ -117,7 +121,9 @@ pub const Descriptor = struct {
             config.allocator.free(uniform_buffers);
         }
 
-        var storage_buffers = try config.allocator.alloc([]GpuBufferMemory, config.buffer_count);
+        // do not allocate if there are no buffers
+        const storage_count = config.buffer_count * std.math.max(1, config.buffer_sizes.len);
+        var storage_buffers = try config.allocator.alloc([]GpuBufferMemory, storage_count);
         errdefer config.allocator.free(storage_buffers);
 
         for (storage_buffers) |*buffers| {
@@ -136,7 +142,18 @@ pub const Descriptor = struct {
             }
         }
 
-        const descriptor_sets = try createDescriptorSet(config.allocator, config.ctx, owned_buffer_sizes, config.buffer_count, descriptor_set_layout, descriptor_pool, uniform_buffers, storage_buffers, my_texture.sampler, my_texture.image_view);
+        const descriptor_sets = try createDescriptorSet(
+            config.allocator,
+            config.ctx,
+            owned_buffer_sizes,
+            config.buffer_count,
+            descriptor_set_layout,
+            descriptor_pool,
+            uniform_buffers,
+            storage_buffers,
+            my_texture.sampler,
+            my_texture.image_view,
+        );
         errdefer config.allocator.free(descriptor_sets);
 
         return Self{

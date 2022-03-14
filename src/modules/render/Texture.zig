@@ -292,6 +292,14 @@ fn getTransitionBits(comptime old_layout: vk.ImageLayout, comptime new_layout: v
                 .top_of_pipe_bit = true,
             };
         },
+        .present_src_khr => {
+            transition_bits.dst_mask = .{
+                .shader_read_bit = true,
+            };
+            transition_bits.dst_stage = .{
+                .fragment_shader_bit = true,
+            };
+        },
         .general => {
             transition_bits.dst_mask = .{
                 .shader_read_bit = true,
@@ -331,7 +339,7 @@ fn getTransitionBits(comptime old_layout: vk.ImageLayout, comptime new_layout: v
     return transition_bits;
 }
 
-inline fn transitionImageLayout(ctx: Context, command_pool: vk.CommandPool, image: vk.Image, comptime old_layout: vk.ImageLayout, comptime new_layout: vk.ImageLayout) !void {
+pub inline fn transitionImageLayout(ctx: Context, command_pool: vk.CommandPool, image: vk.Image, comptime old_layout: vk.ImageLayout, comptime new_layout: vk.ImageLayout) !void {
     const commmand_buffer = try vk_utils.beginOneTimeCommandBuffer(ctx, command_pool);
     const transition = getTransitionBits(old_layout, new_layout);
     const barrier = vk.ImageMemoryBarrier{
