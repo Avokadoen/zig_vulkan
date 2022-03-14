@@ -15,14 +15,14 @@ void main() {
             outTexCoord = vec2(0.0, 1.0);
             break;
         case 1:
-            outTexCoord = vec2(0.0, 1.0);
+            outTexCoord = vec2(1.0, 1.0);
             break;
         case 2:
-            outTexCoord = vec2(0.0, 1.0);
+            outTexCoord = vec2(0.0, 0.0);
             break;
         case 3: 
-            outTexCoord = vec2(0.0, 1.0);
+            outTexCoord = vec2(1.0, 0.0);
             break;
     }
-    gl_Position = (ubo.proj * ubo.view) * gl_Position;
+    gl_Position = (ubo.proj * ubo.view) * vec4(inPosition * vec2(800, 600), 0, 1);
 }
