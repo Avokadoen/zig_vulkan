@@ -34,6 +34,8 @@ pub const PipeType = enum(usize) {
 };
 pub const pipe_type_count = @typeInfo(PipeType).Enum.fields.len;
 
+const wait_stages = vk.PipelineStageFlags{ .color_attachment_output_bit = true };
+
 allocator: Allocator,
 
 render_pass: vk.RenderPass,
@@ -44,6 +46,7 @@ framebuffers: []vk.Framebuffer,
 // TODO: command buffers should be according to what we draw, and not directly related to pipeline?
 command_buffers: [pipe_type_count][]vk.CommandBuffer,
 s_descriptors: *[pipe_type_count]descriptor.SyncDescriptor,
+submit_info: [pipe_type_count]vk.SubmitInfo,
 
 image_available_s: []vk.Semaphore,
 renderer_finished_s: []vk.Semaphore,
@@ -60,6 +63,8 @@ sc_data: *swapchain.Data,
 view: *swapchain.ViewportScissor,
 
 instance_count: u32,
+
+current_image_index: ?u32 = null,
 
 pub fn init(
     allocator: Allocator,
@@ -206,6 +211,7 @@ pub fn init(
         .indices_buffer = indices_buffer,
         .sc_data = sc_data,
         .s_descriptors = s_descriptors,
+        .submit_info = undefined,
         .instance_count = instance_count,
     };
     try recordCmdBuffers(ctx, &pipeline);
@@ -235,28 +241,30 @@ pub fn draw(
     const in_flight_fence_p = @ptrCast([*]const vk.Fence, &self.in_flight_fences[state.current_frame]);
     _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, in_flight_fence_p, vk.TRUE, max_u64);
 
-    var image_index: u32 = undefined;
-    if (ctx.vkd.acquireNextImageKHR(ctx.logical_device, self.sc_data.swapchain, max_u64, self.image_available_s[state.current_frame], .null_handle)) |ok| switch (ok.result) {
-        .success => {
-            image_index = ok.image_index;
-        },
-        .suboptimal_khr => {
-            self.requested_rescale_pipeline = true;
-            image_index = ok.image_index;
-        },
-        else => {
-            // TODO: handle timeout and not_ready
-            return error.UnhandledAcquireResult;
-        },
-    } else |err| switch (err) {
-        error.OutOfDateKHR => {
-            self.requested_rescale_pipeline = true;
-            return;
-        },
-        else => {
-            return err;
-        },
+    if (self.current_image_index == null) {
+        if (ctx.vkd.acquireNextImageKHR(ctx.logical_device, self.sc_data.swapchain, max_u64, self.image_available_s[state.current_frame], .null_handle)) |ok| switch (ok.result) {
+            .success => {
+                self.current_image_index = ok.image_index;
+            },
+            .suboptimal_khr => {
+                self.requested_rescale_pipeline = true;
+                self.current_image_index = ok.image_index;
+            },
+            else => {
+                // TODO: handle timeout and not_ready
+                return error.UnhandledAcquireResult;
+            },
+        } else |err| switch (err) {
+            error.OutOfDateKHR => {
+                self.requested_rescale_pipeline = true;
+                return;
+            },
+            else => {
+                return err;
+            },
+        }
     }
+    const image_index = self.current_image_index.?;
 
     if (self.images_in_flight[image_index] != .null_handle) {
         const p_fence = @ptrCast([*]const vk.Fence, &self.images_in_flight[image_index]);
@@ -277,8 +285,7 @@ pub fn draw(
 
     @call(.{ .modifier = .always_inline }, transfer_fn, .{ image_index, user_ctx });
 
-    const wait_stages = vk.PipelineStageFlags{ .color_attachment_output_bit = true };
-    const submit_info = vk.SubmitInfo{
+    self.submit_info[pipe_type.asUsize()] = vk.SubmitInfo{
         .wait_semaphore_count = 1,
         .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.image_available_s[state.current_frame]),
         .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &wait_stages),
@@ -287,30 +294,29 @@ pub fn draw(
         .signal_semaphore_count = 1,
         .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s[state.current_frame]),
     };
-    const p_submit_info = @ptrCast([*]const vk.SubmitInfo, &submit_info);
-    _ = try ctx.vkd.resetFences(ctx.logical_device, 1, in_flight_fence_p);
-    try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, p_submit_info, self.in_flight_fences[state.current_frame]);
-
-    const present_info = vk.PresentInfoKHR{
-        .wait_semaphore_count = 1,
-        .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s[state.current_frame]),
-        .swapchain_count = 1,
-        .p_swapchains = @ptrCast([*]const vk.SwapchainKHR, &self.sc_data.swapchain),
-        .p_image_indices = @ptrCast([*]const u32, &image_index),
-        .p_results = null,
-    };
-    if (ctx.vkd.queuePresentKHR(ctx.present_queue, &present_info)) |_| {
-        // TODO:
-    } else |_| {
-        // TODO:
-    }
-
-    if (self.requested_rescale_pipeline == true) {
-        try self.rescalePipeline(self.allocator, ctx);
-    }
 
     if (progress_frame) {
+        _ = try ctx.vkd.resetFences(ctx.logical_device, 1, in_flight_fence_p);
+        try ctx.vkd.queueSubmit(ctx.graphics_queue, self.submit_info.len, &self.submit_info, self.in_flight_fences[state.current_frame]);
+        const present_info = vk.PresentInfoKHR{
+            .wait_semaphore_count = 1,
+            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s[state.current_frame]),
+            .swapchain_count = 1,
+            .p_swapchains = @ptrCast([*]const vk.SwapchainKHR, &self.sc_data.swapchain),
+            .p_image_indices = @ptrCast([*]const u32, &image_index),
+            .p_results = null,
+        };
+        if (ctx.vkd.queuePresentKHR(ctx.present_queue, &present_info)) |_| {
+            // TODO:
+        } else |_| {
+            // TODO:
+        }
+        self.current_image_index = null;
         state.current_frame = (state.current_frame + 1) % constants.max_frames_in_flight;
+
+        if (self.requested_rescale_pipeline == true) {
+            try self.rescalePipeline(self.allocator, ctx);
+        }
     }
 }
 

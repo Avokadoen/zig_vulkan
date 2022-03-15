@@ -289,12 +289,14 @@ pub const InitializedApi = struct {
                 .viewport = self.view.viewport[0],
                 .buffer_count = self.swapchain.images.len,
                 .buffer_sizes = sprite_buffer_sizes[0..],
+                .is_compute_target = true,
             };
             api.state.subos[0] = try descriptor.SyncDescriptor.init(desc_config);
 
             desc_config.image = self.image_images.items[0]; // TODO: support none, and multiple images
             const image_buffer_sizes = [0]u64{};
             desc_config.buffer_sizes = image_buffer_sizes[0..];
+            desc_config.is_compute_target = false;
             api.state.subos[1] = try descriptor.SyncDescriptor.init(desc_config);
         }
         api.state.pipeline = try Pipeline.init(

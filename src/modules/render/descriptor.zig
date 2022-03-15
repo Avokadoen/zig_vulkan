@@ -26,6 +26,7 @@ pub const Config = struct {
     buffer_count: usize, // TODO: rename to swapchain buffer count
     /// the size of each storage buffer element, descriptor makes a copy of data 
     buffer_sizes: []const u64,
+    is_compute_target: bool,
 };
 
 pub const SyncDescriptor = struct {
@@ -102,7 +103,7 @@ pub const Descriptor = struct {
             .usage = .{ .transfer_dst_bit = true, .sampled_bit = true, .storage_bit = true },
             .queue_family_indices = indices[0..indices_len],
             // TODO: r8g8b8a8_srgb does not work for compute shader textures
-            .format = .r8g8b8a8_unorm,
+            .format = if (config.is_compute_target) .r8g8b8a8_unorm else .r8g8b8a8_srgb,
         };
         const my_texture = try Texture.init(config.ctx, config.ctx.gfx_cmd_pool, .general, PixelType, texture_config);
         errdefer my_texture.deinit(config.ctx);
