@@ -93,7 +93,7 @@ pub fn main() anyerror!void {
     var draw_api = blk: {
         var init_api = try render2d.init(allocator, ctx, 1);
         my_texture = try init_api.loadEmptySpriteTexture(1280, 720);
-        my_image = try init_api.createImage("../assets/images/tiger.jpg");
+        my_image = try init_api.imageFromFile("../assets/images/tiger.jpg");
         {
             const window_size = try window.getSize();
             const window_w = @intToFloat(f32, window_size.width);

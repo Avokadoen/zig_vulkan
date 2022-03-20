@@ -96,7 +96,7 @@ pub const InitializedApi = struct {
         if (self.sprite_image_paths.get(path)) |some| {
             return some;
         }
-        const image = try stbi.Image.from_file(self.allocator, path, stbi.DesiredChannels.STBI_rgb_alpha);
+        const image = try stbi.Image.fromFile(self.allocator, path, stbi.DesiredChannels.STBI_rgb_alpha);
         errdefer image.deinit();
         try self.sprite_images.append(image);
         errdefer _ = self.sprite_images.pop();
@@ -115,13 +115,8 @@ pub const InitializedApi = struct {
 
     // TODO: HACK: init a empty texture for compute, see issue https://github.com/Avokadoen/zig_vulkan/issues/62
     pub fn loadEmptySpriteTexture(self: *Self, width: i32, height: i32) !TextureHandle {
-        const image = stbi.Image{
-            .width = width,
-            .height = height,
-            .channels = 4,
-            .data = try self.allocator.alloc(stbi.Pixel, @intCast(usize, width * height)),
-        };
-        errdefer self.allocator.free(image.data);
+        const image = try stbi.Image.initUndefined(self.allocator, width, height);
+        errdefer image.deinit();
 
         try self.sprite_images.append(image);
         const handle = TextureHandle{
@@ -136,15 +131,35 @@ pub const InitializedApi = struct {
         return handle;
     }
 
-    /// Create a new Image 
-    pub fn createImage(self: *Self, path: []const u8) !ImageHandle {
+    /// Create a new image from file
+    pub fn imageFromFile(self: *Self, path: []const u8) !ImageHandle {
         std.debug.assert(self.image_images.items.len == 0); // Unimplemented, only support 1 image currently
 
         if (self.prepared_to_draw) {
             return InvalidApiUseError.Invalidated; // this function can not be called after prepareDraw has been called
         }
 
-        const image = try stbi.Image.from_file(self.allocator, path, stbi.DesiredChannels.STBI_rgb_alpha);
+        const image = try stbi.Image.fromFile(self.allocator, path, stbi.DesiredChannels.STBI_rgb_alpha);
+        errdefer image.deinit();
+
+        try self.image_images.append(image);
+        const id = self.image_images.items.len - 1;
+        return ImageHandle{
+            .id = id,
+            .width = image.width,
+            .height = image.height,
+        };
+    }
+
+    /// Create a new undefined image
+    pub fn imageUndefined(self: *Self, width: i32, height: i32) !ImageHandle {
+        std.debug.assert(self.image_images.items.len == 0); // Unimplemented, only support 1 image currently
+
+        if (self.prepared_to_draw) {
+            return InvalidApiUseError.Invalidated; // this function can not be called after prepareDraw has been called
+        }
+
+        const image = try stbi.Image.initUndefined(self.allocator, width, height);
         errdefer image.deinit();
 
         try self.image_images.append(image);
@@ -201,7 +216,12 @@ pub const InitializedApi = struct {
         const mega_size = try bruteForceFn(self.allocator, packjobs);
 
         // place each texture in the mega texture
-        var mega_data = try self.allocator.alloc(stbi.Pixel, mega_size.width * mega_size.height);
+        const sprite_mega_image = try stbi.Image.initUndefined(
+            self.allocator,
+            @intCast(i32, mega_size.width),
+            @intCast(i32, mega_size.height),
+        );
+        errdefer sprite_mega_image.deinit();
 
         var mega_uvs = try self.allocator.alloc(UV, self.sprite_images.items.len);
         defer self.allocator.free(mega_uvs);
@@ -233,7 +253,7 @@ pub const InitializedApi = struct {
                 var ix = packjob.x;
                 while (ix < x_bound) : (ix += 1) {
                     const src_index = y_src_index + (ix - packjob.x);
-                    mega_data[y_dest_index + ix] = image.data[src_index];
+                    sprite_mega_image.data[y_dest_index + ix] = image.data[src_index];
                 }
             }
         }
@@ -251,13 +271,6 @@ pub const InitializedApi = struct {
         }
         self.sprite_images.deinit();
         self.empty_image_indices.deinit();
-
-        const sprite_mega_image = stbi.Image{
-            .width = @intCast(i32, mega_size.width),
-            .height = @intCast(i32, mega_size.height),
-            .channels = 4,
-            .data = mega_data,
-        };
 
         var api = DrawApi(gpu_update_rate){
             .state = .{
