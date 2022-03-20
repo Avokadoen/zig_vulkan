@@ -298,15 +298,29 @@ pub fn draw(
 
     @call(.{ .modifier = .always_inline }, transfer_fn, .{ image_index, user_ctx });
 
-    self.submit_info[pipe_type.asUsize()] = vk.SubmitInfo{
-        .wait_semaphore_count = 1,
-        .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.image_available_s[state.current_frame]),
-        .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &wait_stages),
-        .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers[pipe_type.asUsize()][image_index]),
-        .signal_semaphore_count = 1,
-        .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s[state.current_frame]),
-    };
+    // TODO: support more then two draw calls ...
+    //       this will break if we do not call 2 draw calls where 1 is not progressing frame and the latter does
+    if (progress_frame == false) {
+        self.submit_info[pipe_type.asUsize()] = vk.SubmitInfo{
+            .wait_semaphore_count = 1,
+            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.image_available_s[state.current_frame]),
+            .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &wait_stages),
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers[pipe_type.asUsize()][image_index]),
+            .signal_semaphore_count = 0,
+            .p_signal_semaphores = undefined,
+        };
+    } else {
+        self.submit_info[pipe_type.asUsize()] = vk.SubmitInfo{
+            .wait_semaphore_count = 0,
+            .p_wait_semaphores = undefined,
+            .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &wait_stages),
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers[pipe_type.asUsize()][image_index]),
+            .signal_semaphore_count = 1,
+            .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s[state.current_frame]),
+        };
+    }
 
     if (progress_frame) {
         _ = try ctx.vkd.resetFences(ctx.logical_device, 1, in_flight_fence_p);
