@@ -306,6 +306,7 @@ pub const InitializedApi = struct {
             @intCast(u32, self.db_ptr.*.len),
             api.state.view,
             api.state.subos,
+            [2]i32{ 800, 600 },
         );
         try api.state.db_ptr.generateUvBuffer(mega_uvs);
 

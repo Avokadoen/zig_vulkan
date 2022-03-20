@@ -4,6 +4,7 @@ const ArrayList = std.ArrayList;
 
 const vk = @import("vulkan");
 const glfw = @import("glfw");
+const za = @import("zalgebra");
 
 const utils = @import("../utils.zig");
 
@@ -53,6 +54,9 @@ renderer_finished_s: []vk.Semaphore,
 in_flight_fences: []vk.Fence,
 images_in_flight: []vk.Fence,
 
+// size of images in the image pipe
+image_size: [2]i32, // TODO support N images
+
 requested_rescale_pipeline: bool = false,
 
 // TODO seperate vertex/index buffers from pipeline
@@ -73,6 +77,7 @@ pub fn init(
     instance_count: u32,
     view: *swapchain.ViewportScissor,
     s_descriptors: *[pipe_type_count]descriptor.SyncDescriptor,
+    image_size: [2]i32,
 ) !Pipeline {
     var pipeline_layouts: [pipe_type_count]vk.PipelineLayout = undefined;
     {
@@ -86,12 +91,19 @@ pub fn init(
         pipeline_layouts[0] = try ctx.createPipelineLayout(sprite_pipeline_layout_info);
         errdefer ctx.destroyPipelineLayout(pipeline_layouts[0]);
 
+        const image_push_constant = vk.PushConstantRange{
+            .stage_flags = .{
+                .vertex_bit = true,
+            },
+            .offset = 0,
+            .size = @sizeOf([2]u32),
+        };
         const image_pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
             .set_layout_count = 1,
             .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &s_descriptors[1].ubo.descriptor_set_layout),
-            .push_constant_range_count = 0,
-            .p_push_constant_ranges = undefined,
+            .push_constant_range_count = 1,
+            .p_push_constant_ranges = @ptrCast([*]const vk.PushConstantRange, &image_push_constant),
         };
         pipeline_layouts[1] = try ctx.createPipelineLayout(image_pipeline_layout_info);
         errdefer ctx.destroyPipelineLayout(pipeline_layouts[1]);
@@ -213,6 +225,7 @@ pub fn init(
         .s_descriptors = s_descriptors,
         .submit_info = undefined,
         .instance_count = instance_count,
+        .image_size = image_size,
     };
     try recordCmdBuffers(ctx, &pipeline);
     return pipeline;
@@ -426,11 +439,7 @@ inline fn recordCmdBuffers(ctx: render.Context, pipeline: *Pipeline) dispatch.Be
     for (pipeline.command_buffers) |command_buffers, i| {
         const image = pipeline.s_descriptors[i].ubo.my_texture.image;
         const image_use = render.Texture.getImageTransitionBarrier(image, .general, .general);
-        // const clear_color = [_]vk.ClearColorValue{
-        //     .{
-        //         .float_32 = [_]f32{ 0.0, 0.0, 0.0, 1.0 },
-        //     },
-        // };
+
         for (command_buffers) |command_buffer, j| {
             const command_begin_info = vk.CommandBufferBeginInfo{
                 .flags = .{},
@@ -478,11 +487,30 @@ inline fn recordCmdBuffers(ctx: render.Context, pipeline: *Pipeline) dispatch.Be
                     0,
                     undefined,
                 );
-                const instance_count = switch (i) {
-                    PipeType.sprite.asUsize() => pipeline.instance_count,
-                    PipeType.image.asUsize() => 1,
+
+                var instance_count: u32 = undefined;
+                switch (i) {
+                    PipeType.sprite.asUsize() => {
+                        instance_count = pipeline.instance_count;
+                    },
+                    PipeType.image.asUsize() => {
+                        const image_size = struct {
+                            size: [2]i32,
+                        }{ .size = pipeline.image_size };
+                        ctx.vkd.cmdPushConstants(
+                            command_buffer,
+                            pipeline.pipeline_layouts[i],
+                            .{
+                                .vertex_bit = true,
+                            },
+                            0,
+                            @sizeOf([2]i32),
+                            @ptrCast(*const anyopaque, &image_size),
+                        );
+                        instance_count = 1;
+                    },
                     else => unreachable,
-                };
+                }
                 ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, instance_count, 0, 0, 0);
                 ctx.vkd.cmdEndRenderPass(command_buffer);
             }

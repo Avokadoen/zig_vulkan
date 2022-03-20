@@ -9,6 +9,10 @@ layout(binding = 0) uniform UniformBuffer {
     layout(offset = 64) mat4 proj;
 } ubo;
 
+layout (push_constant) uniform Constants {
+    ivec2 image_size;
+} constants;
+
 void main() {
     switch(gl_VertexIndex) {
         case 0:
@@ -24,5 +28,5 @@ void main() {
             outTexCoord = vec2(1.0, 0.0);
             break;
     }
-    gl_Position = (ubo.proj * ubo.view) * vec4(inPosition * vec2(800, 600), 0, 1);
+    gl_Position = (ubo.proj * ubo.view) * vec4(inPosition * constants.image_size, 0, 1);
 }
