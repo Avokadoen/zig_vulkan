@@ -90,9 +90,9 @@ pub const Descriptor = struct {
         errdefer config.ctx.vkd.destroyDescriptorPool(config.ctx.logical_device, descriptor_pool, null);
 
         // use graphics and compute index
-        // if they are the same, the we use that index
+        // if they are the same, then we use that index
         const indices = [_]u32{ config.ctx.queue_indices.graphics, config.ctx.queue_indices.compute };
-        const indices_len: usize = if (config.ctx.queue_indices.graphics == config.ctx.queue_indices.compute) 1 else 2;
+        const indices_len: usize = if (config.ctx.queue_indices.graphics == config.ctx.queue_indices.compute or config.is_compute_target == false) 1 else 2;
 
         const PixelType = stbi.Pixel;
         const TextureConfig = Texture.Config(PixelType);
@@ -100,7 +100,7 @@ pub const Descriptor = struct {
             .data = config.image.data,
             .width = @intCast(u32, config.image.width),
             .height = @intCast(u32, config.image.height),
-            .usage = .{ .transfer_dst_bit = true, .sampled_bit = true, .storage_bit = true },
+            .usage = .{ .transfer_dst_bit = true, .sampled_bit = true, .storage_bit = config.is_compute_target },
             .queue_family_indices = indices[0..indices_len],
             // TODO: r8g8b8a8_srgb does not work for compute shader textures
             .format = if (config.is_compute_target) .r8g8b8a8_unorm else .r8g8b8a8_srgb,
