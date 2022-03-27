@@ -11,6 +11,7 @@ const vkgen = @import("deps/vulkan-zig/generator/index.zig");
 const glfw = @import("deps/mach-glfw/build.zig");
 const stbi = @import("deps/stb_image/build.zig");
 const tracy = @import("deps/Zig-Tracy/build_tracy.zig");
+const imgui = @import("deps/zig-gamekit/gamekit/deps/imgui/build.zig");
 
 // TODO: this file could use a refactor pass or atleast some comments to make it more readable
 
@@ -184,6 +185,8 @@ pub fn build(b: *Builder) void {
     glfw.link(b, exe, .{});
     exe.addPackagePath("glfw", "deps/mach-glfw/src/main.zig");
     exe.addPackagePath("zalgebra", "deps/zalgebra/src/main.zig");
+
+    imgui.linkArtifact(b, exe, target, "deps/zig-gamekit/");
 
     stbi.linkStep(b, exe);
 
