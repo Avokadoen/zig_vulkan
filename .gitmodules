@@ -13,3 +13,6 @@
 [submodule "deps/Zig-Tracy"]
 	path = deps/Zig-Tracy
 	url = git@github.com:Avokadoen/Zig-Tracy.git
+[submodule "deps/zig-gamekit"]
+	path = deps/zig-gamekit
+	url = git@github.com:prime31/zig-gamekit.git
