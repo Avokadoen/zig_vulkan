@@ -18,6 +18,7 @@ const dispatch = render.dispatch;
 const GpuBufferMemory = render.GpuBufferMemory;
 const Texture = render.Texture;
 const Context = render.Context;
+const ImageHandle = @import("util_types.zig").ImageHandle;
 
 pub const RecordCmdBufferError = dispatch.BeginCommandBufferError;
 
@@ -54,8 +55,7 @@ renderer_finished_s: []vk.Semaphore,
 in_flight_fences: []vk.Fence,
 images_in_flight: []vk.Fence,
 
-// size of images in the image pipe
-image_size: [2]i32, // TODO support N images
+image_handles: []ImageHandle, // TODO support N images
 
 requested_rescale_pipeline: bool = false,
 
@@ -70,6 +70,7 @@ instance_count: u32,
 
 current_image_index: ?u32 = null,
 
+// Pipeline takes ownership of image_handles
 pub fn init(
     allocator: Allocator,
     ctx: Context,
@@ -77,8 +78,12 @@ pub fn init(
     instance_count: u32,
     view: *swapchain.ViewportScissor,
     s_descriptors: *[pipe_type_count]descriptor.SyncDescriptor,
-    image_size: [2]i32,
+    image_handles: []ImageHandle,
 ) !Pipeline {
+    if (image_handles.len != s_descriptors[PipeType.image.asUsize()].ubo.textures.len) {
+        return error.IncompatibleImageSizeSlice; // each texture needs a size configuration
+    }
+
     var pipeline_layouts: [pipe_type_count]vk.PipelineLayout = undefined;
     {
         const sprite_pipeline_layout_info = vk.PipelineLayoutCreateInfo{
@@ -225,7 +230,7 @@ pub fn init(
         .s_descriptors = s_descriptors,
         .submit_info = undefined,
         .instance_count = instance_count,
-        .image_size = image_size,
+        .image_handles = image_handles,
     };
     try recordCmdBuffers(ctx, &pipeline);
     return pipeline;
@@ -235,14 +240,16 @@ pub fn init(
 /// Parameters:
 ///     * ctx:              application render context
 ///     * user_ctx:         data that should be used by transfer_fn 
-///     * progress_frame:   whether this is the last draw call in this render loop iteration
+///     * draw_number:      which draw call in the draw sequence current draw call is begining with 0
+///     * total_draws:      total draw calls in a given frame, should be atleast 1
 ///     * transfer_fn:      can be used to update any relevant storage buffers or other data that are timing critical according to rendering
 ///     * pipe_type:        if the draw is 
 pub fn draw(
     self: *Pipeline,
     ctx: Context,
     user_ctx: anytype,
-    comptime progress_frame: bool,
+    draw_number: comptime_int,
+    total_draws: comptime_int,
     comptime transfer_fn: fn (image_index: usize, user_ctx: anytype) void,
     comptime pipe_type: PipeType,
 ) !void {
@@ -298,33 +305,45 @@ pub fn draw(
 
     @call(.{ .modifier = .always_inline }, transfer_fn, .{ image_index, user_ctx });
 
-    // TODO: support more then two draw calls ...
-    //       this will break if we do not call 2 draw calls where 1 is not progressing frame and the latter does
-    if (progress_frame == false) {
-        self.submit_info[pipe_type.asUsize()] = vk.SubmitInfo{
+    if (total_draws == 1) {
+        self.submit_info[0] = vk.SubmitInfo{
             .wait_semaphore_count = 1,
             .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.image_available_s[state.current_frame]),
-            .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &wait_stages),
-            .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers[pipe_type.asUsize()][image_index]),
-            .signal_semaphore_count = 0,
-            .p_signal_semaphores = undefined,
-        };
-    } else {
-        self.submit_info[pipe_type.asUsize()] = vk.SubmitInfo{
-            .wait_semaphore_count = 0,
-            .p_wait_semaphores = undefined,
             .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &wait_stages),
             .command_buffer_count = 1,
             .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers[pipe_type.asUsize()][image_index]),
             .signal_semaphore_count = 1,
             .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s[state.current_frame]),
         };
+    } else {
+        if (draw_number == 0) {
+            self.submit_info[pipe_type.asUsize()] = vk.SubmitInfo{
+                .wait_semaphore_count = 1,
+                .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.image_available_s[state.current_frame]),
+                .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &wait_stages),
+                .command_buffer_count = 1,
+                .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers[pipe_type.asUsize()][image_index]),
+                .signal_semaphore_count = 0,
+                .p_signal_semaphores = undefined,
+            };
+        } else if (draw_number == total_draws - 1) {
+            self.submit_info[pipe_type.asUsize()] = vk.SubmitInfo{
+                .wait_semaphore_count = 0,
+                .p_wait_semaphores = undefined,
+                .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &wait_stages),
+                .command_buffer_count = 1,
+                .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers[pipe_type.asUsize()][image_index]),
+                .signal_semaphore_count = 1,
+                .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s[state.current_frame]),
+            };
+        }
     }
 
-    if (progress_frame) {
+    if (draw_number == total_draws - 1) {
+        const submit_info_len = @intCast(u32, std.math.min(total_draws, pipe_type_count));
+
         _ = try ctx.vkd.resetFences(ctx.logical_device, 1, in_flight_fence_p);
-        try ctx.vkd.queueSubmit(ctx.graphics_queue, self.submit_info.len, &self.submit_info, self.in_flight_fences[state.current_frame]);
+        try ctx.vkd.queueSubmit(ctx.graphics_queue, submit_info_len, &self.submit_info, self.in_flight_fences[state.current_frame]);
         const present_info = vk.PresentInfoKHR{
             .wait_semaphore_count = 1,
             .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.renderer_finished_s[state.current_frame]),
@@ -410,6 +429,7 @@ pub fn deinit(self: *Pipeline, ctx: Context) void {
     self.vertex_buffer.deinit(ctx);
     self.indices_buffer.deinit(ctx);
 
+    self.allocator.free(self.image_handles);
     self.allocator.free(self.image_available_s);
     self.allocator.free(self.renderer_finished_s);
     self.allocator.free(self.in_flight_fences);
@@ -451,9 +471,6 @@ inline fn wait_idle(self: Pipeline, ctx: Context) void {
 /// record commands for the pipeline
 inline fn recordCmdBuffers(ctx: render.Context, pipeline: *Pipeline) dispatch.BeginCommandBufferError!void {
     for (pipeline.command_buffers) |command_buffers, i| {
-        const image = pipeline.s_descriptors[i].ubo.my_texture.image;
-        const image_use = render.Texture.getImageTransitionBarrier(image, .general, .general);
-
         for (command_buffers) |command_buffer, j| {
             const command_begin_info = vk.CommandBufferBeginInfo{
                 .flags = .{},
@@ -461,19 +478,25 @@ inline fn recordCmdBuffers(ctx: render.Context, pipeline: *Pipeline) dispatch.Be
             };
             try ctx.vkd.beginCommandBuffer(command_buffer, &command_begin_info);
 
-            // make sure compute shader complete write before beginning render pass
-            ctx.vkd.cmdPipelineBarrier(
-                command_buffer,
-                image_use.transition.src_stage,
-                image_use.transition.dst_stage,
-                vk.DependencyFlags{},
-                0,
-                undefined,
-                0,
-                undefined,
-                1,
-                @ptrCast([*]const vk.ImageMemoryBarrier, &image_use.barrier),
-            );
+            for (pipeline.s_descriptors[i].ubo.textures) |texture| {
+                // expect .general to be used by other systems (i.e compute shaders)
+                if (texture.layout == .general) {
+                    const image_use = render.Texture.getImageTransitionBarrier(texture.image, .general, .general);
+                    ctx.vkd.cmdPipelineBarrier(
+                        command_buffer,
+                        image_use.transition.src_stage,
+                        image_use.transition.dst_stage,
+                        vk.DependencyFlags{},
+                        0,
+                        undefined,
+                        0,
+                        undefined,
+                        1,
+                        @ptrCast([*]const vk.ImageMemoryBarrier, &image_use.barrier),
+                    );
+                }
+            }
+
             const render_begin_info = vk.RenderPassBeginInfo{
                 .render_pass = pipeline.render_pass,
                 .framebuffer = pipeline.framebuffers[j],
@@ -484,50 +507,52 @@ inline fn recordCmdBuffers(ctx: render.Context, pipeline: *Pipeline) dispatch.Be
             ctx.vkd.cmdSetViewport(command_buffer, 0, pipeline.view.viewport.len, &pipeline.view.viewport);
             ctx.vkd.cmdSetScissor(command_buffer, 0, pipeline.view.scissor.len, &pipeline.view.scissor);
             ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.graphics, pipeline.pipelines[i]);
-            {
-                ctx.vkd.cmdBeginRenderPass(command_buffer, &render_begin_info, vk.SubpassContents.@"inline");
-                const buffer_offsets = [_]vk.DeviceSize{0};
-                ctx.vkd.cmdBindVertexBuffers(command_buffer, 0, 1, @ptrCast([*]const vk.Buffer, &pipeline.vertex_buffer.buffer), @ptrCast([*]const vk.DeviceSize, &buffer_offsets));
-                ctx.vkd.cmdBindIndexBuffer(command_buffer, pipeline.indices_buffer.buffer, 0, .uint32);
 
-                // TODO: Race Condition: sync_descript is not synced here
-                ctx.vkd.cmdBindDescriptorSets(
-                    command_buffer,
-                    .graphics,
-                    pipeline.pipeline_layouts[i],
-                    0,
-                    1,
-                    @ptrCast([*]const vk.DescriptorSet, &pipeline.s_descriptors[i].ubo.descriptor_sets[j]),
-                    0,
-                    undefined,
-                );
+            ctx.vkd.cmdBeginRenderPass(command_buffer, &render_begin_info, vk.SubpassContents.@"inline");
+            const buffer_offsets = [_]vk.DeviceSize{0};
+            ctx.vkd.cmdBindVertexBuffers(command_buffer, 0, 1, @ptrCast([*]const vk.Buffer, &pipeline.vertex_buffer.buffer), @ptrCast([*]const vk.DeviceSize, &buffer_offsets));
+            ctx.vkd.cmdBindIndexBuffer(command_buffer, pipeline.indices_buffer.buffer, 0, .uint32);
 
-                var instance_count: u32 = undefined;
-                switch (i) {
-                    PipeType.sprite.asUsize() => {
-                        instance_count = pipeline.instance_count;
-                    },
-                    PipeType.image.asUsize() => {
-                        const image_size = struct {
-                            size: [2]i32,
-                        }{ .size = pipeline.image_size };
-                        ctx.vkd.cmdPushConstants(
-                            command_buffer,
-                            pipeline.pipeline_layouts[i],
-                            .{
-                                .vertex_bit = true,
-                            },
-                            0,
-                            @sizeOf([2]i32),
-                            @ptrCast(*const anyopaque, &image_size),
-                        );
-                        instance_count = 1;
-                    },
-                    else => unreachable,
-                }
-                ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, instance_count, 0, 0, 0);
-                ctx.vkd.cmdEndRenderPass(command_buffer);
+            // TODO: Race Condition: sync_descript is not synced here
+            ctx.vkd.cmdBindDescriptorSets(
+                command_buffer,
+                .graphics,
+                pipeline.pipeline_layouts[i],
+                0,
+                1,
+                @ptrCast([*]const vk.DescriptorSet, &pipeline.s_descriptors[i].ubo.descriptor_sets[j]),
+                0,
+                undefined,
+            );
+
+            var instance_count: u32 = undefined;
+            switch (i) {
+                PipeType.sprite.asUsize() => {
+                    instance_count = pipeline.instance_count;
+                },
+                PipeType.image.asUsize() => {
+                    const image_size = struct {
+                        size: [2]i32,
+                    }{
+                        .size = .{pipeline.image_handles},
+                    };
+                    ctx.vkd.cmdPushConstants(
+                        command_buffer,
+                        pipeline.pipeline_layouts[i],
+                        .{
+                            .vertex_bit = true,
+                        },
+                        0,
+                        @sizeOf([2]i32),
+                        @ptrCast(*const anyopaque, &image_size),
+                    );
+                    instance_count = 1;
+                },
+                else => unreachable,
             }
+            ctx.vkd.cmdDrawIndexed(command_buffer, pipeline.indices_buffer.len, instance_count, 0, 0, 0);
+            ctx.vkd.cmdEndRenderPass(command_buffer);
+
             try ctx.vkd.endCommandBuffer(command_buffer);
         }
     }

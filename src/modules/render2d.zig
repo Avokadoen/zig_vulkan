@@ -28,6 +28,7 @@ pub const Rectangle = util_types.Rectangle;
 pub const UV = util_types.UV;
 pub const TextureHandle = util_types.TextureHandle;
 pub const ImageHandle = util_types.ImageHandle;
+pub const ImageIdType = ImageHandle.IdType;
 pub const BufferUpdateRate = util_types.BufferUpdateRate;
 pub const Camera = @import("render2d/Camera.zig");
 pub const Sprite = @import("render2d/Sprite.zig");
@@ -57,6 +58,7 @@ pub fn init(allocator: Allocator, context: render.Context, init_capacity: usize)
         .sprite_images = std.ArrayList(stbi.Image).init(allocator),
         .sprite_image_paths = std.StringArrayHashMap(TextureHandle).init(allocator),
         .image_images = std.ArrayList(stbi.Image).init(allocator),
+        .image_image_handles = std.ArrayList(ImageHandle).init(allocator),
     };
 }
 
@@ -84,8 +86,8 @@ pub const InitializedApi = struct {
     sprite_images: std.ArrayList(stbi.Image),
     sprite_image_paths: std.StringArrayHashMap(TextureHandle),
 
-    // TODO: MVP support 1 image, but should be N images
     image_images: std.ArrayList(stbi.Image),
+    image_image_handles: std.ArrayList(ImageHandle),
 
     /// loads a given texture to be used by sprites using path relative to executable location. 
     /// In the event of a success the returned value is an texture ID 
@@ -133,8 +135,6 @@ pub const InitializedApi = struct {
 
     /// Create a new image from file
     pub fn imageFromFile(self: *Self, path: []const u8) !ImageHandle {
-        std.debug.assert(self.image_images.items.len == 0); // Unimplemented, only support 1 image currently
-
         if (self.prepared_to_draw) {
             return InvalidApiUseError.Invalidated; // this function can not be called after prepareDraw has been called
         }
@@ -144,17 +144,19 @@ pub const InitializedApi = struct {
 
         try self.image_images.append(image);
         const id = self.image_images.items.len - 1;
-        return ImageHandle{
+        try self.image_image_handles.append(ImageHandle{
             .id = id,
+            .is_dirt = true,
+            .source_width = image.width,
+            .source_height = image.height,
             .width = image.width,
             .height = image.height,
-        };
+        });
+        return self.image_image_handles.items[id];
     }
 
     /// Create a new undefined image
     pub fn imageUndefined(self: *Self, width: i32, height: i32) !ImageHandle {
-        std.debug.assert(self.image_images.items.len == 0); // Unimplemented, only support 1 image currently
-
         if (self.prepared_to_draw) {
             return InvalidApiUseError.Invalidated; // this function can not be called after prepareDraw has been called
         }
@@ -164,11 +166,22 @@ pub const InitializedApi = struct {
 
         try self.image_images.append(image);
         const id = self.image_images.items.len - 1;
-        return ImageHandle{
+        try self.image_image_handles.append(ImageHandle{
             .id = id,
+            .is_dirty = true,
+            .source_width = image.width,
+            .source_height = image.height,
             .width = image.width,
             .height = image.height,
-        };
+        });
+        return self.image_image_handles.items[id];
+    }
+
+    pub fn setImageSize(self: *Self, image: ImageIdType, width: i32, height: i32) void {
+        const image_handle = &self.image_image_handles.items[image];
+        image_handle.width = width;
+        image_handle.height = height;
+        image_handle.is_dirty = true;
     }
 
     /// Create a new sprite 
@@ -196,8 +209,9 @@ pub const InitializedApi = struct {
 
     /// Initialize draw API 
     /// !This will invalidate the current InitializedApi!
-    ///  - update_rate: dictate how often the API should push buffers to the GPU
-    pub fn initDrawApi(self: *Self, comptime gpu_update_rate: BufferUpdateRate) !DrawApi(gpu_update_rate) {
+    ///  - compute_targets: images that will be used by external writes i.e compute pipelines
+    ///  - gpu_update_rate: dictate how often the API should push buffers to the GPU
+    pub fn initDrawApi(self: *Self, compute_targets: []const ImageHandle, comptime gpu_update_rate: BufferUpdateRate) !DrawApi(gpu_update_rate) {
         if (self.prepared_to_draw) {
             return InvalidApiUseError.Invalidated; // this function can not be called after prepareDraw has been called
         }
@@ -271,7 +285,7 @@ pub const InitializedApi = struct {
         }
         self.sprite_images.deinit();
         self.empty_image_indices.deinit();
-
+        self.image_images.deinit();
         var api = DrawApi(gpu_update_rate){
             .state = .{
                 .allocator = self.allocator,
@@ -281,13 +295,20 @@ pub const InitializedApi = struct {
                 .view = try self.allocator.create(sc.ViewportScissor),
                 .pipeline = undefined,
                 .sprite_mega_image = sprite_mega_image,
-                .image_images = self.image_images,
                 .db_ptr = self.db_ptr,
             },
         };
         api.state.swapchain.* = self.swapchain;
         api.state.view.* = self.view;
         {
+            const texture_configs = try self.allocator.alloc(render.descriptor.ImageConfig, self.image_images.items.len);
+            defer self.allocator.free(texture_configs);
+
+            texture_configs[0] = .{
+                .image = sprite_mega_image,
+                .is_compute_target = false,
+            };
+
             const sprite_buffer_sizes = [_]u64{
                 @sizeOf(Vec2) * self.db_ptr.*.sprite_pool_size,
                 @sizeOf(Vec2) * self.db_ptr.*.sprite_pool_size,
@@ -298,18 +319,24 @@ pub const InitializedApi = struct {
             var desc_config = render.descriptor.Config{
                 .allocator = self.allocator,
                 .ctx = self.ctx,
-                .image = sprite_mega_image,
                 .viewport = self.view.viewport[0],
                 .buffer_count = self.swapchain.images.len,
                 .buffer_sizes = sprite_buffer_sizes[0..],
-                .is_compute_target = true,
+                .texture_configs = texture_configs[0..1],
             };
             api.state.subos[0] = try descriptor.SyncDescriptor.init(desc_config);
 
-            desc_config.image = self.image_images.items[0]; // TODO: support none, and multiple images
             const image_buffer_sizes = [0]u64{};
             desc_config.buffer_sizes = image_buffer_sizes[0..];
-            desc_config.is_compute_target = false;
+            for (self.image_images.items) |image, i| {
+                texture_configs[i] = .{
+                    .image = image,
+                    .is_compute_target = false,
+                };
+            }
+            for (compute_targets) |target| {
+                texture_configs[target.id].is_compute_target = true;
+            }
             api.state.subos[1] = try descriptor.SyncDescriptor.init(desc_config);
         }
         api.state.pipeline = try Pipeline.init(
@@ -319,14 +346,24 @@ pub const InitializedApi = struct {
             @intCast(u32, self.db_ptr.*.len),
             api.state.view,
             api.state.subos,
-            [2]i32{ 800, 600 },
+            self.image_image_handles.toOwnedSlice(),
         );
         try api.state.db_ptr.generateUvBuffer(mega_uvs);
 
+        // transfer all current sprite data to GPU
         for (api.state.swapchain.images) |_, i| {
-            const buffers = api.state.subos[0].ubo.storage_buffers[i];
+            const buffers = api.state.subos[PipeType.sprite.asUsize()].ubo.storage_buffers[i];
+
+            // in the case transfer rate is set to never we need to send all current data to GPU
+            try api.state.db_ptr.*.positions.handleDeviceTransfer(self.ctx, &buffers[0]);
+            try api.state.db_ptr.*.scales.handleDeviceTransfer(self.ctx, &buffers[1]);
+            try api.state.db_ptr.*.rotations.handleDeviceTransfer(self.ctx, &buffers[2]);
+            try api.state.db_ptr.*.uv_indices.handleDeviceTransfer(self.ctx, &buffers[3]);
+
+            // send texture UV coordinates once
             try api.state.db_ptr.*.uv_buffer.handleDeviceTransfer(self.ctx, &buffers[4]);
         }
+        api.state.db_ptr.flush();
 
         self.prepared_to_draw = true;
 
@@ -348,12 +385,30 @@ const CommonDrawState = struct {
 
     // render2d specific state
     sprite_mega_image: stbi.Image,
-    image_images: std.ArrayList(stbi.Image),
     db_ptr: *DB,
 };
 
 pub fn DrawApi(comptime rate: BufferUpdateRate) type {
     switch (rate) {
+        .never => {
+            return struct {
+                const Self = @This();
+
+                state: CommonDrawState,
+
+                usingnamespace CommonDrawAPI(Self);
+
+                fn updateImageBuffers(image_index: usize, user_ctx: anytype) void {
+                    _ = image_index;
+                    _ = user_ctx;
+                }
+
+                fn updateSpriteBuffers(image_index: usize, user_ctx: anytype) void {
+                    _ = image_index;
+                    _ = user_ctx;
+                }
+            };
+        },
         .always => {
             return struct {
                 const Self = @This();
@@ -362,18 +417,18 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
 
                 usingnamespace CommonDrawAPI(Self);
 
-                /// draw with sprite api
-                pub inline fn draw(self: *Self) !void {
-                    try self.state.pipeline.draw(self.state.ctx, &self, true, updateBuffers, .sprite);
+                fn updateImageBuffers(image_index: usize, user_ctx: anytype) void {
+                    _ = image_index;
+                    _ = user_ctx;
                 }
 
-                fn updateBuffers(image_index: usize, user_ctx: anytype) void {
-                    const buffers = user_ctx.*.subos[PipeType.sprite].ubo.storage_buffers[image_index];
+                fn updateSpriteBuffers(image_index: usize, user_ctx: anytype) void {
+                    const buffers = user_ctx.*.subos[PipeType.sprite.asUsize()].ubo.storage_buffers[image_index];
                     user_ctx.*.state.db_ptr.*.positions.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[0]) catch {};
                     user_ctx.*.state.db_ptr.*.scales.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[1]) catch {};
                     user_ctx.*.state.db_ptr.*.rotations.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[2]) catch {};
                     user_ctx.*.state.db_ptr.*.uv_indices.handleDeviceTransfer(user_ctx.*.state.ctx, &buffers[3]) catch {};
-                    user_ctx.*.state.db_ptr.*.flush() catch {};
+                    user_ctx.*.state.db_ptr.*.flush();
                 }
             };
         },
@@ -389,12 +444,6 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
                 update_frame_count: u32 = 0,
 
                 usingnamespace CommonDrawAPI(Self);
-
-                /// draw with sprite api
-                pub inline fn draw(self: *Self) !void {
-                    try self.state.pipeline.draw(self.state.ctx, &self, false, updateSpriteBuffers, .sprite);
-                    try self.state.pipeline.draw(self.state.ctx, .{}, true, updateImageBuffers, .image);
-                }
 
                 fn updateImageBuffers(image_index: usize, user_ctx: anytype) void {
                     _ = image_index;
@@ -434,6 +483,12 @@ pub fn DrawApi(comptime rate: BufferUpdateRate) type {
 
 fn CommonDrawAPI(comptime Self: type) type {
     return struct {
+        /// draw with sprite api
+        pub inline fn draw(self: *Self) !void {
+            try self.state.pipeline.draw(self.state.ctx, .{}, 0, 2, Self.updateImageBuffers, .image);
+            try self.state.pipeline.draw(self.state.ctx, &self, 1, 2, Self.updateSpriteBuffers, .sprite);
+        }
+
         // deinitialize sprite library
         pub fn deinit(self: *Self) void {
             self.state.image_images.deinit();

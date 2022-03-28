@@ -8,9 +8,22 @@ pub const TextureHandle = struct {
     height: f32,
 };
 
+/// ImageHandle represent a image. Keep in mind variables are read only: 
+///        - changes to this struct will not change rendered image
+///        - one should avoid storing copies of this struct in api user code since they might become out of sync
+/// Use the render2d API functions to get correct reads and sets for images
 pub const ImageHandle = struct {
-    id: usize,
+    pub const IdType = usize;
+
+    id: IdType,
+    is_dirty: bool,
+    /// the width of the original image
+    source_width: i32,
+    /// the height of the original image
+    source_height: i32,
+    /// current width
     width: i32,
+    /// current height
     height: i32,
 };
 
@@ -33,11 +46,13 @@ pub const Rectangle = struct {
 };
 
 const BufferUpdateRateEnum = enum {
+    never,
     always,
     every_ms,
 };
 
 pub const BufferUpdateRate = union(BufferUpdateRateEnum) {
+    never: void,
     always: void,
     every_ms: u32,
 };

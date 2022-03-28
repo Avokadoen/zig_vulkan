@@ -229,6 +229,7 @@ pub fn getIndex(self: *DB, sprite_id: *Id) Index {
     return @as(Index, sprite_id.value);
 }
 
+/// signal database to push applied changes to GPU
 pub fn flush(self: *DB) void {
     self.positions.signalChangesPushed();
     self.scales.signalChangesPushed();

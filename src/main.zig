@@ -22,6 +22,7 @@ const vox = VoxelRT.vox;
 const terrain = VoxelRT.terrain;
 
 pub const application_name = "zig vulkan";
+pub const internal_render_resolution = za.GenericVector(2, i32).new(1280, 720);
 
 // TODO: wrap this in render to make main seem simpler :^)
 var window: glfw.Window = undefined;
@@ -92,8 +93,8 @@ pub fn main() anyerror!void {
     var my_image: render2d.ImageHandle = undefined;
     var draw_api = blk: {
         var init_api = try render2d.init(allocator, ctx, 1);
-        my_texture = try init_api.loadEmptySpriteTexture(1280, 720);
-        my_image = try init_api.imageFromFile("../assets/images/tiger.jpg");
+        my_texture = try init_api.loadSpriteTexture("../assets/images/tiger.jpg");
+        my_image = try init_api.imageUndefined(internal_render_resolution.x(), internal_render_resolution.y());
         {
             const window_size = try window.getSize();
             const window_w = @intToFloat(f32, window_size.width);
@@ -103,7 +104,8 @@ pub fn main() anyerror!void {
             const pos = za.Vec2.new((window_w - scale[0]) * 0.5, (window_h - scale[1]) * 0.5).data;
             my_sprite = try init_api.createSprite(my_texture, pos, 0, scale);
         }
-        break :blk try init_api.initDrawApi(.{ .every_ms = 99999 });
+        const compute_images = [_]render2d.ImageHandle{my_image};
+        break :blk try init_api.initDrawApi(compute_images[0..], .never);
     };
     defer draw_api.deinit();
 
@@ -158,7 +160,7 @@ pub fn main() anyerror!void {
     try terrain.generateCpu(4, allocator, 420, 4, 20, &grid);
     grid.wakeWorkers();
 
-    var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, &draw_api.state.subos[0].ubo.my_texture, .{});
+    var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, &draw_api.state.subos[1].ubo.textures[0], .{});
     defer voxel_rt.deinit(ctx);
 
     try voxel_rt.pushAlbedo(ctx, albedo_color[0..]);

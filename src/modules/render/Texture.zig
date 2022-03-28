@@ -27,11 +27,10 @@ image_view: vk.ImageView,
 image_memory: vk.DeviceMemory,
 format: vk.Format,
 sampler: vk.Sampler,
-
-comptime layout: vk.ImageLayout = .general,
+layout: vk.ImageLayout,
 
 // TODO: comptime send_to_device: bool to disable all useless transfer
-pub fn init(ctx: Context, command_pool: vk.CommandPool, comptime layout: vk.ImageLayout, comptime T: type, config: Config(T)) !Texture {
+pub fn init(ctx: Context, command_pool: vk.CommandPool, layout: vk.ImageLayout, comptime T: type, config: Config(T)) !Texture {
     const image_extent = vk.Extent2D{
         .width = config.width,
         .height = config.height,
@@ -239,7 +238,7 @@ const TransitionBits = struct {
     src_stage: vk.PipelineStageFlags,
     dst_stage: vk.PipelineStageFlags,
 };
-fn getTransitionBits(comptime old_layout: vk.ImageLayout, comptime new_layout: vk.ImageLayout) TransitionBits {
+fn getTransitionBits(old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) TransitionBits {
     var transition_bits: TransitionBits = undefined;
     switch (old_layout) {
         .@"undefined" => {
@@ -282,7 +281,8 @@ fn getTransitionBits(comptime old_layout: vk.ImageLayout, comptime new_layout: v
             };
         },
         else => {
-            @compileError("unsupported old_layout \"" ++ @tagName(old_layout) ++ "\"");
+            // TODO return error
+            std.debug.panic("illegal old layout", .{});
         },
     }
     switch (new_layout) {
@@ -333,13 +333,14 @@ fn getTransitionBits(comptime old_layout: vk.ImageLayout, comptime new_layout: v
             };
         },
         else => {
-            @compileError("unsupported new_layout \"" ++ @tagName(new_layout) ++ "\"");
+            // TODO return error
+            std.debug.panic("illegal new layout", .{});
         },
     }
     return transition_bits;
 }
 
-pub inline fn transitionImageLayout(ctx: Context, command_pool: vk.CommandPool, image: vk.Image, comptime old_layout: vk.ImageLayout, comptime new_layout: vk.ImageLayout) !void {
+pub inline fn transitionImageLayout(ctx: Context, command_pool: vk.CommandPool, image: vk.Image, old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) !void {
     const commmand_buffer = try vk_utils.beginOneTimeCommandBuffer(ctx, command_pool);
     const transition = getTransitionBits(old_layout, new_layout);
     const barrier = vk.ImageMemoryBarrier{
