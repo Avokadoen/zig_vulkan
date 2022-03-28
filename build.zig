@@ -211,6 +211,20 @@ pub fn build(b: *Builder) void {
     }
 
     {
+        const image_vert = shader_comp.add("assets/shaders/image.vert");
+        shader_move_step.add_abs_resource(image_vert) catch unreachable;
+        const image_frag = shader_comp.add("assets/shaders/image.frag");
+        shader_move_step.add_abs_resource(image_frag) catch unreachable;
+    }
+
+    {
+        const imgui_vert = shader_comp.add("assets/shaders/ui.vert");
+        shader_move_step.add_abs_resource(imgui_vert) catch unreachable;
+        const imgui_frag = shader_comp.add("assets/shaders/ui.frag");
+        shader_move_step.add_abs_resource(imgui_frag) catch unreachable;
+    }
+
+    {
         const comp = shader_comp.add("assets/shaders/comp.comp");
         shader_move_step.add_abs_resource(comp) catch unreachable;
         const o_rt = shader_comp.add("assets/shaders/octree_raytracer.comp");

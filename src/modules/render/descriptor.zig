@@ -17,16 +17,21 @@ const GpuBufferMemory = @import("GpuBufferMemory.zig");
 // TODO: check for slices in config, report error
 // TODO: allow naming shader types!
 
+pub const ImageConfig = struct {
+    image: stbi.Image,
+    is_compute_target: bool,
+};
+
 /// Configuration for SyncDescriptor and Descriptor
 pub const Config = struct {
     allocator: Allocator,
     ctx: Context,
-    image: stbi.Image,
     viewport: vk.Viewport,
     buffer_count: usize, // TODO: rename to swapchain buffer count
     /// the size of each storage buffer element, descriptor makes a copy of data 
     buffer_sizes: []const u64,
-    is_compute_target: bool,
+
+    texture_configs: []ImageConfig,
 };
 
 pub const SyncDescriptor = struct {
@@ -67,7 +72,7 @@ pub const Descriptor = struct {
     descriptor_sets: []vk.DescriptorSet,
 
     // TODO: seperate texture from UniformBuffer
-    my_texture: Texture,
+    textures: []Texture,
 
     // TODO: comptime check that config is const, since var triggers a bug in zig
     pub fn init(config: Config) !Self {
@@ -92,21 +97,43 @@ pub const Descriptor = struct {
         // use graphics and compute index
         // if they are the same, then we use that index
         const indices = [_]u32{ config.ctx.queue_indices.graphics, config.ctx.queue_indices.compute };
-        const indices_len: usize = if (config.ctx.queue_indices.graphics == config.ctx.queue_indices.compute or config.is_compute_target == false) 1 else 2;
+        const indices_len: usize = if (config.ctx.queue_indices.graphics == config.ctx.queue_indices.compute) 1 else 2;
 
         const PixelType = stbi.Pixel;
-        const TextureConfig = Texture.Config(PixelType);
-        const texture_config = TextureConfig{
-            .data = config.image.data,
-            .width = @intCast(u32, config.image.width),
-            .height = @intCast(u32, config.image.height),
-            .usage = .{ .transfer_dst_bit = true, .sampled_bit = true, .storage_bit = config.is_compute_target },
-            .queue_family_indices = indices[0..indices_len],
-            // TODO: r8g8b8a8_srgb does not work for compute shader textures
-            .format = if (config.is_compute_target) .r8g8b8a8_unorm else .r8g8b8a8_srgb,
-        };
-        const my_texture = try Texture.init(config.ctx, config.ctx.gfx_cmd_pool, .general, PixelType, texture_config);
-        errdefer my_texture.deinit(config.ctx);
+        const textures = try config.allocator.alloc(Texture, config.texture_configs.len);
+        errdefer config.allocator.free(textures);
+
+        var textures_initialized: usize = 0;
+        for (config.texture_configs) |tconfig, i| {
+            var format: vk.Format = undefined;
+            var layout: vk.ImageLayout = undefined;
+            if (tconfig.is_compute_target) {
+                format = .r8g8b8a8_unorm;
+                layout = .general;
+            } else {
+                format = .r8g8b8a8_srgb;
+                layout = .shader_read_only_optimal;
+            }
+
+            // TODO: reuse duplicate data (sampler ... etc)?
+            const TextureConfig = Texture.Config(PixelType);
+            const texture_config = TextureConfig{
+                .data = tconfig.image.data,
+                .width = @intCast(u32, tconfig.image.width),
+                .height = @intCast(u32, tconfig.image.height),
+                .usage = .{ .transfer_dst_bit = true, .sampled_bit = true, .storage_bit = tconfig.is_compute_target },
+                .queue_family_indices = indices[0..indices_len],
+                .format = format,
+            };
+            textures[i] = try Texture.init(config.ctx, config.ctx.gfx_cmd_pool, layout, PixelType, texture_config);
+            textures_initialized = i + 1;
+        }
+        errdefer {
+            var i: usize = 0;
+            while (i < textures_initialized) {
+                textures[i].deinit(config.ctx);
+            }
+        }
 
         const uniform_buffers = try createShaderBuffers(
             config.allocator,
@@ -152,8 +179,7 @@ pub const Descriptor = struct {
             descriptor_pool,
             uniform_buffers,
             storage_buffers,
-            my_texture.sampler,
-            my_texture.image_view,
+            textures,
         );
         errdefer config.allocator.free(descriptor_sets);
 
@@ -167,7 +193,7 @@ pub const Descriptor = struct {
             .is_dirty = is_dirty,
             .descriptor_pool = descriptor_pool,
             .descriptor_sets = descriptor_sets,
-            .my_texture = my_texture,
+            .textures = textures,
         };
     }
 
@@ -194,7 +220,10 @@ pub const Descriptor = struct {
 
     pub fn deinit(self: Self, ctx: Context) void {
         self.allocator.free(self.buffer_sizes);
-        self.my_texture.deinit(ctx);
+        for (self.textures) |texture| {
+            texture.deinit(ctx);
+        }
+        self.allocator.free(self.textures);
 
         for (self.uniform_buffers) |buffer| {
             buffer.deinit(ctx);
@@ -332,8 +361,7 @@ fn createDescriptorSet(
     pool: vk.DescriptorPool,
     uniform_buffers: []GpuBufferMemory,
     storage_buffers: [][]GpuBufferMemory,
-    sampler: vk.Sampler,
-    image_view: vk.ImageView,
+    textures: []Texture,
 ) ![]vk.DescriptorSet {
     if (uniform_buffers.len < swapchain_image_count) {
         return error.InsufficentUniformBuffer; // uniform buffer is of insufficent lenght
@@ -380,19 +408,23 @@ fn createDescriptorSet(
                 .p_texel_buffer_view = undefined,
             };
 
+            const image_infos = try allocator.alloc(vk.DescriptorImageInfo, textures.len);
+            defer allocator.free(image_infos);
             // descriptor for image data
-            const image_info = vk.DescriptorImageInfo{
-                .sampler = sampler,
-                .image_view = image_view,
-                .image_layout = .general, // TODO: support swapping between general and readonly optimal
-            };
+            for (textures) |texture, j| {
+                image_infos[j] = vk.DescriptorImageInfo{
+                    .sampler = texture.sampler,
+                    .image_view = texture.image_view,
+                    .image_layout = texture.layout,
+                };
+            }
             const image_write_descriptor_set = vk.WriteDescriptorSet{
                 .dst_set = sets[i],
                 .dst_binding = 1,
                 .dst_array_element = 0,
-                .descriptor_count = 1,
+                .descriptor_count = @intCast(u32, image_infos.len),
                 .descriptor_type = .combined_image_sampler,
-                .p_image_info = @ptrCast([*]const vk.DescriptorImageInfo, &image_info),
+                .p_image_info = image_infos.ptr,
                 .p_buffer_info = undefined,
                 .p_texel_buffer_view = undefined,
             };
@@ -428,7 +460,13 @@ fn createDescriptorSet(
                 };
             }
 
-            ctx.vkd.updateDescriptorSets(ctx.logical_device, @intCast(u32, write_descriptor_sets.len), @ptrCast([*]const vk.WriteDescriptorSet, write_descriptor_sets.ptr), 0, undefined);
+            ctx.vkd.updateDescriptorSets(
+                ctx.logical_device,
+                @intCast(u32, write_descriptor_sets.len),
+                @ptrCast([*]const vk.WriteDescriptorSet, write_descriptor_sets.ptr),
+                0,
+                undefined,
+            );
         }
     }
     return sets;

@@ -12,7 +12,6 @@ const swapchain = render.swapchain;
 const consts = render.consts;
 
 const input = @import("modules/input.zig");
-const render2d = @import("modules/render2d.zig");
 
 // TODO: API topology
 const VoxelRT = @import("modules/VoxelRT.zig");
@@ -22,6 +21,7 @@ const vox = VoxelRT.vox;
 const terrain = VoxelRT.terrain;
 
 pub const application_name = "zig vulkan";
+pub const internal_render_resolution = za.GenericVector(2, i32).new(1280, 720);
 
 // TODO: wrap this in render to make main seem simpler :^)
 var window: glfw.Window = undefined;
@@ -87,29 +87,6 @@ pub fn main() anyerror!void {
     try input.init(window, keyInputFn, mouseBtnInputFn, cursorPosInputFn);
     defer input.deinit();
 
-    var my_texture: render2d.TextureHandle = undefined;
-    var my_sprite: render2d.Sprite = undefined;
-    var my_image: render2d.ImageHandle = undefined;
-    var draw_api = blk: {
-        var init_api = try render2d.init(allocator, ctx, 1);
-        my_texture = try init_api.loadEmptySpriteTexture(1280, 720);
-        my_image = try init_api.imageFromFile("../assets/images/tiger.jpg");
-        {
-            const window_size = try window.getSize();
-            const window_w = @intToFloat(f32, window_size.width);
-            const window_h = @intToFloat(f32, window_size.height);
-            const scale = za.Vec2.new(window_w, window_h).data;
-
-            const pos = za.Vec2.new((window_w - scale[0]) * 0.5, (window_h - scale[1]) * 0.5).data;
-            my_sprite = try init_api.createSprite(my_texture, pos, 0, scale);
-        }
-        break :blk try init_api.initDrawApi(.{ .every_ms = 99999 });
-    };
-    defer draw_api.deinit();
-
-    draw_api.handleWindowResize(window);
-    defer draw_api.noHandleWindowResize(window);
-
     var grid = try BrickGrid.init(allocator, 32, 32, 32, .{
         .min_point = [3]f32{ -16, -16, -16 },
         .material_indices_per_brick = 128,
@@ -158,7 +135,7 @@ pub fn main() anyerror!void {
     try terrain.generateCpu(4, allocator, 420, 4, 20, &grid);
     grid.wakeWorkers();
 
-    var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, &draw_api.state.subos[0].ubo.my_texture, .{});
+    var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, .{});
     defer voxel_rt.deinit(ctx);
 
     try voxel_rt.pushAlbedo(ctx, albedo_color[0..]);
@@ -198,12 +175,7 @@ pub fn main() anyerror!void {
         }
         try voxel_rt.updateGridDelta(ctx);
 
-        { // render stuff
-            try voxel_rt.compute(ctx);
-
-            // Render 2d stuff
-            try draw_api.draw();
-        }
+        try voxel_rt.draw(ctx);
 
         // Poll for and process events
         try glfw.pollEvents();

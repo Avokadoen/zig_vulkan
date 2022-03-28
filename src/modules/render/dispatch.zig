@@ -7,13 +7,15 @@ const vk = @import("vulkan");
 const consts = @import("consts.zig");
 
 pub const Base = vk.BaseWrapper(.{
-    .createInstance = true,
-    .enumerateInstanceExtensionProperties = true,
     .enumerateInstanceLayerProperties = true,
+    .enumerateInstanceExtensionProperties = true,
+    .createInstance = true,
 });
 
 pub const Instance = vk.InstanceWrapper(.{
+    .createDebugUtilsMessengerEXT = consts.enable_validation_layers,
     .createDevice = true,
+    .destroyDebugUtilsMessengerEXT = consts.enable_validation_layers,
     .destroyInstance = true,
     .destroySurfaceKHR = true,
     .enumerateDeviceExtensionProperties = true,
@@ -27,8 +29,6 @@ pub const Instance = vk.InstanceWrapper(.{
     .getPhysicalDeviceSurfaceFormatsKHR = true,
     .getPhysicalDeviceSurfacePresentModesKHR = true,
     .getPhysicalDeviceSurfaceSupportKHR = true,
-    .createDebugUtilsMessengerEXT = consts.enable_validation_layers,
-    .destroyDebugUtilsMessengerEXT = consts.enable_validation_layers,
 });
 
 // zig fmt: off
@@ -40,13 +40,12 @@ pub const Device = vk.DeviceWrapper(.{
     .beginCommandBuffer = true, 
     .bindBufferMemory = true, 
     .bindImageMemory = true, 
-    .cmdPushConstants = true,
-    .cmdBlitImage = true,
     .cmdBeginRenderPass = true, 
     .cmdBindDescriptorSets = true, 
     .cmdBindIndexBuffer = true,
     .cmdBindPipeline = true,
     .cmdBindVertexBuffers = true,
+    .cmdBlitImage = true,
     .cmdCopyBuffer = true,
     .cmdCopyBufferToImage = true,
     .cmdCopyImageToBuffer = true,
@@ -54,6 +53,7 @@ pub const Device = vk.DeviceWrapper(.{
     .cmdDrawIndexed = true,
     .cmdEndRenderPass = true,
     .cmdPipelineBarrier = true,
+    .cmdPushConstants = true,
     .cmdSetScissor = true,
     .cmdSetViewport = true,
     .createBuffer = true,
@@ -66,6 +66,7 @@ pub const Device = vk.DeviceWrapper(.{
     .createGraphicsPipelines = true,
     .createImage = true,
     .createImageView = true,
+    .createPipelineCache = true,
     .createPipelineLayout = true,
     .createRenderPass = true,
     .createSampler = true,
@@ -82,6 +83,7 @@ pub const Device = vk.DeviceWrapper(.{
     .destroyImage = true,
     .destroyImageView = true,
     .destroyPipeline = true,
+    .destroyPipelineCache = true,
     .destroyPipelineLayout = true,
     .destroyRenderPass = true,
     .destroySampler = true,
@@ -90,7 +92,9 @@ pub const Device = vk.DeviceWrapper(.{
     .destroySwapchainKHR = true,
     .deviceWaitIdle = true,
     .endCommandBuffer = true,
+    .flushMappedMemoryRanges = true,
     .freeCommandBuffers = true,
+    .freeDescriptorSets = true,
     .freeMemory = true,
     .getBufferMemoryRequirements = true,
     .getDeviceQueue = true,
@@ -103,7 +107,7 @@ pub const Device = vk.DeviceWrapper(.{
     .resetFences = true,
     .unmapMemory = true,
     .updateDescriptorSets = true,
-    .waitForFences = true 
+    .waitForFences = true, 
 });
 // zig fmt: on
 

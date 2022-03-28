@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 
 pub fn Config(comptime T: type) type {
     return struct {
-        data: []T,
+        data: ?[]T,
         width: u32,
         height: u32,
         usage: vk.ImageUsageFlags,
@@ -27,25 +27,14 @@ image_view: vk.ImageView,
 image_memory: vk.DeviceMemory,
 format: vk.Format,
 sampler: vk.Sampler,
-
-comptime layout: vk.ImageLayout = .general,
+layout: vk.ImageLayout,
 
 // TODO: comptime send_to_device: bool to disable all useless transfer
-pub fn init(ctx: Context, command_pool: vk.CommandPool, comptime layout: vk.ImageLayout, comptime T: type, config: Config(T)) !Texture {
+pub fn init(ctx: Context, command_pool: vk.CommandPool, layout: vk.ImageLayout, comptime T: type, config: Config(T)) !Texture {
     const image_extent = vk.Extent2D{
         .width = config.width,
         .height = config.height,
     };
-    // transfer texture data to gpu
-    const image_size: vk.DeviceSize = @intCast(vk.DeviceSize, config.data.len * @sizeOf(T));
-    var staging_buffer = try GpuBufferMemory.init(ctx, image_size, .{
-        .transfer_src_bit = true,
-    }, .{
-        .host_visible_bit = true,
-        .host_coherent_bit = true,
-    });
-    defer staging_buffer.deinit(ctx);
-    try staging_buffer.transferToDevice(ctx, T, 0, config.data);
 
     const image = blk: {
         // TODO: make sure we use correct usage bits https://www.khronos.org/registry/vulkan/specs/1.2-extensions/man/html/VkImageUsageFlagBits.html
@@ -86,12 +75,27 @@ pub fn init(ctx: Context, command_pool: vk.CommandPool, comptime layout: vk.Imag
     };
 
     try ctx.vkd.bindImageMemory(ctx.logical_device, image, image_memory, 0);
-    try transitionImageLayout(ctx, command_pool, image, .@"undefined", .transfer_dst_optimal);
 
-    // TODO: this is not always desireable
-    try copyBufferToImage(ctx, command_pool, image, staging_buffer.buffer, image_extent);
+    // TODO: set size according to image format
+    const image_size: vk.DeviceSize = @intCast(vk.DeviceSize, config.width * config.height * @sizeOf(f32));
 
-    try transitionImageLayout(ctx, command_pool, image, .transfer_dst_optimal, layout);
+    // transfer texture data to gpu
+    if (config.data) |data| {
+        var staging_buffer = try GpuBufferMemory.init(ctx, image_size, .{
+            .transfer_src_bit = true,
+        }, .{
+            .host_visible_bit = true,
+            .host_coherent_bit = true,
+        });
+        defer staging_buffer.deinit(ctx);
+        try staging_buffer.transferToDevice(ctx, T, 0, data);
+
+        try transitionImageLayout(ctx, command_pool, image, .@"undefined", .transfer_dst_optimal);
+        try copyBufferToImage(ctx, command_pool, image, staging_buffer.buffer, image_extent);
+        try transitionImageLayout(ctx, command_pool, image, .transfer_dst_optimal, layout);
+    } else {
+        try transitionImageLayout(ctx, command_pool, image, .@"undefined", layout);
+    }
 
     const image_view = blk: {
         // TODO: evaluate if this and swapchain should share logic (probably no)
@@ -239,7 +243,7 @@ const TransitionBits = struct {
     src_stage: vk.PipelineStageFlags,
     dst_stage: vk.PipelineStageFlags,
 };
-fn getTransitionBits(comptime old_layout: vk.ImageLayout, comptime new_layout: vk.ImageLayout) TransitionBits {
+fn getTransitionBits(old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) TransitionBits {
     var transition_bits: TransitionBits = undefined;
     switch (old_layout) {
         .@"undefined" => {
@@ -282,7 +286,8 @@ fn getTransitionBits(comptime old_layout: vk.ImageLayout, comptime new_layout: v
             };
         },
         else => {
-            @compileError("unsupported old_layout \"" ++ @tagName(old_layout) ++ "\"");
+            // TODO return error
+            std.debug.panic("illegal old layout", .{});
         },
     }
     switch (new_layout) {
@@ -333,13 +338,14 @@ fn getTransitionBits(comptime old_layout: vk.ImageLayout, comptime new_layout: v
             };
         },
         else => {
-            @compileError("unsupported new_layout \"" ++ @tagName(new_layout) ++ "\"");
+            // TODO return error
+            std.debug.panic("illegal new layout", .{});
         },
     }
     return transition_bits;
 }
 
-pub inline fn transitionImageLayout(ctx: Context, command_pool: vk.CommandPool, image: vk.Image, comptime old_layout: vk.ImageLayout, comptime new_layout: vk.ImageLayout) !void {
+pub inline fn transitionImageLayout(ctx: Context, command_pool: vk.CommandPool, image: vk.Image, old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) !void {
     const commmand_buffer = try vk_utils.beginOneTimeCommandBuffer(ctx, command_pool);
     const transition = getTransitionBits(old_layout, new_layout);
     const barrier = vk.ImageMemoryBarrier{
@@ -364,8 +370,7 @@ pub inline fn transitionImageLayout(ctx: Context, command_pool: vk.CommandPool, 
     try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, commmand_buffer);
 }
 
-// TODO: find a suitable location for this functio
-inline fn copyBufferToImage(ctx: Context, command_pool: vk.CommandPool, image: vk.Image, buffer: vk.Buffer, image_extent: vk.Extent2D) !void {
+pub inline fn copyBufferToImage(ctx: Context, command_pool: vk.CommandPool, image: vk.Image, buffer: vk.Buffer, image_extent: vk.Extent2D) !void {
     const command_buffer = try vk_utils.beginOneTimeCommandBuffer(ctx, command_pool);
     {
         const region = vk.BufferImageCopy{

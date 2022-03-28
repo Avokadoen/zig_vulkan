@@ -43,9 +43,8 @@ pub inline fn findMemoryTypeIndex(ctx: Context, type_filter: u32, memory_flags: 
     {
         var i: u32 = 0;
         while (i < properties.memory_type_count) : (i += 1) {
-            // I am honsetly not sure what this something actually does ...
-            const something = type_filter & @as(u32, 1) << @intCast(u5, i);
-            if (something > 0 and memory_flags.toInt() == properties.memory_types[i].property_flags.toInt()) {
+            const correct_type: bool = (type_filter & (@as(u32, 1) << @intCast(u5, i))) != 0;
+            if (correct_type and (properties.memory_types[i].property_flags.toInt() & memory_flags.toInt()) == memory_flags.toInt()) {
                 return i;
             }
         }

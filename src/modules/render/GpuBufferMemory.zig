@@ -17,6 +17,18 @@ len: u32,
 size: vk.DeviceSize,
 buffer: vk.Buffer,
 memory: vk.DeviceMemory,
+mapped: ?*anyopaque,
+
+/// create a undefined buffer that can be utilized later
+pub fn @"undefined"() GpuBufferMemory {
+    return GpuBufferMemory{
+        .len = 0,
+        .size = 0,
+        .buffer = .null_handle,
+        .memory = .null_handle,
+        .mapped = null,
+    };
+}
 
 /// user has to make sure to call deinit on buffer
 pub fn init(ctx: Context, size: vk.DeviceSize, buf_usage_flags: vk.BufferUsageFlags, mem_prop_flags: vk.MemoryPropertyFlags) !GpuBufferMemory {
@@ -51,6 +63,7 @@ pub fn init(ctx: Context, size: vk.DeviceSize, buf_usage_flags: vk.BufferUsageFl
         .size = size,
         .buffer = buffer,
         .memory = memory,
+        .mapped = null,
     };
 }
 
@@ -71,6 +84,10 @@ pub fn transferToDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, 
     const transfer_zone = tracy.ZoneN(@src(), @src().fn_name);
     defer transfer_zone.End();
 
+    if (self.mapped != null) {
+        // TODO: implement a transfer for already mapped memory
+        return error.MemoryAlreadyMapped; // can't used transfer if memory is externally mapped
+    }
     // transfer empty data slice is NOP
     if (data.len <= 0) return;
 
@@ -81,27 +98,61 @@ pub fn transferToDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, 
 
     const gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, size, .{})) orelse return error.FailedToMapGPUMem;
     const gpu_mem_start = @ptrToInt(gpu_mem) + offset * @sizeOf(T);
-    for (data) |element, i| {
-        const mem_location = gpu_mem_start + i * @sizeOf(T);
-        var ptr = @intToPtr(*T, mem_location);
-        ptr.* = element;
+    {
+        @setRuntimeSafety(false);
+        for (data) |element, i| {
+            const mem_location = gpu_mem_start + i * @sizeOf(T);
+            var ptr = @intToPtr(*T, mem_location);
+            ptr.* = element;
+        }
     }
     ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
     self.len = @intCast(u32, data.len);
+}
+
+pub fn map(self: *GpuBufferMemory, ctx: Context, size: vk.DeviceSize, offset: vk.DeviceSize) !void {
+    self.mapped = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, offset, size, .{})) orelse return error.FailedToMapGPUMem;
+}
+
+pub fn unmap(self: GpuBufferMemory, ctx: Context) void {
+    if (self.mapped != null) {
+        ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
+    }
+}
+
+pub fn flush(self: GpuBufferMemory, ctx: Context, offset: vk.DeviceSize, size: vk.DeviceSize) !void {
+    const map_range = vk.MappedMemoryRange{
+        .memory = self.memory,
+        .offset = offset,
+        .size = size,
+    };
+    try ctx.vkd.flushMappedMemoryRanges(
+        ctx.logical_device,
+        1,
+        @ptrCast([*]const vk.MappedMemoryRange, &map_range),
+    );
 }
 
 pub fn transferFromDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, data: []T) !void {
     const transfer_zone = tracy.ZoneN(@src(), @src().fn_name);
     defer transfer_zone.End();
 
+    if (self.mapped != null) {
+        // TODO: implement a transfer for already mapped memory
+        return error.MemoryAlreadyMapped; // can't used transfer if memory is externally mapped
+    }
+
     const gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, self.size, .{})) orelse return error.FailedToMapGPUMem;
     const gpu_mem_start = @ptrToInt(gpu_mem);
 
     var i: usize = 0;
     var offset: usize = 0;
-    while (offset + @sizeOf(T) <= self.size and i < data.len) : (i += 1) {
-        offset = @sizeOf(T) * i;
-        data[i] = @intToPtr(*T, gpu_mem_start + offset).*;
+    {
+        @setRuntimeSafety(false);
+        while (offset + @sizeOf(T) <= self.size and i < data.len) : (i += 1) {
+            offset = @sizeOf(T) * i;
+            data[i] = @intToPtr(*T, gpu_mem_start + offset).*;
+        }
     }
     ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
 }
@@ -111,6 +162,11 @@ pub fn transferFromDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type
 pub fn batchTransfer(self: *GpuBufferMemory, ctx: Context, comptime T: type, offsets: []usize, datas: [][]const T) !void {
     const transfer_zone = tracy.ZoneN(@src(), @src().fn_name);
     defer transfer_zone.End();
+
+    if (self.mapped != null) {
+        // TODO: implement a transfer for already mapped memory
+        return error.MemoryAlreadyMapped; // can't used transfer if memory is externally mapped
+    }
 
     if (offsets.len == 0) return;
     if (offsets.len != datas.len) {
@@ -125,12 +181,15 @@ pub fn batchTransfer(self: *GpuBufferMemory, ctx: Context, comptime T: type, off
 
     const gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, self.size, .{})) orelse return error.FailedToMapGPUMem;
     const gpu_mem_start = @ptrToInt(gpu_mem);
-    for (offsets) |offset, i| {
-        const byte_offset = offset * @sizeOf(T);
-        for (datas[i]) |element, j| {
-            const mem_location = gpu_mem_start + byte_offset + j * @sizeOf(T);
-            var ptr = @intToPtr(*T, mem_location);
-            ptr.* = element;
+    {
+        @setRuntimeSafety(false);
+        for (offsets) |offset, i| {
+            const byte_offset = offset * @sizeOf(T);
+            for (datas[i]) |element, j| {
+                const mem_location = gpu_mem_start + byte_offset + j * @sizeOf(T);
+                var ptr = @intToPtr(*T, mem_location);
+                ptr.* = element;
+            }
         }
     }
     ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
@@ -138,7 +197,15 @@ pub fn batchTransfer(self: *GpuBufferMemory, ctx: Context, comptime T: type, off
     self.len = std.math.max(self.len, @intCast(u32, datas[datas.len - 1].len + offsets[offsets.len - 1]));
 }
 
-pub inline fn deinit(self: GpuBufferMemory, ctx: Context) void {
-    ctx.vkd.destroyBuffer(ctx.logical_device, self.buffer, null);
-    ctx.vkd.freeMemory(ctx.logical_device, self.memory, null);
+/// destroy buffer and free memory
+pub fn deinit(self: GpuBufferMemory, ctx: Context) void {
+    // unmap if needed
+    self.unmap(ctx);
+
+    if (self.buffer != .null_handle) {
+        ctx.vkd.destroyBuffer(ctx.logical_device, self.buffer, null);
+    }
+    if (self.memory != .null_handle) {
+        ctx.vkd.freeMemory(ctx.logical_device, self.memory, null);
+    }
 }

@@ -181,7 +181,7 @@ pub fn generateGpu(ctx: Context, allocator: Allocator, seed: u32, scale: f32, oc
         };
         const state_configs = Compute.StateConfigs{ .uniform_sizes = uniform_sizes[0..], .storage_sizes = &.{} };
 
-        break :blk try Compute.init(allocator, ctx, "../../height_map_gen.comp.spv", &target_texture, state_configs);
+        break :blk try Compute.init(allocator, ctx, "height_map_gen.comp.spv", &target_texture, state_configs);
     };
     defer comp_pipeline.deinit(ctx);
 

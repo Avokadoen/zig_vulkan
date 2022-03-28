@@ -147,7 +147,9 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
 
     self.gfx_cmd_pool = blk: {
         const pool_info = vk.CommandPoolCreateInfo{
-            .flags = .{},
+            .flags = .{
+                .reset_command_buffer_bit = true,
+            },
             .queue_family_index = self.queue_indices.graphics,
         };
         break :blk try self.vkd.createCommandPool(self.logical_device, &pool_info, null);
@@ -155,7 +157,9 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
 
     self.comp_cmd_pool = blk: {
         const pool_info = vk.CommandPoolCreateInfo{
-            .flags = .{},
+            .flags = .{
+                .reset_command_buffer_bit = true,
+            },
             .queue_family_index = self.queue_indices.compute,
         };
         break :blk try self.vkd.createCommandPool(self.logical_device, &pool_info, null);
