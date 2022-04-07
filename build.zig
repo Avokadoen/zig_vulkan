@@ -10,6 +10,8 @@ const ArrayList = std.ArrayList;
 const vkgen = @import("deps/vulkan-zig/generator/index.zig");
 const glfw = @import("deps/mach-glfw/build.zig");
 const stbi = @import("deps/stb_image/build.zig");
+const tracy = @import("deps/Zig-Tracy/build_tracy.zig");
+const imgui = @import("deps/zig-gamekit/gamekit/deps/imgui/build.zig");
 
 // TODO: this file could use a refactor pass or atleast some comments to make it more readable
 
@@ -184,6 +186,8 @@ pub fn build(b: *Builder) void {
     exe.addPackagePath("glfw", "deps/mach-glfw/src/main.zig");
     exe.addPackagePath("zalgebra", "deps/zalgebra/src/main.zig");
 
+    imgui.linkArtifact(b, exe, target, "deps/zig-gamekit/");
+
     stbi.linkStep(b, exe);
 
     const vk_xml_path = b.option([]const u8, "vulkan-registry", "Override to the Vulkan registry") orelse "deps/vk.xml";
@@ -197,10 +201,27 @@ pub fn build(b: *Builder) void {
     const shader_move_step = ShaderMoveStep.init(b, shader_comp) catch unreachable;
 
     {
-        const vert = shader_comp.add("assets/shaders/render2d.vert");
-        shader_move_step.add_abs_resource(vert) catch unreachable;
-        const frag = shader_comp.add("assets/shaders/render2d.frag");
-        shader_move_step.add_abs_resource(frag) catch unreachable;
+        const sprite_vert = shader_comp.add("assets/shaders/render2d_sprite.vert");
+        shader_move_step.add_abs_resource(sprite_vert) catch unreachable;
+        const image_vert = shader_comp.add("assets/shaders/render2d_image.vert");
+        shader_move_step.add_abs_resource(image_vert) catch unreachable;
+
+        const common_frag = shader_comp.add("assets/shaders/render2d_common.frag");
+        shader_move_step.add_abs_resource(common_frag) catch unreachable;
+    }
+
+    {
+        const image_vert = shader_comp.add("assets/shaders/image.vert");
+        shader_move_step.add_abs_resource(image_vert) catch unreachable;
+        const image_frag = shader_comp.add("assets/shaders/image.frag");
+        shader_move_step.add_abs_resource(image_frag) catch unreachable;
+    }
+
+    {
+        const imgui_vert = shader_comp.add("assets/shaders/ui.vert");
+        shader_move_step.add_abs_resource(imgui_vert) catch unreachable;
+        const imgui_frag = shader_comp.add("assets/shaders/ui.frag");
+        shader_move_step.add_abs_resource(imgui_frag) catch unreachable;
     }
 
     {
@@ -210,10 +231,17 @@ pub fn build(b: *Builder) void {
         shader_move_step.add_abs_resource(o_rt) catch unreachable;
         const b_rt = shader_comp.add("assets/shaders/brick_raytracer.comp");
         shader_move_step.add_abs_resource(b_rt) catch unreachable;
+        const gen_height = shader_comp.add("assets/shaders/height_map_gen.comp");
+        shader_move_step.add_abs_resource(gen_height) catch unreachable;
     }
 
     exe.step.dependOn(&shader_comp.step);
     exe.step.dependOn(&shader_move_step.step);
+
+    // link tracy if in debug mode and nothing else is specified
+    const no_tracy = b.option(bool, "no-tracy", "Force build to omit tracy") orelse false;
+    var tracy_path = if (no_tracy == false) @as([]const u8, "deps/Zig-Tracy/tracy-0.7.8") else null;
+    tracy.link(b, exe, tracy_path);
 
     const asset_move = AssetMoveStep.init(b) catch unreachable;
     exe.step.dependOn(&asset_move.step);

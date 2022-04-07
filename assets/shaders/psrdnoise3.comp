@@ -1,0 +1,121 @@
+// psrdnoise (c) Stefan Gustavson and Ian McEwan,
+// ver. 2021-12-02, published under the MIT license:
+// https://github.com/stegu/psrdnoise/
+
+// PLEASE NOTE THAT THE CODE IS MODIFIED
+
+// Permutation polynomial for the hash value
+vec4 permute(vec4 i) {
+  vec4 im = mod(i, 289.0);
+  return mod(fma(im, vec4(34.0), vec4(10.0)) * im, 289.0);
+}
+
+//
+// 3-D tiling simplex noise with rotating gradients and first order
+// analytical derivatives.
+// "vec3 x" is the point (x,y,z) to evaluate
+// "vec3 period" is the desired periods along x,y,z, up to 289.
+// (If Perlin's grid is used, multiples of 3 up to 288 are allowed.)
+// "float alpha" is the rotation (in radians) for the swirling gradients.
+// The "float" return value is the noise value, and
+// the "out vec3 gradient" argument returns the x,y,z partial derivatives.
+//
+// The function executes 15-20% faster if alpha is constant == 0.0
+// across all fragments being executed in parallel.
+// (This speedup will not happen if FASTROTATION is enabled. Do not specify
+// FASTROTATION if you are not actually going to use the rotation.)
+//
+// Setting any period to 0.0 or a negative value will skip the periodic
+// wrap for that dimension. Setting all periods to 0.0 makes the function
+// execute 10-15% faster.
+//
+// Not using the return value for the gradient will make the compiler
+// eliminate the code for computing it. This speeds up the function by
+// around 10%.
+//
+float psrdnoise(vec3 x, vec3 period, float alpha, out vec3 gradient)
+{
+  const mat3 M = mat3(0.0, 1.0, 1.0, 1.0, 0.0, 1.0,  1.0, 1.0, 0.0);
+  const mat3 Mi = mat3(-0.5, 0.5, 0.5, 0.5,-0.5, 0.5, 0.5, 0.5, -0.5);
+
+  const vec3 uvw = M * x;
+  vec3 i0 = floor(uvw);
+
+  const vec3 f0 = fract(uvw);
+  const vec3 g_ = step(f0.xyx, f0.yzz), l_ = 1.0 - g_;
+  const vec3 g = vec3(l_.z, g_.xy), l = vec3(l_.xy, g_.z);
+  const vec3 o1 = min( g, l ), o2 = max( g, l );
+  vec3 i1 = i0 + o1, i2 = i0 + o2;
+  vec3 i3 = i0 + vec3(1.0);
+
+  const vec3 v0 = Mi * i0;
+  const vec3 v1 = Mi * i1;
+  const vec3 v2 = Mi * i2;
+  const vec3 v3 = Mi * i3;
+  const vec3 x0 = x - v0; 
+  const vec3 x1 = x - v1;
+  const vec3 x2 = x - v2;
+  const vec3 x3 = x - v3;
+
+  if(any(greaterThan(period, vec3(0.0)))) {
+    vec4 vx = vec4(v0.x, v1.x, v2.x, v3.x);
+    vec4 vy = vec4(v0.y, v1.y, v2.y, v3.y);
+    vec4 vz = vec4(v0.z, v1.z, v2.z, v3.z);
+
+    if(period.x > 0.0) vx = mod(vx, period.x);
+    if(period.y > 0.0) vy = mod(vy, period.y);
+    if(period.z > 0.0) vz = mod(vz, period.z);
+    
+    i0 = floor(M * vec3(vx.x, vy.x, vz.x) + 0.5);
+    i1 = floor(M * vec3(vx.y, vy.y, vz.y) + 0.5);
+    i2 = floor(M * vec3(vx.z, vy.z, vz.z) + 0.5);
+    i3 = floor(M * vec3(vx.w, vy.w, vz.w) + 0.5);
+  }
+
+  const vec4 hash = permute(permute(permute(vec4(i0.z, i1.z, i2.z, i3.z)) + vec4(i0.y, i1.y, i2.y, i3.y)) + vec4(i0.x, i1.x, i2.x, i3.x));
+  const vec4 theta = hash * 3.883222077;
+  const vec4 sz = fma(hash, vec4(-0.006920415), vec4(0.996539792));
+  const vec4 psi = hash * 0.108705628;
+  const vec4 Ct = cos(theta); 
+  const vec4 St = sin(theta);
+  const vec4 sz_prime = sqrt(1.0 - sz * sz);
+  vec4 gx, gy, gz;
+  if(alpha != 0.0) {
+    const vec4 px = Ct * sz_prime; 
+    const vec4 py = St * sz_prime;
+    const vec4 Sp = sin(psi);
+    const vec4 Cp = cos(psi); 
+    const vec4 Ctp = fma(St, Sp, -(Ct * Cp));
+    const vec4 qx = mix(Ctp * St, Sp, sz);
+    const vec4 qy = mix(-Ctp * Ct, Cp, sz);
+    const vec4 qz = -fma(py, Cp, px * Sp);
+    const vec4 Sa = vec4(sin(alpha));
+    const vec4 Ca = vec4(cos(alpha));
+    gx = fma(Ca, px, Sa * qx);
+    gy = fma(Ca, py, Sa * qy);
+    gz = fma(Ca, sz, Sa * qz);
+  } else {
+    gx = Ct * sz_prime; 
+    gy = St * sz_prime; 
+    gz = sz;  
+  }
+
+  const vec3 g0 = vec3(gx.x, gy.x, gz.x);
+  const vec3 g1 = vec3(gx.y, gy.y, gz.y);
+  const vec3 g2 = vec3(gx.z, gy.z, gz.z); 
+  const vec3 g3 = vec3(gx.w, gy.w, gz.w);
+
+  const vec4 w = max(0.5 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0);
+  const vec4 w2 = w * w;
+  const vec4 w3 = w2 * w;
+
+  const vec4 gdotx = vec4(dot(g0, x0), dot(g1,x1), dot(g2,x2), dot(g3,x3));
+  const float n = dot(w3, gdotx);
+  const vec4 dw = -6.0 * w2 * gdotx;
+  const vec3 dn0 = fma(vec3(w3.x), g0, vec3(dw.x * x0) );
+  const vec3 dn1 = fma(vec3(w3.y), g1, vec3(dw.y * x1) );
+  const vec3 dn2 = fma(vec3(w3.z), g2, vec3(dw.z * x2) );
+  const vec3 dn3 = fma(vec3(w3.w), g3, vec3(dw.w * x3) );
+  gradient = 39.5 * (dn0 + dn1 + dn2 + dn3);
+  return 39.5 * n;
+}

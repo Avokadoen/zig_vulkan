@@ -1,0 +1,19 @@
+#version 450
+
+#include "perlin.comp" // cnoise
+
+layout(local_size_x = 32, local_size_y = 32) in;
+layout(Rgba8, binding = 0) uniform writeonly image2D img_output;
+
+layout(binding = 1) uniform GenerateData {
+    vec4 offset_scale;
+    uint seed;
+} gen_data;
+
+void main() {	
+    const vec2 image_size = imageSize(img_output);
+    const vec2 offset = gen_data.offset_scale.xy * image_size;
+    const vec3 pos = vec3(((gl_GlobalInvocationID.xy + offset) / image_size) * gen_data.offset_scale.w, 0);
+    const float noise = cnoise(pos);
+    imageStore(img_output, ivec2(gl_GlobalInvocationID.xy), vec4(noise, noise, noise, 1));
+}

@@ -13,14 +13,28 @@ pub const Pixel = struct {
 
 /// Utility wrapper for stb_load functions
 pub const Image = struct {
+    allocator: Allocator,
     width: i32,
     height: i32,
     channels: i32,
     data: []Pixel,
 
+    loaded_from_file: bool,
+
+    pub fn initUndefined(allocator: Allocator, width: i32, height: i32) !Image {
+        return Image{
+            .allocator = allocator,
+            .width = width,
+            .height = height,
+            .channels = 4,
+            .data = try allocator.alloc(Pixel, @intCast(usize, width * height)),
+            .loaded_from_file = false,
+        };
+    }
+
     // TODO: remove comptime keyword -> // TODO: acount for any channel type
     /// Caller must call deinit to free created memory
-    pub fn from_file(allocator: Allocator, path: []const u8, comptime desired_channels: DesiredChannels) !Image {
+    pub fn fromFile(allocator: Allocator, path: []const u8, comptime desired_channels: DesiredChannels) !Image {
         const use_path = try buildPath(allocator, path);
         defer allocator.destroy(use_path.ptr);
         // TODO: acount for any channel type
@@ -50,10 +64,12 @@ pub const Image = struct {
 
         const pixel_count = @intCast(usize, width * height);
         return Image{
+            .allocator = allocator,
             .width = width,
             .height = height,
             .channels = channels,
             .data = pixel_ptr[0..pixel_count],
+            .loaded_from_file = true,
         };
     }
 
@@ -63,14 +79,18 @@ pub const Image = struct {
 
         const char_ptr = std.mem.alignPointer(self.data.ptr, 2);
 
-        const error_code = c.stbi_write_png(use_path.ptr, self.width, self.height, self.channels + 1, char_ptr, self.width * (self.channels + 1));
+        const error_code = c.stbi_write_png(use_path.ptr, self.width, self.height, self.channels, char_ptr, self.width * self.channels);
         if (error_code == 0) {
             return error.StbiFailedWrite; // error scenarios are not specified :(
         }
     }
 
     pub fn deinit(self: Image) void {
-        c.stbi_image_free(self.data.ptr);
+        if (self.loaded_from_file) {
+            c.stbi_image_free(self.data.ptr);
+        } else {
+            self.allocator.free(self.data);
+        }
     }
 };
 
