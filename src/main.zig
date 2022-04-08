@@ -11,7 +11,8 @@ const render = @import("modules/render.zig");
 const swapchain = render.swapchain;
 const consts = render.consts;
 
-const input = @import("modules/input.zig");
+const Input = @import("modules/Input.zig");
+const InputModeCursor = Input.InputModeCursor;
 
 // TODO: API topology
 const VoxelRT = @import("modules/VoxelRT.zig");
@@ -21,19 +22,21 @@ const vox = VoxelRT.vox;
 const terrain = VoxelRT.terrain;
 
 pub const application_name = "zig vulkan";
-pub const internal_render_resolution = za.GenericVector(2, i32).new(1280, 720);
+pub const internal_render_resolution = za.GenericVector(2, u32).new(1920, 1080);
 
 // TODO: wrap this in render to make main seem simpler :^)
-var window: glfw.Window = undefined;
 var delta_time: f64 = 0;
 
 var activate_sprint: bool = false;
 var call_translate: u8 = 0;
 var camera_translate = za.Vec3.zero();
 
+var input: Input = undefined;
 var call_yaw = false;
 var call_pitch = false;
 var mouse_delta = za.Vec2.zero();
+var first_input_after_change: bool = true;
+var mouse_input_mode: InputModeCursor = .disabled;
 
 pub fn main() anyerror!void {
     tracy.InitThread();
@@ -65,12 +68,12 @@ pub fn main() anyerror!void {
 
     // zig fmt: off
     // Create a windowed mode window
-    window = glfw.Window.create(1920, 1080, application_name, null, null, 
+    var window = glfw.Window.create(3840, 2160, application_name, null, null, 
         .{ 
             .center_cursor = true, 
             .client_api = .no_api,
-            // .maximized = true,
-            // .scale_to_monitor = true,
+            .maximized = true,
+            .scale_to_monitor = true,
             .focused = true, 
         }
     ) catch |err| {
@@ -83,12 +86,18 @@ pub fn main() anyerror!void {
     const ctx = try render.Context.init(allocator, application_name, &window);
     defer ctx.deinit();
 
-    // init input module with iput handler functions
-    try input.init(window, keyInputFn, mouseBtnInputFn, cursorPosInputFn);
-    defer input.deinit();
+    // init input module with default input handler functions
+    input = try Input.init(
+        allocator,
+        window,
+        keyInputFn,
+        mouseBtnInputFn,
+        disabledCursorPosInputFn,
+    );
+    defer input.deinit(allocator);
 
-    var grid = try BrickGrid.init(allocator, 32, 32, 32, .{
-        .min_point = [3]f32{ -16, -16, -16 },
+    var grid = try BrickGrid.init(allocator, 64, 32, 64, .{
+        .min_point = [3]f32{ -32, -16, -32 },
         .material_indices_per_brick = 128,
     });
     defer grid.deinit();
@@ -135,7 +144,10 @@ pub fn main() anyerror!void {
     try terrain.generateCpu(4, allocator, 420, 4, 20, &grid);
     grid.wakeWorkers();
 
-    var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, .{});
+    var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, .{
+        .internal_resolution_width = internal_render_resolution.x(),
+        .internal_resolution_height = internal_render_resolution.y(),
+    });
     defer voxel_rt.deinit(ctx);
 
     try voxel_rt.pushAlbedo(ctx, albedo_color[0..]);
@@ -185,63 +197,73 @@ pub fn main() anyerror!void {
     }
 }
 
-fn keyInputFn(event: input.KeyEvent) void {
+fn keyInputFn(event: Input.KeyEvent) void {
     if (event.action == .press) {
         switch (event.key) {
-            input.Key.w => {
+            Input.Key.w => {
                 call_translate += 1;
                 camera_translate.data[2] -= 1;
             },
-            input.Key.s => {
+            Input.Key.s => {
                 call_translate += 1;
                 camera_translate.data[2] += 1;
             },
-            input.Key.d => {
+            Input.Key.d => {
                 call_translate += 1;
                 camera_translate.data[0] += 1;
             },
-            input.Key.a => {
+            Input.Key.a => {
                 call_translate += 1;
                 camera_translate.data[0] -= 1;
             },
-            input.Key.left_control => {
+            Input.Key.left_control => {
                 call_translate += 1;
                 camera_translate.data[1] += 1;
             },
-            input.Key.left_shift => activate_sprint = true,
-            input.Key.space => {
+            Input.Key.left_shift => activate_sprint = true,
+            Input.Key.space => {
                 call_translate += 1;
                 camera_translate.data[1] -= 1;
             },
-            input.Key.escape => window.setShouldClose(true),
+            Input.Key.escape => {
+                if (mouse_input_mode == InputModeCursor.disabled) {
+                    mouse_input_mode = .normal;
+                    input.setCursorPosCallback(normalCursorPosInputFn);
+                } else {
+                    first_input_after_change = true;
+                    mouse_input_mode = .disabled;
+                    input.setCursorPosCallback(disabledCursorPosInputFn);
+                }
+                input.setInputModeCursor(mouse_input_mode) catch {};
+            },
             else => {},
         }
     } else if (event.action == .release) {
         switch (event.key) {
-            input.Key.w => {
+            Input.Key.w => {
                 call_translate -= 1;
                 camera_translate.data[2] += 1;
             },
-            input.Key.s => {
+            Input.Key.s => {
                 call_translate -= 1;
                 camera_translate.data[2] -= 1;
             },
-            input.Key.d => {
+            Input.Key.d => {
                 call_translate -= 1;
                 camera_translate.data[0] -= 1;
             },
-            input.Key.a => {
+            Input.Key.a => {
                 call_translate -= 1;
                 camera_translate.data[0] += 1;
             },
-            input.Key.left_control => {
+            Input.Key.left_control => {
                 call_translate -= 1;
                 camera_translate.data[1] -= 1;
             },
-            input.Key.left_shift => {
+            Input.Key.left_shift => {
                 activate_sprint = false;
             },
-            input.Key.space => {
+            Input.Key.space => {
                 call_translate -= 1;
                 camera_translate.data[1] += 1;
             },
@@ -250,26 +272,33 @@ fn keyInputFn(event: input.KeyEvent) void {
     }
 }
 
-fn mouseBtnInputFn(event: input.MouseButtonEvent) void {
-    if (event.action == input.Action.press) {
-        if (event.button == input.MouseButton.left) {} else if (event.button == input.MouseButton.right) {}
+fn mouseBtnInputFn(event: Input.MouseButtonEvent) void {
+    if (event.action == Input.Action.press) {
+        if (event.button == Input.MouseButton.left) {} else if (event.button == Input.MouseButton.right) {}
     }
-    if (event.action == input.Action.release) {
-        if (event.button == input.MouseButton.left) {} else if (event.button == input.MouseButton.right) {}
+    if (event.action == Input.Action.release) {
+        if (event.button == Input.MouseButton.left) {} else if (event.button == Input.MouseButton.right) {}
     }
 }
 
-fn cursorPosInputFn(event: input.CursorPosEvent) void {
+fn disabledCursorPosInputFn(event: Input.CursorPosEvent) void {
     const State = struct {
-        var prev_event: ?input.CursorPosEvent = null;
+        var prev_event: ?Input.CursorPosEvent = null;
     };
     defer State.prev_event = event;
 
-    // let prev_event be defined before processing input
-    if (State.prev_event) |p_event| {
-        mouse_delta.data[0] += @floatCast(f32, event.x - p_event.x);
-        mouse_delta.data[1] += @floatCast(f32, event.y - p_event.y);
+    if (first_input_after_change == false) {
+        // let prev_event be defined before processing Input
+        if (State.prev_event) |p_event| {
+            mouse_delta.data[0] += @floatCast(f32, event.x - p_event.x);
+            mouse_delta.data[1] += @floatCast(f32, event.y - p_event.y);
+        }
+        call_yaw = call_yaw or mouse_delta.x() < -0.00001 or mouse_delta.x() > 0.00001;
+        call_pitch = call_pitch or mouse_delta.y() < -0.00001 or mouse_delta.y() > 0.00001;
     }
-    call_yaw = call_yaw or mouse_delta.x() < -0.00001 or mouse_delta.x() > 0.00001;
-    call_pitch = call_pitch or mouse_delta.y() < -0.00001 or mouse_delta.y() > 0.00001;
+    first_input_after_change = false;
+}
+
+fn normalCursorPosInputFn(event: Input.CursorPosEvent) void {
+    _ = event;
 }
