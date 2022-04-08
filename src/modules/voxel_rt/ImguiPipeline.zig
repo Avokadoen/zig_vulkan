@@ -579,21 +579,19 @@ fn newFrame(self: *ImguiPipeline) void {
     imgui.igNewFrame();
 
     // Init imGui windows and elements
-    imgui.igTextUnformatted(imgui_title, "");
-    imgui.igTextUnformatted("some more text", "");
+    imgui.igText(imgui_title);
+    imgui.igText("some more text");
 
     imgui.igText("Camera");
     _ = imgui.igInputInt("max bounce", &self.state_bindings.camera.max_bounce, 0, 0, 0);
 
     imgui.igSetNextWindowSize(.{ .x = 200, .y = 200 }, imgui.ImGuiCond_FirstUseEver);
-    var window_open = true;
-    _ = imgui.igBegin("Example settings", &window_open, 0);
+    _ = imgui.igBegin("Example settings", null, 0);
     _ = imgui.igCheckbox("cool yes?", &self.state_bindings.cool_yes);
     imgui.igEnd();
 
-    imgui.igSetNextWindowSize(.{ .x = 650, .y = 20 }, imgui.ImGuiCond_FirstUseEver);
-    var demo_open = true;
-    imgui.igShowDemoWindow(&demo_open);
+    imgui.igSetNextWindowPos(.{ .x = 650, .y = 20 }, imgui.ImGuiCond_FirstUseEver, .{ .x = 0, .y = 0 });
+    imgui.igShowDemoWindow(null);
 
     imgui.igRender();
 }
