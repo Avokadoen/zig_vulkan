@@ -114,9 +114,10 @@ pub fn map(self: *GpuBufferMemory, ctx: Context, size: vk.DeviceSize, offset: vk
     self.mapped = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, offset, size, .{})) orelse return error.FailedToMapGPUMem;
 }
 
-pub fn unmap(self: GpuBufferMemory, ctx: Context) void {
+pub fn unmap(self: *GpuBufferMemory, ctx: Context) void {
     if (self.mapped != null) {
         ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
+        self.mapped = null;
     }
 }
 
@@ -199,9 +200,9 @@ pub fn batchTransfer(self: *GpuBufferMemory, ctx: Context, comptime T: type, off
 
 /// destroy buffer and free memory
 pub fn deinit(self: GpuBufferMemory, ctx: Context) void {
-    // unmap if needed
-    self.unmap(ctx);
-
+    if (self.mapped != null) {
+        ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
+    }
     if (self.buffer != .null_handle) {
         ctx.vkd.destroyBuffer(ctx.logical_device, self.buffer, null);
     }

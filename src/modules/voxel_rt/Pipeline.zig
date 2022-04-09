@@ -181,6 +181,7 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
 pub fn draw(self: *Pipeline, ctx: Context) !void {
     // wait for previous compute dispatch to complete
     _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.compute_complete_fence), vk.TRUE, std.math.maxInt(u64));
+    try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.compute_complete_fence));
 
     // perform the compute ray tracing, draw to target texture
     const compute_submit_info = vk.SubmitInfo{
@@ -192,7 +193,6 @@ pub fn draw(self: *Pipeline, ctx: Context) !void {
         .signal_semaphore_count = 1,
         .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.compute_complete_semaphore),
     };
-    try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.compute_complete_fence));
     try ctx.vkd.queueSubmit(ctx.compute_queue, 1, @ptrCast([*]const vk.SubmitInfo, &compute_submit_info), self.compute_complete_fence);
 
     const aquire_result = try ctx.vkd.acquireNextImageKHR(
@@ -207,8 +207,11 @@ pub fn draw(self: *Pipeline, ctx: Context) !void {
     }
     const image_index = aquire_result.image_index;
 
-    try self.imgui_pipeline.prepareDraw(ctx);
+    // wait for previous texture draw before updating buffers and command buffers
     _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
+    try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence));
+
+    try self.imgui_pipeline.prepareDraw(ctx);
 
     // re-record command buffer to update any state
     var begin_info = self.render_pass_begin_info;
@@ -225,7 +228,7 @@ pub fn draw(self: *Pipeline, ctx: Context) !void {
         .signal_semaphore_count = 1,
         .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.render_complete_semaphore),
     };
-    try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence));
+
     try ctx.vkd.queueSubmit(
         ctx.graphics_queue,
         1,
