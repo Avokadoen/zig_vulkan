@@ -36,7 +36,6 @@ var call_yaw = false;
 var call_pitch = false;
 var mouse_delta = za.Vec2.zero();
 var first_input_after_change: bool = true;
-var mouse_input_mode: InputModeCursor = .disabled;
 
 pub fn main() anyerror!void {
     tracy.InitThread();
@@ -150,14 +149,12 @@ pub fn main() anyerror!void {
     input = try Input.init(
         allocator,
         window,
-        keyInputFn,
+        gameKeyInputFn,
         mouseBtnInputFn,
-        disabledCursorPosInputFn,
+        gameCursorPosInputFn,
     );
     defer input.deinit(allocator);
-    try input.setInputModeCursor(mouse_input_mode);
-    input.setWantCaptureMouse(false);
-    input.setWantCaptureKeyboard(false);
+    try input.setInputModeCursor(.disabled);
 
     // Loop until the user closes the window
     while (!window.shouldClose()) {
@@ -196,16 +193,13 @@ pub fn main() anyerror!void {
         try glfw.pollEvents();
         prev_frame = current_frame;
 
-        // if interacting with gui, update cursor accordingly
-        if (mouse_input_mode == .normal) {
-            input.updateCursor() catch {};
-        }
+        input.updateCursor() catch {};
 
         tracy.FrameMark();
     }
 }
 
-fn keyInputFn(event: Input.KeyEvent) void {
+fn gameKeyInputFn(event: Input.KeyEvent) void {
     if (event.action == .press) {
         switch (event.key) {
             Input.Key.w => {
@@ -234,19 +228,9 @@ fn keyInputFn(event: Input.KeyEvent) void {
                 camera_translate.data[1] -= 1;
             },
             Input.Key.escape => {
-                if (mouse_input_mode == InputModeCursor.disabled) {
-                    mouse_input_mode = .normal;
-                    input.setCursorPosCallback(normalCursorPosInputFn);
-                    input.setWantCaptureMouse(true);
-                    input.setWantCaptureKeyboard(true);
-                } else {
-                    first_input_after_change = true;
-                    mouse_input_mode = .disabled;
-                    input.setCursorPosCallback(disabledCursorPosInputFn);
-                    input.setWantCaptureMouse(false);
-                    input.setWantCaptureKeyboard(false);
-                }
-                input.setInputModeCursor(mouse_input_mode) catch {};
+                input.setCursorPosCallback(menuCursorPosInputFn);
+                input.setKeyCallback(menuKeyInputFn);
+                input.setInputModeCursor(.normal) catch {};
             },
             else => {},
         }
@@ -284,6 +268,19 @@ fn keyInputFn(event: Input.KeyEvent) void {
     }
 }
 
+fn menuKeyInputFn(event: Input.KeyEvent) void {
+    if (event.action == .press) {
+        switch (event.key) {
+            Input.Key.escape => {
+                input.setCursorPosCallback(gameCursorPosInputFn);
+                input.setKeyCallback(gameKeyInputFn);
+                input.setInputModeCursor(.disabled) catch {};
+            },
+            else => {},
+        }
+    }
+}
+
 fn mouseBtnInputFn(event: Input.MouseButtonEvent) void {
     if (event.action == Input.Action.press) {
         if (event.button == Input.MouseButton.left) {} else if (event.button == Input.MouseButton.right) {}
@@ -293,7 +290,7 @@ fn mouseBtnInputFn(event: Input.MouseButtonEvent) void {
     }
 }
 
-fn disabledCursorPosInputFn(event: Input.CursorPosEvent) void {
+fn gameCursorPosInputFn(event: Input.CursorPosEvent) void {
     const State = struct {
         var prev_event: ?Input.CursorPosEvent = null;
     };
@@ -311,6 +308,6 @@ fn disabledCursorPosInputFn(event: Input.CursorPosEvent) void {
     first_input_after_change = false;
 }
 
-fn normalCursorPosInputFn(event: Input.CursorPosEvent) void {
+fn menuCursorPosInputFn(event: Input.CursorPosEvent) void {
     _ = event;
 }

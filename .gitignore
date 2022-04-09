@@ -11,3 +11,5 @@ deps/docs/*
 vk.zig
 
 *.spv
+
+imgui.ini

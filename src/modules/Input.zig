@@ -39,6 +39,7 @@ pub const MouseButtonHandleFn = fn (MouseButtonEvent) void;
 pub const CursorPosHandleFn = fn (CursorPosEvent) void;
 
 const WindowContext = struct {
+    allocator: Allocator,
     key_handle_fn: KeyHandleFn,
     mouse_btn_handle_fn: MouseButtonHandleFn,
     cursor_pos_handle_fn: CursorPosHandleFn,
@@ -46,6 +47,7 @@ const WindowContext = struct {
 
 const ImguiContext = struct {
     mouse_cursors: [imgui.ImGuiMouseCursor_COUNT]?glfw.Cursor,
+    hid_cursor: bool,
 };
 
 const Input = @This();
@@ -66,6 +68,7 @@ pub fn init(
     const window = input_window;
     const window_context = try allocator.create(WindowContext);
     window_context.* = .{
+        .allocator = allocator,
         .key_handle_fn = input_handle_fn,
         .mouse_btn_handle_fn = input_mouse_btn_handle_fn,
         .cursor_pos_handle_fn = input_cursor_pos_handle_fn,
@@ -74,15 +77,13 @@ pub fn init(
     try window.setInputMode(glfw.Window.InputMode.cursor, InputModeCursor.normal);
 
     _ = window.setKeyCallback(keyCallback);
+    _ = window.setCharCallback(charCallback);
     _ = window.setMouseButtonCallback(mouseBtnCallback);
     _ = window.setCursorPosCallback(cursorPosCallback);
     _ = window.setScrollCallback(scrollCallback);
     window.setUserPointer(@ptrCast(?*anyopaque, window_context));
 
     const imgui_context = try linkImguiCodes();
-    const io = imgui.igGetIO();
-    io.WantCaptureMouse = false;
-    io.WantCaptureKeyboard = false;
 
     return Input{
         .window = window,
@@ -98,6 +99,7 @@ pub fn deinit(self: Input, allocator: Allocator) void {
 
     // unregister callback functions
     _ = self.window.setKeyCallback(null);
+    _ = self.window.setCharCallback(null);
     _ = self.window.setMouseButtonCallback(null);
     _ = self.window.setCursorPosCallback(null);
     _ = self.window.setScrollCallback(null);
@@ -111,29 +113,26 @@ pub fn setCursorPosCallback(self: Input, input_cursor_pos_handle_fn: CursorPosHa
     self.window_context.cursor_pos_handle_fn = input_cursor_pos_handle_fn;
 }
 
-pub fn setWantCaptureMouse(self: Input, want: bool) void {
-    _ = self;
-    const io = imgui.igGetIO();
-    io.WantCaptureMouse = want;
-}
-
-pub fn setWantCaptureKeyboard(self: Input, want: bool) void {
-    _ = self;
-    const io = imgui.igGetIO();
-    io.WantCaptureKeyboard = want;
+pub fn setKeyCallback(self: Input, input_key_handle_fn: KeyHandleFn) void {
+    self.window_context.key_handle_fn = input_key_handle_fn;
 }
 
 /// update cursor based on imgui 
-pub fn updateCursor(self: Input) !void {
+pub fn updateCursor(self: *Input) !void {
     const io = imgui.igGetIO();
     if (io.ConfigFlags & imgui.ImGuiConfigFlags_NoMouseCursorChange == 0) {
         const cursor = imgui.igGetMouseCursor();
         if (io.MouseDrawCursor or cursor == imgui.ImGuiMouseCursor_None) {
             try self.window.setInputModeCursor(.hidden);
+            self.imgui_context.hid_cursor = true;
         } else {
             const new_cursor = self.imgui_context.mouse_cursors[@intCast(usize, cursor)] orelse self.imgui_context.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_Arrow)].?;
             try self.window.setCursor(new_cursor);
-            try self.window.setInputModeCursor(.normal);
+
+            if (self.imgui_context.hid_cursor == true) {
+                try self.window.setInputModeCursor(.normal);
+                self.imgui_context.hid_cursor = false;
+            }
         }
     }
 }
@@ -157,6 +156,16 @@ fn keyCallback(window: glfw.Window, key: Key, scan_code: i32, action: Action, mo
     io.KeyCtrl = mods.control;
     io.KeyAlt = mods.alt;
     io.KeySuper = mods.super;
+}
+
+fn charCallback(window: glfw.Window, codepoint: u21) void {
+    const context = if (window.getUserPointer(WindowContext)) |some| some else return;
+    const io = imgui.igGetIO();
+    var buffer: [8]u8 = undefined;
+    const len = std.unicode.utf8Encode(codepoint, buffer[0..]) catch return;
+    const text = std.cstr.addNullByte(context.allocator, buffer[0..len]) catch return;
+    defer context.allocator.free(text);
+    imgui.ImGuiIO_AddInputCharactersUTF8(io, text);
 }
 
 fn mouseBtnCallback(window: glfw.Window, button: MouseButton, action: Action, mods: Mods) void {
@@ -235,6 +244,7 @@ fn linkImguiCodes() !ImguiContext {
     const Shape = glfw.Cursor.Shape;
     var self = ImguiContext{
         .mouse_cursors = undefined,
+        .hid_cursor = false,
     };
     std.mem.set(?glfw.Cursor, self.mouse_cursors[0..], null);
     self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_Arrow)] = try glfw.Cursor.createStandard(Shape.arrow);
