@@ -110,7 +110,7 @@ pub fn transferToDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, 
     self.len = @intCast(u32, data.len);
 }
 
-pub fn map(self: *GpuBufferMemory, ctx: Context, size: vk.DeviceSize, offset: vk.DeviceSize) !void {
+pub fn map(self: *GpuBufferMemory, ctx: Context, offset: vk.DeviceSize, size: vk.DeviceSize) !void {
     self.mapped = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, offset, size, .{})) orelse return error.FailedToMapGPUMem;
 }
 

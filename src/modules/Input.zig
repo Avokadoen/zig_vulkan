@@ -53,7 +53,6 @@ const Input = @This();
 window: glfw.Window,
 window_context: *WindowContext,
 imgui_context: ImguiContext,
-gui_interaction: bool,
 
 /// !This will set the glfw window user context!
 /// create a input module.
@@ -82,14 +81,13 @@ pub fn init(
 
     const imgui_context = try linkImguiCodes();
     const io = imgui.igGetIO();
-    io.WantCaptureMouse = true;
-    io.WantCaptureKeyboard = true;
+    io.WantCaptureMouse = false;
+    io.WantCaptureKeyboard = false;
 
     return Input{
         .window = window,
         .window_context = window_context,
         .imgui_context = imgui_context,
-        .gui_interaction = false,
     };
 }
 
@@ -127,8 +125,6 @@ pub fn setWantCaptureKeyboard(self: Input, want: bool) void {
 
 /// update cursor based on imgui 
 pub fn updateCursor(self: Input) !void {
-    if (self.gui_interaction == false) return;
-
     const io = imgui.igGetIO();
     if (io.ConfigFlags & imgui.ImGuiConfigFlags_NoMouseCursorChange == 0) {
         const cursor = imgui.igGetMouseCursor();
@@ -176,9 +172,9 @@ fn mouseBtnCallback(window: glfw.Window, button: MouseButton, action: Action, mo
 
     const io = imgui.igGetIO();
     switch (button) {
-        .left => io.MouseDown[0] = true,
-        .right => io.MouseDown[1] = true,
-        .middle => io.MouseDown[2] = true,
+        .left => io.MouseDown[0] = action == .press,
+        .right => io.MouseDown[1] = action == .press,
+        .middle => io.MouseDown[2] = action == .press,
         else => {},
     }
 }
@@ -192,8 +188,7 @@ fn cursorPosCallback(window: glfw.Window, x_pos: f64, y_pos: f64) void {
     context.cursor_pos_handle_fn(event);
 
     const io = imgui.igGetIO();
-    io.MousePos.x = @floatCast(f32, x_pos);
-    io.MousePos.y = @floatCast(f32, y_pos);
+    io.MousePos = imgui.ImVec2.init(@floatCast(f32, x_pos), @floatCast(f32, y_pos));
 }
 
 fn scrollCallback(window: glfw.Window, xoffset: f64, yoffset: f64) void {

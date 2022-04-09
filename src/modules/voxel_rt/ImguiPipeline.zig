@@ -595,7 +595,7 @@ fn newFrame(self: *ImguiPipeline) void {
     imgui.igText("counter = %d", State.counter);
 
     imgui.igSetNextWindowSize(.{ .x = 200, .y = 200 }, imgui.ImGuiCond_FirstUseEver);
-    _ = imgui.igBegin("Example settings", null, 0);
+    _ = imgui.igBegin("External settings", null, 0);
     _ = imgui.igCheckbox("cool yes?", &self.state_bindings.cool_yes);
     imgui.igEnd();
 
@@ -609,10 +609,11 @@ fn newFrame(self: *ImguiPipeline) void {
 fn updateBuffers(self: *ImguiPipeline, ctx: Context) !void {
     const draw_data = imgui.igGetDrawData();
 
-    { // update vertex buffer size accordingly
-        const vertex_buffer_size = draw_data.TotalVtxCount * @sizeOf(imgui.ImDrawVert);
-        if (vertex_buffer_size == 0) return; // nothing to draw
+    const vertex_buffer_size = draw_data.TotalVtxCount * @sizeOf(imgui.ImDrawVert);
+    const index_buffer_size = draw_data.TotalIdxCount * @sizeOf(imgui.ImDrawIdx);
+    if (index_buffer_size == 0 or vertex_buffer_size == 0) return; // nothing to draw
 
+    { // update vertex buffer size accordingly
         if (self.vertex_buffer.buffer == .null_handle or self.vertex_buffer_len != draw_data.TotalVtxCount) {
             self.vertex_buffer.unmap(ctx);
             self.vertex_buffer.deinit(ctx);
@@ -623,13 +624,10 @@ fn updateBuffers(self: *ImguiPipeline, ctx: Context) !void {
                 .{ .host_visible_bit = true },
             );
             self.vertex_buffer_len = draw_data.TotalVtxCount;
-            try self.vertex_buffer.map(ctx, vk.WHOLE_SIZE, 0);
+            try self.vertex_buffer.map(ctx, 0, vk.WHOLE_SIZE);
         }
     }
     { // update index buffer size accordingly
-        const index_buffer_size = draw_data.TotalIdxCount * @sizeOf(imgui.ImDrawIdx);
-        if (index_buffer_size == 0) return; // nothing to draw
-
         if (self.index_buffer.buffer == .null_handle or self.index_buffer_len != draw_data.TotalIdxCount) {
             self.index_buffer.unmap(ctx);
             self.index_buffer.deinit(ctx);
@@ -640,20 +638,14 @@ fn updateBuffers(self: *ImguiPipeline, ctx: Context) !void {
                 .{ .host_visible_bit = true },
             );
             self.index_buffer_len = draw_data.TotalIdxCount;
-            try self.index_buffer.map(ctx, vk.WHOLE_SIZE, 0);
+            try self.index_buffer.map(ctx, 0, vk.WHOLE_SIZE);
         }
     }
 
-    var vertex_dest = @ptrCast([*]imgui.ImDrawVert, @alignCast(
-        @alignOf(imgui.ImDrawVert),
-        self.vertex_buffer.mapped,
-    ) orelse unreachable);
+    var vertex_dest = @ptrCast([*]imgui.ImDrawVert, @alignCast(@alignOf(imgui.ImDrawVert), self.vertex_buffer.mapped) orelse unreachable);
     var vertex_offset: usize = 0;
 
-    var index_dest = @ptrCast([*]imgui.ImDrawIdx, @alignCast(
-        @alignOf(imgui.ImDrawIdx),
-        self.index_buffer.mapped,
-    ) orelse unreachable);
+    var index_dest = @ptrCast([*]imgui.ImDrawIdx, @alignCast(@alignOf(imgui.ImDrawIdx), self.index_buffer.mapped) orelse unreachable);
     var index_offset: usize = 0;
 
     var i: usize = 0;
@@ -665,18 +657,18 @@ fn updateBuffers(self: *ImguiPipeline, ctx: Context) !void {
             const cmd_list = draw_data.CmdLists[i];
 
             // transfer vertex data
-            var j: usize = vertex_offset;
+            var j: usize = 0;
             const vertex_count = @intCast(usize, cmd_list.VtxBuffer.Size);
             while (j < vertex_count) : (j += 1) {
-                vertex_dest[j] = cmd_list.VtxBuffer.Data[j];
+                vertex_dest[vertex_offset + j] = cmd_list.VtxBuffer.Data[j];
             }
             vertex_offset += vertex_count;
 
             // transfer index data
-            j = index_offset;
+            j = 0;
             const index_count = @intCast(usize, cmd_list.IdxBuffer.Size);
             while (j < index_count) : (j += 1) {
-                index_dest[j] = cmd_list.IdxBuffer.Data[j];
+                index_dest[index_offset + j] = cmd_list.IdxBuffer.Data[j];
             }
             index_offset += index_count;
         }

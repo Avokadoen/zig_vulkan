@@ -155,6 +155,9 @@ pub fn main() anyerror!void {
         disabledCursorPosInputFn,
     );
     defer input.deinit(allocator);
+    try input.setInputModeCursor(mouse_input_mode);
+    input.setWantCaptureMouse(false);
+    input.setWantCaptureKeyboard(false);
 
     // Loop until the user closes the window
     while (!window.shouldClose()) {
@@ -234,10 +237,14 @@ fn keyInputFn(event: Input.KeyEvent) void {
                 if (mouse_input_mode == InputModeCursor.disabled) {
                     mouse_input_mode = .normal;
                     input.setCursorPosCallback(normalCursorPosInputFn);
+                    input.setWantCaptureMouse(true);
+                    input.setWantCaptureKeyboard(true);
                 } else {
                     first_input_after_change = true;
                     mouse_input_mode = .disabled;
                     input.setCursorPosCallback(disabledCursorPosInputFn);
+                    input.setWantCaptureMouse(false);
+                    input.setWantCaptureKeyboard(false);
                 }
                 input.setInputModeCursor(mouse_input_mode) catch {};
             },
