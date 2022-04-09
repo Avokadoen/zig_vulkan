@@ -86,16 +86,6 @@ pub fn main() anyerror!void {
     const ctx = try render.Context.init(allocator, application_name, &window);
     defer ctx.deinit();
 
-    // init input module with default input handler functions
-    input = try Input.init(
-        allocator,
-        window,
-        keyInputFn,
-        mouseBtnInputFn,
-        disabledCursorPosInputFn,
-    );
-    defer input.deinit(allocator);
-
     var grid = try BrickGrid.init(allocator, 64, 32, 64, .{
         .min_point = [3]f32{ -32, -16, -32 },
         .material_indices_per_brick = 128,
@@ -156,6 +146,16 @@ pub fn main() anyerror!void {
     var prev_frame = std.time.milliTimestamp();
     try window.setInputMode(glfw.Window.InputMode.cursor, glfw.Window.InputModeCursor.disabled);
 
+    // init input module with default input handler functions
+    input = try Input.init(
+        allocator,
+        window,
+        keyInputFn,
+        mouseBtnInputFn,
+        disabledCursorPosInputFn,
+    );
+    defer input.deinit(allocator);
+
     // Loop until the user closes the window
     while (!window.shouldClose()) {
         const current_frame = std.time.milliTimestamp();
@@ -192,6 +192,11 @@ pub fn main() anyerror!void {
         // Poll for and process events
         try glfw.pollEvents();
         prev_frame = current_frame;
+
+        // if interacting with gui, update cursor accordingly
+        if (mouse_input_mode == .normal) {
+            input.updateCursor() catch {};
+        }
 
         tracy.FrameMark();
     }

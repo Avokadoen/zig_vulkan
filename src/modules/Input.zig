@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const glfw = @import("glfw");
+const imgui = @import("imgui");
 
 pub const WindowHandle = glfw.Window.Handle;
 pub const Key = glfw.Key;
@@ -13,6 +14,8 @@ pub const InputModeCursor = glfw.Window.InputModeCursor;
 // TODO: use callbacks for easier key binding
 // const int scancode = glfwGetKeyScancode(GLFW_KEY_X);
 // set_key_mapping(scancode, swap_weapons);
+
+// TODO: imgui should be optional
 
 pub const KeyEvent = struct {
     key: Key,
@@ -41,10 +44,16 @@ const WindowContext = struct {
     cursor_pos_handle_fn: CursorPosHandleFn,
 };
 
+const ImguiContext = struct {
+    mouse_cursors: [imgui.ImGuiMouseCursor_COUNT]?glfw.Cursor,
+};
+
 const Input = @This();
 
 window: glfw.Window,
 window_context: *WindowContext,
+imgui_context: ImguiContext,
+gui_interaction: bool,
 
 /// !This will set the glfw window user context!
 /// create a input module.
@@ -68,11 +77,19 @@ pub fn init(
     _ = window.setKeyCallback(keyCallback);
     _ = window.setMouseButtonCallback(mouseBtnCallback);
     _ = window.setCursorPosCallback(cursorPosCallback);
+    _ = window.setScrollCallback(scrollCallback);
     window.setUserPointer(@ptrCast(?*anyopaque, window_context));
+
+    const imgui_context = try linkImguiCodes();
+    const io = imgui.igGetIO();
+    io.WantCaptureMouse = true;
+    io.WantCaptureKeyboard = true;
 
     return Input{
         .window = window,
         .window_context = window_context,
+        .imgui_context = imgui_context,
+        .gui_interaction = false,
     };
 }
 
@@ -85,6 +102,7 @@ pub fn deinit(self: Input, allocator: Allocator) void {
     _ = self.window.setKeyCallback(null);
     _ = self.window.setMouseButtonCallback(null);
     _ = self.window.setCursorPosCallback(null);
+    _ = self.window.setScrollCallback(null);
 }
 
 pub fn setInputModeCursor(self: Input, mode: InputModeCursor) !void {
@@ -95,14 +113,35 @@ pub fn setCursorPosCallback(self: Input, input_cursor_pos_handle_fn: CursorPosHa
     self.window_context.cursor_pos_handle_fn = input_cursor_pos_handle_fn;
 }
 
-// TODO: generic wrapper?
-/// sends key events to a the key event to the input stream for further handling
-/// Params:
-///     - window	    The window that received the event.
-///     - key	        The keyboard key that was pressed or released.
-///     - scan_code	    The system-specific scancode of the key.
-///     - action	    GLFW_PRESS, GLFW_RELEASE or GLFW_REPEAT. Future releases may add more actions.
-///     - mod	        Bit field describing which modifier keys were held down.
+pub fn setWantCaptureMouse(self: Input, want: bool) void {
+    _ = self;
+    const io = imgui.igGetIO();
+    io.WantCaptureMouse = want;
+}
+
+pub fn setWantCaptureKeyboard(self: Input, want: bool) void {
+    _ = self;
+    const io = imgui.igGetIO();
+    io.WantCaptureKeyboard = want;
+}
+
+/// update cursor based on imgui 
+pub fn updateCursor(self: Input) !void {
+    if (self.gui_interaction == false) return;
+
+    const io = imgui.igGetIO();
+    if (io.ConfigFlags & imgui.ImGuiConfigFlags_NoMouseCursorChange == 0) {
+        const cursor = imgui.igGetMouseCursor();
+        if (io.MouseDrawCursor or cursor == imgui.ImGuiMouseCursor_None) {
+            try self.window.setInputModeCursor(.hidden);
+        } else {
+            const new_cursor = self.imgui_context.mouse_cursors[@intCast(usize, cursor)] orelse self.imgui_context.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_Arrow)].?;
+            try self.window.setCursor(new_cursor);
+            try self.window.setInputModeCursor(.normal);
+        }
+    }
+}
+
 fn keyCallback(window: glfw.Window, key: Key, scan_code: i32, action: Action, mods: Mods) void {
     _ = scan_code;
 
@@ -115,6 +154,13 @@ fn keyCallback(window: glfw.Window, key: Key, scan_code: i32, action: Action, mo
     };
     const context = if (window.getUserPointer(WindowContext)) |some| some else return;
     context.key_handle_fn(event);
+
+    const io = imgui.igGetIO();
+    io.KeysDown[@intCast(usize, @enumToInt(key))] = action == Action.press;
+    io.KeyShift = mods.shift;
+    io.KeyCtrl = mods.control;
+    io.KeyAlt = mods.alt;
+    io.KeySuper = mods.super;
 }
 
 fn mouseBtnCallback(window: glfw.Window, button: MouseButton, action: Action, mods: Mods) void {
@@ -127,6 +173,14 @@ fn mouseBtnCallback(window: glfw.Window, button: MouseButton, action: Action, mo
     };
     const context = if (window.getUserPointer(WindowContext)) |some| some else return;
     context.mouse_btn_handle_fn(event);
+
+    const io = imgui.igGetIO();
+    switch (button) {
+        .left => io.MouseDown[0] = true,
+        .right => io.MouseDown[1] = true,
+        .middle => io.MouseDown[2] = true,
+        else => {},
+    }
 }
 
 fn cursorPosCallback(window: glfw.Window, x_pos: f64, y_pos: f64) void {
@@ -136,4 +190,81 @@ fn cursorPosCallback(window: glfw.Window, x_pos: f64, y_pos: f64) void {
     };
     const context = if (window.getUserPointer(WindowContext)) |some| some else return;
     context.cursor_pos_handle_fn(event);
+
+    const io = imgui.igGetIO();
+    io.MousePos.x = @floatCast(f32, x_pos);
+    io.MousePos.y = @floatCast(f32, y_pos);
+}
+
+fn scrollCallback(window: glfw.Window, xoffset: f64, yoffset: f64) void {
+    _ = window;
+    const io = imgui.igGetIO();
+    if (xoffset > 0) io.MouseWheelH -= 1;
+    if (xoffset < 0) io.MouseWheelH += 1;
+    if (yoffset > 0) io.MouseWheel += 1;
+    if (yoffset > 0) io.MouseWheel -= 1;
+}
+
+/// link imgui and glfw codes
+fn linkImguiCodes() !ImguiContext {
+    var io = imgui.igGetIO();
+    io.BackendFlags |= imgui.ImGuiBackendFlags_HasMouseCursors;
+    io.BackendFlags |= imgui.ImGuiBackendFlags_HasSetMousePos;
+
+    io.KeyMap[imgui.ImGuiKey_Tab] = @enumToInt(Key.tab);
+    io.KeyMap[imgui.ImGuiKey_LeftArrow] = @enumToInt(Key.left);
+    io.KeyMap[imgui.ImGuiKey_RightArrow] = @enumToInt(Key.right);
+    io.KeyMap[imgui.ImGuiKey_UpArrow] = @enumToInt(Key.up);
+    io.KeyMap[imgui.ImGuiKey_DownArrow] = @enumToInt(Key.down);
+    io.KeyMap[imgui.ImGuiKey_PageUp] = @enumToInt(Key.page_up);
+    io.KeyMap[imgui.ImGuiKey_PageDown] = @enumToInt(Key.page_down);
+    io.KeyMap[imgui.ImGuiKey_Home] = @enumToInt(Key.home);
+    io.KeyMap[imgui.ImGuiKey_End] = @enumToInt(Key.end);
+    io.KeyMap[imgui.ImGuiKey_Insert] = @enumToInt(Key.insert);
+    io.KeyMap[imgui.ImGuiKey_Delete] = @enumToInt(Key.delete);
+    io.KeyMap[imgui.ImGuiKey_Backspace] = @enumToInt(Key.backspace);
+    io.KeyMap[imgui.ImGuiKey_Space] = @enumToInt(Key.space);
+    io.KeyMap[imgui.ImGuiKey_Enter] = @enumToInt(Key.enter);
+    io.KeyMap[imgui.ImGuiKey_Escape] = @enumToInt(Key.escape);
+    io.KeyMap[imgui.ImGuiKey_KeyPadEnter] = @enumToInt(Key.kp_enter);
+    io.KeyMap[imgui.ImGuiKey_A] = @enumToInt(Key.a);
+    io.KeyMap[imgui.ImGuiKey_C] = @enumToInt(Key.c);
+    io.KeyMap[imgui.ImGuiKey_V] = @enumToInt(Key.v);
+    io.KeyMap[imgui.ImGuiKey_X] = @enumToInt(Key.x);
+    io.KeyMap[imgui.ImGuiKey_Y] = @enumToInt(Key.y);
+    io.KeyMap[imgui.ImGuiKey_Z] = @enumToInt(Key.z);
+
+    io.SetClipboardTextFn = setClipboardTextFn;
+    io.GetClipboardTextFn = getClipboardTextFn;
+
+    const Shape = glfw.Cursor.Shape;
+    var self = ImguiContext{
+        .mouse_cursors = undefined,
+    };
+    std.mem.set(?glfw.Cursor, self.mouse_cursors[0..], null);
+    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_Arrow)] = try glfw.Cursor.createStandard(Shape.arrow);
+    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_TextInput)] = try glfw.Cursor.createStandard(Shape.ibeam);
+    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_ResizeAll)] = try glfw.Cursor.createStandard(Shape.crosshair);
+    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_ResizeNS)] = try glfw.Cursor.createStandard(Shape.vresize);
+    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_ResizeEW)] = try glfw.Cursor.createStandard(Shape.hresize);
+    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_ResizeNESW)] = try glfw.Cursor.createStandard(Shape.crosshair);
+    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_ResizeNWSE)] = try glfw.Cursor.createStandard(Shape.crosshair);
+    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_Hand)] = try glfw.Cursor.createStandard(Shape.hand);
+    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_NotAllowed)] = try glfw.Cursor.createStandard(Shape.hand);
+
+    return self;
+}
+
+fn getClipboardTextFn(ctx: ?*anyopaque) callconv(.C) [*c]const u8 {
+    _ = ctx;
+
+    const clipboard_string = glfw.getClipboardString() catch blk: {
+        break :blk "";
+    };
+    return clipboard_string;
+}
+
+fn setClipboardTextFn(ctx: ?*anyopaque, text: [*c]const u8) callconv(.C) void {
+    _ = ctx;
+    glfw.setClipboardString(text) catch {};
 }

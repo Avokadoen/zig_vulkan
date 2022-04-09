@@ -576,6 +576,9 @@ pub fn recordCommandBuffer(self: ImguiPipeline, ctx: Context, command_buffer: vk
 
 // Starts a new imGui frame and sets up windows and ui elements
 fn newFrame(self: *ImguiPipeline) void {
+    const State = struct {
+        var counter: u32 = 0;
+    };
     imgui.igNewFrame();
 
     // Init imGui windows and elements
@@ -584,6 +587,12 @@ fn newFrame(self: *ImguiPipeline) void {
 
     imgui.igText("Camera");
     _ = imgui.igInputInt("max bounce", &self.state_bindings.camera.max_bounce, 0, 0, 0);
+
+    if (imgui.igButton("Count", .{ .x = 0, .y = 0 })) {
+        State.counter += 1;
+    }
+    imgui.igSameLine(0, 10);
+    imgui.igText("counter = %d", State.counter);
 
     imgui.igSetNextWindowSize(.{ .x = 200, .y = 200 }, imgui.ImGuiCond_FirstUseEver);
     _ = imgui.igBegin("Example settings", null, 0);
