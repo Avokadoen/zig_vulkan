@@ -39,10 +39,10 @@ struct HitRecord {
     float internal_reflection;
 };
 
-layout(binding = 1) uniform Camera {
+
+layout (push_constant) uniform Camera {
     uint image_width;
     uint image_height;
-
     vec3 horizontal;
     vec3 vertical;
     vec3 lower_left_corner;
@@ -53,7 +53,7 @@ layout(binding = 1) uniform Camera {
 } camera;
 Ray CameraGetRay(float u, float v);
 
-layout (binding = 2) uniform BrickGridState {
+layout (binding = 1) uniform BrickGridState {
     // how many voxels in each axis
     uint voxel_dim_x;
     uint voxel_dim_y;
@@ -77,7 +77,7 @@ layout (binding = 2) uniform BrickGridState {
     vec4 max_point_scale;
 } brick_grid;
 
-layout (std430, binding = 7) buffer HigherGridBuffer {
+layout (std430, binding = 6) buffer HigherGridBuffer {
     // one entry hold 4 entries
     readonly uint higher_grid_entries[];
 };
@@ -87,7 +87,7 @@ struct GridEntry {
     // 2 first bits are type, 30 next are data according to type
     uint bits;
 };
-layout (std430, binding = 8) buffer GridBuffer {
+layout (std430, binding = 7) buffer GridBuffer {
     readonly GridEntry grid_entries[];
 };
 
@@ -97,11 +97,11 @@ struct Brick {
     uint material_index;
     uint lod_index;
 };
-layout (std430, binding = 9) buffer BrickBuffer {
+layout (std430, binding = 8) buffer BrickBuffer {
     readonly Brick bricks[];
 };
 
-layout (std430, binding = 10) buffer MaterialIndicesBuffer {
+layout (std430, binding = 9) buffer MaterialIndicesBuffer {
     // one entry hold 4 indices
     readonly uint material_indices[];
 };
@@ -113,7 +113,7 @@ struct Material {
     int type_index;   // 15 shifted 2 bits
     int albedo_index; // 15 shifted 17 bits
 };
-layout (std430, binding = 3) buffer MaterialBuffer {
+layout (std430, binding = 2) buffer MaterialBuffer {
     readonly int materials[];
 };
 bool ScatterLambertian(Material material, Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered);
@@ -124,7 +124,7 @@ bool ScatterDielectric(Material material, Ray r_in, vec3 hit_c_min, inout HitRec
 struct Albedo {
     vec4 color;
 };
-layout (std430, binding = 4) buffer AlbedoBuffer {
+layout (std430, binding = 3) buffer AlbedoBuffer {
     readonly Albedo albedos[];
 };
 vec3 AlbedoColor(Material mat);
@@ -133,7 +133,7 @@ vec3 AlbedoColor(Material mat);
 struct Metal {
     float fuzz;
 };
-layout (std430, binding = 5) buffer MetalBuffer {
+layout (std430, binding = 4) buffer MetalBuffer {
     readonly Metal metal[];
 };
 
@@ -142,7 +142,7 @@ struct Dielectric {
     //             fuzz should define reflection/refraction ray spread
     float internal_reflection;
 };
-layout (std430, binding = 6) buffer DielectricBuffer {
+layout (std430, binding = 5) buffer DielectricBuffer {
     readonly Dielectric dielectric[];
 };
 

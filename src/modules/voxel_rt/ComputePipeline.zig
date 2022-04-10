@@ -9,6 +9,8 @@ const Context = render.Context;
 const GpuBufferMemory = render.GpuBufferMemory;
 const Texture = render.Texture;
 
+const Camera = @import("Camera.zig");
+
 /// compute shader that draws to a target texture
 const ComputePipeline = @This();
 
@@ -242,12 +244,17 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
     }
 
     self.pipeline_layout = blk: {
+        const push_constant_range = vk.PushConstantRange{
+            .stage_flags = .{ .compute_bit = true },
+            .offset = 0,
+            .size = @sizeOf(Camera.Device),
+        };
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
-            .set_layout_count = 1, // TODO: see GfxPipeline
+            .set_layout_count = 1,
             .p_set_layouts = @ptrCast([*]vk.DescriptorSetLayout, &self.target_descriptor_layout),
-            .push_constant_range_count = 0,
-            .p_push_constant_ranges = undefined,
+            .push_constant_range_count = 1,
+            .p_push_constant_ranges = @ptrCast([*]const vk.PushConstantRange, &push_constant_range),
         };
         break :blk try ctx.createPipelineLayout(pipeline_layout_info);
     };
@@ -269,8 +276,6 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
     // TODO: we need to rescale pipeline dispatch
     self.command_buffer = try render.pipeline.createCmdBuffer(ctx, ctx.comp_cmd_pool);
     errdefer ctx.vkd.freeCommandBuffers(ctx.logical_device, ctx.comp_cmd_pool, 1, @ptrCast([*]vk.CommandBuffer, &self.command_buffer));
-
-    try self.recordCommandBuffers(ctx);
 
     // zig fmt: off
     return ComputePipeline{ 
@@ -308,13 +313,19 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
     self.allocator.destroy(self.pipeline);
 }
 
-pub fn recordCommandBuffers(self: ComputePipeline, ctx: Context) !void {
+pub fn recordCommandBuffers(self: ComputePipeline, ctx: Context, camera: Camera) !void {
     const command_begin_info = vk.CommandBufferBeginInfo{
         .flags = .{},
         .p_inheritance_info = null,
     };
+
     try ctx.vkd.beginCommandBuffer(self.command_buffer, &command_begin_info);
+
     ctx.vkd.cmdBindPipeline(self.command_buffer, vk.PipelineBindPoint.compute, self.pipeline.*);
+
+    // push camera data as a push constant
+    ctx.vkd.cmdPushConstants(self.command_buffer, self.pipeline_layout, .{ .compute_bit = true }, 0, @sizeOf(Camera.Device), &camera.d_camera);
+
     // bind target texture
     ctx.vkd.cmdBindDescriptorSets(self.command_buffer, .compute, self.pipeline_layout, 0, 1, @ptrCast([*]const vk.DescriptorSet, &self.target_descriptor_set), 0, undefined);
     // zig fmt: on
@@ -330,6 +341,7 @@ pub fn recordCommandBuffers(self: ComputePipeline, ctx: Context) !void {
     const img_height = self.target_texture.image_extent.height;
     const x_dispatch = @ceil(@intToFloat(f32, img_width) * local_thread_factor_x);
     const y_dispatch = @ceil(@intToFloat(f32, img_height) * local_thread_factor_y);
+
     ctx.vkd.cmdDispatch(self.command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
     try ctx.vkd.endCommandBuffer(self.command_buffer);
 }

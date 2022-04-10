@@ -35,7 +35,7 @@ var input: Input = undefined;
 var call_yaw = false;
 var call_pitch = false;
 var mouse_delta = za.Vec2.zero();
-var first_input_after_change: bool = true;
+var mouse_ignore_frames: u32 = 5;
 
 pub fn main() anyerror!void {
     tracy.InitThread();
@@ -179,7 +179,6 @@ pub fn main() anyerror!void {
             voxel_rt.camera.turnPitch(mouse_delta.y() * dt);
         }
         if (call_translate > 0 or call_yaw or call_pitch) {
-            try voxel_rt.debugMoveCamera(ctx);
             call_yaw = false;
             call_pitch = false;
             mouse_delta.data[0] = 0;
@@ -278,6 +277,9 @@ fn menuKeyInputFn(event: Input.KeyEvent) void {
                 input.setKeyCallback(gameKeyInputFn);
                 input.setImguiWantInput(false);
                 input.setInputModeCursor(.disabled) catch {};
+
+                // ignore first 5 frames of input after
+                mouse_ignore_frames = 5;
             },
             else => {},
         }
@@ -299,7 +301,7 @@ fn gameCursorPosInputFn(event: Input.CursorPosEvent) void {
     };
     defer State.prev_event = event;
 
-    if (first_input_after_change == false) {
+    if (mouse_ignore_frames == 0) {
         // let prev_event be defined before processing Input
         if (State.prev_event) |p_event| {
             mouse_delta.data[0] += @floatCast(f32, event.x - p_event.x);
@@ -308,7 +310,7 @@ fn gameCursorPosInputFn(event: Input.CursorPosEvent) void {
         call_yaw = call_yaw or mouse_delta.x() < -0.00001 or mouse_delta.x() > 0.00001;
         call_pitch = call_pitch or mouse_delta.y() < -0.00001 or mouse_delta.y() > 0.00001;
     }
-    first_input_after_change = false;
+    mouse_ignore_frames = if (mouse_ignore_frames > 0) mouse_ignore_frames - 1 else 0;
 }
 
 fn menuCursorPosInputFn(event: Input.CursorPosEvent) void {

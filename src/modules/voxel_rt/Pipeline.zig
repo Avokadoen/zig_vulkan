@@ -35,7 +35,7 @@ const Pixel = packed struct {
 const Pipeline = @This();
 
 allocator: Allocator,
-target_texture: Texture,
+target_texture: *Texture,
 swapchain: render.swapchain.Data,
 render_pass: vk.RenderPass,
 render_pass_begin_info: vk.RenderPassBeginInfo,
@@ -52,14 +52,18 @@ compute_pipeline: ComputePipeline,
 gfx_pipeline: GraphicsPipeline,
 imgui_pipeline: ImguiPipeline,
 
+camera: *Camera,
 gui: ImguiGui,
 
 pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.Extent2D, grid_state: GridState, camera: *Camera, config: Config) !Pipeline {
+    const target_texture = try allocator.create(Texture);
+    errdefer allocator.destroy(target_texture);
+
     // use graphics and compute index
     // if they are the same, then we use that index
     const indices = [_]u32{ ctx.queue_indices.graphics, ctx.queue_indices.compute };
     const indices_len: usize = if (ctx.queue_indices.graphics == ctx.queue_indices.compute) 1 else 2;
-    const target_texture = blk: {
+    target_texture.* = blk: {
         const texture_config = Texture.Config(Pixel){
             .data = null,
             .width = internal_render_resolution.width,
@@ -96,7 +100,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
 
     var compute_pipeline = blk: {
         const uniform_sizes = [_]u64{
-            @sizeOf(Camera.Device),
             @sizeOf(GridState.Device),
         };
         const storage_sizes = [_]u64{
@@ -111,13 +114,13 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         };
         const state_configs = ComputePipeline.StateConfigs{ .uniform_sizes = uniform_sizes[0..], .storage_sizes = storage_sizes[0..] };
 
-        break :blk try ComputePipeline.init(allocator, ctx, "brick_raytracer.comp.spv", &target_texture, state_configs);
+        break :blk try ComputePipeline.init(allocator, ctx, "brick_raytracer.comp.spv", target_texture, state_configs);
     };
     errdefer compute_pipeline.deinit(ctx);
 
-    try compute_pipeline.recordCommandBuffers(ctx);
+    try compute_pipeline.recordCommandBuffers(ctx, camera.*);
 
-    const gfx_pipeline = try GraphicsPipeline.init(allocator, ctx, swapchain, render_pass, &target_texture);
+    const gfx_pipeline = try GraphicsPipeline.init(allocator, ctx, swapchain, render_pass, target_texture);
     errdefer gfx_pipeline.deinit(allocator, ctx);
 
     const imgui_pipeline = try ImguiPipeline.init(ctx, allocator, render_pass, swapchain.extent, swapchain.images.len);
@@ -153,6 +156,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .compute_pipeline = compute_pipeline,
         .gfx_pipeline = gfx_pipeline,
         .imgui_pipeline = imgui_pipeline,
+        .camera = camera,
         .gui = gui,
     };
 }
@@ -185,13 +189,17 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     self.compute_pipeline.deinit(ctx);
     ctx.destroyRenderPass(self.render_pass);
     self.swapchain.deinit(ctx);
+
     self.target_texture.deinit(ctx);
+    self.allocator.destroy(self.target_texture);
 }
 
 pub fn draw(self: *Pipeline, ctx: Context) !void {
     // wait for previous compute dispatch to complete
     _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.compute_complete_fence), vk.TRUE, std.math.maxInt(u64));
     try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.compute_complete_fence));
+
+    try self.compute_pipeline.recordCommandBuffers(ctx, self.camera.*);
 
     // perform the compute ray tracing, draw to target texture
     const compute_submit_info = vk.SubmitInfo{
@@ -260,16 +268,10 @@ pub fn draw(self: *Pipeline, ctx: Context) !void {
 
 }
 
-/// Transfer camera data to GPU
-pub inline fn transferCamera(self: Pipeline, ctx: Context, camera: Camera) !void {
-    const camera_data = [_]Camera.Device{camera.d_camera};
-    try self.compute_pipeline.uniform_buffers[0].transferToDevice(ctx, Camera.Device, 0, camera_data[0..]);
-}
-
 /// Transfer grid data to GPU
 pub inline fn transferGridState(self: Pipeline, ctx: Context, grid: GridState) !void {
     const grid_data = [_]GridState.Device{grid.device_state};
-    try self.compute_pipeline.uniform_buffers[1].transferToDevice(ctx, GridState.Device, 0, grid_data[0..]);
+    try self.compute_pipeline.uniform_buffers[0].transferToDevice(ctx, GridState.Device, 0, grid_data[0..]);
 }
 
 /// Transfer material data to GPU

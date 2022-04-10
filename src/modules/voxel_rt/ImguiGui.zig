@@ -21,6 +21,8 @@ pub fn init(state_binding: StateBinding) ImguiGui {
 
 // Starts a new imGui frame and sets up windows and ui elements
 pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline) void {
+    _ = ctx;
+    _ = pipeline;
     imgui.igNewFrame();
 
     imgui.igSetNextWindowSize(.{ .x = 400, .y = 500 }, imgui.ImGuiCond_FirstUseEver);
@@ -60,9 +62,7 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline) void {
 
     imgui.igRender();
 
-    if (camera_changed) self.onCameraChange(ctx, pipeline);
-}
-
-fn onCameraChange(self: ImguiGui, ctx: Context, pipeline: *Pipeline) void {
-    pipeline.transferCamera(ctx, self.state_binding.camera_ptr.*) catch {};
+    if (camera_changed) {
+        // camera is propagated as a push constant
+    }
 }

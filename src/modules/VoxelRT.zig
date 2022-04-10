@@ -47,7 +47,6 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, config: 
         config.pipeline,
     );
     errdefer pipeline.deinit(ctx);
-    try pipeline.transferCamera(ctx, camera.*);
 
     try pipeline.transferGridState(ctx, brick_grid.state.*);
     const metals = [_]gpu_types.Metal{.{
@@ -83,11 +82,6 @@ pub fn pushMaterials(self: VoxelRT, ctx: Context, materials: []const gpu_types.M
 /// push the albedo to GPU
 pub fn pushAlbedo(self: VoxelRT, ctx: Context, albedos: []const gpu_types.Albedo) !void {
     try self.pipeline.transferAlbedos(ctx, 0, albedos);
-}
-
-/// a temporary way of pushing camera changes (TODO: update function)
-pub fn debugMoveCamera(self: *VoxelRT, ctx: Context) !void {
-    try self.pipeline.transferCamera(ctx, self.camera.*);
 }
 
 /// Push all terrain data to GPU
