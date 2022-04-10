@@ -17,6 +17,8 @@ pub const InputModeCursor = glfw.Window.InputModeCursor;
 
 // TODO: imgui should be optional
 
+// TODO: thread safety
+
 pub const KeyEvent = struct {
     key: Key,
     action: Action,
@@ -40,6 +42,7 @@ pub const CursorPosHandleFn = fn (CursorPosEvent) void;
 
 const WindowContext = struct {
     allocator: Allocator,
+    imgui_want_input: bool,
     key_handle_fn: KeyHandleFn,
     mouse_btn_handle_fn: MouseButtonHandleFn,
     cursor_pos_handle_fn: CursorPosHandleFn,
@@ -69,6 +72,7 @@ pub fn init(
     const window_context = try allocator.create(WindowContext);
     window_context.* = .{
         .allocator = allocator,
+        .imgui_want_input = false,
         .key_handle_fn = input_handle_fn,
         .mouse_btn_handle_fn = input_mouse_btn_handle_fn,
         .cursor_pos_handle_fn = input_cursor_pos_handle_fn,
@@ -103,6 +107,10 @@ pub fn deinit(self: Input, allocator: Allocator) void {
     _ = self.window.setMouseButtonCallback(null);
     _ = self.window.setCursorPosCallback(null);
     _ = self.window.setScrollCallback(null);
+}
+
+pub fn setImguiWantInput(self: Input, want_input: bool) void {
+    self.window_context.imgui_want_input = want_input;
 }
 
 pub fn setInputModeCursor(self: Input, mode: InputModeCursor) !void {
@@ -150,22 +158,26 @@ fn keyCallback(window: glfw.Window, key: Key, scan_code: i32, action: Action, mo
     const context = if (window.getUserPointer(WindowContext)) |some| some else return;
     context.key_handle_fn(event);
 
-    const io = imgui.igGetIO();
-    io.KeysDown[@intCast(usize, @enumToInt(key))] = action == Action.press;
-    io.KeyShift = mods.shift;
-    io.KeyCtrl = mods.control;
-    io.KeyAlt = mods.alt;
-    io.KeySuper = mods.super;
+    if (context.imgui_want_input) {
+        const io = imgui.igGetIO();
+        io.KeysDown[@intCast(usize, @enumToInt(key))] = action == Action.press;
+        io.KeyShift = mods.shift;
+        io.KeyCtrl = mods.control;
+        io.KeyAlt = mods.alt;
+        io.KeySuper = mods.super;
+    }
 }
 
 fn charCallback(window: glfw.Window, codepoint: u21) void {
     const context = if (window.getUserPointer(WindowContext)) |some| some else return;
-    const io = imgui.igGetIO();
-    var buffer: [8]u8 = undefined;
-    const len = std.unicode.utf8Encode(codepoint, buffer[0..]) catch return;
-    const text = std.cstr.addNullByte(context.allocator, buffer[0..len]) catch return;
-    defer context.allocator.free(text);
-    imgui.ImGuiIO_AddInputCharactersUTF8(io, text);
+    if (context.imgui_want_input) {
+        const io = imgui.igGetIO();
+        var buffer: [8]u8 = undefined;
+        const len = std.unicode.utf8Encode(codepoint, buffer[0..]) catch return;
+        const text = std.cstr.addNullByte(context.allocator, buffer[0..len]) catch return;
+        defer context.allocator.free(text);
+        imgui.ImGuiIO_AddInputCharactersUTF8(io, text);
+    }
 }
 
 fn mouseBtnCallback(window: glfw.Window, button: MouseButton, action: Action, mods: Mods) void {
@@ -179,12 +191,14 @@ fn mouseBtnCallback(window: glfw.Window, button: MouseButton, action: Action, mo
     const context = if (window.getUserPointer(WindowContext)) |some| some else return;
     context.mouse_btn_handle_fn(event);
 
-    const io = imgui.igGetIO();
-    switch (button) {
-        .left => io.MouseDown[0] = action == .press,
-        .right => io.MouseDown[1] = action == .press,
-        .middle => io.MouseDown[2] = action == .press,
-        else => {},
+    if (context.imgui_want_input) {
+        const io = imgui.igGetIO();
+        switch (button) {
+            .left => io.MouseDown[0] = action == .press,
+            .right => io.MouseDown[1] = action == .press,
+            .middle => io.MouseDown[2] = action == .press,
+            else => {},
+        }
     }
 }
 
@@ -197,11 +211,15 @@ fn cursorPosCallback(window: glfw.Window, x_pos: f64, y_pos: f64) void {
     context.cursor_pos_handle_fn(event);
 
     const io = imgui.igGetIO();
-    io.MousePos = imgui.ImVec2.init(@floatCast(f32, x_pos), @floatCast(f32, y_pos));
+    // set imgui mouse pos to screen pos, or 0 if imgui should not get input
+    const want_pos = @intToFloat(f32, @boolToInt(context.imgui_want_input));
+    io.MousePos = imgui.ImVec2.init(@floatCast(f32, x_pos) * want_pos, @floatCast(f32, y_pos) * want_pos);
 }
 
 fn scrollCallback(window: glfw.Window, xoffset: f64, yoffset: f64) void {
-    _ = window;
+    const context = if (window.getUserPointer(WindowContext)) |some| some else return;
+    if (context.imgui_want_input == false) return;
+
     const io = imgui.igGetIO();
     if (xoffset > 0) io.MouseWheelH -= 1;
     if (xoffset < 0) io.MouseWheelH += 1;

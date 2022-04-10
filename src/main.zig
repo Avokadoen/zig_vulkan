@@ -155,6 +155,7 @@ pub fn main() anyerror!void {
     );
     defer input.deinit(allocator);
     try input.setInputModeCursor(.disabled);
+    input.setImguiWantInput(false);
 
     // Loop until the user closes the window
     while (!window.shouldClose()) {
@@ -231,6 +232,7 @@ fn gameKeyInputFn(event: Input.KeyEvent) void {
                 input.setCursorPosCallback(menuCursorPosInputFn);
                 input.setKeyCallback(menuKeyInputFn);
                 input.setInputModeCursor(.normal) catch {};
+                input.setImguiWantInput(true);
             },
             else => {},
         }
@@ -274,6 +276,7 @@ fn menuKeyInputFn(event: Input.KeyEvent) void {
             Input.Key.escape => {
                 input.setCursorPosCallback(gameCursorPosInputFn);
                 input.setKeyCallback(gameKeyInputFn);
+                input.setImguiWantInput(false);
                 input.setInputModeCursor(.disabled) catch {};
             },
             else => {},
