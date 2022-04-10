@@ -125,7 +125,7 @@ pub fn setKeyCallback(self: Input, input_key_handle_fn: KeyHandleFn) void {
     self.window_context.key_handle_fn = input_key_handle_fn;
 }
 
-/// update cursor based on imgui 
+/// update cursor based on imgui
 pub fn updateCursor(self: *Input) !void {
     const io = imgui.igGetIO();
     if (io.ConfigFlags & imgui.ImGuiConfigFlags_NoMouseCursorChange == 0) {

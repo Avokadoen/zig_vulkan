@@ -45,7 +45,7 @@ descriptor_set: vk.DescriptorSet,
 // shader modules stored for cleanup
 shader_modules: [2]vk.ShaderModule,
 
-pub fn init(ctx: Context, allocator: Allocator, render_pass: vk.RenderPass, gui_extent: vk.Extent2D, swapchain_image_count: usize) !ImguiPipeline {
+pub fn init(ctx: Context, allocator: Allocator, render_pass: vk.RenderPass, swapchain_image_count: usize) !ImguiPipeline {
     // initialize imgui
     _ = imgui.igCreateContext(null);
     var io = imgui.igGetIO();
@@ -410,20 +410,6 @@ pub fn init(ctx: Context, allocator: Allocator, render_pass: vk.RenderPass, gui_
         @ptrCast([*]vk.Pipeline, &pipeline),
     );
     errdefer ctx.vkd.destroyPipeline(ctx.logical_device, pipeline, null);
-
-    // Color scheme
-    const style = imgui.igGetStyle();
-    style.Colors[imgui.ImGuiCol_TitleBg] = imgui.ImVec4{ .x = 1, .y = 0, .z = 0, .w = 0.6 };
-    style.Colors[imgui.ImGuiCol_TitleBgActive] = imgui.ImVec4{ .x = 1, .y = 0, .z = 0, .w = 0.8 };
-    style.Colors[imgui.ImGuiCol_MenuBarBg] = imgui.ImVec4{ .x = 1, .y = 0, .z = 0, .w = 0.4 };
-    style.Colors[imgui.ImGuiCol_Header] = imgui.ImVec4{ .x = 1, .y = 0, .z = 0, .w = 0.4 };
-    style.Colors[imgui.ImGuiCol_CheckMark] = imgui.ImVec4{ .x = 0, .y = 1, .z = 0, .w = 1 };
-
-    // Dimensions
-    const gui_width = @intToFloat(f32, gui_extent.width);
-    const gui_height = @intToFloat(f32, gui_extent.height);
-    io.DisplaySize = imgui.ImVec2.init(gui_width, gui_height);
-    io.DisplayFramebufferScale = imgui.ImVec2.init(1, 1);
 
     return ImguiPipeline{
         .sampler = sampler,

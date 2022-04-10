@@ -123,7 +123,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     const gfx_pipeline = try GraphicsPipeline.init(allocator, ctx, swapchain, render_pass, target_texture);
     errdefer gfx_pipeline.deinit(allocator, ctx);
 
-    const imgui_pipeline = try ImguiPipeline.init(ctx, allocator, render_pass, swapchain.extent, swapchain.images.len);
+    const imgui_pipeline = try ImguiPipeline.init(ctx, allocator, render_pass, swapchain.images.len);
     errdefer imgui_pipeline.deinit(ctx);
 
     const render_pass_begin_info = vk.RenderPassBeginInfo{
@@ -140,7 +140,12 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     const state_binding = ImguiGui.StateBinding{
         .camera_ptr = camera,
     };
-    const gui = ImguiGui.init(state_binding);
+    const gui = ImguiGui.init(
+        @intToFloat(f32, swapchain.extent.width),
+        @intToFloat(f32, swapchain.extent.height),
+        state_binding,
+        .{},
+    );
 
     return Pipeline{
         .allocator = allocator,
@@ -314,7 +319,7 @@ pub inline fn transferMaterialIndices(self: Pipeline, ctx: Context, offset: usiz
     try self.compute_pipeline.storage_buffers[7].transferToDevice(ctx, u8, offset, material_indices);
 }
 
-/// prepare gfx_pipeline + imgui_pipeline command buffer 
+/// prepare gfx_pipeline + imgui_pipeline command buffer
 fn recordCommandBuffers(self: Pipeline, ctx: Context) !void {
     // copy begin info
     var begin_info = self.render_pass_begin_info;
