@@ -1,3 +1,6 @@
+
+ ![frame capture](screenshot.png)
+
 # Zig vulkan renderer
 
 A toy renderer written in zig using vulkan and glfw
