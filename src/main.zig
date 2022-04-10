@@ -137,7 +137,7 @@ pub fn main() anyerror!void {
         .internal_resolution_width = internal_render_resolution.x(),
         .internal_resolution_height = internal_render_resolution.y(),
     });
-    defer voxel_rt.deinit(ctx);
+    defer voxel_rt.deinit(allocator, ctx);
 
     try voxel_rt.pushAlbedo(ctx, albedo_color[0..]);
     try voxel_rt.pushMaterials(ctx, materials[0..]);

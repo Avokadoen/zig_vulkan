@@ -30,8 +30,6 @@ yaw: za.Quat,
 vertical_fov: f32,
 d_camera: Device,
 
-/// Do not use this function
-/// Exist purely to highlight the Camera.Builder
 pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Config) Camera {
     const math = std.math;
 
@@ -92,6 +90,11 @@ pub fn activateSprint(self: *Camera) void {
 /// set camera movement speed to normal speed
 pub fn disableSprint(self: *Camera) void {
     self.movement_speed = self.normal_speed;
+}
+
+pub fn setOrigin(self: *Camera, origin: Vec3) void {
+    self.d_camera.origin = origin;
+    self.propogatePitchChange();
 }
 
 /// Move camera

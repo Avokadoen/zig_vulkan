@@ -11,6 +11,8 @@ const ComputePipeline = @import("ComputePipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const ImguiPipeline = @import("ImguiPipeline.zig");
 
+const ImguiGui = @import("ImguiGui.zig");
+
 const Camera = @import("Camera.zig");
 const GridState = @import("brick/State.zig");
 const gpu_types = @import("gpu_types.zig");
@@ -50,7 +52,9 @@ compute_pipeline: ComputePipeline,
 gfx_pipeline: GraphicsPipeline,
 imgui_pipeline: ImguiPipeline,
 
-pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.Extent2D, grid_state: GridState, config: Config) !Pipeline {
+gui: ImguiGui,
+
+pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.Extent2D, grid_state: GridState, camera: *Camera, config: Config) !Pipeline {
     // use graphics and compute index
     // if they are the same, then we use that index
     const indices = [_]u32{ ctx.queue_indices.graphics, ctx.queue_indices.compute };
@@ -130,6 +134,11 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .p_clear_values = &clear_values,
     };
 
+    const state_binding = ImguiGui.StateBinding{
+        .camera_ptr = camera,
+    };
+    const gui = ImguiGui.init(state_binding);
+
     return Pipeline{
         .allocator = allocator,
         .target_texture = target_texture,
@@ -144,6 +153,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .compute_pipeline = compute_pipeline,
         .gfx_pipeline = gfx_pipeline,
         .imgui_pipeline = imgui_pipeline,
+        .gui = gui,
     };
 }
 
@@ -211,7 +221,8 @@ pub fn draw(self: *Pipeline, ctx: Context) !void {
     _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
     try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence));
 
-    try self.imgui_pipeline.prepareDraw(ctx);
+    self.gui.newFrame(ctx, self);
+    try self.imgui_pipeline.updateBuffers(ctx);
 
     // re-record command buffer to update any state
     var begin_info = self.render_pass_begin_info;

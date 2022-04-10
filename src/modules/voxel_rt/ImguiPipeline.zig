@@ -15,31 +15,9 @@ const GpuBufferMemory = render.GpuBufferMemory;
 const Context = render.Context;
 const Texture = render.Texture;
 
-pub const imgui_title = "hello imgui!";
-
 /// application imgui vulkan render wrapper
 /// this should not be used directly by user code and should only be used by internal code
 const ImguiPipeline = @This();
-
-/// contains gui state
-pub const StateBindings = struct {
-    // currently empty
-    pub const Camera = struct {
-        max_bounce: c_int,
-    };
-
-    camera: Camera,
-    cool_yes: bool,
-
-    pub fn init() StateBindings {
-        return StateBindings{
-            .camera = .{
-                .max_bounce = 1,
-            },
-            .cool_yes = false,
-        };
-    }
-};
 
 pub const PushConstant = struct {
     scale: [2]f32,
@@ -66,8 +44,6 @@ descriptor_set: vk.DescriptorSet,
 
 // shader modules stored for cleanup
 shader_modules: [2]vk.ShaderModule,
-
-state_bindings: StateBindings,
 
 pub fn init(ctx: Context, allocator: Allocator, render_pass: vk.RenderPass, gui_extent: vk.Extent2D, swapchain_image_count: usize) !ImguiPipeline {
     // initialize imgui
@@ -464,7 +440,6 @@ pub fn init(ctx: Context, allocator: Allocator, render_pass: vk.RenderPass, gui_
         .descriptor_pool = descriptor_pool,
         .descriptor_set_layout = descriptor_set_layout,
         .descriptor_set = descriptor_set,
-        .state_bindings = StateBindings.init(),
         .shader_modules = [2]vk.ShaderModule{ vert.module, frag.module },
     };
 }
@@ -484,12 +459,6 @@ pub fn deinit(self: ImguiPipeline, ctx: Context) void {
 
     self.vertex_buffer.deinit(ctx);
     self.index_buffer.deinit(ctx);
-}
-
-/// update imgui and gpu state, must be called before recording any buffers
-pub fn prepareDraw(self: *ImguiPipeline, ctx: Context) !void {
-    self.newFrame();
-    try self.updateBuffers(ctx);
 }
 
 /// record a command buffer that can draw current frame
@@ -574,39 +543,8 @@ pub fn recordCommandBuffer(self: ImguiPipeline, ctx: Context, command_buffer: vk
     }
 }
 
-// Starts a new imGui frame and sets up windows and ui elements
-fn newFrame(self: *ImguiPipeline) void {
-    const State = struct {
-        var counter: u32 = 0;
-    };
-    imgui.igNewFrame();
-
-    // Init imGui windows and elements
-    imgui.igText(imgui_title);
-    imgui.igText("some more text");
-
-    imgui.igText("Camera");
-    _ = imgui.igInputInt("max bounce", &self.state_bindings.camera.max_bounce, 0, 0, 0);
-
-    if (imgui.igButton("Count", .{ .x = 0, .y = 0 })) {
-        State.counter += 1;
-    }
-    imgui.igSameLine(0, 10);
-    imgui.igText("counter = %d", State.counter);
-
-    imgui.igSetNextWindowSize(.{ .x = 200, .y = 200 }, imgui.ImGuiCond_FirstUseEver);
-    _ = imgui.igBegin("External settings", null, 0);
-    _ = imgui.igCheckbox("cool yes?", &self.state_bindings.cool_yes);
-    imgui.igEnd();
-
-    imgui.igSetNextWindowPos(.{ .x = 650, .y = 20 }, imgui.ImGuiCond_FirstUseEver, .{ .x = 0, .y = 0 });
-    imgui.igShowDemoWindow(null);
-
-    imgui.igRender();
-}
-
 // TODO: do not make new buffers if buffer is larger than total count
-fn updateBuffers(self: *ImguiPipeline, ctx: Context) !void {
+pub fn updateBuffers(self: *ImguiPipeline, ctx: Context) !void {
     const draw_data = imgui.igGetDrawData();
 
     const vertex_buffer_size = draw_data.TotalVtxCount * @sizeOf(imgui.ImDrawVert);

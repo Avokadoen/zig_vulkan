@@ -26,12 +26,15 @@ pub const Config = struct {
 
 const VoxelRT = @This();
 
-camera: Camera,
+camera: *Camera,
 brick_grid: *BrickGrid,
 pipeline: Pipeline,
 
 /// init VoxelRT, api takes ownership of the brick_grid
 pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, config: Config) !VoxelRT {
+    const camera = try allocator.create(Camera);
+    camera.* = Camera.init(75, config.internal_resolution_width, config.internal_resolution_height, config.camera);
+
     const pipeline = try Pipeline.init(
         ctx,
         allocator,
@@ -40,12 +43,11 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, config: 
             .height = config.internal_resolution_height,
         },
         brick_grid.state.*,
+        camera,
         config.pipeline,
     );
     errdefer pipeline.deinit(ctx);
-
-    const camera = Camera.init(75, config.internal_resolution_width, config.internal_resolution_height, config.camera);
-    try pipeline.transferCamera(ctx, camera);
+    try pipeline.transferCamera(ctx, camera.*);
 
     try pipeline.transferGridState(ctx, brick_grid.state.*);
     const metals = [_]gpu_types.Metal{.{
@@ -85,7 +87,7 @@ pub fn pushAlbedo(self: VoxelRT, ctx: Context, albedos: []const gpu_types.Albedo
 
 /// a temporary way of pushing camera changes (TODO: update function)
 pub fn debugMoveCamera(self: *VoxelRT, ctx: Context) !void {
-    try self.pipeline.transferCamera(ctx, self.camera);
+    try self.pipeline.transferCamera(ctx, self.camera.*);
 }
 
 /// Push all terrain data to GPU
@@ -152,6 +154,7 @@ pub fn updateGridDelta(self: *VoxelRT, ctx: Context) !void {
     }
 }
 
-pub fn deinit(self: VoxelRT, ctx: Context) void {
+pub fn deinit(self: VoxelRT, allocator: Allocator, ctx: Context) void {
+    allocator.destroy(self.camera);
     self.pipeline.deinit(ctx);
 }
