@@ -22,6 +22,8 @@ pub const Config = struct {
     albedo_buffer: u64 = 256,
     metal_buffer: u64 = 256,
     dielectric_buffer: u64 = 256,
+
+    gfx_pipeline_config: GraphicsPipeline.Config = .{},
 };
 
 const Pixel = packed struct {
@@ -120,7 +122,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
 
     try compute_pipeline.recordCommandBuffers(ctx, camera.*);
 
-    const gfx_pipeline = try GraphicsPipeline.init(allocator, ctx, swapchain, render_pass, target_texture);
+    const gfx_pipeline = try GraphicsPipeline.init(allocator, ctx, swapchain, render_pass, target_texture, config.gfx_pipeline_config);
     errdefer gfx_pipeline.deinit(allocator, ctx);
 
     const imgui_pipeline = try ImguiPipeline.init(ctx, allocator, render_pass, swapchain.images.len);
@@ -139,6 +141,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
 
     const state_binding = ImguiGui.StateBinding{
         .camera_ptr = camera,
+        .gfx_pipeline_shader_constants = gfx_pipeline.shader_constants,
     };
     const gui = ImguiGui.init(
         @intToFloat(f32, swapchain.extent.width),
@@ -273,6 +276,22 @@ pub fn draw(self: *Pipeline, ctx: Context) !void {
 
 }
 
+pub fn setDenoiseSampleCount(self: *Pipeline, sample_count: i32) void {
+    self.gfx_pipeline.shader_constants.samples = sample_count;
+}
+
+pub fn setDenoiseDistributionBias(self: *Pipeline, distribution_bias: f32) void {
+    self.gfx_pipeline.shader_constants.distribution_bias = distribution_bias;
+}
+
+pub fn setDenoiseInverseHueTolerance(self: *Pipeline, inverse_hue_tolerance: f32) void {
+    self.gfx_pipeline.shader_constants.inverse_hue_tolerance = inverse_hue_tolerance;
+}
+
+pub fn setDenoisePixelMultiplier(self: *Pipeline, pixel_multiplier: f32) void {
+    self.gfx_pipeline.shader_constants.pixel_multiplier = pixel_multiplier;
+}
+
 /// Transfer grid data to GPU
 pub inline fn transferGridState(self: Pipeline, ctx: Context, grid: GridState) !void {
     const grid_data = [_]GridState.Device{grid.device_state};
@@ -394,6 +413,15 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize, begin_info: *
         };
         ctx.vkd.cmdSetScissor(command_buffer, 0, 1, @ptrCast([*]const vk.Rect2D, &scissor));
     }
+
+    ctx.vkd.cmdPushConstants(
+        command_buffer,
+        self.gfx_pipeline.pipeline_layout,
+        .{ .fragment_bit = true },
+        0,
+        @sizeOf(GraphicsPipeline.PushConstant),
+        self.gfx_pipeline.shader_constants,
+    );
 
     ctx.vkd.cmdBindDescriptorSets(
         command_buffer,

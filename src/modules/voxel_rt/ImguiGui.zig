@@ -5,13 +5,16 @@ const Context = render.Context;
 
 const Camera = @import("Camera.zig");
 const Pipeline = @import("Pipeline.zig"); // TODO: circular dependency :( ...
+const GraphicsPipeline = @import("GraphicsPipeline.zig");
 
 pub const StateBinding = struct {
     camera_ptr: *Camera,
+    gfx_pipeline_shader_constants: *GraphicsPipeline.PushConstant,
 };
 
 pub const Config = struct {
     camera_window_active: bool = true,
+    post_process_window_active: bool = true,
 };
 
 // build voxel_rt gui for the ImguiPipeline and handle state propagation
@@ -20,6 +23,7 @@ const ImguiGui = @This();
 state_binding: StateBinding,
 
 camera_window_active: bool,
+post_process_window_active: bool,
 
 pub fn init(gui_width: f32, gui_height: f32, state_binding: StateBinding, config: Config) ImguiGui {
     // Color scheme
@@ -38,6 +42,7 @@ pub fn init(gui_width: f32, gui_height: f32, state_binding: StateBinding, config
     return ImguiGui{
         .state_binding = state_binding,
         .camera_window_active = config.camera_window_active,
+        .post_process_window_active = config.post_process_window_active,
     };
 }
 
@@ -83,10 +88,14 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline) void {
         if (imgui.igMenuItemBool("Camera", null, self.camera_window_active, true)) {
             self.camera_window_active = !self.camera_window_active;
         }
+        if (imgui.igMenuItemBool("Post process", null, self.post_process_window_active, true)) {
+            self.post_process_window_active = !self.post_process_window_active;
+        }
     }
     imgui.igEnd();
 
     self.drawCameraWindowIfEnabled();
+    self.drawPostProcessWindowIfEnabled();
 
     // imgui.igSetNextWindowPos(.{ .x = 650, .y = 20 }, imgui.ImGuiCond_FirstUseEver, .{ .x = 0, .y = 0 });
     // imgui.igShowDemoWindow(null);
@@ -105,9 +114,22 @@ inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
     _ = imgui.igSliderInt("max bounces", &self.state_binding.camera_ptr.d_camera.max_bounce, 1, 32, null, 0);
     _ = imgui.igSliderInt("samples per pixel", &self.state_binding.camera_ptr.d_camera.samples_per_pixel, 1, 32, null, 0);
 
+    _ = imgui.igInputFloat("move speed", &self.state_binding.camera_ptr.normal_speed, 0, 0, null, 0);
+
     var camera_origin: [3]f32 = self.state_binding.camera_ptr.d_camera.origin;
     const camera_origin_changed = imgui.igInputFloat3("camera position", &camera_origin, null, 0);
     if (camera_origin_changed) {
         self.state_binding.camera_ptr.setOrigin(camera_origin);
     }
+}
+
+inline fn drawPostProcessWindowIfEnabled(self: *ImguiGui) void {
+    if (self.post_process_window_active == false) return;
+
+    imgui.igSetNextWindowSize(.{ .x = 400, .y = 500 }, imgui.ImGuiCond_FirstUseEver);
+    const early_exit = imgui.igBegin("Post process", &self.post_process_window_active, imgui.ImGuiWindowFlags_None) == false;
+    defer imgui.igEnd();
+    if (early_exit) return;
+
+    _ = imgui.igInputInt("samples", &self.state_binding.gfx_pipeline_shader_constants.samples, 1, 2, 0);
 }

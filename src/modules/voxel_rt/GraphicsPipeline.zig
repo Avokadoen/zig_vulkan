@@ -14,6 +14,20 @@ const Vertex = extern struct {
     uv: [2]f32,
 };
 
+pub const PushConstant = extern struct {
+    samples: i32,
+    distribution_bias: f32,
+    pixel_multiplier: f32,
+    inverse_hue_tolerance: f32,
+};
+
+pub const Config = struct {
+    samples: i32 = 80, // HIGHER = NICER = SLOWER
+    distribution_bias: f32 = 0.6, // between 0. and 1.
+    pixel_multiplier: f32 = 1.5, // between 1. and 3. (keep low)
+    inverse_hue_tolerance: f32 = 20, // (2. - 30.)
+};
+
 /// Pipeline to draw a single texture to screen
 const GraphicsPipeline = @This();
 
@@ -32,12 +46,14 @@ framebuffers: []vk.Framebuffer,
 vertex_buffer: GpuBufferMemory,
 index_buffer: GpuBufferMemory,
 
+shader_constants: *PushConstant,
+
 // shader modules stored for cleanup
 shader_modules: [2]vk.ShaderModule,
 
 texture: *const Texture,
 
-pub fn init(allocator: Allocator, ctx: Context, swapchain: Swapchain, render_pass: vk.RenderPass, texture: *const Texture) !GraphicsPipeline {
+pub fn init(allocator: Allocator, ctx: Context, swapchain: Swapchain, render_pass: vk.RenderPass, texture: *const Texture, config: Config) !GraphicsPipeline {
     const vertices = [_]Vertex{
         .{ .pos = .{ 1.0, 1.0, 0.0 }, .uv = .{ 1.0, 1.0 } },
         .{ .pos = .{ -1.0, 1.0, 0.0 }, .uv = .{ 0.0, 1.0 } },
@@ -144,12 +160,17 @@ pub fn init(allocator: Allocator, ctx: Context, swapchain: Swapchain, render_pas
     }
 
     const pipeline_layout = blk: {
+        const push_constant_range = vk.PushConstantRange{
+            .stage_flags = .{ .fragment_bit = true },
+            .offset = 0,
+            .size = @sizeOf(PushConstant),
+        };
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
             .set_layout_count = 1,
             .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &descriptor_set_layout),
-            .push_constant_range_count = 0,
-            .p_push_constant_ranges = undefined,
+            .push_constant_range_count = 1,
+            .p_push_constant_ranges = @ptrCast([*]const vk.PushConstantRange, &push_constant_range),
         };
         break :blk try ctx.vkd.createPipelineLayout(ctx.logical_device, &pipeline_layout_info, null);
     };
@@ -313,6 +334,14 @@ pub fn init(allocator: Allocator, ctx: Context, swapchain: Swapchain, render_pas
         allocator.free(framebuffers);
     }
 
+    const shader_constants = try allocator.create(PushConstant);
+    shader_constants.* = .{
+        .samples = config.samples,
+        .distribution_bias = config.distribution_bias,
+        .pixel_multiplier = config.pixel_multiplier,
+        .inverse_hue_tolerance = config.inverse_hue_tolerance,
+    };
+
     return GraphicsPipeline{
         .pipeline_cache = pipeline_cache,
         .pipeline_layout = pipeline_layout,
@@ -327,6 +356,7 @@ pub fn init(allocator: Allocator, ctx: Context, swapchain: Swapchain, render_pas
         .index_buffer = index_buffer,
         .shader_modules = [2]vk.ShaderModule{ vert.module, frag.module },
         .texture = texture,
+        .shader_constants = shader_constants,
     };
 }
 
@@ -352,4 +382,6 @@ pub fn deinit(self: GraphicsPipeline, allocator: Allocator, ctx: Context) void {
     ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.descriptor_pool, null);
     self.vertex_buffer.deinit(ctx);
     self.index_buffer.deinit(ctx);
+
+    allocator.destroy(self.shader_constants);
 }
