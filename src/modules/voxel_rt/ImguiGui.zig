@@ -1,3 +1,5 @@
+const std = @import("std");
+
 const imgui = @import("imgui");
 
 const render = @import("../render.zig");
@@ -14,7 +16,17 @@ pub const StateBinding = struct {
 
 pub const Config = struct {
     camera_window_active: bool = true,
+    metrics_window_active: bool = true,
     post_process_window_active: bool = true,
+    update_frame_timings: bool = true,
+};
+
+const MetricState = struct {
+    update_frame_timings: bool,
+    prev_frame_ts: i128,
+    frame_times: [50]f32,
+    min_frame_time: f32,
+    max_frame_time: f32,
 };
 
 // build voxel_rt gui for the ImguiPipeline and handle state propagation
@@ -23,7 +35,10 @@ const ImguiGui = @This();
 state_binding: StateBinding,
 
 camera_window_active: bool,
+metrics_window_active: bool,
 post_process_window_active: bool,
+
+metrics_state: MetricState,
 
 pub fn init(gui_width: f32, gui_height: f32, state_binding: StateBinding, config: Config) ImguiGui {
     // Color scheme
@@ -42,12 +57,21 @@ pub fn init(gui_width: f32, gui_height: f32, state_binding: StateBinding, config
     return ImguiGui{
         .state_binding = state_binding,
         .camera_window_active = config.camera_window_active,
+        .metrics_window_active = config.metrics_window_active,
         .post_process_window_active = config.post_process_window_active,
+
+        .metrics_state = .{
+            .update_frame_timings = config.update_frame_timings,
+            .prev_frame_ts = std.time.nanoTimestamp(),
+            .frame_times = [_]f32{0} ** 50,
+            .min_frame_time = std.math.f32_max,
+            .max_frame_time = std.math.f32_min,
+        },
     };
 }
 
 // Starts a new imGui frame and sets up windows and ui elements
-pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline) void {
+pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metrics: bool) void {
     _ = ctx;
     _ = pipeline;
     imgui.igNewFrame();
@@ -65,7 +89,7 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline) void {
     );
     imgui.igSetNextWindowPos(.{ .x = 0, .y = 0 }, imgui.ImGuiCond_Always, .{ .x = 0, .y = 0 });
     _ = imgui.igBegin(
-        "Control panel",
+        "Main menu",
         null,
         imgui.ImGuiWindowFlags_MenuBar |
             imgui.ImGuiWindowFlags_NoMove |
@@ -88,13 +112,30 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline) void {
         if (imgui.igMenuItemBool("Camera", null, self.camera_window_active, true)) {
             self.camera_window_active = !self.camera_window_active;
         }
+        if (imgui.igMenuItemBool("Metrics", null, self.metrics_window_active, true)) {
+            self.metrics_window_active = !self.metrics_window_active;
+        }
         if (imgui.igMenuItemBool("Post process", null, self.post_process_window_active, true)) {
             self.post_process_window_active = !self.post_process_window_active;
         }
     }
     imgui.igEnd();
 
+    blk: {
+        if (!self.metrics_state.update_frame_timings or !update_metrics) {
+            break :blk;
+        }
+        const now = std.time.nanoTimestamp();
+        const frame_time = @intToFloat(f32, now - self.metrics_state.prev_frame_ts) / std.time.ns_per_ms;
+        self.metrics_state.prev_frame_ts = now;
+        std.mem.copy(f32, self.metrics_state.frame_times[0..], self.metrics_state.frame_times[1..]);
+        self.metrics_state.frame_times[49] = frame_time;
+        self.metrics_state.min_frame_time = std.math.min(self.metrics_state.min_frame_time, frame_time);
+        self.metrics_state.max_frame_time = std.math.max(self.metrics_state.max_frame_time, frame_time);
+    }
+
     self.drawCameraWindowIfEnabled();
+    self.drawMetricsWindowIfEnabled();
     self.drawPostProcessWindowIfEnabled();
 
     // imgui.igSetNextWindowPos(.{ .x = 650, .y = 20 }, imgui.ImGuiCond_FirstUseEver, .{ .x = 0, .y = 0 });
@@ -121,6 +162,24 @@ inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
     if (camera_origin_changed) {
         self.state_binding.camera_ptr.setOrigin(camera_origin);
     }
+}
+
+inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
+    if (self.post_process_window_active == false) return;
+
+    imgui.igSetNextWindowSize(.{ .x = 400, .y = 500 }, imgui.ImGuiCond_FirstUseEver);
+    const early_exit = imgui.igBegin("Metrics", &self.post_process_window_active, imgui.ImGuiWindowFlags_None) == false;
+    defer imgui.igEnd();
+    if (early_exit) return;
+
+    imgui.igPlotLinesFloatPtr("Frame times", &self.metrics_state.frame_times, 50, 0, "", self.metrics_state.min_frame_time, self.metrics_state.max_frame_time, imgui.ImVec2{ .x = 0, .y = 80 }, @sizeOf(f32));
+    imgui.igText(
+        "Recent frame time: %d\nMinimum frame time: %d\nMaximum frame time: %d",
+        0, // TODO self.metrics_state.frame_times[49] / std.time.ns_per_ms,
+        0, // TODO self.metrics_state.min_frame_time / std.time.ns_per_ms,
+        0, // TODO self.metrics_state.max_frame_time / std.time.ns_per_ms,
+    );
+    // ImGui::PlotLines("Frame Times", &uiSettings.frameTimes[0], 50, 0, "", uiSettings.frameTimeMin, uiSettings.frameTimeMax, ImVec2(0, 80));
 }
 
 inline fn drawPostProcessWindowIfEnabled(self: *ImguiGui) void {

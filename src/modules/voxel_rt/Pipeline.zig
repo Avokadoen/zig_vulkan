@@ -237,7 +237,7 @@ pub fn draw(self: *Pipeline, ctx: Context) !void {
     _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
     try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence));
 
-    self.gui.newFrame(ctx, self);
+    self.gui.newFrame(ctx, self, image_index == 0);
     try self.imgui_pipeline.updateBuffers(ctx);
 
     // re-record command buffer to update any state
