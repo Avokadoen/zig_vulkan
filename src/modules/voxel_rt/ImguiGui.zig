@@ -173,13 +173,9 @@ inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
     if (early_exit) return;
 
     imgui.igPlotLinesFloatPtr("Frame times", &self.metrics_state.frame_times, 50, 0, "", self.metrics_state.min_frame_time, self.metrics_state.max_frame_time, imgui.ImVec2{ .x = 0, .y = 80 }, @sizeOf(f32));
-    imgui.igText(
-        "Recent frame time: %d\nMinimum frame time: %d\nMaximum frame time: %d",
-        0, // TODO self.metrics_state.frame_times[49] / std.time.ns_per_ms,
-        0, // TODO self.metrics_state.min_frame_time / std.time.ns_per_ms,
-        0, // TODO self.metrics_state.max_frame_time / std.time.ns_per_ms,
-    );
-    // ImGui::PlotLines("Frame Times", &uiSettings.frameTimes[0], 50, 0, "", uiSettings.frameTimeMin, uiSettings.frameTimeMax, ImVec2(0, 80));
+    imgui.igText("Recent frame time: %f", self.metrics_state.frame_times[49]);
+    imgui.igText("Minimum frame time: %f", self.metrics_state.min_frame_time);
+    imgui.igText("Maximum frame time: %f", self.metrics_state.max_frame_time);
 }
 
 inline fn drawPostProcessWindowIfEnabled(self: *ImguiGui) void {
