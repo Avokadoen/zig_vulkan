@@ -33,6 +33,8 @@ pipeline: Pipeline,
 /// init VoxelRT, api takes ownership of the brick_grid
 pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, config: Config) !VoxelRT {
     const camera = try allocator.create(Camera);
+    errdefer allocator.destroy(camera);
+
     camera.* = Camera.init(75, config.internal_resolution_width, config.internal_resolution_height, config.camera);
 
     const pipeline = try Pipeline.init(
