@@ -52,15 +52,13 @@ pub const Data = struct {
         errdefer support_details.deinit(allocator);
 
         const sc_create_info = blk1: {
-            if (support_details.capabilities.max_image_count <= 0) {
-                return error.SwapchainNoImageSupport;
-            }
+            const max_images = if (support_details.capabilities.max_image_count == 0) support_details.capabilities.min_image_count + 1 else support_details.capabilities.max_image_count;
 
             const format = support_details.selectSwapChainFormat();
             const present_mode = support_details.selectSwapchainPresentMode();
             const extent = try support_details.constructSwapChainExtent(ctx.window_ptr.*);
 
-            const image_count = std.math.min(support_details.capabilities.min_image_count + 1, support_details.capabilities.max_image_count);
+            const image_count = std.math.min(support_details.capabilities.min_image_count + 1, max_images);
 
             const Config = struct {
                 sharing_mode: vk.SharingMode,
