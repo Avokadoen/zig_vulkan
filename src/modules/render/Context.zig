@@ -7,7 +7,6 @@ const glfw = @import("glfw");
 
 const consts = @import("consts.zig");
 const dispatch = @import("dispatch.zig");
-const swapchain = @import("swapchain.zig");
 const physical_device = @import("physical_device.zig");
 const QueueFamilyIndices = physical_device.QueueFamilyIndices;
 const validation_layer = @import("validation_layer.zig");
@@ -202,7 +201,7 @@ pub fn destroyShaderModule(self: Context, module: vk.ShaderModule) void {
     self.vkd.destroyShaderModule(self.logical_device, module, null);
 }
 
-/// caller must destroy returned module 
+/// caller must destroy returned module
 pub fn createPipelineLayout(self: Context, create_info: vk.PipelineLayoutCreateInfo) !vk.PipelineLayout {
     return self.vkd.createPipelineLayout(self.logical_device, &create_info, null);
 }

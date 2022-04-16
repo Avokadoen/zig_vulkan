@@ -1,6 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const glfw = @import("glfw");
+
 const vk = @import("vulkan");
 const render = @import("../render.zig");
 const Context = render.Context;
@@ -56,6 +58,8 @@ imgui_pipeline: ImguiPipeline,
 
 camera: *Camera,
 gui: ImguiGui,
+
+requested_rescale_pipeline: bool = false,
 
 pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.Extent2D, grid_state: GridState, camera: *Camera, config: Config) !Pipeline {
     const target_texture = try allocator.create(Texture);
@@ -221,17 +225,35 @@ pub fn draw(self: *Pipeline, ctx: Context) !void {
     };
     try ctx.vkd.queueSubmit(ctx.compute_queue, 1, @ptrCast([*]const vk.SubmitInfo, &compute_submit_info), self.compute_complete_fence);
 
-    const aquire_result = try ctx.vkd.acquireNextImageKHR(
-        ctx.logical_device,
-        self.swapchain.swapchain,
-        std.math.maxInt(u64),
-        self.present_complete_semaphore,
-        .null_handle,
-    ); // TODO: handle out of date khr: rescale pipeline
-    if (aquire_result.result == .suboptimal_khr) {
-        // TODO: request rescale pipeline(s)!
-    }
-    const image_index = aquire_result.image_index;
+    const image_index = blk: {
+        const aquired = ctx.vkd.acquireNextImageKHR(
+            ctx.logical_device,
+            self.swapchain.swapchain,
+            std.math.maxInt(u64),
+            self.present_complete_semaphore,
+            .null_handle,
+        );
+
+        if (aquired) |ok| switch (ok.result) {
+            .success => break :blk ok.image_index,
+            .suboptimal_khr => {
+                self.requested_rescale_pipeline = true;
+                break :blk ok.image_index;
+            },
+            else => {
+                // TODO: handle timeout and not_ready
+                return error.UnhandledAcquireResult;
+            },
+        } else |err| switch (err) {
+            error.OutOfDateKHR => {
+                self.requested_rescale_pipeline = true;
+                return;
+            },
+            else => {
+                return err;
+            },
+        }
+    };
 
     // wait for previous texture draw before updating buffers and command buffers
     _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
@@ -274,6 +296,7 @@ pub fn draw(self: *Pipeline, ctx: Context) !void {
     const queue_result = try ctx.vkd.queuePresentKHR(ctx.graphics_queue, &present_info);
     _ = queue_result; // TODO: perform resize here if out of date reported by queuePresentKHR
 
+    if (self.requested_rescale_pipeline) try self.rescalePipeline(ctx);
 }
 
 pub fn setDenoiseSampleCount(self: *Pipeline, sample_count: i32) void {
@@ -336,6 +359,52 @@ pub inline fn transferBricks(self: Pipeline, ctx: Context, offset: usize, bricks
 /// Transfer dielectric data to GPU
 pub inline fn transferMaterialIndices(self: Pipeline, ctx: Context, offset: usize, material_indices: []const u8) !void {
     try self.compute_pipeline.storage_buffers[7].transferToDevice(ctx, u8, offset, material_indices);
+}
+
+// TODO: make allow to multithread this
+/// Used to update the pipeline according to changes in the window spec
+/// This functions should only be called from the main thread (see glfwGetFramebufferSize)
+fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
+    var window_size = try ctx.window_ptr.*.getFramebufferSize();
+    if (window_size.width == 0 or window_size.height == 0) {
+        window_size = try ctx.window_ptr.*.getFramebufferSize();
+        try glfw.waitEvents();
+    }
+
+    self.requested_rescale_pipeline = false;
+
+    // Wait for pipeline to become idle
+    {
+        // wait for previous compute dispatch to complete
+        _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.compute_complete_fence), vk.TRUE, std.math.maxInt(u64));
+        // wait for previous texture draw before updating buffers and command buffers
+        _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
+    }
+
+    // recreate swapchain utilizing the old one
+    const old_swapchain = self.swapchain;
+    defer old_swapchain.deinit(ctx);
+
+    self.swapchain = try render.swapchain.Data.init(self.allocator, ctx, old_swapchain.swapchain);
+    errdefer self.swapchain.deinit(ctx);
+
+    // recreate renderpass
+    ctx.destroyRenderPass(self.render_pass);
+    self.render_pass = try ctx.createRenderPass(self.swapchain.format);
+    errdefer ctx.destroyRenderPass(self.render_pass);
+    self.render_pass_begin_info.render_pass = self.render_pass;
+
+    // recreate framebuffers
+    for (self.gfx_pipeline.framebuffers) |framebuffer| {
+        ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
+    }
+    self.gfx_pipeline.framebuffers = try render.pipeline.createFramebuffers(self.allocator, ctx, &self.swapchain, self.render_pass, null);
+    errdefer {
+        for (framebuffers) |buffer| {
+            ctx.vkd.destroyFramebuffer(ctx.logical_device, buffer, null);
+        }
+        self.allocator.free(framebuffers);
+    }
 }
 
 /// prepare gfx_pipeline + imgui_pipeline command buffer
