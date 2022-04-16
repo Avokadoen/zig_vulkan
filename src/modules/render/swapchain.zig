@@ -69,14 +69,14 @@ pub const Data = struct {
                 if (ctx.queue_indices.graphics != ctx.queue_indices.present) {
                     const indices_arr = [_]u32{ ctx.queue_indices.graphics, ctx.queue_indices.present };
                     break :blk2 Config{
-                        .sharing_mode = vk.SharingMode.concurrent, // TODO: read up on ownership in this context
+                        .sharing_mode = .concurrent, // TODO: read up on ownership in this context
                         .index_count = indices_arr.len,
                         .p_indices = @ptrCast([*]const u32, &indices_arr[0..indices_arr.len]),
                     };
                 } else {
                     const indices_arr = [_]u32{ ctx.queue_indices.graphics, ctx.queue_indices.present };
                     break :blk2 Config{
-                        .sharing_mode = vk.SharingMode.exclusive,
+                        .sharing_mode = .exclusive,
                         .index_count = 0,
                         .p_indices = @ptrCast([*]const u32, &indices_arr[0..indices_arr.len]),
                     };
@@ -99,7 +99,7 @@ pub const Data = struct {
                 .composite_alpha = vk.CompositeAlphaFlagsKHR{ .opaque_bit_khr = true },
                 .present_mode = present_mode,
                 .clipped = vk.TRUE,
-                .old_swapchain = old_swapchain orelse vk.SwapchainKHR.null_handle,
+                .old_swapchain = old_swapchain orelse .null_handle,
             };
         };
         const swapchain_khr = try ctx.vkd.createSwapchainKHR(ctx.logical_device, &sc_create_info, null);
