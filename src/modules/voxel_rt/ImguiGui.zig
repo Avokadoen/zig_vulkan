@@ -164,6 +164,7 @@ inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
     _ = imgui.igSliderInt("samples per pixel", &self.state_binding.camera_ptr.d_camera.samples_per_pixel, 1, 32, null, 0);
 
     _ = imgui.igInputFloat("move speed", &self.state_binding.camera_ptr.normal_speed, 0, 0, null, 0);
+    _ = imgui.igInputFloat("turn rate", &self.state_binding.camera_ptr.turn_rate, 0, 0, null, 0);
 
     var camera_origin: [3]f32 = self.state_binding.camera_ptr.d_camera.origin;
     const camera_origin_changed = imgui.igInputFloat3("camera position", &camera_origin, null, 0);
