@@ -70,6 +70,14 @@ pub fn init(gui_width: f32, gui_height: f32, state_binding: StateBinding, config
     };
 }
 
+/// handle window resizing
+pub fn handleRescale(self: ImguiGui, gui_width: f32, gui_height: f32) void {
+    _ = self;
+
+    const io = imgui.igGetIO();
+    io.DisplaySize = imgui.ImVec2.init(gui_width, gui_height);
+}
+
 // Starts a new imGui frame and sets up windows and ui elements
 pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metrics: bool) void {
     _ = ctx;

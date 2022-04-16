@@ -8,7 +8,6 @@ const za = @import("zalgebra");
 const tracy = @import("tracy.zig");
 
 const render = @import("modules/render.zig");
-const swapchain = render.swapchain;
 const consts = render.consts;
 
 const Input = @import("modules/Input.zig");

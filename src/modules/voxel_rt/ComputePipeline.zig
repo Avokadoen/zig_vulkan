@@ -35,8 +35,6 @@ target_descriptor_layout: vk.DescriptorSetLayout,
 target_descriptor_pool: vk.DescriptorPool,
 target_descriptor_set: vk.DescriptorSet,
 
-requested_rescale_pipeline: bool = false,
-
 uniform_buffers: []GpuBufferMemory,
 storage_buffers: []GpuBufferMemory,
 

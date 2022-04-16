@@ -398,13 +398,15 @@ fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
     for (self.gfx_pipeline.framebuffers) |framebuffer| {
         ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
     }
-    self.gfx_pipeline.framebuffers = try render.pipeline.createFramebuffers(self.allocator, ctx, &self.swapchain, self.render_pass, null);
+    self.gfx_pipeline.framebuffers = try render.pipeline.createFramebuffers(self.allocator, ctx, &self.swapchain, self.render_pass, self.gfx_pipeline.framebuffers);
     errdefer {
         for (framebuffers) |buffer| {
             ctx.vkd.destroyFramebuffer(ctx.logical_device, buffer, null);
         }
         self.allocator.free(framebuffers);
     }
+
+    self.gui.handleRescale(@intToFloat(f32, window_size.width), @intToFloat(f32, window_size.height));
 }
 
 /// prepare gfx_pipeline + imgui_pipeline command buffer

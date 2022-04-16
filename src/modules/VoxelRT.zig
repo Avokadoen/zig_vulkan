@@ -94,7 +94,7 @@ pub fn debugUpdateTerrain(self: *VoxelRT, ctx: Context) !void {
     try self.pipeline.transferMaterialIndices(ctx, 0, self.brick_grid.state.material_indices);
 }
 
-/// update grid device data based on changes 
+/// update grid device data based on changes
 pub fn updateGridDelta(self: *VoxelRT, ctx: Context) !void {
     {
         const transfer_zone = tracy.ZoneN(@src(), "higher order transfer");
