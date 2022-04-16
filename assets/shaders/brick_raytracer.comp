@@ -3,6 +3,8 @@
 #extension GL_EXT_debug_printf : disable
 // debugPrintfEXT("hello world %f", 1.0);
 
+// This extension is strictly not required for vulkan 1.2 target, but is used to silence validator...
+#extension GL_GOOGLE_include_directive : enable
 #include "rand.comp"
 
 layout(local_size_x = 32, local_size_y = 32) in;
