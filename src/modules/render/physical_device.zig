@@ -155,7 +155,7 @@ fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.Phys
     };
 
     const extensions_score: i32 = blk: {
-        const extension_slice = constants.logicical_device_extensions[0..];
+        const extension_slice = constants.logical_device_extensions[0..];
         const extensions_available = try isDeviceExtensionsPresent(allocator, vki, device, extension_slice);
         if (!extensions_available) {
             break :blk -1000;
@@ -208,8 +208,8 @@ pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
         .p_queue_create_infos = queue_create_infos.ptr,
         .enabled_layer_count = validation_layer_info.enabled_layer_count,
         .pp_enabled_layer_names = validation_layer_info.enabled_layer_names,
-        .enabled_extension_count = constants.logicical_device_extensions.len,
-        .pp_enabled_extension_names = &constants.logicical_device_extensions,
+        .enabled_extension_count = constants.logical_device_extensions.len,
+        .pp_enabled_extension_names = &constants.logical_device_extensions,
         .p_enabled_features = @ptrCast(*const vk.PhysicalDeviceFeatures, &device_features),
     };
     return ctx.vki.createDevice(ctx.physical_device, &create_info, null);
