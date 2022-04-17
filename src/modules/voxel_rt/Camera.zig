@@ -5,8 +5,8 @@ const Vec3 = @Vector(3, f32);
 pub const Config = struct {
     viewport_height: f32 = 2,
     origin: Vec3 = za.Vec3.zero().data,
-    samples_per_pixel: i32 = 1,
-    max_bounce: i32 = 4,
+    samples_per_pixel: i32 = 2,
+    max_bounce: i32 = 2,
     turn_rate: f32 = 0.1,
     normal_speed: f32 = 1,
     sprint_speed: f32 = 2,
@@ -137,7 +137,7 @@ pub inline fn orientation(self: Camera) za.Quat {
     return self.yaw.mul(self.pitch).norm();
 }
 
-/// Get byte size of Camera's GPU data 
+/// Get byte size of Camera's GPU data
 pub inline fn getGpuSize() u64 {
     return @sizeOf(Device);
 }

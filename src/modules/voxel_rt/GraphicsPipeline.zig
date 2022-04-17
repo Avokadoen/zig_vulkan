@@ -22,7 +22,7 @@ pub const PushConstant = extern struct {
 };
 
 pub const Config = struct {
-    samples: i32 = 80, // HIGHER = NICER = SLOWER
+    samples: i32 = 20, // HIGHER = NICER = SLOWER
     distribution_bias: f32 = 0.6, // between 0. and 1.
     pixel_multiplier: f32 = 1.5, // between 1. and 3. (keep low)
     inverse_hue_tolerance: f32 = 20, // (2. - 30.)
