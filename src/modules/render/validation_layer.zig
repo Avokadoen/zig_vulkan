@@ -1,4 +1,4 @@
-/// Functions related to validation layers and debug messaging 
+/// Functions related to validation layers and debug messaging
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
@@ -89,7 +89,7 @@ pub fn messageCallback(
             .error_bit_ext = true,
         };
     };
-    const is_severe = error_mask.toInt() & message_severity > 0;
+    const is_severe = (error_mask.toInt() & message_severity) > 0;
     const writer = if (is_severe) std.io.getStdErr().writer() else std.io.getStdOut().writer();
 
     if (p_callback_data) |data| {

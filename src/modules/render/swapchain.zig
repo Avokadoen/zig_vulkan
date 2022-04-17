@@ -52,12 +52,11 @@ pub const Data = struct {
         errdefer support_details.deinit(allocator);
 
         const sc_create_info = blk1: {
-            const max_images = if (support_details.capabilities.max_image_count == 0) support_details.capabilities.min_image_count + 1 else support_details.capabilities.max_image_count;
-
             const format = support_details.selectSwapChainFormat();
             const present_mode = support_details.selectSwapchainPresentMode();
             const extent = try support_details.constructSwapChainExtent(ctx.window_ptr.*);
 
+            const max_images = if (support_details.capabilities.max_image_count == 0) std.math.maxInt(u32) else support_details.capabilities.max_image_count;
             const image_count = std.math.min(support_details.capabilities.min_image_count + 1, max_images);
 
             const Config = struct {
@@ -77,8 +76,8 @@ pub const Data = struct {
                     const indices_arr = [_]u32{ ctx.queue_indices.graphics, ctx.queue_indices.present };
                     break :blk2 Config{
                         .sharing_mode = .exclusive,
-                        .index_count = 0,
-                        .p_indices = @ptrCast([*]const u32, &indices_arr[0..indices_arr.len]),
+                        .index_count = 1,
+                        .p_indices = @ptrCast([*]const u32, &indices_arr[0..1]),
                     };
                 }
             };
@@ -104,9 +103,8 @@ pub const Data = struct {
         };
         const swapchain_khr = try ctx.vkd.createSwapchainKHR(ctx.logical_device, &sc_create_info, null);
         const swapchain_images = blk: {
-            var image_count: u32 = 0;
-
             // TODO: handle incomplete
+            var image_count: u32 = 0;
             _ = try ctx.vkd.getSwapchainImagesKHR(ctx.logical_device, swapchain_khr, &image_count, null);
 
             var images = try allocator.alloc(vk.Image, image_count);
@@ -114,7 +112,6 @@ pub const Data = struct {
 
             // TODO: handle incomplete
             _ = try ctx.vkd.getSwapchainImagesKHR(ctx.logical_device, swapchain_khr, &image_count, images.ptr);
-            images.len = image_count;
             break :blk images;
         };
         errdefer allocator.free(swapchain_images);
@@ -124,8 +121,7 @@ pub const Data = struct {
         }
 
         const image_views = blk: {
-            const image_view_count = swapchain_images.len;
-            var views = try allocator.alloc(vk.ImageView, image_view_count);
+            var views = try allocator.alloc(vk.ImageView, swapchain_images.len);
             errdefer allocator.free(views);
 
             const components = vk.ComponentMapping{
@@ -141,19 +137,16 @@ pub const Data = struct {
                 .base_array_layer = 0,
                 .layer_count = 1,
             };
-            {
-                var i: u32 = 0;
-                while (i < image_view_count) : (i += 1) {
-                    const create_info = vk.ImageViewCreateInfo{
-                        .flags = .{},
-                        .image = swapchain_images[i],
-                        .view_type = .@"2d",
-                        .format = sc_create_info.image_format,
-                        .components = components,
-                        .subresource_range = subresource_range,
-                    };
-                    views[i] = try ctx.vkd.createImageView(ctx.logical_device, &create_info, null);
-                }
+            for (swapchain_images) |image, i| {
+                const create_info = vk.ImageViewCreateInfo{
+                    .flags = .{},
+                    .image = image,
+                    .view_type = .@"2d",
+                    .format = sc_create_info.image_format,
+                    .components = components,
+                    .subresource_range = subresource_range,
+                };
+                views[i] = try ctx.vkd.createImageView(ctx.logical_device, &create_info, null);
             }
 
             break :blk views;

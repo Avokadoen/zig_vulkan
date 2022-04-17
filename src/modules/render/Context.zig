@@ -73,7 +73,7 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
 
     const glfw_extensions_slice = try glfw.getRequiredInstanceExtensions();
     // Due to a zig bug we need arraylist to append instead of preallocate slice
-    // in release it fails and lenght turnes out to be 1
+    // in release it fail and length turns out to be 1
     var extensions = try ArrayList([*:0]const u8).initCapacity(allocator, glfw_extensions_slice.len + application_extensions.len);
     defer extensions.deinit();
 
@@ -97,18 +97,34 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
 
     const validation_layer_info = try validation_layer.Info.init(allocator, self.vkb);
 
-    var create_p_next: ?*anyopaque = null;
-    if (consts.enable_validation_layers) {
-        comptime {
-            std.debug.assert(consts.enable_validation_layers);
+    // const debug_features = [_]vk.ValidationFeatureEnableEXT{
+    //     .best_practices_ext, .synchronization_validation_ext,
+    // };
+    const features: ?*const vk.ValidationFeaturesEXT = blk: {
+        if (consts.enable_validation_layers) {
+            break :blk &vk.ValidationFeaturesEXT{
+                // .enabled_validation_feature_count = debug_features.len,
+                // .p_enabled_validation_features = &debug_features,
+                .enabled_validation_feature_count = 0,
+                .p_enabled_validation_features = undefined,
+                .disabled_validation_feature_count = 0,
+                .p_disabled_validation_features = undefined,
+            };
         }
-        var debug_create_info = createDefaultDebugCreateInfo();
-        create_p_next = @ptrCast(?*anyopaque, &debug_create_info);
-    }
+        break :blk null;
+    };
+
+    const debug_create_info: ?*const vk.DebugUtilsMessengerCreateInfoEXT = blk: {
+        if (consts.enable_validation_layers) {
+            break :blk &createDefaultDebugCreateInfo(@ptrCast(?*const anyopaque, features));
+        } else {
+            break :blk null;
+        }
+    };
 
     self.instance = blk: {
-        const instanceInfo = vk.InstanceCreateInfo{
-            .p_next = create_p_next,
+        const instance_info = vk.InstanceCreateInfo{
+            .p_next = @ptrCast(?*const anyopaque, debug_create_info),
             .flags = .{},
             .p_application_info = &app_info,
             .enabled_layer_count = validation_layer_info.enabled_layer_count,
@@ -116,7 +132,7 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
             .enabled_extension_count = @intCast(u32, extensions.items.len),
             .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, extensions.items.ptr),
         };
-        break :blk try self.vkb.createInstance(&instanceInfo, null);
+        break :blk try self.vkb.createInstance(&instance_info, null);
     };
 
     self.vki = try dispatch.Instance.load(self.instance, vk_proc);
@@ -132,8 +148,7 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
 
     self.messenger = blk: {
         if (!consts.enable_validation_layers) break :blk null;
-        const create_info = createDefaultDebugCreateInfo();
-        break :blk self.vki.createDebugUtilsMessengerEXT(self.instance, &create_info, null) catch {
+        break :blk self.vki.createDebugUtilsMessengerEXT(self.instance, debug_create_info.?, null) catch {
             std.debug.panic("failed to create debug messenger", .{});
         };
     };
@@ -328,9 +343,10 @@ pub fn deinit(self: Context) void {
 }
 
 // TODO: can probably drop function and inline it in init
-fn createDefaultDebugCreateInfo() vk.DebugUtilsMessengerCreateInfoEXT {
+fn createDefaultDebugCreateInfo(p_next: ?*const anyopaque) vk.DebugUtilsMessengerCreateInfoEXT {
     const message_severity = vk.DebugUtilsMessageSeverityFlagsEXT{
         .verbose_bit_ext = true,
+        .info_bit_ext = true,
         .warning_bit_ext = true,
         .error_bit_ext = true,
     };
@@ -342,6 +358,7 @@ fn createDefaultDebugCreateInfo() vk.DebugUtilsMessengerCreateInfoEXT {
     };
 
     return vk.DebugUtilsMessengerCreateInfoEXT{
+        .p_next = p_next,
         .flags = .{},
         .message_severity = message_severity,
         .message_type = message_type,
