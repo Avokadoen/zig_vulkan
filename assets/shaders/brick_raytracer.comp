@@ -28,6 +28,7 @@ bool IsNearZero(vec3 v) {
 struct Ray {
     vec3 origin;
     vec3 direction;
+    float internal_reflection;
 };
 Ray CreateRay(vec3 origin, vec3 direction);
 vec3 RayAt(Ray r, float t);
@@ -38,9 +39,7 @@ struct HitRecord {
     vec3 normal;
     float t;
     uint index; 
-    float internal_reflection;
 };
-
 
 layout (push_constant) uniform Camera {
     uint image_width;
@@ -203,7 +202,8 @@ void main() {
 }
 
 Ray CreateRay(vec3 origin, vec3 direction) {
-    return Ray(origin, normalize(direction));
+    const float internal_reflection = 1.0;
+    return Ray(origin, normalize(direction), internal_reflection);
 }
 
 vec3 RayAt(Ray r, float t) {
@@ -213,7 +213,6 @@ vec3 RayAt(Ray r, float t) {
 
 vec3 RayColor(Ray r) {
     HitRecord hit;
-    hit.internal_reflection = 1.0;
     
     Ray current_ray = r;
     vec3 accumulative_attenuation = vec3(1.0);
@@ -551,8 +550,6 @@ bool AdvIntersect(vec3 p0, vec3 p1, Ray r, float t_min, inout float t_max, inout
 
 
 bool ScatterLambertian(Material material, Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
-    hit.internal_reflection = 1.0;
-
     // TODO: better random hemisphere
     vec3 scatter_dir = normalize(hit.normal + RandVec3(hit.point.xy + hit.point.z, -0.4, 0.4));
     scattered = CreateRay(hit.point, scatter_dir);
@@ -562,8 +559,6 @@ bool ScatterLambertian(Material material, Ray r_in, inout HitRecord hit, out vec
 }
 
 bool ScatterMetal(Material material, Ray r_in, inout HitRecord hit, out vec3 attenuation, out Ray scattered) {
-    hit.internal_reflection = 1.0;
-
     vec3 reflected = reflect(r_in.direction, hit.normal);
     float fuzz = metal[material.type_index].fuzz;
     scattered = CreateRay(hit.point, reflected + RandVec3(hit.point.xy + hit.point.z, -fuzz, fuzz));
@@ -583,7 +578,7 @@ bool ScatterMetal(Material material, Ray r_in, inout HitRecord hit, out vec3 att
 ///     - refrac_dir: poternial calculated penetration vector of r_in
 /// @return: bool that is true if refraction is calculated
 bool transmissionDirection(float n1, float n2, vec3 ray_dir, vec3 normal, out vec3 refrac_dir) {
-    const float eta = n1/n2;
+    const float eta = n1 / n2;
     const float c1 = -dot(ray_dir, normal);
     const float w = eta * c1;
     const float c2m = (w - eta) * (w + eta);
@@ -603,7 +598,7 @@ bool ScatterDielectric(Material material, Ray r_in, vec3 hit_c_min, inout HitRec
     // TODO: add property to glass: roughness (0 should be no noise/rng)
     const vec3 normal = normalize(hit.normal + RandVec3(hit.point.xy + hit.point.z, -0.1, 0.1));
     vec3 direction;
-    const bool do_refract = transmissionDirection(ir, hit.internal_reflection, r_in.direction, normal, direction);
+    const bool do_refract = transmissionDirection(ir, r_in.internal_reflection, r_in.direction, normal, direction);
     if (do_refract) {
         scattered = CreateRay(hit.point, direction);
         // TODO: we can remove this if we find the correct t_min for GridHit in calculate raycolor
@@ -614,11 +609,11 @@ bool ScatterDielectric(Material material, Ray r_in, vec3 hit_c_min, inout HitRec
             AdvIntersect(hit_c_min, hit_c_min + vec3(0.125), scattered, 0.0, t_max, c_hit);
             scattered = CreateRay(RayAt(scattered, t_max), scattered.direction);
         }
-        hit.internal_reflection = ir;
+        // ray is traveling through non air medium
+        scattered.internal_reflection = ir;
     } else {
         direction = reflect(r_in.direction, normal);
         scattered = CreateRay(hit.point, direction);
-        hit.internal_reflection = 1.0;
     }
 
     return true;
