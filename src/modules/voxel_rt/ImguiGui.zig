@@ -161,7 +161,9 @@ inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
     if (early_exit) return;
 
     _ = imgui.igSliderInt("max bounces", &self.state_binding.camera_ptr.d_camera.max_bounce, 1, 32, null, 0);
+    imguiToolTip("how many times a ray is allowed to bounce before terminating", .{});
     _ = imgui.igSliderInt("samples per pixel", &self.state_binding.camera_ptr.d_camera.samples_per_pixel, 1, 32, null, 0);
+    imguiToolTip("how many rays per pixel", .{});
 
     _ = imgui.igInputFloat("move speed", &self.state_binding.camera_ptr.normal_speed, 0, 0, null, 0);
     _ = imgui.igInputFloat("turn rate", &self.state_binding.camera_ptr.turn_rate, 0, 0, null, 0);
@@ -195,5 +197,27 @@ inline fn drawPostProcessWindowIfEnabled(self: *ImguiGui) void {
     defer imgui.igEnd();
     if (early_exit) return;
 
-    _ = imgui.igInputInt("samples", &self.state_binding.gfx_pipeline_shader_constants.samples, 1, 2, 0);
+    const none_flag = imgui.ImGuiInputTextFlags_None;
+    _ = imgui.igInputInt("Samples", &self.state_binding.gfx_pipeline_shader_constants.samples, 1, 2, none_flag);
+    imguiToolTip("Higher sample count result in less noise\nThis comes at the cost of performance", .{});
+    _ = imgui.igSliderFloat("Distribution bias", &self.state_binding.gfx_pipeline_shader_constants.distribution_bias, 0, 1, null, none_flag);
+    _ = imgui.igSliderFloat("Pixel Multiplier", &self.state_binding.gfx_pipeline_shader_constants.pixel_multiplier, 1, 3, null, none_flag);
+    imguiToolTip("should be kept low", .{});
+    _ = imgui.igSliderFloat("Inverse Hue Tolerance", &self.state_binding.gfx_pipeline_shader_constants.inverse_hue_tolerance, 2, 30, null, none_flag);
+}
+
+const ToolTipConfig = struct {
+    offset_from_start: f32 = 0,
+    spacing: f32 = 10,
+};
+fn imguiToolTip(comptime tip: [*c]const u8, config: ToolTipConfig) void {
+    imgui.igSameLine(config.offset_from_start, config.spacing);
+    imgui.igTextDisabled("(?)");
+    if (imgui.igIsItemHovered(imgui.ImGuiHoveredFlags_None)) {
+        imgui.igBeginTooltip();
+        imgui.igPushTextWrapPos(450);
+        imgui.igTextUnformatted(tip, null);
+        imgui.igPopTextWrapPos();
+        imgui.igEndTooltip();
+    }
 }

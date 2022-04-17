@@ -22,17 +22,11 @@ layout (push_constant) uniform PushConstant {
 	float inversHueTolerance;
 } pushConstant;
 
-
-// #define SAMPLES 1  // HIGHER = NICER = SLOWER
-// #define DISTRIBUTION_BIAS 0.6 // between 0. and 1.
-// #define PIXEL_MULTIPLIER  1.5 // between 1. and 3. (keep low)
-// #define INVERSE_HUE_TOLERANCE 20.0 // (2. - 30.)
-
 #define GOLDEN_ANGLE 2.3999632 //3PI-sqrt(5)PI
 
 #define pow(a,b) pow(max(a,0.),b) // @morimea
 
-mat2 sample2D = mat2(cos(GOLDEN_ANGLE),sin(GOLDEN_ANGLE),-sin(GOLDEN_ANGLE),cos(GOLDEN_ANGLE));
+mat2 sample2D = mat2(cos(GOLDEN_ANGLE), sin(GOLDEN_ANGLE), -sin(GOLDEN_ANGLE), cos(GOLDEN_ANGLE));
 
 vec3 sirBirdDenoise() {
 	ivec2 imageResolution = textureSize(imageSampler, 0);
