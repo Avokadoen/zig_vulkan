@@ -293,8 +293,15 @@ pub fn draw(self: *Pipeline, ctx: Context) !void {
         .p_image_indices = @ptrCast([*]const u32, &image_index),
         .p_results = null,
     };
-    const queue_result = try ctx.vkd.queuePresentKHR(ctx.graphics_queue, &present_info);
-    _ = queue_result; // TODO: perform resize here if out of date reported by queuePresentKHR
+
+    const queue_result = ctx.vkd.queuePresentKHR(ctx.graphics_queue, &present_info);
+    if (queue_result) |ok| switch (ok) {
+        vk.Result.suboptimal_khr => self.requested_rescale_pipeline = true,
+        else => {},
+    } else |err| switch (err) {
+        error.OutOfDateKHR => self.requested_rescale_pipeline = true,
+        else => return err,
+    }
 
     if (self.requested_rescale_pipeline) try self.rescalePipeline(ctx);
 }
