@@ -174,21 +174,21 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
     // set the color information for the given voxel
     {
         // shift material position voxels that are after this voxel
-        const was_set: bool = (brick.solid_mask & @as(i512, 1) << nth_bit) != 0;
+        const voxel_was_set: bool = (brick.solid_mask & @as(i512, 1) << nth_bit) != 0;
         const voxels_in_brick = countBits(brick.solid_mask, 512);
         // TODO: error
-        const bucket = self.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.grid.*.material_indices, was_set) catch {
+        const bucket = self.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.grid.*.material_indices, voxel_was_set) catch {
             std.debug.panic("at {d} {d} {d} no more buckets", .{ insert_job.x, insert_job.y, insert_job.z });
         };
-        brick.material_index = bucket.start_index;
+        brick.index = @intCast(u31, bucket.start_index);
 
         // move all color data
         const bits_before = countBits(brick.solid_mask, nth_bit);
-        const new_voxel_material_index = brick.material_index + bits_before;
-        if (was_set == false) {
+        const new_voxel_material_index = bucket.start_index + bits_before;
+        if (voxel_was_set == false) {
             var i: u32 = voxels_in_brick;
             while (i > bits_before) : (i -= 1) {
-                const base_index = brick.material_index + i;
+                const base_index = bucket.start_index + i;
                 self.grid.*.material_indices[base_index] = self.grid.material_indices[base_index - 1];
             }
         }
@@ -197,12 +197,12 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
         // always register that the current voxel material has changed
         const delta_from = new_voxel_material_index;
         // we need to sync all of the voxel material data between current and last brick voxel since it has been shifted
-        const delta_to = if (was_set) new_voxel_material_index else brick.material_index + voxels_in_brick;
+        const delta_to = if (voxel_was_set) new_voxel_material_index else bucket.start_index + voxels_in_brick;
         self.grid.material_indices_deltas[self.id].registerDeltaRange(delta_from, delta_to);
 
-        // material indices is stored as 32bit on GPU and 8bit on CPU
+        // material indices is stored as 31bit on GPU and 8bit on CPU
         // we divide by for to store the correct *GPU* index
-        brick.material_index /= 4;
+        brick.index /= 4;
     }
 
     // set voxel

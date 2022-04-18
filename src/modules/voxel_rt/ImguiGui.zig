@@ -6,7 +6,7 @@ const render = @import("../render.zig");
 const Context = render.Context;
 
 const Camera = @import("Camera.zig");
-const Pipeline = @import("Pipeline.zig"); // TODO: circular dependency :( ...
+const Pipeline = @import("Pipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 
 pub const StateBinding = struct {

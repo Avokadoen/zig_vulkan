@@ -106,10 +106,15 @@ pub const GridEntry = packed struct {
 };
 
 pub const Brick = packed struct {
+    const IndexType = enum(u1) {
+        voxel_start_index,
+        brick_lod_index,
+    };
+
     /// maps to a voxel grid of 8x8x8
     solid_mask: i512,
-    material_index: u32,
-    lod_material_index: u32,
+    index: u31,
+    index_type: IndexType,
 };
 
 const State = @This();
@@ -117,7 +122,7 @@ const State = @This();
 higher_order_grid_mutex: Mutex,
 
 higher_order_grid_delta: *DeviceDataDelta,
-/// used to accelerate ray traversal over large empty distances 
+/// used to accelerate ray traversal over large empty distances
 /// a entry is used to check if any brick in a 4x4x4 segment should be checked for hits or if nothing is set
 higher_order_grid: []u8,
 

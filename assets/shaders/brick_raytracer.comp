@@ -92,11 +92,13 @@ layout (std430, binding = 7) buffer GridBuffer {
     readonly GridEntry grid_entries[];
 };
 
+const uint VOXEL_START_INDEX = 0x0;
+const uint BRICK_LOD_INDEX = 0x1;
 struct Brick {
     // 512 bit voxel set mask
     int solid_mask[16];
-    uint material_index;
-    uint lod_index;
+    // left-most bit is the index type (VOXEL_START_INDEX, or BRICK_LOD_INDEX) 
+    uint type_and_index;
 };
 layout (std430, binding = 8) buffer BrickBuffer {
     readonly Brick bricks[];
@@ -462,9 +464,12 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
 
                 const int material_index_index = (bits_before * 8) / 32;
                 const int material_index_bit_offset = (bits_before * 8) % 32;
+                
+                // get the material index from brick 
+                const uint brick_material_index = (brick.type_and_index << 1) >> 1;
 
                 // perform material lookup
-                hit.index = bitfieldExtract(material_indices[material_index_index + brick.material_index], material_index_bit_offset, 8);
+                hit.index = bitfieldExtract(material_indices[material_index_index + brick_material_index], material_index_bit_offset, 8);
             }
             const float scale = brick_grid.max_point_scale.w * 0.125;
             hit.t = fma(t_value, scale, hit.t);

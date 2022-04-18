@@ -32,7 +32,7 @@ state: *State,
 worker_threads: []std.Thread,
 workers: []Worker,
 
-/// Initialize a BrickGrid that can be raytraced 
+/// Initialize a BrickGrid that can be raytraced
 /// @param:
 ///     - allocator: used to allocate bricks and the grid, also to clean up these in deinit
 ///     - dim_x:     how many bricks *maps* (or chunks) in x dimension
@@ -59,7 +59,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     const brick_alloc = config.brick_alloc orelse grid.len;
     const bricks = try allocator.alloc(State.Brick, brick_alloc);
     errdefer allocator.free(bricks);
-    std.mem.set(State.Brick, bricks, .{ .solid_mask = 0, .material_index = 0, .lod_material_index = 0 });
+    std.mem.set(State.Brick, bricks, .{ .solid_mask = 0, .index_type = .voxel_start_index, .index = 0 });
 
     const material_indices = try allocator.alloc(u8, bricks.len * math.min(512, config.material_indices_per_brick));
     errdefer allocator.free(material_indices);
