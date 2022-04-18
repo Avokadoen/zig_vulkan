@@ -81,7 +81,6 @@ pub fn handleRescale(self: ImguiGui, gui_width: f32, gui_height: f32) void {
 // Starts a new imGui frame and sets up windows and ui elements
 pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metrics: bool) void {
     _ = ctx;
-    _ = pipeline;
     imgui.igNewFrame();
 
     const style = imgui.igGetStyle();
@@ -183,10 +182,37 @@ inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
     defer imgui.igEnd();
     if (early_exit) return;
 
-    imgui.igPlotLinesFloatPtr("Frame times", &self.metrics_state.frame_times, 50, 0, "", self.metrics_state.min_frame_time, self.metrics_state.max_frame_time, imgui.ImVec2{ .x = 0, .y = 80 }, @sizeOf(f32));
-    imgui.igText("Recent frame time: %f", self.metrics_state.frame_times[49]);
-    imgui.igText("Minimum frame time: %f", self.metrics_state.min_frame_time);
-    imgui.igText("Maximum frame time: %f", self.metrics_state.max_frame_time);
+    imgui.igPlotLinesFloatPtr(
+        "Frame times",
+        &self.metrics_state.frame_times,
+        self.metrics_state.frame_times.len,
+        0,
+        "",
+        self.metrics_state.min_frame_time,
+        self.metrics_state.max_frame_time,
+        imgui.ImVec2{ .x = 0, .y = 80 },
+        @sizeOf(f32),
+    );
+
+    const zigImguiText = struct {
+        pub inline fn fmt(buffer: []u8, begin: []const u8, number: f32) void {
+            const fmt_str = "{s:<7} frame time: {d:>8.3}";
+            const ok = std.fmt.bufPrint(buffer[0..], fmt_str, .{ begin, number }) catch {
+                imgui.igTextUnformatted("error", null);
+                return;
+            };
+            if (buffer.len - 1 <= ok.len) {
+                imgui.igTextUnformatted("error", null);
+                return;
+            }
+            buffer[ok.len] = 0;
+            imgui.igTextUnformatted(buffer[0..].ptr, null);
+        }
+    }.fmt;
+    var buffer: ["Minimum frame time: 99999999999999".len]u8 = undefined;
+    zigImguiText(buffer[0..], "Recent", self.metrics_state.frame_times[self.metrics_state.frame_times.len - 1]);
+    zigImguiText(buffer[0..], "Minimum", self.metrics_state.min_frame_time);
+    zigImguiText(buffer[0..], "Maximum", self.metrics_state.max_frame_time);
 }
 
 inline fn drawPostProcessWindowIfEnabled(self: *ImguiGui) void {
