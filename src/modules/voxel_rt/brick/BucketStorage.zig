@@ -63,10 +63,7 @@ buckets: [bucket_count]Bucket,
 /// caller must make sure to call deinit
 pub fn init(allocator: Allocator, start_index: u32, brick_count: usize, material_indices_len: usize) !BucketStorage {
     std.debug.assert(material_indices_len > 2048);
-
     const segments_2048 = std.math.divFloor(usize, material_indices_len, 2048) catch unreachable;
-    var bucket_mutexes: [bucket_count]std.Thread.Mutex = undefined;
-    std.mem.set(std.Thread.Mutex, bucket_mutexes[0..], .{});
 
     var buckets: [bucket_count]Bucket = undefined;
 
