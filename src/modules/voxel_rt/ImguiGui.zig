@@ -184,10 +184,10 @@ inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
 }
 
 inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
-    if (self.post_process_window_active == false) return;
+    if (self.metrics_window_active == false) return;
 
     imgui.igSetNextWindowSize(.{ .x = 400, .y = 500 }, imgui.ImGuiCond_FirstUseEver);
-    const early_exit = imgui.igBegin("Metrics", &self.post_process_window_active, imgui.ImGuiWindowFlags_None) == false;
+    const early_exit = imgui.igBegin("Metrics", &self.metrics_window_active, imgui.ImGuiWindowFlags_None) == false;
     defer imgui.igEnd();
     if (early_exit) return;
 
