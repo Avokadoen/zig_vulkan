@@ -222,6 +222,8 @@ vec3 RayAt(Ray r, float t) {
 }
 
 vec3 RayColor(Ray r) {
+    const bool sun_enabled = push_constant.sun_enabled > 0;
+
     HitRecord hit;
     
     Ray current_ray = r;
@@ -262,7 +264,7 @@ vec3 RayColor(Ray r) {
         if (!result) 
             break;
 
-        if (push_constant.sun_enabled > 0) {
+        if (sun_enabled) {
             const Ray shadow_ray = CreateRay(hit.point, push_constant.sun_position - hit.point);
             const vec3 luminosity = max(push_constant.sun_color * vec3(!GridHit(shadow_ray, 0.00001, infinity, hit_v_min, shadow_hit)), vec3(0.1));
             accumulative_attenuation *= (attenuation * luminosity);
@@ -277,7 +279,11 @@ vec3 RayColor(Ray r) {
 
     float t = 0.5 * (current_ray.direction.y + 1.0);
     vec3 background_color = fma(vec3(1.0 - t), vec3(1.0), t * vec3(0.5, 0.7, 1.0));
-    return background_color;
+    if (sun_enabled) {
+        return background_color *  push_constant.sun_color;
+    } else {
+        return background_color;
+    }
 }
 
 bool isInHigherGrid(ivec3 point) {
