@@ -6,11 +6,13 @@ const render = @import("../render.zig");
 const Context = render.Context;
 
 const Camera = @import("Camera.zig");
+const Sun = @import("Sun.zig");
 const Pipeline = @import("Pipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 
 pub const StateBinding = struct {
     camera_ptr: *Camera,
+    sun_ptr: *Sun,
     gfx_pipeline_shader_constants: *GraphicsPipeline.PushConstant,
 };
 
@@ -18,6 +20,7 @@ pub const Config = struct {
     camera_window_active: bool = true,
     metrics_window_active: bool = true,
     post_process_window_active: bool = true,
+    sun_window_active: bool = true,
     update_frame_timings: bool = true,
 };
 
@@ -37,6 +40,7 @@ state_binding: StateBinding,
 camera_window_active: bool,
 metrics_window_active: bool,
 post_process_window_active: bool,
+sun_window_active: bool,
 
 metrics_state: MetricState,
 
@@ -59,6 +63,7 @@ pub fn init(gui_width: f32, gui_height: f32, state_binding: StateBinding, config
         .camera_window_active = config.camera_window_active,
         .metrics_window_active = config.metrics_window_active,
         .post_process_window_active = config.post_process_window_active,
+        .sun_window_active = config.sun_window_active,
 
         .metrics_state = .{
             .update_frame_timings = config.update_frame_timings,
@@ -125,6 +130,9 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
         if (imgui.igMenuItemBool("Post process", null, self.post_process_window_active, true)) {
             self.post_process_window_active = !self.post_process_window_active;
         }
+        if (imgui.igMenuItemBool("Sun", null, self.sun_window_active, true)) {
+            self.sun_window_active = !self.sun_window_active;
+        }
     }
     imgui.igEnd();
 
@@ -144,6 +152,7 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
     self.drawCameraWindowIfEnabled();
     self.drawMetricsWindowIfEnabled();
     self.drawPostProcessWindowIfEnabled();
+    self.drawPostSunWindowIfEnabled();
 
     // imgui.igSetNextWindowPos(.{ .x = 650, .y = 20 }, imgui.ImGuiCond_FirstUseEver, .{ .x = 0, .y = 0 });
     // imgui.igShowDemoWindow(null);
@@ -168,7 +177,7 @@ inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
     _ = imgui.igInputFloat("turn rate", &self.state_binding.camera_ptr.turn_rate, 0, 0, null, 0);
 
     var camera_origin: [3]f32 = self.state_binding.camera_ptr.d_camera.origin;
-    const camera_origin_changed = imgui.igInputFloat3("camera position", &camera_origin, null, 0);
+    const camera_origin_changed = imgui.igInputFloat3("position", &camera_origin, null, 0);
     if (camera_origin_changed) {
         self.state_binding.camera_ptr.setOrigin(camera_origin);
     }
@@ -230,6 +239,22 @@ inline fn drawPostProcessWindowIfEnabled(self: *ImguiGui) void {
     _ = imgui.igSliderFloat("Pixel Multiplier", &self.state_binding.gfx_pipeline_shader_constants.pixel_multiplier, 1, 3, null, none_flag);
     imguiToolTip("should be kept low", .{});
     _ = imgui.igSliderFloat("Inverse Hue Tolerance", &self.state_binding.gfx_pipeline_shader_constants.inverse_hue_tolerance, 2, 30, null, none_flag);
+}
+
+inline fn drawPostSunWindowIfEnabled(self: *ImguiGui) void {
+    if (self.sun_window_active == false) return;
+
+    imgui.igSetNextWindowSize(.{ .x = 400, .y = 500 }, imgui.ImGuiCond_FirstUseEver);
+    const early_exit = imgui.igBegin("Sun", &self.sun_window_active, imgui.ImGuiWindowFlags_None) == false;
+    defer imgui.igEnd();
+    if (early_exit) return;
+
+    var enabled = (self.state_binding.sun_ptr.device_data.enabled > 0);
+    _ = imgui.igCheckbox("enabled", &enabled);
+    self.state_binding.sun_ptr.device_data.enabled = if (enabled) 1 else 0;
+
+    _ = imgui.igDragFloat3("position", &self.state_binding.sun_ptr.device_data.position, 1, -10000, 10000, null, 0);
+    _ = imgui.igColorEdit3("color", &self.state_binding.sun_ptr.device_data.color, 0);
 }
 
 const ToolTipConfig = struct {

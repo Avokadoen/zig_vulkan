@@ -16,6 +16,7 @@ const ImguiPipeline = @import("ImguiPipeline.zig");
 const ImguiGui = @import("ImguiGui.zig");
 
 const Camera = @import("Camera.zig");
+const Sun = @import("Sun.zig");
 const GridState = @import("brick/State.zig");
 const gpu_types = @import("gpu_types.zig");
 
@@ -57,11 +58,13 @@ gfx_pipeline: GraphicsPipeline,
 imgui_pipeline: ImguiPipeline,
 
 camera: *Camera,
+sun: *Sun,
+
 gui: ImguiGui,
 
 requested_rescale_pipeline: bool = false,
 
-pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.Extent2D, grid_state: GridState, camera: *Camera, config: Config) !Pipeline {
+pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.Extent2D, grid_state: GridState, camera: *Camera, sun: *Sun, config: Config) !Pipeline {
     const target_texture = try allocator.create(Texture);
     errdefer allocator.destroy(target_texture);
 
@@ -124,7 +127,11 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     };
     errdefer compute_pipeline.deinit(ctx);
 
-    try compute_pipeline.recordCommandBuffers(ctx, camera.*);
+    try compute_pipeline.recordCommandBuffers(
+        ctx,
+        camera.*,
+        sun.*,
+    );
 
     const gfx_pipeline = try GraphicsPipeline.init(allocator, ctx, swapchain, render_pass, target_texture, config.gfx_pipeline_config);
     errdefer gfx_pipeline.deinit(allocator, ctx);
@@ -145,6 +152,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
 
     const state_binding = ImguiGui.StateBinding{
         .camera_ptr = camera,
+        .sun_ptr = sun,
         .gfx_pipeline_shader_constants = gfx_pipeline.shader_constants,
     };
     const gui = ImguiGui.init(
@@ -169,6 +177,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .gfx_pipeline = gfx_pipeline,
         .imgui_pipeline = imgui_pipeline,
         .camera = camera,
+        .sun = sun,
         .gui = gui,
     };
 }
@@ -211,7 +220,7 @@ pub fn draw(self: *Pipeline, ctx: Context) !void {
     _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.compute_complete_fence), vk.TRUE, std.math.maxInt(u64));
     try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.compute_complete_fence));
 
-    try self.compute_pipeline.recordCommandBuffers(ctx, self.camera.*);
+    try self.compute_pipeline.recordCommandBuffers(ctx, self.camera.*, self.sun.*);
 
     // perform the compute ray tracing, draw to target texture
     const compute_submit_info = vk.SubmitInfo{

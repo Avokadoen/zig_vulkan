@@ -10,6 +10,7 @@ const GpuBufferMemory = render.GpuBufferMemory;
 const Texture = render.Texture;
 
 const Camera = @import("Camera.zig");
+const Sun = @import("Sun.zig");
 
 /// compute shader that draws to a target texture
 const ComputePipeline = @This();
@@ -242,17 +243,17 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
     }
 
     self.pipeline_layout = blk: {
-        const push_constant_range = vk.PushConstantRange{
+        const push_constant_ranges = [_]vk.PushConstantRange{.{
             .stage_flags = .{ .compute_bit = true },
             .offset = 0,
-            .size = @sizeOf(Camera.Device),
-        };
+            .size = @sizeOf(Sun.Device) + @sizeOf(Camera.Device),
+        }};
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
             .set_layout_count = 1,
             .p_set_layouts = @ptrCast([*]vk.DescriptorSetLayout, &self.target_descriptor_layout),
-            .push_constant_range_count = 1,
-            .p_push_constant_ranges = @ptrCast([*]const vk.PushConstantRange, &push_constant_range),
+            .push_constant_range_count = push_constant_ranges.len,
+            .p_push_constant_ranges = &push_constant_ranges,
         };
         break :blk try ctx.createPipelineLayout(pipeline_layout_info);
     };
@@ -311,7 +312,7 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
     self.allocator.destroy(self.pipeline);
 }
 
-pub fn recordCommandBuffers(self: ComputePipeline, ctx: Context, camera: Camera) !void {
+pub fn recordCommandBuffers(self: ComputePipeline, ctx: Context, camera: Camera, sun: Sun) !void {
     const command_begin_info = vk.CommandBufferBeginInfo{
         .flags = .{},
         .p_inheritance_info = null,
@@ -321,8 +322,25 @@ pub fn recordCommandBuffers(self: ComputePipeline, ctx: Context, camera: Camera)
 
     ctx.vkd.cmdBindPipeline(self.command_buffer, vk.PipelineBindPoint.compute, self.pipeline.*);
 
+    // push sun data as a push constant
+    ctx.vkd.cmdPushConstants(
+        self.command_buffer,
+        self.pipeline_layout,
+        .{ .compute_bit = true },
+        0,
+        @sizeOf(Sun.Device),
+        &sun.device_data,
+    );
+
     // push camera data as a push constant
-    ctx.vkd.cmdPushConstants(self.command_buffer, self.pipeline_layout, .{ .compute_bit = true }, 0, @sizeOf(Camera.Device), &camera.d_camera);
+    ctx.vkd.cmdPushConstants(
+        self.command_buffer,
+        self.pipeline_layout,
+        .{ .compute_bit = true },
+        @sizeOf(Sun.Device),
+        @sizeOf(Camera.Device),
+        &camera.d_camera,
+    );
 
     // bind target texture
     ctx.vkd.cmdBindDescriptorSets(self.command_buffer, .compute, self.pipeline_layout, 0, 1, @ptrCast([*]const vk.DescriptorSet, &self.target_descriptor_set), 0, undefined);

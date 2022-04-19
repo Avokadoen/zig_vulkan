@@ -11,6 +11,7 @@ const Context = render.Context;
 
 const Pipeline = @import("voxel_rt/Pipeline.zig");
 pub const Camera = @import("voxel_rt/Camera.zig");
+pub const Sun = @import("voxel_rt/Sun.zig");
 pub const BrickGrid = @import("voxel_rt/brick/Grid.zig");
 pub const GridState = @import("voxel_rt/brick/State.zig");
 pub const gpu_types = @import("voxel_rt/gpu_types.zig");
@@ -22,11 +23,14 @@ pub const Config = struct {
     internal_resolution_height: u32 = 720,
     pipeline: Pipeline.Config = .{},
     camera: Camera.Config = .{},
+    sun: Sun.Config = .{},
 };
 
 const VoxelRT = @This();
 
 camera: *Camera,
+sun: *Sun,
+
 brick_grid: *BrickGrid,
 pipeline: Pipeline,
 
@@ -34,8 +38,14 @@ pipeline: Pipeline,
 pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, config: Config) !VoxelRT {
     const camera = try allocator.create(Camera);
     errdefer allocator.destroy(camera);
-
     camera.* = Camera.init(75, config.internal_resolution_width, config.internal_resolution_height, config.camera);
+
+    const sun = try allocator.create(Sun);
+    errdefer allocator.destroy(sun);
+    sun.* = blk: {
+        const position = config.sun.position orelse [_]f32{ 0, -@intToFloat(f32, brick_grid.state.device_state.voxel_dim_y) * 2, 0 };
+        break :blk Sun.init(config.sun.enabled, position, config.sun.color);
+    };
 
     const pipeline = try Pipeline.init(
         ctx,
@@ -46,6 +56,7 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, config: 
         },
         brick_grid.state.*,
         camera,
+        sun,
         config.pipeline,
     );
     errdefer pipeline.deinit(ctx);
@@ -67,6 +78,7 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, config: 
 
     return VoxelRT{
         .camera = camera,
+        .sun = sun,
         .brick_grid = brick_grid,
         .pipeline = pipeline,
     };
@@ -152,5 +164,6 @@ pub fn updateGridDelta(self: *VoxelRT, ctx: Context) !void {
 
 pub fn deinit(self: VoxelRT, allocator: Allocator, ctx: Context) void {
     allocator.destroy(self.camera);
+    allocator.destroy(self.sun);
     self.pipeline.deinit(ctx);
 }
