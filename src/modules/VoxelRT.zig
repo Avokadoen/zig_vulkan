@@ -42,10 +42,7 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, config: 
 
     const sun = try allocator.create(Sun);
     errdefer allocator.destroy(sun);
-    sun.* = blk: {
-        const position = config.sun.position orelse [_]f32{ 0, -@intToFloat(f32, brick_grid.state.device_state.voxel_dim_y) * 2, 0 };
-        break :blk Sun.init(config.sun.enabled, position, config.sun.color);
-    };
+    sun.* = Sun.init(brick_grid.state.device_state.voxel_dim_y, config.sun);
 
     const pipeline = try Pipeline.init(
         ctx,
