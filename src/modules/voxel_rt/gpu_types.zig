@@ -43,12 +43,10 @@ pub const Material = packed struct {
     @"type": Type,
     /// index in the type array
     /// i.e: type = material, type_index = 0 points to index 0 in metal array
-    type_index: u15,
+    type_index: u6,
     /// index to the color of the voxel
-    albedo_index: u15,
+    albedo_index: u8,
 };
-
-// TODO: convert to push constants: Albedo, Metal, Dielectric
 
 // storage buffer, binding: 4
 pub const Albedo = extern struct {

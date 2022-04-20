@@ -130,8 +130,8 @@ layout (std430, binding = 9) buffer MaterialIndicesBuffer {
 // material is represented by 32 bits:
 struct Material {
     int type;          // 2 left most bits
-    int type_index;   // 15 shifted 2 bits
-    int albedo_index; // 15 shifted 17 bits
+    int type_index;   // 6 shifted 2 bits
+    int albedo_index; // 8 shifted 8 bits
 };
 layout (std430, binding = 2) buffer MaterialBuffer {
     readonly int materials[];
@@ -258,11 +258,15 @@ vec3 RayColor(Ray r) {
         Ray scattered;
         vec3 attenuation;
         bool result = false;
-        const int material_bits = materials[hit.index];
+        // The data is packed in 16 bits which is packed into a single int, so one int maps 2 materials
+        // data sets. We shift the bits if we are a odd material index to get the material bits we want:
+        const uint material_index = hit.index / 2;
+        const uint material_bit_offset = 16 * (hit.index % 2);
+        const int material_bits = (materials[material_index] >> material_bit_offset);
         const Material material = Material(
             material_bits & 3,  // type
-            bitfieldExtract(material_bits, 2, 15), // material index
-            bitfieldExtract(material_bits, 17, 15) // albedo color
+            bitfieldExtract(material_bits, 2, 6), // material index
+            bitfieldExtract(material_bits, 8, 8) // albedo color
         );
         switch (material.type) {
             case MAT_LAMBERTIAN: 

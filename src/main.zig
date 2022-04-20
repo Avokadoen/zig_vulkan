@@ -120,7 +120,7 @@ pub fn main() anyerror!void {
             ).data,
             // zig fmt: on
         };
-        materials[index] = .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = @intCast(u15, index) };
+        materials[index] = .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = @intCast(u8, index) };
     }
 
     // Test what we are loading
