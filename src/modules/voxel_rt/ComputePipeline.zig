@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 
 const vk = @import("vulkan");
 const glfw = @import("glfw");
+const tracy = @import("../../tracy.zig");
 
 const render = @import("../render.zig");
 const Context = render.Context;
@@ -313,6 +314,9 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
 }
 
 pub fn recordCommandBuffers(self: ComputePipeline, ctx: Context, camera: Camera, sun: Sun) !void {
+    const draw_zone = tracy.ZoneN(@src(), "compute record");
+    defer draw_zone.End();
+
     const command_begin_info = vk.CommandBufferBeginInfo{
         .flags = .{},
         .p_inheritance_info = null,

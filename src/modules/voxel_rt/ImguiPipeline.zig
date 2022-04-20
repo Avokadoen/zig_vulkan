@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 // based on sascha's imgui example
+
 // this code does not use most of the codebase abstractions because a MVP is the goal and its
 // easier to directly adapt the original code without out it :)
 
@@ -9,6 +10,7 @@ const Allocator = std.mem.Allocator;
 const imgui = @import("imgui");
 const vk = @import("vulkan");
 const za = @import("zalgebra");
+const tracy = @import("../../tracy.zig");
 
 const render = @import("../render.zig");
 const GpuBufferMemory = render.GpuBufferMemory;
@@ -449,6 +451,9 @@ pub fn deinit(self: ImguiPipeline, ctx: Context) void {
 
 /// record a command buffer that can draw current frame
 pub fn recordCommandBuffer(self: ImguiPipeline, ctx: Context, command_buffer: vk.CommandBuffer) !void {
+    const record_zone = tracy.ZoneN(@src(), "imgui commands");
+    defer record_zone.End();
+
     var io = imgui.igGetIO();
 
     ctx.vkd.cmdBindDescriptorSets(
@@ -531,6 +536,9 @@ pub fn recordCommandBuffer(self: ImguiPipeline, ctx: Context, command_buffer: vk
 
 // TODO: do not make new buffers if buffer is larger than total count
 pub fn updateBuffers(self: *ImguiPipeline, ctx: Context) !void {
+    const update_buffers_zone = tracy.ZoneN(@src(), "imgui: vertex & index update");
+    defer update_buffers_zone.End();
+
     const draw_data = imgui.igGetDrawData();
 
     const vertex_buffer_size = draw_data.TotalVtxCount * @sizeOf(imgui.ImDrawVert);

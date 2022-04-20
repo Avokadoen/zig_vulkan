@@ -3,6 +3,8 @@ const Allocator = std.mem.Allocator;
 
 const glfw = @import("glfw");
 
+const tracy = @import("../../tracy.zig");
+
 const vk = @import("vulkan");
 const render = @import("../render.zig");
 const Context = render.Context;
@@ -65,6 +67,9 @@ gui: ImguiGui,
 requested_rescale_pipeline: bool = false,
 
 pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.Extent2D, grid_state: GridState, camera: *Camera, sun: *Sun, config: Config) !Pipeline {
+    const init_zone = tracy.ZoneN(@src(), "init pipeline");
+    defer init_zone.End();
+
     const target_texture = try allocator.create(Texture);
     errdefer allocator.destroy(target_texture);
 
@@ -215,10 +220,18 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     self.allocator.destroy(self.target_texture);
 }
 
-pub fn draw(self: *Pipeline, ctx: Context) !void {
-    // wait for previous compute dispatch to complete
-    _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.compute_complete_fence), vk.TRUE, std.math.maxInt(u64));
-    try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.compute_complete_fence));
+pub inline fn draw(self: *Pipeline, ctx: Context) !void {
+    const draw_zone = tracy.ZoneN(@src(), "draw");
+    defer draw_zone.End();
+
+    {
+        const wait_compute_zone = tracy.ZoneN(@src(), "idle wait compute");
+        defer wait_compute_zone.End();
+
+        // wait for previous compute dispatch to complete
+        _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.compute_complete_fence), vk.TRUE, std.math.maxInt(u64));
+        try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.compute_complete_fence));
+    }
 
     try self.compute_pipeline.recordCommandBuffers(ctx, self.camera.*, self.sun.*);
 
@@ -264,9 +277,14 @@ pub fn draw(self: *Pipeline, ctx: Context) !void {
         }
     };
 
-    // wait for previous texture draw before updating buffers and command buffers
-    _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
-    try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence));
+    {
+        const wait_render_zone = tracy.ZoneN(@src(), "render wait complete");
+        defer wait_render_zone.End();
+
+        // wait for previous texture draw before updating buffers and command buffers
+        _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
+        try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence));
+    }
 
     self.gui.newFrame(ctx, self, image_index == 0);
     try self.imgui_pipeline.updateBuffers(ctx);
@@ -381,6 +399,9 @@ pub inline fn transferMaterialIndices(self: Pipeline, ctx: Context, offset: usiz
 /// Used to update the pipeline according to changes in the window spec
 /// This functions should only be called from the main thread (see glfwGetFramebufferSize)
 fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
+    const rescale_zone = tracy.ZoneN(@src(), "rescale pipeline");
+    defer rescale_zone.End();
+
     var window_size = try ctx.window_ptr.*.getFramebufferSize();
     if (window_size.width == 0 or window_size.height == 0) {
         window_size = try ctx.window_ptr.*.getFramebufferSize();
@@ -436,6 +457,9 @@ fn recordCommandBuffers(self: Pipeline, ctx: Context) !void {
 
 // TODO: properly handling of errors
 fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize, begin_info: *vk.RenderPassBeginInfo) !void {
+    const record_zone = tracy.ZoneN(@src(), "record gfx & imgui commands");
+    defer record_zone.End();
+
     const command_buffer = self.gfx_pipeline.command_buffers[index];
     try ctx.vkd.beginCommandBuffer(command_buffer, &command_buffer_info);
 
