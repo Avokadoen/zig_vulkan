@@ -703,7 +703,7 @@ bool ScatterDielectric(Material material, Ray r_in, vec3 hit_c_min, HitRecord hi
     
     // TODO: better noise (blue :))
     // TODO: add property to glass: roughness (0 should be no noise/rng)
-    const vec3 normal = normalize(hit.normal);
+    const vec3 normal = normalize(hit.normal + RandVec3(hit.point.xy + hit.point.z, -0.05, 0.05));
     vec3 direction;
     const bool do_refract = transmissionDirection(ir, r_in.internal_reflection, r_in.direction, normal, direction);
     if (do_refract) {
