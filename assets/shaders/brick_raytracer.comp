@@ -286,8 +286,15 @@ vec3 RayColor(Ray r) {
             break;
 
         if (sun_enabled) {
-            const vec3 shadow_ray_dir = push_constant.sun_position - hit.point;
-            const vec3 shadow_origin = hit.point + vec3(Rand(hit.point.xy, -0.01, 0.01), 0, Rand(hit.point.yz, -0.01, 0.01));
+            const vec3 shadow_ray_dir = (push_constant.sun_position - hit.point);
+            // TODO: This causes shadows to be set on random pixels on a luminated surface
+            //       one obvious problem with this is that the point might go outside the surface bounds
+            //       and subsequently become shadowed by being inside neighbour voxels
+            const vec3 shadow_origin = hit.point + vec3(
+                Rand(hit.point.xy, -0.001, 0.001) * (1 - hit.normal.x), 
+                Rand(hit.point.yz, -0.001, 0.001) * (1 - hit.normal.y), 
+                Rand(hit.point.zx, -0.001, 0.001) * (1 - hit.normal.z)
+            );
             const Ray shadow_ray = CreateShadowRay(shadow_origin, shadow_ray_dir);
             const vec3 luminosity = max(push_constant.sun_color * vec3(!GridHit(shadow_ray, 0.00001, infinity, hit_v_min, shadow_hit)) * push_constant.sun_intensity, vec3(0.1));
             current_ray.color *= (attenuation * luminosity);
