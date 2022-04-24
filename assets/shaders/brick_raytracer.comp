@@ -290,6 +290,7 @@ vec3 RayColor(Ray r) {
             // TODO: This causes shadows to be set on random pixels on a luminated surface
             //       one obvious problem with this is that the point might go outside the surface bounds
             //       and subsequently become shadowed by being inside neighbour voxels
+            //       In other words: we need to clamp this origin, but knowing the bounds is TODO
             const vec3 shadow_origin = hit.point + vec3(
                 Rand(hit.point.xy, -0.001, 0.001) * (1 - hit.normal.x), 
                 Rand(hit.point.yz, -0.001, 0.001) * (1 - hit.normal.y), 
@@ -317,14 +318,13 @@ vec3 RayColor(Ray r) {
     }
 }
 
-float defineAxis(vec3 dir, vec3 fposition, ivec3 position, vec3 delta, int axis_value, inout ivec3 pos_step) {
-    const int a = axis_value;
-    if (dir[a] < 0) {
-        pos_step[a] = -1;
-        return ((fposition[a] - float(position[a])) * delta[a]);
+float defineAxis(float dir, float fposition, int position, float delta, inout int pos_step) {
+    if (dir < 0) {
+        pos_step = -1;
+        return ((fposition - float(position)) * delta);
     } else {
-        pos_step[a] = 1;
-        return ((float(position[a]) + 1 - fposition[a]) * delta[a]);
+        pos_step = 1;
+        return ((float(position) + 1 - fposition) * delta);
     }
 }
 
@@ -355,9 +355,9 @@ bool HigherGridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRec
 
     ivec3 pos_step;
     vec3 axis_t;
-    axis_t[0] = defineAxis(r.direction, fposition, position, delta, 0, pos_step);
-    axis_t[1] = defineAxis(r.direction, fposition, position, delta, 1, pos_step);
-    axis_t[2] = defineAxis(r.direction, fposition, position, delta, 2, pos_step);
+    axis_t.x = defineAxis(r.direction.x, fposition.x, position.x, delta.x, pos_step.x);
+    axis_t.y = defineAxis(r.direction.y, fposition.y, position.y, delta.y, pos_step.y);
+    axis_t.z = defineAxis(r.direction.z, fposition.z, position.z, delta.z, pos_step.z);
 
     // DDA loop
     float t_value = 0;
@@ -417,6 +417,7 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
     const vec3 g_min = brick_grid.min_point_base_t.xyz;
     const vec3 g_max = brick_grid.max_point_scale.xyz - vec3(0.001);
     const float b_base_t = brick_grid.min_point_base_t.w;
+    const ivec3 brick_dim = ivec3(brick_grid.dim_x, brick_grid.dim_y, brick_grid.dim_z);
    
     float t_grid_max = t_max;
     HitRecord hit_grid;
@@ -439,9 +440,9 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
 
     ivec3 pos_step;
     vec3 axis_t;
-    axis_t[0] = defineAxis(r.direction, fposition, position, delta, 0, pos_step);
-    axis_t[1] = defineAxis(r.direction, fposition, position, delta, 1, pos_step);
-    axis_t[2] = defineAxis(r.direction, fposition, position, delta, 2, pos_step);
+    axis_t.x = defineAxis(r.direction.x, fposition.x, position.x, delta.x, pos_step.x);
+    axis_t.y = defineAxis(r.direction.y, fposition.y, position.y, delta.y, pos_step.y);
+    axis_t.z = defineAxis(r.direction.z, fposition.z, position.z, delta.z, pos_step.z);
 
     // DDA loop
     float t_value = 0;
@@ -461,40 +462,20 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
             }
         }
 
-        // progress position with DDA
-        if (axis_t.x < axis_t.y) {
-            if (axis_t.x < axis_t.z) {
-                t_value = axis_t.x;
-                position.x += pos_step.x;
-                if (position.x < 0 || position.x >= brick_grid.dim_x) {
-                    break;
-                }
-                axis_t.x += delta.x;
-            } else {
-                t_value = axis_t.z;
-                position.z += pos_step.z;
-                if (position.z < 0 || position.z >= brick_grid.dim_z) {
-                    break;
-                }
-                axis_t.z += delta.z;
-            }
-        } else {
-            if (axis_t.y < axis_t.z) {
-                t_value = axis_t.y;
-                position.y += pos_step.y;
-                if (position.y < 0 || position.y >= brick_grid.dim_y) {
-                    break;
-                }
-                axis_t.y += delta.y;
-            } else {
-                t_value = axis_t.z;
-                position.z += pos_step.z;
-                if (position.z < 0 || position.z >= brick_grid.dim_z) {
-                    break;
-                }
-                axis_t.z += delta.z;
-            }
+        const bool x_axis = (axis_t.x < axis_t.y) && (axis_t.x < axis_t.z);
+        const bool y_axis = (axis_t.x >= axis_t.y) && (axis_t.y < axis_t.z);
+        const bool z_axis = !x_axis && !y_axis;
+        const vec3 axis = vec3(x_axis, y_axis, z_axis);
+        t_value = fma(axis_t.x, axis.x, fma(axis_t.y, axis.y, axis_t.z * axis.z));
+        position += pos_step * ivec3(axis);
+        if (
+            (position.x < 0 || position.x >= brick_dim.x) || 
+            (position.y < 0 || position.y >= brick_dim.y) || 
+            (position.z < 0 || position.z >= brick_dim.z)
+        ) {
+            break;
         }
+        axis_t += delta * axis;
     }   
 
     return false;
@@ -509,9 +490,9 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
 
     ivec3 pos_step;
     vec3 axis_t;
-    axis_t[0] = defineAxis(r.direction, fposition, position, delta, 0, pos_step);
-    axis_t[1] = defineAxis(r.direction, fposition, position, delta, 1, pos_step);
-    axis_t[2] = defineAxis(r.direction, fposition, position, delta, 2, pos_step);
+    axis_t.x = defineAxis(r.direction.x, fposition.x, position.x, delta.x, pos_step.x);
+    axis_t.y = defineAxis(r.direction.y, fposition.y, position.y, delta.y, pos_step.y);
+    axis_t.z = defineAxis(r.direction.z, fposition.z, position.z, delta.z, pos_step.z);
 
     // DDA loop
     float t_value = 0;
@@ -572,40 +553,16 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
             }
         }
 
-        // progress position with DDA
-        if (axis_t.x < axis_t.y) {
-            if (axis_t.x < axis_t.z) {
-                t_value = axis_t.x;
-                position.x += pos_step.x;
-                if (position.x < 0 || position.x >= 8) {
-                    break;
-                }
-                axis_t.x += delta.x;
-            } else {
-                t_value = axis_t.z;
-                position.z += pos_step.z;
-                if (position.z < 0 || position.z >= 8) {
-                    break;
-                }
-                axis_t.z += delta.z;
-            }
-        } else {
-            if (axis_t.y < axis_t.z) {
-                t_value = axis_t.y;
-                position.y += pos_step.y;
-                if (position.y < 0 || position.y >= 8) {
-                    break;
-                }
-                axis_t.y += delta.y;
-            } else {
-                t_value = axis_t.z;
-                position.z += pos_step.z;
-                if (position.z < 0 || position.z >= 8) {
-                    break;
-                }
-                axis_t.z += delta.z;
-            }
+        const bool x_axis = (axis_t.x < axis_t.y) && (axis_t.x < axis_t.z);
+        const bool y_axis = (axis_t.x >= axis_t.y) && (axis_t.y < axis_t.z);
+        const bool z_axis = !x_axis && !y_axis;
+        const vec3 axis = vec3(x_axis, y_axis, z_axis);
+        t_value = axis_t.x * axis.x + axis_t.y * axis.y + axis_t.z * axis.z;
+        position += pos_step * ivec3(axis);
+        if ((position.x < 0 || position.x >= 8) || (position.y < 0 || position.y >= 8) || (position.z < 0 || position.z >= 8)) {
+            break;
         }
+        axis_t += delta * axis;
     }   
 
     return false;

@@ -139,3 +139,6 @@ material_indices: []u8,
 active_bricks: AtomicCount,
 
 device_state: Device,
+
+// used to determine which worker is scheduled a job
+work_segment_size: usize,

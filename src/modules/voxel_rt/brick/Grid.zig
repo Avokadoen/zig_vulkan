@@ -130,6 +130,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         .bricks = bricks,
         .material_indices = material_indices,
         .active_bricks = AtomicCount.init(0),
+        .work_segment_size = dim_x / config.workers_count,
         .device_state = State.Device{
             .voxel_dim_x = dim_x * 8,
             .voxel_dim_y = dim_y * 8,
@@ -220,9 +221,8 @@ pub fn wakeWorkers(self: *BrickGrid) void {
 pub fn insert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u8) void {
     // find a workers that should be assigned insert
     const worker_index = blk: {
-        const actual_y = ((self.state.device_state.dim_y * 8) - 1) - y;
-        const grid_index = gridAt(self.state.*.device_state, x, actual_y, z);
-        break :blk grid_index % self.workers.len;
+        const grid_x = x / 8;
+        break :blk grid_x / self.state.work_segment_size;
     };
 
     self.workers[worker_index].registerJob(Worker.Job{ .insert = .{
