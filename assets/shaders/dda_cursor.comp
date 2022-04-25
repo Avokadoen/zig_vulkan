@@ -1,0 +1,59 @@
+
+struct DDA {
+    vec3 fposition;
+    ivec3 position;
+    ivec3 ray_step;
+    vec3 side_distance;
+    vec3 delta_distance;
+    bvec3 mask;
+    vec3 prev_side_distance;
+};
+
+// TODO: another constructor with delta_distance
+DDA CreateDDA(vec3 fposition, vec3 ray_direction) {
+    const vec3 f_ray_step = sign(ray_direction + 0.0);
+    const ivec3 ray_step = ivec3(floor(f_ray_step));
+
+    const ivec3 position = ivec3(floor(fposition));
+
+    const float dir_len = length(ray_direction);
+    vec3 delta_distance; 
+    delta_distance.x = (ray_direction.x == 0) ? 9999999 : abs(dir_len / ray_direction.x);
+    delta_distance.y = (ray_direction.y == 0) ? 9999999 : abs(dir_len / ray_direction.y);
+    delta_distance.z = (ray_direction.z == 0) ? 9999999 : abs(dir_len / ray_direction.z);
+
+    const vec3 side_distance = (f_ray_step * -fract(fposition) + (f_ray_step * vec3(0.5)) + vec3(0.5)) * delta_distance;
+    return DDA(
+        fposition,
+        position,
+        ray_step,
+        side_distance,
+        delta_distance,
+        bvec3(false),
+        vec3(0)
+    );
+}
+
+void DDAUpdate(inout DDA cursor, vec3 fposition) {
+    cursor.fposition = fposition;
+    cursor.position = ivec3(floor(fposition));
+    cursor.side_distance = (
+            vec3(cursor.ray_step) * -fract(fposition) + (vec3(cursor.ray_step) * vec3(0.5)) + vec3(0.5)
+        ) * cursor.delta_distance;
+}
+
+void DDAStep(inout DDA cursor) {
+    // cursor.mask = step(side_distance, side_distance.yzx) * step(side_distance, side_distance.zxy);
+    cursor.mask = lessThanEqual(cursor.side_distance.xyz, min(cursor.side_distance.yzx, cursor.side_distance.zxy));
+
+    cursor.prev_side_distance = cursor.side_distance;
+    cursor.side_distance += vec3(cursor.mask) * cursor.delta_distance;
+    cursor.position += ivec3(vec3(cursor.mask)) * cursor.ray_step;
+}
+
+float DDATValue(DDA cursor) {
+    const float x = cursor.prev_side_distance.x * float(cursor.mask.x);
+    const float y = cursor.prev_side_distance.y * float(cursor.mask.y);
+    const float z = cursor.prev_side_distance.z * float(cursor.mask.z);
+    return x + y + z;
+}
