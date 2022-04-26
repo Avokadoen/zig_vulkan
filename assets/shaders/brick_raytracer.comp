@@ -432,7 +432,7 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
     
     /// get position in grid space from global position
     const vec3 fposition = RayAt(r, hit_grid.t) - g_min;
-    ivec3 position = ivec3(fposition);
+    ivec3 position = ivec3(floor(fposition));
 
     // in the event of a axis of direction is 0 we get infinity according to 
     // float specification IEEE 754 (division by 0 is defined as resulting in infinity value)
@@ -462,20 +462,40 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
             }
         }
 
-        const bool x_axis = (axis_t.x < axis_t.y) && (axis_t.x < axis_t.z);
-        const bool y_axis = (axis_t.x >= axis_t.y) && (axis_t.y < axis_t.z);
-        const bool z_axis = !x_axis && !y_axis;
-        const vec3 axis = vec3(x_axis, y_axis, z_axis);
-        t_value = fma(axis_t.x, axis.x, fma(axis_t.y, axis.y, axis_t.z * axis.z));
-        position += pos_step * ivec3(axis);
-        if (
-            (position.x < 0 || position.x >= brick_dim.x) || 
-            (position.y < 0 || position.y >= brick_dim.y) || 
-            (position.z < 0 || position.z >= brick_dim.z)
-        ) {
-            break;
+        // progress position with DDA
+        if (axis_t.x < axis_t.y) {
+            if (axis_t.x < axis_t.z) {
+                t_value = axis_t.x;
+                position.x += pos_step.x;
+                if (position.x < 0 || position.x >= brick_grid.dim_x) {
+                    break;
+                }
+                axis_t.x += delta.x;
+            } else {
+                t_value = axis_t.z;
+                position.z += pos_step.z;
+                if (position.z < 0 || position.z >= brick_grid.dim_z) {
+                    break;
+                }
+                axis_t.z += delta.z;
+            }
+        } else {
+            if (axis_t.y < axis_t.z) {
+                t_value = axis_t.y;
+                position.y += pos_step.y;
+                if (position.y < 0 || position.y >= brick_grid.dim_y) {
+                    break;
+                }
+                axis_t.y += delta.y;
+            } else {
+                t_value = axis_t.z;
+                position.z += pos_step.z;
+                if (position.z < 0 || position.z >= brick_grid.dim_z) {
+                    break;
+                }
+                axis_t.z += delta.z;
+            }
         }
-        axis_t += delta * axis;
     }   
 
     return false;
@@ -486,7 +506,8 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
     /// get position in brick space from global position
     /// caller should make sure that p is in fact inside the grid
     const vec3 fposition = (RayAt(r, hit.t + 0.0001) - brick_position) * 8;
-    ivec3 position = ivec3(fposition);
+    ivec3 position = ivec3(floor(fposition));
+
 
     ivec3 pos_step;
     vec3 axis_t;
@@ -553,16 +574,40 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
             }
         }
 
-        const bool x_axis = (axis_t.x < axis_t.y) && (axis_t.x < axis_t.z);
-        const bool y_axis = (axis_t.x >= axis_t.y) && (axis_t.y < axis_t.z);
-        const bool z_axis = !x_axis && !y_axis;
-        const vec3 axis = vec3(x_axis, y_axis, z_axis);
-        t_value = axis_t.x * axis.x + axis_t.y * axis.y + axis_t.z * axis.z;
-        position += pos_step * ivec3(axis);
-        if ((position.x < 0 || position.x >= 8) || (position.y < 0 || position.y >= 8) || (position.z < 0 || position.z >= 8)) {
-            break;
+        // progress position with DDA
+        if (axis_t.x < axis_t.y) {
+            if (axis_t.x < axis_t.z) {
+                t_value = axis_t.x;
+                position.x += pos_step.x;
+                if (position.x < 0 || position.x >= 8) {
+                    break;
+                }
+                axis_t.x += delta.x;
+            } else {
+                t_value = axis_t.z;
+                position.z += pos_step.z;
+                if (position.z < 0 || position.z >= 8) {
+                    break;
+                }
+                axis_t.z += delta.z;
+            }
+        } else {
+            if (axis_t.y < axis_t.z) {
+                t_value = axis_t.y;
+                position.y += pos_step.y;
+                if (position.y < 0 || position.y >= 8) {
+                    break;
+                }
+                axis_t.y += delta.y;
+            } else {
+                t_value = axis_t.z;
+                position.z += pos_step.z;
+                if (position.z < 0 || position.z >= 8) {
+                    break;
+                }
+                axis_t.z += delta.z;
+            }
         }
-        axis_t += delta * axis;
     }   
 
     return false;
