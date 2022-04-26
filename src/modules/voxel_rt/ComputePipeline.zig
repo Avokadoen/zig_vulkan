@@ -247,7 +247,7 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
         const push_constant_ranges = [_]vk.PushConstantRange{.{
             .stage_flags = .{ .compute_bit = true },
             .offset = 0,
-            .size = @sizeOf(Sun.Device) + @sizeOf(Camera.Device),
+            .size = @sizeOf(Camera.Device) + @sizeOf(Sun.Device),
         }};
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
@@ -326,24 +326,24 @@ pub fn recordCommandBuffers(self: ComputePipeline, ctx: Context, camera: Camera,
 
     ctx.vkd.cmdBindPipeline(self.command_buffer, vk.PipelineBindPoint.compute, self.pipeline.*);
 
-    // push sun data as a push constant
-    ctx.vkd.cmdPushConstants(
-        self.command_buffer,
-        self.pipeline_layout,
-        .{ .compute_bit = true },
-        0,
-        @sizeOf(Sun.Device),
-        &sun.device_data,
-    );
-
     // push camera data as a push constant
     ctx.vkd.cmdPushConstants(
         self.command_buffer,
         self.pipeline_layout,
         .{ .compute_bit = true },
-        @sizeOf(Sun.Device),
+        0,
         @sizeOf(Camera.Device),
         &camera.d_camera,
+    );
+
+    // push sun data as a push constant
+    ctx.vkd.cmdPushConstants(
+        self.command_buffer,
+        self.pipeline_layout,
+        .{ .compute_bit = true },
+        @sizeOf(Camera.Device),
+        @sizeOf(Sun.Device),
+        &sun.device_data,
     );
 
     // bind target texture

@@ -21,7 +21,7 @@ const vox = VoxelRT.vox;
 const terrain = VoxelRT.terrain;
 
 pub const application_name = "zig vulkan";
-pub const internal_render_resolution = za.GenericVector(2, u32).new(1920, 1080);
+pub const internal_render_resolution = za.GenericVector(2, u32).new(1024, 576);
 
 // TODO: wrap this in render to make main seem simpler :^)
 var delta_time: f64 = 0;

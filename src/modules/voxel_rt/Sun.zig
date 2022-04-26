@@ -3,6 +3,7 @@ pub const Config = struct {
     position: ?[3]f32 = null,
     color: [3]f32 = [_]f32{ 1, 1.1, 1 },
     intensity: f32 = 1.0,
+    radius: f32 = 5,
 };
 
 pub const Device = extern struct {
@@ -10,6 +11,7 @@ pub const Device = extern struct {
     enabled: u32,
     color: [3]f32,
     intensity: f32,
+    radius: f32,
 };
 
 const Sun = @This();
@@ -23,5 +25,6 @@ pub fn init(voxel_dim_y: u32, config: Config) Sun {
         .position = position,
         .color = config.color,
         .intensity = config.intensity,
+        .radius = config.radius,
     } };
 }

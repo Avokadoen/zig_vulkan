@@ -10,6 +10,8 @@
 layout(local_size_x = 32, local_size_y = 32) in;
 layout(Rgba8, binding = 0) uniform writeonly image2D img_output;
 
+#define MAX_BOUNCES 32
+ 
 // Constants
 const int MAT_LAMBERTIAN = 0;
 const int MAT_METAL = 1;
@@ -51,12 +53,6 @@ struct HitRecord {
 };
 
 layout (push_constant) uniform PushConstants {
-    // Sun
-    vec3 sun_position;
-    uint sun_enabled;
-    vec3 sun_color; 
-    float sun_intensity;
-
     // Camera
     uint image_width;
     uint image_height;
@@ -64,9 +60,16 @@ layout (push_constant) uniform PushConstants {
     vec3 vertical;
     vec3 lower_left_corner;
     vec3 origin;
-    int padding;
+    float paddin;
     int samples_per_pixel;
     int max_bounce;
+
+    // Sun
+    vec3 sun_position;
+    uint sun_enabled;
+    vec3 sun_color; 
+    float sun_intensity;
+    float sun_radius;
 } push_constant;
 Ray CameraGetRay(float u, float v);
 
@@ -182,17 +185,6 @@ bool AdvIntersect(vec3 p0, vec3 p1, Ray r, float t_min, inout float t_max, inout
 // TODO: bug with refract vs reflect in diel
 // TODO: store the current chunk index we stand in for further sampling and bounces!
 
-/// used to do a software conversion of linear unorm to srgb
-float floatToSrgb(float value) {
-    const float inv_12_92 = 0.0773993808;
-    return value <= 0.04045
-       ? value * inv_12_92
-       : pow((value + 0.055) / 1.055, 2.4);
-}
-vec3 vec3ToSrgb(vec3 value) {
-    return vec3(floatToSrgb(value.x), floatToSrgb(value.y), floatToSrgb(value.z));
-}
-
 void main() {
     const ivec2 pixel_coord = ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y);
     const ivec2 image_size = imageSize(img_output);
@@ -215,9 +207,9 @@ void main() {
         color += RayColor(ray);
     }
 
+    // Divide the color by the number of samples and gamma-correct for gamma=2.0.
     color = sqrt(color / push_constant.samples_per_pixel);
-    color = clamp(color, 0, 1);
-    imageStore(img_output, pixel_coord, vec4(vec3ToSrgb(color), 1.0));
+    imageStore(img_output, pixel_coord, vec4(color, 1.0));
 }
 
 Ray CreateRay(vec3 origin, vec3 direction) {
@@ -229,7 +221,7 @@ Ray CreateRay(vec3 origin, vec3 direction) {
 
 Ray CreateShadowRay(vec3 origin, vec3 direction) {
     const float internal_reflection = 1.0;
-    const uint material_ignore_mask = IGNORE_MAT_DIELECTRIC;
+    const uint material_ignore_mask = (push_constant.sun_enabled > 0) ? IGNORE_MAT_NONE : IGNORE_MAT_DIELECTRIC;
     const vec3 color = vec3(1.0);
     return Ray(origin, normalize(direction), internal_reflection, material_ignore_mask, color);
 }
@@ -237,6 +229,12 @@ Ray CreateShadowRay(vec3 origin, vec3 direction) {
 vec3 RayAt(Ray r, float t) {
     // instruction for: t * dir + origin
     return fma(vec3(t), r.direction, r.origin);
+}
+
+vec3 BackgroundColor(Ray r) {
+    float t = 0.5 * (r.direction.y + 1.0);
+    vec3 background_color = fma(vec3(1.0 - t), vec3(1.0), t * vec3(0.5, 0.7, 1.0));
+    return background_color;
 }
 
 vec3 RayColor(Ray r) {
@@ -251,6 +249,8 @@ vec3 RayColor(Ray r) {
     HitRecord shadow_hit;
     Ray shadow_ray;
 
+    vec3 emits[MAX_BOUNCES];
+    vec3 attenuations[MAX_BOUNCES];
     vec3 hit_v_min;
     while (loop_count < push_constant.max_bounce && GridHit(current_ray, 0.00001, infinity, hit_v_min, hit)){         
         loop_count += 1;
@@ -282,39 +282,49 @@ vec3 RayColor(Ray r) {
                 result = false;
                 break;
         }
-        if (!result) 
-            break;
-
         if (sun_enabled) {
-            const vec3 shadow_ray_dir = (push_constant.sun_position - hit.point);
-            // TODO: This causes shadows to be set on random pixels on a luminated surface
-            //       one obvious problem with this is that the point might go outside the surface bounds
-            //       and subsequently become shadowed by being inside neighbour voxels
-            //       In other words: we need to clamp this origin, but knowing the bounds is TODO
-            const vec3 shadow_origin = hit.point + vec3(
-                Rand(hit.point.xy, -0.001, 0.001) * (1 - hit.normal.x), 
-                Rand(hit.point.yz, -0.001, 0.001) * (1 - hit.normal.y), 
-                Rand(hit.point.zx, -0.001, 0.001) * (1 - hit.normal.z)
-            );
+            const vec3 sun_sample_position = push_constant.sun_position + RandVec3(current_ray.direction.xy + current_ray.direction.z, -push_constant.sun_radius, push_constant.sun_radius);
+            const vec3 shadow_ray_dir = (sun_sample_position - hit.point);
+            const vec3 shadow_origin = hit.point;
             const Ray shadow_ray = CreateShadowRay(shadow_origin, shadow_ray_dir);
-            const vec3 luminosity = max(push_constant.sun_color * vec3(!GridHit(shadow_ray, 0.00001, infinity, hit_v_min, shadow_hit)) * push_constant.sun_intensity, vec3(0.1));
-            current_ray.color *= (attenuation * luminosity);
-        } else {
-            current_ray.color *= attenuation;
+
+            // if lit by sun
+            if (!GridHit(shadow_ray, 0.00001, infinity, hit_v_min, shadow_hit)) {
+                emits[loop_count-1] = attenuation * push_constant.sun_color * push_constant.sun_intensity;
+            } else {
+                // cheat and apply some ambient :)
+                emits[loop_count-1] = attenuation * vec3(0.01);
+            }
         }
-        scattered.color = current_ray.color;
+        if (!result) {
+            attenuations[loop_count-1] = vec3(0);
+            break;
+        }
+
+        attenuations[loop_count-1] = attenuation;
         current_ray = scattered;
     }
-    if (loop_count > 0) {
-        return current_ray.color;
-    }
 
-    float t = 0.5 * (current_ray.direction.y + 1.0);
-    vec3 background_color = fma(vec3(1.0 - t), vec3(1.0), t * vec3(0.5, 0.7, 1.0));
     if (sun_enabled) {
-        return background_color *  push_constant.sun_color;
+        if (loop_count == 0) {
+            return BackgroundColor(current_ray) * push_constant.sun_color;
+        }
+
+        vec3 color = vec3(0);
+        for (int i = loop_count - 1; i >= 0; i--) {
+            color = (color * attenuations[i]) + emits[i];
+        }
+        return color;
     } else {
-        return background_color;
+        if (loop_count == 0) {
+            return BackgroundColor(current_ray);
+        }
+
+        vec3 color = vec3(1);
+        for (int i = loop_count - 1; i >= 0; i--) {
+            color *= attenuations[i];
+        }
+        return color;
     }
 }
 
@@ -669,7 +679,7 @@ bool AdvIntersect(vec3 p0, vec3 p1, Ray r, float t_min, inout float t_max, inout
 
 bool ScatterLambertian(Material material, Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scattered) {
     // TODO: better random hemisphere
-    vec3 scatter_dir = normalize(hit.normal + RandVec3(hit.point.xy + hit.point.z, -0.2, 0.2));
+    vec3 scatter_dir = normalize(hit.normal + RandVec3(hit.point.xy + hit.point.z, -0.5, 0.5));
     scattered = CreateRay(hit.point, scatter_dir);
 
     attenuation = AlbedoColor(material);
