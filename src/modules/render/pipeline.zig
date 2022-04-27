@@ -19,7 +19,7 @@ pub fn createFramebuffers(allocator: Allocator, ctx: Context, swapchain_data: *c
             .flags = .{},
             .render_pass = render_pass,
             .attachment_count = attachments.len,
-            .p_attachments = @ptrCast([*]const vk.ImageView, &attachments),
+            .p_attachments = &attachments,
             .width = swapchain_data.extent.width,
             .height = swapchain_data.extent.height,
             .layers = 1,

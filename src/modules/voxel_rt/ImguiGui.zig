@@ -256,6 +256,7 @@ inline fn drawPostSunWindowIfEnabled(self: *ImguiGui) void {
     _ = imgui.igDragFloat3("position", &self.state_binding.sun_ptr.device_data.position, 1, -10000, 10000, null, 0);
     _ = imgui.igColorEdit3("color", &self.state_binding.sun_ptr.device_data.color, 0);
     _ = imgui.igDragFloat("intensity", &self.state_binding.sun_ptr.device_data.intensity, 0, 0.01, 6, null, 0);
+    _ = imgui.igDragFloat("radius", &self.state_binding.sun_ptr.device_data.radius, 0, 0, 20, null, 0);
 }
 
 const ToolTipConfig = struct {
