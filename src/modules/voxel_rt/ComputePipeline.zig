@@ -53,35 +53,31 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
 
     // TODO: descriptor set creation: one single for loop for each config instead of one for loop for each type
 
-    {
-        self.uniform_buffers = try allocator.alloc(GpuBufferMemory, state_config.uniform_sizes.len);
-        errdefer allocator.free(self.uniform_buffers);
-        var buffers_initialized: usize = 0;
-        for (state_config.uniform_sizes) |size, i| {
-            self.uniform_buffers[i] = try GpuBufferMemory.init(ctx, size, .{ .uniform_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
-            buffers_initialized = i + 1;
-        }
-        errdefer {
-            var i: usize = 0;
-            while (i < buffers_initialized) : (i += 1) {
-                self.uniform_buffers[i].deinit(ctx);
-            }
+    self.uniform_buffers = try allocator.alloc(GpuBufferMemory, state_config.uniform_sizes.len);
+    errdefer allocator.free(self.uniform_buffers);
+    var uniform_initialized: usize = 0;
+    for (state_config.uniform_sizes) |size, i| {
+        self.uniform_buffers[i] = try GpuBufferMemory.init(ctx, size, .{ .uniform_buffer_bit = true }, .{ .host_visible_bit = true });
+        uniform_initialized = i + 1;
+    }
+    errdefer {
+        var i: usize = 0;
+        while (i < uniform_initialized) : (i += 1) {
+            self.uniform_buffers[i].deinit(ctx);
         }
     }
 
-    {
-        self.storage_buffers = try allocator.alloc(GpuBufferMemory, state_config.storage_sizes.len);
-        errdefer allocator.free(self.storage_buffers);
-        var buffers_initialized: usize = 0;
-        for (state_config.storage_sizes) |size, i| {
-            self.storage_buffers[i] = try GpuBufferMemory.init(ctx, size, .{ .storage_buffer_bit = true }, .{ .host_visible_bit = true, .host_coherent_bit = true });
-            buffers_initialized = i + 1;
-        }
-        errdefer {
-            var i: usize = 0;
-            while (i < buffers_initialized) : (i += 1) {
-                self.storage_buffers[i].deinit(ctx);
-            }
+    self.storage_buffers = try allocator.alloc(GpuBufferMemory, state_config.storage_sizes.len);
+    errdefer allocator.free(self.storage_buffers);
+    var storage_initialized: usize = 0;
+    for (state_config.storage_sizes) |size, i| {
+        self.storage_buffers[i] = try GpuBufferMemory.init(ctx, size, .{ .storage_buffer_bit = true }, .{ .host_visible_bit = true });
+        storage_initialized = i + 1;
+    }
+    errdefer {
+        var i: usize = 0;
+        while (i < storage_initialized) : (i += 1) {
+            self.storage_buffers[i].deinit(ctx);
         }
     }
 

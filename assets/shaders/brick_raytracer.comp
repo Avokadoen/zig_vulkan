@@ -457,7 +457,7 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
     // DDA loop
     ivec3 axis = ivec3(0);
     while (true) { 
-        const uint index = position.x + brick_grid.dim_x * (position.z + brick_grid.dim_z * position.y);
+        const uint index = position.x + brick_dim.x * (position.z + brick_dim.z * position.y);
         const uint bits = grid_entries[index].bits;
         const uint entry_type = bitfieldExtract(bits, 0, 2);
         if(bits != 0) { // TODO: actually check type
