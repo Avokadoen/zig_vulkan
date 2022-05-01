@@ -37,8 +37,12 @@ target_descriptor_layout: vk.DescriptorSetLayout,
 target_descriptor_pool: vk.DescriptorPool,
 target_descriptor_set: vk.DescriptorSet,
 
-uniform_buffers: []GpuBufferMemory,
-storage_buffers: []GpuBufferMemory,
+// TODO: should be a slice or list. When the sum of a buffer size is greater than 250mb, we create a new buffer
+uniform_offsets: []vk.DeviceSize,
+uniform_buffer: GpuBufferMemory,
+
+storage_offsets: []vk.DeviceSize,
+storage_buffer: GpuBufferMemory,
 
 // TODO: descriptor has a lot of duplicate code with init ...
 // TODO: refactor descriptor stuff to be configurable (loop array of config objects for buffer stuff)
@@ -52,33 +56,36 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
     self.target_texture = target_texture;
 
     // TODO: descriptor set creation: one single for loop for each config instead of one for loop for each type
-
-    self.uniform_buffers = try allocator.alloc(GpuBufferMemory, state_config.uniform_sizes.len);
-    errdefer allocator.free(self.uniform_buffers);
-    var uniform_initialized: usize = 0;
-    for (state_config.uniform_sizes) |size, i| {
-        self.uniform_buffers[i] = try GpuBufferMemory.init(ctx, size, .{ .uniform_buffer_bit = true }, .{ .host_visible_bit = true });
-        uniform_initialized = i + 1;
-    }
-    errdefer {
-        var i: usize = 0;
-        while (i < uniform_initialized) : (i += 1) {
-            self.uniform_buffers[i].deinit(ctx);
+    {
+        self.uniform_offsets = try allocator.alloc(vk.DeviceSize, state_config.uniform_sizes.len);
+        errdefer allocator.free(self.uniform_offsets);
+        var uniform_memory_size: u64 = 0;
+        for (state_config.uniform_sizes) |size, i| {
+            self.uniform_offsets[i] = uniform_memory_size;
+            uniform_memory_size += size;
         }
+        self.uniform_buffer = try GpuBufferMemory.init(
+            ctx,
+            @intCast(vk.DeviceSize, uniform_memory_size),
+            .{ .uniform_buffer_bit = true },
+            .{ .host_visible_bit = true, .device_local_bit = true },
+        );
     }
 
-    self.storage_buffers = try allocator.alloc(GpuBufferMemory, state_config.storage_sizes.len);
-    errdefer allocator.free(self.storage_buffers);
-    var storage_initialized: usize = 0;
-    for (state_config.storage_sizes) |size, i| {
-        self.storage_buffers[i] = try GpuBufferMemory.init(ctx, size, .{ .storage_buffer_bit = true }, .{ .host_visible_bit = true });
-        storage_initialized = i + 1;
-    }
-    errdefer {
-        var i: usize = 0;
-        while (i < storage_initialized) : (i += 1) {
-            self.storage_buffers[i].deinit(ctx);
+    {
+        self.storage_offsets = try allocator.alloc(vk.DeviceSize, state_config.storage_sizes.len);
+        errdefer allocator.free(self.storage_offsets);
+        var storage_memory_size: u64 = 0;
+        for (state_config.storage_sizes) |size, i| {
+            self.storage_offsets[i] = storage_memory_size;
+            storage_memory_size += size;
         }
+        self.storage_buffer = try GpuBufferMemory.init(
+            ctx,
+            @intCast(vk.DeviceSize, storage_memory_size),
+            .{ .storage_buffer_bit = true },
+            .{ .host_visible_bit = true, .device_local_bit = true },
+        );
     }
 
     const set_count = 1 + state_config.uniform_sizes.len + state_config.storage_sizes.len;
@@ -162,7 +169,7 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
         const descriptor_set_alloc_info = vk.DescriptorSetAllocateInfo{
             .descriptor_pool = self.target_descriptor_pool,
             .descriptor_set_count = 1,
-            .p_set_layouts = @ptrCast([*]vk.DescriptorSetLayout, &self.target_descriptor_layout),
+            .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &self.target_descriptor_layout),
         };
         try ctx.vkd.allocateDescriptorSets(ctx.logical_device, &descriptor_set_alloc_info, @ptrCast([*]vk.DescriptorSet, &self.target_descriptor_set));
     }
@@ -191,8 +198,8 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
 
         for (state_config.uniform_sizes) |size, i| {
             buffer_infos[i] = vk.DescriptorBufferInfo{
-                .buffer = self.uniform_buffers[i].buffer,
-                .offset = 0,
+                .buffer = self.uniform_buffer.buffer,
+                .offset = self.uniform_offsets[i],
                 .range = size,
             };
             write_descriptor_sets[i + 1] = vk.WriteDescriptorSet{
@@ -212,8 +219,8 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
             const index = 1 + state_config.uniform_sizes.len + i;
             // descriptor for buffer info
             buffer_infos[index - 1] = vk.DescriptorBufferInfo{
-                .buffer = self.storage_buffers[i].buffer,
-                .offset = 0,
+                .buffer = self.storage_buffer.buffer,
+                .offset = self.storage_offsets[i],
                 .range = size,
             };
             write_descriptor_sets[index] = vk.WriteDescriptorSet{
@@ -271,7 +278,7 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
 
     // TODO: we need to rescale pipeline dispatch
     self.command_buffer = try render.pipeline.createCmdBuffer(ctx, ctx.comp_cmd_pool);
-    errdefer ctx.vkd.freeCommandBuffers(ctx.logical_device, ctx.comp_cmd_pool, 1, @ptrCast([*]vk.CommandBuffer, &self.command_buffer));
+    errdefer ctx.vkd.freeCommandBuffers(ctx.logical_device, ctx.comp_cmd_pool, 1, @ptrCast([*]const vk.CommandBuffer, &command_buffer));
 
     // zig fmt: off
     return ComputePipeline{ 
@@ -283,21 +290,19 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
         .target_descriptor_layout = self.target_descriptor_layout, 
         .target_descriptor_pool = self.target_descriptor_pool, 
         .target_descriptor_set = self.target_descriptor_set, 
-        .uniform_buffers = self.uniform_buffers,
-        .storage_buffers = self.storage_buffers,
+        .uniform_offsets = self.uniform_offsets,
+        .uniform_buffer = self.uniform_buffer,
+        .storage_offsets = self.storage_offsets,
+        .storage_buffer = self.storage_buffer,
     };
     // zig fmt: on
 }
 
 pub fn deinit(self: ComputePipeline, ctx: Context) void {
-    for (self.uniform_buffers) |buffer| {
-        buffer.deinit(ctx);
-    }
-    self.allocator.free(self.uniform_buffers);
-    for (self.storage_buffers) |buffer| {
-        buffer.deinit(ctx);
-    }
-    self.allocator.free(self.storage_buffers);
+    self.allocator.free(self.uniform_offsets);
+    self.allocator.free(self.storage_offsets);
+    self.uniform_buffer.deinit(ctx);
+    self.storage_buffer.deinit(ctx);
 
     ctx.vkd.freeCommandBuffers(ctx.logical_device, ctx.comp_cmd_pool, 1, @ptrCast([*]const vk.CommandBuffer, &self.command_buffer));
     ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);

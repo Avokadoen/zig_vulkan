@@ -100,23 +100,21 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
     // const debug_features = [_]vk.ValidationFeatureEnableEXT{
     //     .best_practices_ext, .synchronization_validation_ext,
     // };
-    const features: ?*const vk.ValidationFeaturesEXT = blk: {
-        if (consts.enable_validation_layers) {
-            break :blk &vk.ValidationFeaturesEXT{
-                // .enabled_validation_feature_count = debug_features.len,
-                // .p_enabled_validation_features = &debug_features,
-                .enabled_validation_feature_count = 0,
-                .p_enabled_validation_features = undefined,
-                .disabled_validation_feature_count = 0,
-                .p_disabled_validation_features = undefined,
-            };
-        }
-        break :blk null;
-    };
+    // const features: ?*const vk.ValidationFeaturesEXT = blk: {
+    //     if (consts.enable_validation_layers) {
+    //         break :blk &vk.ValidationFeaturesEXT{
+    //             .enabled_validation_feature_count = debug_features.len,
+    //             .p_enabled_validation_features = &debug_features,
+    //             .disabled_validation_feature_count = 0,
+    //             .p_disabled_validation_features = undefined,
+    //         };
+    //     }
+    //     break :blk null;
+    // };
 
     const debug_create_info: ?*const vk.DebugUtilsMessengerCreateInfoEXT = blk: {
         if (consts.enable_validation_layers) {
-            break :blk &createDefaultDebugCreateInfo(@ptrCast(?*const anyopaque, features));
+            break :blk &createDefaultDebugCreateInfo(null); //&createDefaultDebugCreateInfo(@ptrCast(?*const anyopaque, features));
         } else {
             break :blk null;
         }
@@ -345,8 +343,8 @@ pub fn deinit(self: Context) void {
 // TODO: can probably drop function and inline it in init
 fn createDefaultDebugCreateInfo(p_next: ?*const anyopaque) vk.DebugUtilsMessengerCreateInfoEXT {
     const message_severity = vk.DebugUtilsMessageSeverityFlagsEXT{
-        .verbose_bit_ext = true,
-        .info_bit_ext = true,
+        .verbose_bit_ext = false,
+        .info_bit_ext = false,
         .warning_bit_ext = true,
         .error_bit_ext = true,
     };

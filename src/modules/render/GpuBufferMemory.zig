@@ -92,12 +92,8 @@ pub fn transferToDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, 
     if (data.len <= 0) return;
 
     const size = data.len * @sizeOf(T);
-    if (self.size < size) {
-        return error.InsufficentBufferSize; // size of buffer is less than data being transfered
-    }
-
-    const gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, size, .{})) orelse return error.FailedToMapGPUMem;
-    const gpu_mem_start = @ptrToInt(gpu_mem) + offset * @sizeOf(T);
+    const gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, offset, size, .{})) orelse return error.FailedToMapGPUMem;
+    const gpu_mem_start = @ptrToInt(gpu_mem);
     {
         @setRuntimeSafety(false);
         for (data) |element, i| {

@@ -31,8 +31,6 @@ vertical_fov: f32,
 d_camera: Device,
 
 pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Config) Camera {
-    const math = std.math;
-
     const aspect_ratio = @intToFloat(f32, image_width) / @intToFloat(f32, image_height);
 
     const inv_180: comptime_float = comptime blk: {
@@ -40,9 +38,9 @@ pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Conf
     };
 
     const viewport_height = blk: {
-        const theta = vertical_fov * math.pi * inv_180;
+        const theta = vertical_fov * std.math.pi * inv_180;
         const height = config.viewport_height;
-        break :blk height * math.tan(theta * 0.5);
+        break :blk height * @tan(theta * 0.5);
     };
     const viewport_width = aspect_ratio * viewport_height;
 
@@ -111,14 +109,14 @@ pub fn translate(self: *Camera, delta_time: f32, by: za.Vec3) void {
 pub fn turnPitch(self: *Camera, angle: f32) void {
     // Axis angle to quaternion: https://www.euclideanspace.com/maths/geometry/rotations/conversions/angleToQuaternion/index.htm
     const h_angle = angle * self.turn_rate;
-    const i = std.math.sin(h_angle);
-    const w = std.math.cos(h_angle);
+    const i = @sin(h_angle);
+    const w = @cos(h_angle);
     const prev_pitch = self.pitch;
     self.pitch = self.pitch.mul(za.Quat{ .w = w, .x = i, .y = 0.0, .z = 0.0 });
 
     // arbitrary restrict rotation so that camera does not become inversed
     const euler_x_rotation = self.pitch.extractEulerAngles().x();
-    if (std.math.fabs(euler_x_rotation) >= 90) {
+    if (@fabs(euler_x_rotation) >= 90) {
         self.pitch = prev_pitch;
     }
 
@@ -127,8 +125,8 @@ pub fn turnPitch(self: *Camera, angle: f32) void {
 
 pub fn turnYaw(self: *Camera, angle: f32) void {
     const h_angle = angle * self.turn_rate;
-    const j = std.math.sin(h_angle);
-    const w = std.math.cos(h_angle);
+    const j = @sin(h_angle);
+    const w = @cos(h_angle);
     self.yaw = self.yaw.mul(za.Quat{ .w = w, .x = 0.0, .y = j, .z = 0.0 });
     self.propogatePitchChange();
 }

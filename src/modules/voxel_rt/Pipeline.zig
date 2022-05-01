@@ -350,49 +350,98 @@ pub fn setDenoisePixelMultiplier(self: *Pipeline, pixel_multiplier: f32) void {
 }
 
 /// Transfer grid data to GPU
-pub inline fn transferGridState(self: Pipeline, ctx: Context, grid: GridState) !void {
+pub inline fn transferGridState(self: *Pipeline, ctx: Context, grid: GridState) !void {
     const grid_data = [_]GridState.Device{grid.device_state};
-    try self.compute_pipeline.uniform_buffers[0].transferToDevice(ctx, GridState.Device, 0, grid_data[0..]);
+    const offset = self.compute_pipeline.uniform_offsets[0];
+    try self.compute_pipeline.uniform_buffer.transferToDevice(ctx, GridState.Device, offset, grid_data[0..]);
 }
 
 /// Transfer material data to GPU
-pub inline fn transferMaterials(self: Pipeline, ctx: Context, offset: usize, materials: []const gpu_types.Material) !void {
-    try self.compute_pipeline.storage_buffers[0].transferToDevice(ctx, gpu_types.Material, offset, materials);
+pub inline fn transferMaterials(self: *Pipeline, ctx: Context, offset: usize, materials: []const gpu_types.Material) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[0];
+    try self.compute_pipeline.storage_buffer.transferToDevice(
+        ctx,
+        gpu_types.Material,
+        buffer_offset + offset * @sizeOf(gpu_types.Material),
+        materials,
+    );
 }
 
 /// Transfer albedo data to GPU
-pub inline fn transferAlbedos(self: Pipeline, ctx: Context, offset: usize, albedo: []const gpu_types.Albedo) !void {
-    try self.compute_pipeline.storage_buffers[1].transferToDevice(ctx, gpu_types.Albedo, offset, albedo);
+pub inline fn transferAlbedos(self: *Pipeline, ctx: Context, offset: usize, albedo: []const gpu_types.Albedo) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[1];
+    try self.compute_pipeline.storage_buffer.transferToDevice(
+        ctx,
+        gpu_types.Albedo,
+        buffer_offset + offset * @sizeOf(gpu_types.Albedo),
+        albedo,
+    );
 }
 
 /// Transfer metal data to GPU
-pub inline fn transferMetals(self: Pipeline, ctx: Context, offset: usize, metals: []const gpu_types.Metal) !void {
-    try self.compute_pipeline.storage_buffers[2].transferToDevice(ctx, gpu_types.Metal, offset, metals);
+pub inline fn transferMetals(self: *Pipeline, ctx: Context, offset: usize, metals: []const gpu_types.Metal) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[2];
+    try self.compute_pipeline.storage_buffer.transferToDevice(
+        ctx,
+        gpu_types.Metal,
+        buffer_offset + offset * @sizeOf(gpu_types.Metal),
+        metals,
+    );
 }
 
 /// Transfer dielectric data to GPU
-pub inline fn transferDielectrics(self: Pipeline, ctx: Context, offset: usize, dielectrics: []const gpu_types.Dielectric) !void {
-    try self.compute_pipeline.storage_buffers[3].transferToDevice(ctx, gpu_types.Dielectric, offset, dielectrics);
+pub inline fn transferDielectrics(self: *Pipeline, ctx: Context, offset: usize, dielectrics: []const gpu_types.Dielectric) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[3];
+    try self.compute_pipeline.storage_buffer.transferToDevice(
+        ctx,
+        gpu_types.Dielectric,
+        buffer_offset + offset * @sizeOf(gpu_types.Dielectric),
+        dielectrics,
+    );
 }
 
 /// Transfer higher order grid data to GPU
-pub inline fn transferHigherOrderGrid(self: Pipeline, ctx: Context, offset: usize, higher_order_grid: []const u8) !void {
-    try self.compute_pipeline.storage_buffers[4].transferToDevice(ctx, u8, offset, higher_order_grid);
+pub inline fn transferHigherOrderGrid(self: *Pipeline, ctx: Context, offset: usize, higher_order_grid: []const u8) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[4];
+    try self.compute_pipeline.storage_buffer.transferToDevice(
+        ctx,
+        u8,
+        buffer_offset + offset * @sizeOf(usize),
+        higher_order_grid,
+    );
 }
 
 /// Transfer dielectric data to GPU
-pub inline fn transferGridEntries(self: Pipeline, ctx: Context, offset: usize, grid_entries: []const GridState.GridEntry) !void {
-    try self.compute_pipeline.storage_buffers[5].transferToDevice(ctx, GridState.GridEntry, offset, grid_entries);
+pub inline fn transferGridEntries(self: *Pipeline, ctx: Context, offset: usize, grid_entries: []const GridState.GridEntry) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[5];
+    try self.compute_pipeline.storage_buffer.transferToDevice(
+        ctx,
+        GridState.GridEntry,
+        buffer_offset + offset * @sizeOf(GridState.GridEntry),
+        grid_entries,
+    );
 }
 
 /// Transfer dielectric data to GPU
-pub inline fn transferBricks(self: Pipeline, ctx: Context, offset: usize, bricks: []const GridState.Brick) !void {
-    try self.compute_pipeline.storage_buffers[6].transferToDevice(ctx, GridState.Brick, offset, bricks);
+pub inline fn transferBricks(self: *Pipeline, ctx: Context, offset: usize, bricks: []const GridState.Brick) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[6];
+    try self.compute_pipeline.storage_buffer.transferToDevice(
+        ctx,
+        GridState.Brick,
+        buffer_offset + offset * @sizeOf(GridState.Brick),
+        bricks,
+    );
 }
 
 /// Transfer dielectric data to GPU
-pub inline fn transferMaterialIndices(self: Pipeline, ctx: Context, offset: usize, material_indices: []const u8) !void {
-    try self.compute_pipeline.storage_buffers[7].transferToDevice(ctx, u8, offset, material_indices);
+pub inline fn transferMaterialIndices(self: *Pipeline, ctx: Context, offset: usize, material_indices: []const u8) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[7];
+    try self.compute_pipeline.storage_buffer.transferToDevice(
+        ctx,
+        u8,
+        buffer_offset + offset * @sizeOf(u8),
+        material_indices,
+    );
 }
 
 // TODO: make allow to multithread this

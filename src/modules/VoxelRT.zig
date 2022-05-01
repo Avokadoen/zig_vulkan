@@ -44,7 +44,7 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, config: 
     errdefer allocator.destroy(sun);
     sun.* = Sun.init(brick_grid.state.device_state.voxel_dim_y, config.sun);
 
-    const pipeline = try Pipeline.init(
+    var pipeline = try Pipeline.init(
         ctx,
         allocator,
         .{
@@ -86,19 +86,19 @@ pub fn draw(self: *VoxelRT, ctx: Context) !void {
 }
 
 /// push the materials to GPU
-pub fn pushMaterials(self: VoxelRT, ctx: Context, materials: []const gpu_types.Material) !void {
+pub fn pushMaterials(self: *VoxelRT, ctx: Context, materials: []const gpu_types.Material) !void {
     try self.pipeline.transferMaterials(ctx, 0, materials);
 }
 
 /// push the albedo to GPU
-pub fn pushAlbedo(self: VoxelRT, ctx: Context, albedos: []const gpu_types.Albedo) !void {
+pub fn pushAlbedo(self: *VoxelRT, ctx: Context, albedos: []const gpu_types.Albedo) !void {
     try self.pipeline.transferAlbedos(ctx, 0, albedos);
 }
 
 /// Push all terrain data to GPU
 pub fn debugUpdateTerrain(self: *VoxelRT, ctx: Context) !void {
     try self.pipeline.transferHigherOrderGrid(ctx, 0, self.brick_grid.state.higher_order_grid);
-    try self.pipeline.transferGridEntries(ctx, 0, self.brick_grid.state.bricks);
+    try self.pipeline.transferGridEntries(ctx, 0, self.brick_grid.state.grid);
     try self.pipeline.transferBricks(ctx, 0, self.brick_grid.state.bricks);
     try self.pipeline.transferMaterialIndices(ctx, 0, self.brick_grid.state.material_indices);
 }
