@@ -406,7 +406,7 @@ pub inline fn transferHigherOrderGrid(self: *Pipeline, ctx: Context, offset: usi
     try self.compute_pipeline.storage_buffer.transferToDevice(
         ctx,
         u8,
-        buffer_offset + offset * @sizeOf(usize),
+        buffer_offset + offset * @sizeOf(u8),
         higher_order_grid,
     );
 }
@@ -422,7 +422,7 @@ pub inline fn transferGridEntries(self: *Pipeline, ctx: Context, offset: usize, 
     );
 }
 
-/// Transfer dielectric data to GPU
+/// Transfer bricks data to GPU
 pub inline fn transferBricks(self: *Pipeline, ctx: Context, offset: usize, bricks: []const GridState.Brick) !void {
     const buffer_offset = self.compute_pipeline.storage_offsets[6];
     try self.compute_pipeline.storage_buffer.transferToDevice(
@@ -433,7 +433,7 @@ pub inline fn transferBricks(self: *Pipeline, ctx: Context, offset: usize, brick
     );
 }
 
-/// Transfer dielectric data to GPU
+/// Transfer material index data to GPU
 pub inline fn transferMaterialIndices(self: *Pipeline, ctx: Context, offset: usize, material_indices: []const u8) !void {
     const buffer_offset = self.compute_pipeline.storage_offsets[7];
     try self.compute_pipeline.storage_buffer.transferToDevice(

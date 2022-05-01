@@ -28,22 +28,17 @@ pub const DeviceDataDelta = struct {
 
     pub fn resetDelta(self: *DeviceDataDelta) void {
         self.state = .inactive;
-        self.from = 0;
-        self.to = 0;
+        self.from = std.math.maxInt(usize);
+        self.to = std.math.minInt(usize);
     }
 
     pub fn registerDelta(self: *DeviceDataDelta, delta_index: usize) void {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        if (self.state == .active) {
-            self.from = std.math.min(self.from, delta_index);
-            self.to = std.math.max(self.to, delta_index + 1);
-        } else {
-            self.state = .active;
-            self.from = delta_index;
-            self.to = delta_index + 1;
-        }
+        self.state = .active;
+        self.from = std.math.min(self.from, delta_index);
+        self.to = std.math.max(self.to, delta_index + 1);
     }
 
     /// register a delta range
@@ -51,14 +46,9 @@ pub const DeviceDataDelta = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        if (self.state == .active) {
-            self.from = std.math.min(self.from, from);
-            self.to = std.math.max(self.to, to + 1);
-        } else {
-            self.state = .active;
-            self.from = from;
-            self.to = to + 1;
-        }
+        self.state = .active;
+        self.from = std.math.min(self.from, from);
+        self.to = std.math.max(self.to, to + 1);
     }
 };
 
