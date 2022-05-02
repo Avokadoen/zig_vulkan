@@ -178,22 +178,26 @@ fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.Phys
 pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
 
     // merge indices if they are identical according to vulkan spec
-    const family_indices: []const u32 = blk: {
-        if (ctx.queue_indices.graphics != ctx.queue_indices.present) {
-            break :blk &[_]u32{ ctx.queue_indices.graphics, ctx.queue_indices.present };
-        }
-        break :blk &[_]u32{ctx.queue_indices.graphics};
-    };
+    var family_indices = [3]u32{ ctx.queue_indices.graphics, undefined, undefined };
+    var indices: usize = 1;
+    if (ctx.queue_indices.graphics != ctx.queue_indices.present) {
+        family_indices[indices] = ctx.queue_indices.present;
+        indices += 1;
+    }
+    if (ctx.queue_indices.compute != ctx.queue_indices.graphics and ctx.queue_indices.compute != ctx.queue_indices.present) {
+        family_indices[indices] = ctx.queue_indices.compute;
+        indices += 1;
+    }
 
-    var queue_create_infos = try allocator.alloc(vk.DeviceQueueCreateInfo, family_indices.len);
+    var queue_create_infos = try allocator.alloc(vk.DeviceQueueCreateInfo, indices);
     defer allocator.free(queue_create_infos);
 
     const queue_priority = [_]f32{1.0};
-    for (family_indices) |family_index, i| {
+    for (family_indices[0..indices]) |family_index, i| {
         queue_create_infos[i] = .{
             .flags = .{},
             .queue_family_index = family_index,
-            .queue_count = 1,
+            .queue_count = if (family_index == ctx.queue_indices.compute) 4 else 1,
             .p_queue_priorities = &queue_priority,
         };
     }

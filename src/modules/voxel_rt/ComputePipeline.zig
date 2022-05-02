@@ -28,7 +28,11 @@ allocator: Allocator,
 pipeline_layout: vk.PipelineLayout,
 pipeline: *vk.Pipeline,
 
-command_buffer: vk.CommandBuffer,
+current_queue_buffer: usize,
+command_buffers: []vk.CommandBuffer,
+queues: []vk.Queue,
+complete_semaphores: []vk.Semaphore,
+complete_fences: []vk.Fence,
 
 // TODO: move this out?
 // compute pipelines *currently* should write to a texture
@@ -56,7 +60,9 @@ work_group_dim: extern struct {
 
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
-pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_texture: *const Texture, state_config: StateConfigs) !ComputePipeline {
+pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_path: []const u8, target_texture: *const Texture, state_config: StateConfigs) !ComputePipeline {
+    std.debug.assert(in_flight_count <= 4);
+
     var self: ComputePipeline = undefined;
     self.allocator = allocator;
     self.target_texture = target_texture;
@@ -70,6 +76,12 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
             .y = uniform_dim / 2,
         };
     };
+
+    self.queues = try allocator.alloc(vk.Queue, in_flight_count);
+    errdefer allocator.free(self.queues);
+    for (self.queues) |*queue, i| {
+        queue.* = ctx.vkd.getDeviceQueue(ctx.logical_device, ctx.queue_indices.compute, @intCast(u32, i));
+    }
 
     self.uniform_offsets = try allocator.alloc(vk.DeviceSize, state_config.uniform_sizes.len);
     errdefer allocator.free(self.uniform_offsets);
@@ -252,15 +264,13 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
             };
         }
 
-        // zig fmt: off
         ctx.vkd.updateDescriptorSets(
-            ctx.logical_device, 
-            @intCast(u32, write_descriptor_sets.len), 
+            ctx.logical_device,
+            @intCast(u32, write_descriptor_sets.len),
             @ptrCast([*]const vk.WriteDescriptorSet, write_descriptor_sets.ptr),
             0,
-            undefined
+            undefined,
         );
-        // zig fmt: on
     }
 
     self.pipeline_layout = blk: {
@@ -317,26 +327,62 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
     };
 
     // TODO: we need to rescale pipeline dispatch
-    self.command_buffer = try render.pipeline.createCmdBuffer(ctx, ctx.comp_cmd_pool);
-    errdefer ctx.vkd.freeCommandBuffers(ctx.logical_device, ctx.comp_cmd_pool, 1, @ptrCast([*]const vk.CommandBuffer, &command_buffer));
+    self.command_buffers = try render.pipeline.createCmdBuffers(allocator, ctx, ctx.comp_cmd_pool, in_flight_count, null);
+    errdefer {
+        ctx.vkd.freeCommandBuffers(
+            ctx.logical_device,
+            ctx.comp_cmd_pool,
+            @intCast(u32, self.command_buffers.len),
+            @ptrCast([*]const vk.CommandBuffer, self.command_buffers.ptr),
+        );
+        allocator.free(self.command_buffers);
+    }
 
-    // zig fmt: off
-    return ComputePipeline{ 
-        .allocator = self.allocator, 
-        .pipeline_layout = self.pipeline_layout, 
+    var semaphore_initialized: usize = 0;
+    const semaphore_info = vk.SemaphoreCreateInfo{ .flags = .{} };
+    self.complete_semaphores = try allocator.alloc(vk.Semaphore, in_flight_count);
+    errdefer allocator.free(self.complete_semaphores);
+    for (self.complete_semaphores) |*semaphore, i| {
+        semaphore.* = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
+        semaphore_initialized = i + 1;
+    }
+    errdefer {
+        var i: usize = 0;
+        while (i < semaphore_initialized) : (i += 1) {
+            ctx.vkd.destroySemaphore(ctx.logical_device, self.complete_semaphores[i], null);
+        }
+    }
+
+    const fence_info = vk.FenceCreateInfo{
+        .flags = .{
+            .signaled_bit = true,
+        },
+    };
+    self.complete_fences = try allocator.alloc(vk.Fence, in_flight_count);
+    errdefer allocator.free(self.complete_fences);
+    for (self.complete_fences) |*fence| {
+        fence.* = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
+    }
+
+    return ComputePipeline{
+        .allocator = self.allocator,
+        .pipeline_layout = self.pipeline_layout,
         .pipeline = self.pipeline,
-        .command_buffer = self.command_buffer, 
-        .target_texture = self.target_texture, 
-        .target_descriptor_layout = self.target_descriptor_layout, 
-        .target_descriptor_pool = self.target_descriptor_pool, 
-        .target_descriptor_set = self.target_descriptor_set, 
+        .current_queue_buffer = 0,
+        .command_buffers = self.command_buffers,
+        .queues = self.queues,
+        .complete_semaphores = self.complete_semaphores,
+        .complete_fences = self.complete_fences,
+        .target_texture = self.target_texture,
+        .target_descriptor_layout = self.target_descriptor_layout,
+        .target_descriptor_pool = self.target_descriptor_pool,
+        .target_descriptor_set = self.target_descriptor_set,
         .uniform_offsets = self.uniform_offsets,
         .storage_offsets = self.storage_offsets,
         .buffers = self.buffers,
         .staging_buffer = self.staging_buffer,
         .work_group_dim = self.work_group_dim,
     };
-    // zig fmt: on
 }
 
 /// transfer to device storage buffer
@@ -362,12 +408,38 @@ pub fn transferToUniform(self: *ComputePipeline, ctx: Context, offset: vk.Device
 }
 
 pub fn deinit(self: ComputePipeline, ctx: Context) void {
+    // wait for all fences
+    _ = ctx.vkd.waitForFences(
+        ctx.logical_device,
+        @intCast(u32, self.complete_fences.len),
+        self.complete_fences.ptr,
+        vk.TRUE,
+        std.math.maxInt(u64),
+    ) catch |err| std.debug.print("failed to wait for gfx fence, err: {any}", .{err});
+
     self.allocator.free(self.uniform_offsets);
     self.allocator.free(self.storage_offsets);
     self.buffers.deinit(ctx);
     self.staging_buffer.deinit(ctx);
 
-    ctx.vkd.freeCommandBuffers(ctx.logical_device, ctx.comp_cmd_pool, 1, @ptrCast([*]const vk.CommandBuffer, &self.command_buffer));
+    ctx.vkd.freeCommandBuffers(
+        ctx.logical_device,
+        ctx.comp_cmd_pool,
+        @intCast(u32, self.command_buffers.len),
+        @ptrCast([*]const vk.CommandBuffer, self.command_buffers.ptr),
+    );
+    self.allocator.free(self.command_buffers);
+
+    for (self.complete_semaphores) |semaphore| {
+        ctx.vkd.destroySemaphore(ctx.logical_device, semaphore, null);
+    }
+    self.allocator.free(self.complete_semaphores);
+    for (self.complete_fences) |fence| {
+        ctx.vkd.destroyFence(ctx.logical_device, fence, null);
+    }
+    self.allocator.free(self.complete_fences);
+    self.allocator.free(self.queues);
+
     ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
     ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.target_descriptor_pool, null);
 
@@ -377,7 +449,51 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
     self.allocator.destroy(self.pipeline);
 }
 
-pub fn recordCommandBuffers(self: ComputePipeline, ctx: Context, camera: Camera, sun: Sun) !void {
+pub inline fn dispatch(self: *ComputePipeline, ctx: Context, camera: Camera, sun: Sun) !vk.Semaphore {
+    {
+        const wait_compute_zone = tracy.ZoneN(@src(), "idle wait compute");
+        defer wait_compute_zone.End();
+
+        // wait for previous compute dispatch to complete
+        _ = try ctx.vkd.waitForFences(
+            ctx.logical_device,
+            1,
+            @ptrCast([*]const vk.Fence, &self.complete_fences[self.current_queue_buffer]),
+            vk.TRUE,
+            std.math.maxInt(u64),
+        );
+        try ctx.vkd.resetFences(
+            ctx.logical_device,
+            1,
+            @ptrCast([*]const vk.Fence, &self.complete_fences[self.current_queue_buffer]),
+        );
+    }
+
+    try self.recordCommandBuffer(ctx, self.current_queue_buffer, camera, sun);
+
+    const compute_complete_semaphore = self.complete_semaphores[self.current_queue_buffer];
+    // perform the compute ray tracing, draw to target texture
+    const compute_submit_info = vk.SubmitInfo{
+        .wait_semaphore_count = 0,
+        .p_wait_semaphores = undefined,
+        .p_wait_dst_stage_mask = undefined,
+        .command_buffer_count = 1,
+        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers[self.current_queue_buffer]),
+        .signal_semaphore_count = 1,
+        .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &compute_complete_semaphore),
+    };
+    try ctx.vkd.queueSubmit(
+        self.queues[self.current_queue_buffer],
+        1,
+        @ptrCast([*]const vk.SubmitInfo, &compute_submit_info),
+        self.complete_fences[self.current_queue_buffer],
+    );
+
+    self.current_queue_buffer = (self.current_queue_buffer + 1) % self.command_buffers.len;
+    return compute_complete_semaphore;
+}
+
+pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, index: usize, camera: Camera, sun: Sun) !void {
     const draw_zone = tracy.ZoneN(@src(), "compute record");
     defer draw_zone.End();
 
@@ -386,13 +502,13 @@ pub fn recordCommandBuffers(self: ComputePipeline, ctx: Context, camera: Camera,
         .p_inheritance_info = null,
     };
 
-    try ctx.vkd.beginCommandBuffer(self.command_buffer, &command_begin_info);
+    try ctx.vkd.beginCommandBuffer(self.command_buffers[index], &command_begin_info);
 
-    ctx.vkd.cmdBindPipeline(self.command_buffer, vk.PipelineBindPoint.compute, self.pipeline.*);
+    ctx.vkd.cmdBindPipeline(self.command_buffers[index], vk.PipelineBindPoint.compute, self.pipeline.*);
 
     // push camera data as a push constant
     ctx.vkd.cmdPushConstants(
-        self.command_buffer,
+        self.command_buffers[index],
         self.pipeline_layout,
         .{ .compute_bit = true },
         0,
@@ -402,7 +518,7 @@ pub fn recordCommandBuffers(self: ComputePipeline, ctx: Context, camera: Camera,
 
     // push sun data as a push constant
     ctx.vkd.cmdPushConstants(
-        self.command_buffer,
+        self.command_buffers[index],
         self.pipeline_layout,
         .{ .compute_bit = true },
         @sizeOf(Camera.Device),
@@ -412,7 +528,7 @@ pub fn recordCommandBuffers(self: ComputePipeline, ctx: Context, camera: Camera,
 
     // bind target texture
     ctx.vkd.cmdBindDescriptorSets(
-        self.command_buffer,
+        self.command_buffers[index],
         .compute,
         self.pipeline_layout,
         0,
@@ -426,6 +542,6 @@ pub fn recordCommandBuffers(self: ComputePipeline, ctx: Context, camera: Camera,
     const x_dispatch = @ceil(@intToFloat(f32, img_width) / @intToFloat(f32, self.work_group_dim.x));
     const y_dispatch = @ceil(@intToFloat(f32, img_height) / @intToFloat(f32, self.work_group_dim.y));
 
-    ctx.vkd.cmdDispatch(self.command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
-    try ctx.vkd.endCommandBuffer(self.command_buffer);
+    ctx.vkd.cmdDispatch(self.command_buffers[index], @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
+    try ctx.vkd.endCommandBuffer(self.command_buffers[index]);
 }

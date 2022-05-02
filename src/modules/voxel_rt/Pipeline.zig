@@ -28,6 +28,7 @@ pub const Config = struct {
     metal_buffer: u64 = 256,
     dielectric_buffer: u64 = 256,
 
+    in_flight_compute: usize = 2,
     gfx_pipeline_config: GraphicsPipeline.Config = .{},
 };
 
@@ -46,9 +47,6 @@ target_texture: *Texture,
 swapchain: render.swapchain.Data,
 render_pass: vk.RenderPass,
 render_pass_begin_info: vk.RenderPassBeginInfo,
-
-compute_complete_semaphore: vk.Semaphore,
-compute_complete_fence: vk.Fence,
 
 present_complete_semaphore: vk.Semaphore,
 render_complete_semaphore: vk.Semaphore,
@@ -97,8 +95,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     errdefer ctx.destroyRenderPass(render_pass);
 
     const semaphore_info = vk.SemaphoreCreateInfo{ .flags = .{} };
-    const compute_complete_semaphore = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
-    errdefer ctx.vkd.destroySemaphore(ctx.logical_device, compute_complete_semaphore, null);
     const present_complete_semaphore = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
     errdefer ctx.vkd.destroySemaphore(ctx.logical_device, present_complete_semaphore, null);
     const render_complete_semaphore = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
@@ -109,7 +105,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
             .signaled_bit = true,
         },
     };
-    const compute_complete_fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
     const render_complete_fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
 
     var compute_pipeline = blk: {
@@ -128,15 +123,16 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         };
         const state_configs = ComputePipeline.StateConfigs{ .uniform_sizes = uniform_sizes[0..], .storage_sizes = storage_sizes[0..] };
 
-        break :blk try ComputePipeline.init(allocator, ctx, "brick_raytracer.comp.spv", target_texture, state_configs);
+        break :blk try ComputePipeline.init(allocator, ctx, config.in_flight_compute, "brick_raytracer.comp.spv", target_texture, state_configs);
     };
     errdefer compute_pipeline.deinit(ctx);
 
-    try compute_pipeline.recordCommandBuffers(
-        ctx,
-        camera.*,
-        sun.*,
-    );
+    {
+        var i: usize = 0;
+        while (i < config.in_flight_compute) : (i += 1) {
+            try compute_pipeline.recordCommandBuffer(ctx, i, camera.*, sun.*);
+        }
+    }
 
     const gfx_pipeline = try GraphicsPipeline.init(allocator, ctx, swapchain, render_pass, target_texture, config.gfx_pipeline_config);
     errdefer gfx_pipeline.deinit(allocator, ctx);
@@ -174,8 +170,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .swapchain = swapchain,
         .render_pass = render_pass,
         .render_pass_begin_info = render_pass_begin_info,
-        .compute_complete_semaphore = compute_complete_semaphore,
-        .compute_complete_fence = compute_complete_fence,
         .present_complete_semaphore = present_complete_semaphore,
         .render_complete_semaphore = render_complete_semaphore,
         .render_complete_fence = render_complete_fence,
@@ -192,23 +186,13 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     _ = ctx.vkd.waitForFences(
         ctx.logical_device,
         1,
-        @ptrCast([*]const vk.Fence, &self.compute_complete_fence),
-        vk.TRUE,
-        std.math.maxInt(u64),
-    ) catch |err| std.debug.print("failed to wait for gfx fence, err: {any}", .{err});
-
-    _ = ctx.vkd.waitForFences(
-        ctx.logical_device,
-        1,
         @ptrCast([*]const vk.Fence, &self.render_complete_fence),
         vk.TRUE,
         std.math.maxInt(u64),
     ) catch |err| std.debug.print("failed to wait for compute fence, err: {any}", .{err});
 
-    ctx.vkd.destroySemaphore(ctx.logical_device, self.compute_complete_semaphore, null);
     ctx.vkd.destroySemaphore(ctx.logical_device, self.present_complete_semaphore, null);
     ctx.vkd.destroySemaphore(ctx.logical_device, self.render_complete_semaphore, null);
-    ctx.vkd.destroyFence(ctx.logical_device, self.compute_complete_fence, null);
     ctx.vkd.destroyFence(ctx.logical_device, self.render_complete_fence, null);
 
     self.imgui_pipeline.deinit(ctx);
@@ -225,28 +209,7 @@ pub inline fn draw(self: *Pipeline, ctx: Context) !void {
     const draw_zone = tracy.ZoneN(@src(), "draw");
     defer draw_zone.End();
 
-    {
-        const wait_compute_zone = tracy.ZoneN(@src(), "idle wait compute");
-        defer wait_compute_zone.End();
-
-        // wait for previous compute dispatch to complete
-        _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.compute_complete_fence), vk.TRUE, std.math.maxInt(u64));
-        try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.compute_complete_fence));
-    }
-
-    try self.compute_pipeline.recordCommandBuffers(ctx, self.camera.*, self.sun.*);
-
-    // perform the compute ray tracing, draw to target texture
-    const compute_submit_info = vk.SubmitInfo{
-        .wait_semaphore_count = 0,
-        .p_wait_semaphores = undefined,
-        .p_wait_dst_stage_mask = undefined,
-        .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.compute_pipeline.command_buffer),
-        .signal_semaphore_count = 1,
-        .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.compute_complete_semaphore),
-    };
-    try ctx.vkd.queueSubmit(ctx.compute_queue, 1, @ptrCast([*]const vk.SubmitInfo, &compute_submit_info), self.compute_complete_fence);
+    const compute_semaphore = try self.compute_pipeline.dispatch(ctx, self.camera.*, self.sun.*);
 
     const image_index = blk: {
         const aquired = ctx.vkd.acquireNextImageKHR(
@@ -295,7 +258,7 @@ pub inline fn draw(self: *Pipeline, ctx: Context) !void {
     try self.recordCommandBuffer(ctx, image_index, &begin_info);
 
     const stage_masks = [_]vk.PipelineStageFlags{ .{ .vertex_input_bit = true }, .{ .color_attachment_output_bit = true } };
-    const wait_semaphores = [stage_masks.len]vk.Semaphore{ self.compute_complete_semaphore, self.present_complete_semaphore };
+    const wait_semaphores = [stage_masks.len]vk.Semaphore{ compute_semaphore, self.present_complete_semaphore };
     const render_submit_info = vk.SubmitInfo{
         .wait_semaphore_count = wait_semaphores.len,
         .p_wait_semaphores = &wait_semaphores,
@@ -467,8 +430,13 @@ fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
 
     // Wait for pipeline to become idle
     {
-        // wait for previous compute dispatch to complete
-        _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.compute_complete_fence), vk.TRUE, std.math.maxInt(u64));
+        _ = ctx.vkd.waitForFences(
+            ctx.logical_device,
+            @intCast(u32, self.compute_pipeline.complete_fences.len),
+            self.compute_pipeline.complete_fences.ptr,
+            vk.TRUE,
+            std.math.maxInt(u64),
+        ) catch |err| std.debug.print("failed to wait for compute fences, err: {any}", .{err});
         // wait for previous texture draw before updating buffers and command buffers
         _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
     }
