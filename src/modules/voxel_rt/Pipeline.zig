@@ -161,6 +161,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .gfx_pipeline_shader_constants = gfx_pipeline.shader_constants,
     };
     const gui = ImguiGui.init(
+        ctx,
         @intToFloat(f32, swapchain.extent.width),
         @intToFloat(f32, swapchain.extent.height),
         state_binding,

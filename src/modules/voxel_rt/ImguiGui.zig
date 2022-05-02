@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const imgui = @import("imgui");
+const vk = @import("vulkan");
 
 const render = @import("../render.zig");
 const Context = render.Context;
@@ -42,9 +43,11 @@ metrics_window_active: bool,
 post_process_window_active: bool,
 sun_window_active: bool,
 
+device_properties: vk.PhysicalDeviceProperties,
+
 metrics_state: MetricState,
 
-pub fn init(gui_width: f32, gui_height: f32, state_binding: StateBinding, config: Config) ImguiGui {
+pub fn init(ctx: Context, gui_width: f32, gui_height: f32, state_binding: StateBinding, config: Config) ImguiGui {
     // Color scheme
     const style = imgui.igGetStyle();
     style.Colors[imgui.ImGuiCol_TitleBg] = imgui.ImVec4{ .x = 0.1, .y = 0.1, .z = 0.1, .w = 0.85 };
@@ -64,7 +67,7 @@ pub fn init(gui_width: f32, gui_height: f32, state_binding: StateBinding, config
         .metrics_window_active = config.metrics_window_active,
         .post_process_window_active = config.post_process_window_active,
         .sun_window_active = config.sun_window_active,
-
+        .device_properties = ctx.getPhysicalDeviceProperties(),
         .metrics_state = .{
             .update_frame_timings = config.update_frame_timings,
             .prev_frame_ts = std.time.nanoTimestamp(),
@@ -190,6 +193,8 @@ inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
     const early_exit = imgui.igBegin("Metrics", &self.metrics_window_active, imgui.ImGuiWindowFlags_None) == false;
     defer imgui.igEnd();
     if (early_exit) return;
+
+    imgui.igTextUnformatted(self.device_properties.device_name[0..], null);
 
     imgui.igPlotLinesFloatPtr(
         "Frame times",
