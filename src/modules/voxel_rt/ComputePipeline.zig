@@ -45,6 +45,11 @@ buffers: GpuBufferMemory,
 // intermediate buffer for storage and uniform buffers
 staging_buffer: GpuBufferMemory,
 
+work_group_dim: extern struct {
+    x: u32,
+    y: u32,
+},
+
 // TODO: descriptor has a lot of duplicate code with init ...
 // TODO: refactor descriptor stuff to be configurable (loop array of config objects for buffer stuff)
 // TODO: correctness if init fail, clean up resources created with errdefer
@@ -55,6 +60,16 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
     var self: ComputePipeline = undefined;
     self.allocator = allocator;
     self.target_texture = target_texture;
+
+    self.work_group_dim = blk: {
+        const device_properties = ctx.getPhysicalDeviceProperties();
+        const dim_size = device_properties.limits.max_compute_work_group_invocations;
+        const uniform_dim = @floatToInt(u32, @floor(@sqrt(@intToFloat(f64, dim_size))));
+        break :blk .{
+            .x = uniform_dim,
+            .y = uniform_dim,
+        };
+    };
 
     self.uniform_offsets = try allocator.alloc(vk.DeviceSize, state_config.uniform_sizes.len);
     errdefer allocator.free(self.uniform_offsets);
@@ -265,7 +280,30 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
         break :blk try ctx.createPipelineLayout(pipeline_layout_info);
     };
     self.pipeline = blk: {
-        const stage = try render.pipeline.loadShaderStage(ctx, allocator, null, shader_path, .{ .compute_bit = true });
+        const SpecType = @TypeOf(self.work_group_dim);
+        const spec_map = [_]vk.SpecializationMapEntry{ .{
+            .constant_id = 0,
+            .offset = @offsetOf(SpecType, "x"),
+            .size = @sizeOf(u32),
+        }, .{
+            .constant_id = 1,
+            .offset = @offsetOf(SpecType, "y"),
+            .size = @sizeOf(u32),
+        } };
+        const specialization = vk.SpecializationInfo{
+            .map_entry_count = spec_map.len,
+            .p_map_entries = &spec_map,
+            .data_size = @sizeOf(SpecType),
+            .p_data = @ptrCast(*const anyopaque, &self.work_group_dim),
+        };
+        const stage = try render.pipeline.loadShaderStage(
+            ctx,
+            allocator,
+            null,
+            shader_path,
+            .{ .compute_bit = true },
+            @ptrCast(?*const vk.SpecializationInfo, &specialization),
+        );
         defer ctx.destroyShaderModule(stage.module);
 
         // TOOD: read on defer_compile_bit_nv
@@ -374,20 +412,20 @@ pub fn recordCommandBuffers(self: ComputePipeline, ctx: Context, camera: Camera,
     );
 
     // bind target texture
-    ctx.vkd.cmdBindDescriptorSets(self.command_buffer, .compute, self.pipeline_layout, 0, 1, @ptrCast([*]const vk.DescriptorSet, &self.target_descriptor_set), 0, undefined);
-    // zig fmt: on
-    // TODO: allow varying local thread size, error if x_ or y_ dispatch have decimal values
-    // compute shader has 16 thread in x and y, we calculate inverse at compile time
-    const local_thread_factor_x: f32 = comptime blk: {
-        break :blk 1.0 / 32.0;
-    };
-    const local_thread_factor_y: f32 = comptime blk: {
-        break :blk 1.0 / 32.0;
-    };
+    ctx.vkd.cmdBindDescriptorSets(
+        self.command_buffer,
+        .compute,
+        self.pipeline_layout,
+        0,
+        1,
+        @ptrCast([*]const vk.DescriptorSet, &self.target_descriptor_set),
+        0,
+        undefined,
+    );
     const img_width = self.target_texture.image_extent.width;
     const img_height = self.target_texture.image_extent.height;
-    const x_dispatch = @ceil(@intToFloat(f32, img_width) * local_thread_factor_x);
-    const y_dispatch = @ceil(@intToFloat(f32, img_height) * local_thread_factor_y);
+    const x_dispatch = @ceil(@intToFloat(f32, img_width) / @intToFloat(f32, self.work_group_dim.x));
+    const y_dispatch = @ceil(@intToFloat(f32, img_height) / @intToFloat(f32, self.work_group_dim.y));
 
     ctx.vkd.cmdDispatch(self.command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
     try ctx.vkd.endCommandBuffer(self.command_buffer);

@@ -259,6 +259,10 @@ pub fn destroyPipeline(self: Context, pipeline: *vk.Pipeline) void {
     self.vkd.destroyPipeline(self.logical_device, pipeline.*, null);
 }
 
+pub fn getPhysicalDeviceProperties(self: Context) vk.PhysicalDeviceProperties {
+    return self.vki.getPhysicalDeviceProperties(self.physical_device);
+}
+
 /// caller must destroy returned render pass
 pub fn createRenderPass(self: Context, format: vk.Format) !vk.RenderPass {
     const color_attachment = [_]vk.AttachmentDescription{

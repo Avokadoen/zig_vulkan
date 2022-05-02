@@ -348,9 +348,9 @@ pub fn init(ctx: Context, allocator: Allocator, render_pass: vk.RenderPass, swap
         .p_dynamic_states = &dynamic_state_enabled,
     };
 
-    const vert = try render.pipeline.loadShaderStage(ctx, allocator, null, "ui.vert.spv", .{ .vertex_bit = true });
+    const vert = try render.pipeline.loadShaderStage(ctx, allocator, null, "ui.vert.spv", .{ .vertex_bit = true }, null);
     errdefer ctx.vkd.destroyShaderModule(ctx.logical_device, vert.module, null);
-    const frag = try render.pipeline.loadShaderStage(ctx, allocator, null, "ui.frag.spv", .{ .fragment_bit = true });
+    const frag = try render.pipeline.loadShaderStage(ctx, allocator, null, "ui.frag.spv", .{ .fragment_bit = true }, null);
     errdefer ctx.vkd.destroyShaderModule(ctx.logical_device, frag.module, null);
     const shader_stages = [_]vk.PipelineShaderStageCreateInfo{ vert, frag };
 

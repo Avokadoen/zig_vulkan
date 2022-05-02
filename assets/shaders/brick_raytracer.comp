@@ -7,7 +7,7 @@
 #extension GL_GOOGLE_include_directive : enable
 #include "rand.comp"
 
-layout(local_size_x = 32, local_size_y = 32) in;
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z = 1) in;
 layout(Rgba8, binding = 0) uniform writeonly image2D img_output;
 
 #define MAX_BOUNCES 32
@@ -41,7 +41,6 @@ struct Ray {
     // TODO: Bitmask instead of single ignore value.
     //       Refactor needed to make material types 1, 2, 3 instead of 0, 1, 2
     uint material_ignore;
-    vec3 color;
 };
 Ray CreateRay(vec3 origin, vec3 direction);
 vec3 RayAt(Ray r, float t);
@@ -216,15 +215,13 @@ void main() {
 Ray CreateRay(vec3 origin, vec3 direction) {
     const float internal_reflection = 1.0;
     const uint material_ignore_mask = IGNORE_MAT_NONE;
-    const vec3 color = vec3(1.0);
-    return Ray(origin, normalize(direction), internal_reflection, material_ignore_mask, color);
+    return Ray(origin, normalize(direction), internal_reflection, material_ignore_mask);
 }
 
 Ray CreateShadowRay(vec3 origin, vec3 direction) {
     const float internal_reflection = 1.0;
     const uint material_ignore_mask = (push_constant.sun_enabled > 0) ? IGNORE_MAT_NONE : IGNORE_MAT_DIELECTRIC;
-    const vec3 color = vec3(1.0);
-    return Ray(origin, normalize(direction), internal_reflection, material_ignore_mask, color);
+    return Ray(origin, normalize(direction), internal_reflection, material_ignore_mask);
 }
 
 vec3 RayAt(Ray r, float t) {

@@ -30,7 +30,14 @@ pub fn createFramebuffers(allocator: Allocator, ctx: Context, swapchain_data: *c
     return framebuffers;
 }
 
-pub fn loadShaderStage(ctx: Context, allocator: Allocator, exe_path: ?[]const u8, file_name: []const u8, stage: vk.ShaderStageFlags) !vk.PipelineShaderStageCreateInfo {
+pub fn loadShaderStage(
+    ctx: Context,
+    allocator: Allocator,
+    exe_path: ?[]const u8,
+    file_name: []const u8,
+    stage: vk.ShaderStageFlags,
+    specialization: ?*const vk.SpecializationInfo,
+) !vk.PipelineShaderStageCreateInfo {
     var x_path: []const u8 = undefined;
     var free_x_path: bool = undefined;
     if (exe_path) |some| {
@@ -62,7 +69,7 @@ pub fn loadShaderStage(ctx: Context, allocator: Allocator, exe_path: ?[]const u8
         .stage = stage,
         .module = module,
         .p_name = "main",
-        .p_specialization_info = null,
+        .p_specialization_info = specialization,
     };
 }
 
