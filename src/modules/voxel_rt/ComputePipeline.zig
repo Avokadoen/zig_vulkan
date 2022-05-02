@@ -67,7 +67,7 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
         const uniform_dim = @floatToInt(u32, @floor(@sqrt(@intToFloat(f64, dim_size))));
         break :blk .{
             .x = uniform_dim,
-            .y = uniform_dim,
+            .y = uniform_dim / 2,
         };
     };
 
