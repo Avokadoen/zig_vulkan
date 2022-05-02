@@ -39,10 +39,11 @@ target_descriptor_set: vk.DescriptorSet,
 
 // TODO: should be a slice or list. When the sum of a buffer size is greater than 250mb, we create a new buffer
 uniform_offsets: []vk.DeviceSize,
-uniform_buffer: GpuBufferMemory,
-
 storage_offsets: []vk.DeviceSize,
-storage_buffer: GpuBufferMemory,
+buffers: GpuBufferMemory,
+
+// intermediate buffer for storage and uniform buffers
+staging_buffer: GpuBufferMemory,
 
 // TODO: descriptor has a lot of duplicate code with init ...
 // TODO: refactor descriptor stuff to be configurable (loop array of config objects for buffer stuff)
@@ -55,38 +56,40 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
     self.allocator = allocator;
     self.target_texture = target_texture;
 
-    // TODO: descriptor set creation: one single for loop for each config instead of one for loop for each type
-    {
-        self.uniform_offsets = try allocator.alloc(vk.DeviceSize, state_config.uniform_sizes.len);
-        errdefer allocator.free(self.uniform_offsets);
-        var uniform_memory_size: u64 = 0;
-        for (state_config.uniform_sizes) |size, i| {
-            self.uniform_offsets[i] = uniform_memory_size;
-            uniform_memory_size += size;
-        }
-        self.uniform_buffer = try GpuBufferMemory.init(
-            ctx,
-            @intCast(vk.DeviceSize, uniform_memory_size),
-            .{ .uniform_buffer_bit = true },
-            .{ .host_visible_bit = true, .device_local_bit = true },
-        );
-    }
+    self.uniform_offsets = try allocator.alloc(vk.DeviceSize, state_config.uniform_sizes.len);
+    errdefer allocator.free(self.uniform_offsets);
+    self.storage_offsets = try allocator.alloc(vk.DeviceSize, state_config.storage_sizes.len);
+    errdefer allocator.free(self.storage_offsets);
 
-    {
-        self.storage_offsets = try allocator.alloc(vk.DeviceSize, state_config.storage_sizes.len);
-        errdefer allocator.free(self.storage_offsets);
-        var storage_memory_size: u64 = 0;
-        for (state_config.storage_sizes) |size, i| {
-            self.storage_offsets[i] = storage_memory_size;
-            storage_memory_size += size;
-        }
-        self.storage_buffer = try GpuBufferMemory.init(
-            ctx,
-            @intCast(vk.DeviceSize, storage_memory_size),
-            .{ .storage_buffer_bit = true },
-            .{ .host_visible_bit = true, .device_local_bit = true },
-        );
+    var staging_buffer_size: u64 = 0;
+    var uniform_memory_size: u64 = 0;
+    for (state_config.uniform_sizes) |size, i| {
+        self.uniform_offsets[i] = uniform_memory_size;
+        uniform_memory_size += size;
+        staging_buffer_size = std.math.max(staging_buffer_size, size);
     }
+    var storage_memory_size: u64 = 0;
+    for (state_config.storage_sizes) |size, i| {
+        self.storage_offsets[i] = storage_memory_size + uniform_memory_size;
+        storage_memory_size += size;
+        staging_buffer_size = std.math.max(staging_buffer_size, size);
+    }
+    self.buffers = try GpuBufferMemory.init(
+        ctx,
+        @intCast(vk.DeviceSize, storage_memory_size),
+        .{ .storage_buffer_bit = true, .uniform_buffer_bit = true, .transfer_dst_bit = true },
+        .{ .device_local_bit = true },
+    );
+
+    // TODO: limit size, don't need to be as big as other buffers ...
+    self.staging_buffer = try GpuBufferMemory.init(
+        ctx,
+        // Do not keep as big of a buffer in memory
+        @intCast(vk.DeviceSize, staging_buffer_size),
+        .{ .transfer_src_bit = true },
+        .{ .host_visible_bit = true },
+    );
+    errdefer self.staging_buffer.deinit(ctx);
 
     const set_count = 1 + state_config.uniform_sizes.len + state_config.storage_sizes.len;
     const layout_bindings = try allocator.alloc(vk.DescriptorSetLayoutBinding, set_count);
@@ -198,7 +201,7 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
 
         for (state_config.uniform_sizes) |size, i| {
             buffer_infos[i] = vk.DescriptorBufferInfo{
-                .buffer = self.uniform_buffer.buffer,
+                .buffer = self.buffers.buffer,
                 .offset = self.uniform_offsets[i],
                 .range = size,
             };
@@ -219,7 +222,7 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
             const index = 1 + state_config.uniform_sizes.len + i;
             // descriptor for buffer info
             buffer_infos[index - 1] = vk.DescriptorBufferInfo{
-                .buffer = self.storage_buffer.buffer,
+                .buffer = self.buffers.buffer,
                 .offset = self.storage_offsets[i],
                 .range = size,
             };
@@ -291,18 +294,41 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
         .target_descriptor_pool = self.target_descriptor_pool, 
         .target_descriptor_set = self.target_descriptor_set, 
         .uniform_offsets = self.uniform_offsets,
-        .uniform_buffer = self.uniform_buffer,
         .storage_offsets = self.storage_offsets,
-        .storage_buffer = self.storage_buffer,
+        .buffers = self.buffers,
+        .staging_buffer = self.staging_buffer,
+        .work_group_dim = self.work_group_dim,
     };
     // zig fmt: on
+}
+
+/// transfer to device storage buffer
+pub fn transferToStorage(self: *ComputePipeline, ctx: Context, offset: vk.DeviceSize, comptime T: type, data: []const T) !void {
+    try self.staging_buffer.transferToDevice(ctx, T, 0, data);
+    const copy_config = .{
+        .src_offset = 0,
+        .dst_offset = offset,
+        .size = data.len * @sizeOf(T),
+    };
+    try self.staging_buffer.copy(ctx, &self.buffers, ctx.gfx_cmd_pool, copy_config);
+}
+
+/// transfer to device storage buffer
+pub fn transferToUniform(self: *ComputePipeline, ctx: Context, offset: vk.DeviceSize, comptime T: type, data: []const T) !void {
+    try self.staging_buffer.transferToDevice(ctx, T, 0, data);
+    const copy_config = .{
+        .src_offset = 0,
+        .dst_offset = offset,
+        .size = data.len * @sizeOf(T),
+    };
+    try self.staging_buffer.copy(ctx, &self.buffers, ctx.gfx_cmd_pool, copy_config);
 }
 
 pub fn deinit(self: ComputePipeline, ctx: Context) void {
     self.allocator.free(self.uniform_offsets);
     self.allocator.free(self.storage_offsets);
-    self.uniform_buffer.deinit(ctx);
-    self.storage_buffer.deinit(ctx);
+    self.buffers.deinit(ctx);
+    self.staging_buffer.deinit(ctx);
 
     ctx.vkd.freeCommandBuffers(ctx.logical_device, ctx.comp_cmd_pool, 1, @ptrCast([*]const vk.CommandBuffer, &self.command_buffer));
     ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);

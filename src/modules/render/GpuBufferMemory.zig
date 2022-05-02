@@ -37,7 +37,7 @@ pub fn init(ctx: Context, size: vk.DeviceSize, buf_usage_flags: vk.BufferUsageFl
             .flags = .{},
             .size = size,
             .usage = buf_usage_flags,
-            .sharing_mode = .exclusive, // TODO: look into concurrent mode!
+            .sharing_mode = .exclusive,
             .queue_family_index_count = 0,
             .p_queue_family_indices = undefined,
         };
@@ -67,16 +67,20 @@ pub fn init(ctx: Context, size: vk.DeviceSize, buf_usage_flags: vk.BufferUsageFl
     };
 }
 
-pub fn copy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, size: vk.DeviceSize, command_pool: vk.CommandPool) !void {
+pub const CopyConfig = struct {
+    src_offset: vk.DeviceSize = 0,
+    dst_offset: vk.DeviceSize = 0,
+    size: vk.DeviceSize = 0,
+};
+pub fn copy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, command_pool: vk.CommandPool, config: CopyConfig) !void {
     const command_buffer = try vk_utils.beginOneTimeCommandBuffer(ctx, command_pool);
     var copy_region = vk.BufferCopy{
-        .src_offset = 0,
-        .dst_offset = 0,
-        .size = size,
+        .src_offset = config.src_offset,
+        .dst_offset = config.dst_offset,
+        .size = config.size,
     };
     ctx.vkd.cmdCopyBuffer(command_buffer, self.buffer, into.buffer, 1, @ptrCast([*]vk.BufferCopy, &copy_region));
     try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, command_buffer);
-    into.len += self.len;
 }
 
 /// Transfer data from host to device
