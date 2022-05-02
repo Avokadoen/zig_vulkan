@@ -77,21 +77,20 @@ pub fn init(allocator: Allocator, ctx: Context, shader_path: []const u8, target_
     errdefer allocator.free(self.storage_offsets);
 
     var staging_buffer_size: u64 = 0;
-    var uniform_memory_size: u64 = 0;
+    var buffer_size: u64 = 0;
     for (state_config.uniform_sizes) |size, i| {
-        self.uniform_offsets[i] = uniform_memory_size;
-        uniform_memory_size += size;
+        self.uniform_offsets[i] = buffer_size;
+        buffer_size += size;
         staging_buffer_size = std.math.max(staging_buffer_size, size);
     }
-    var storage_memory_size: u64 = 0;
     for (state_config.storage_sizes) |size, i| {
-        self.storage_offsets[i] = storage_memory_size + uniform_memory_size;
-        storage_memory_size += size;
+        self.storage_offsets[i] = buffer_size;
+        buffer_size += size;
         staging_buffer_size = std.math.max(staging_buffer_size, size);
     }
     self.buffers = try GpuBufferMemory.init(
         ctx,
-        @intCast(vk.DeviceSize, storage_memory_size),
+        @intCast(vk.DeviceSize, buffer_size),
         .{ .storage_buffer_bit = true, .uniform_buffer_bit = true, .transfer_dst_bit = true },
         .{ .device_local_bit = true },
     );
