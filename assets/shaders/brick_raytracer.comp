@@ -12,6 +12,7 @@ layout(Rgba8, binding = 0) uniform writeonly image2D img_output;
 
 #define MAX_BOUNCES 32
 #define BIG_NUMBER 1e30
+#define AMBIENT vec3(0.005)
  
 // Constants
 const int MAT_LAMBERTIAN = 0;
@@ -293,7 +294,7 @@ vec3 RayColor(Ray r) {
                 emits[loop_count-1] = attenuation * push_constant.sun_color;
             } else {
                 // cheat and apply some ambient :)
-                emits[loop_count-1] = attenuation * vec3(0.01);
+                emits[loop_count-1] = attenuation * AMBIENT;
             }
         }
         if (!result) {
@@ -446,16 +447,14 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
     // float specification IEEE 754 (division by 0 is defined as resulting in infinity value)
     const vec3 delta = abs(inv_ray_dir);
 
-    const bvec3 bool_dir_less_than = bvec3(
+    const bvec3 less_than = bvec3(
         r.direction.x < 0,
         r.direction.y < 0,
         r.direction.z < 0        
     );
-    const vec3 dir_less_than = vec3(bool_dir_less_than);
-    const vec3 not_dir_less_than = vec3(not(bool_dir_less_than));
-    ivec3 pos_step = ivec3(1) + ivec3(bool_dir_less_than) * ivec3(-2);
-    vec3 axis_a = fposition * dir_less_than + (vec3(position) + vec3(1)) * not_dir_less_than;
-    vec3 axis_b = vec3(position) * dir_less_than + fposition * not_dir_less_than;
+    const ivec3 pos_step = ivec3(1) + ivec3(less_than) * ivec3(-2);
+    vec3 axis_a = fma(fposition, vec3(less_than), (vec3(position) + vec3(1)) * vec3(not(less_than)));
+    vec3 axis_b = fma(vec3(position), vec3(less_than), fposition * vec3(not(less_than)));
     vec3 axis_t = (axis_a - axis_b) * delta;
 
     // DDA loop
@@ -502,19 +501,15 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
     const vec3 fposition = (RayAt(r, hit.t + 0.0001) - brick_position) * 8;
     vec3 position = vec3(floor(fposition));
 
-    const vec3 one = vec3(1);
-    const bvec3 bool_dir_less_than = bvec3(
+    const bvec3 less_than = bvec3(
         r.direction.x < 0,
         r.direction.y < 0,
         r.direction.z < 0        
     );
-    const vec3 dir_less_than = vec3(bool_dir_less_than);
-    const vec3 not_dir_less_than = vec3(not(bool_dir_less_than));
-    vec3 pos_step = one + dir_less_than * vec3(-2);
-    vec3 axis_a = fposition * dir_less_than + (position + one) * not_dir_less_than;
-    vec3 axis_b = position * dir_less_than + fposition * not_dir_less_than;
+    const ivec3 pos_step = ivec3(1) + ivec3(less_than) * ivec3(-2);
+    vec3 axis_a = fma(fposition, vec3(less_than), (vec3(position) + vec3(1)) * vec3(not(less_than)));
+    vec3 axis_b = fma(vec3(position), vec3(less_than), fposition * vec3(not(less_than)));
     vec3 axis_t = (axis_a - axis_b) * delta;
-
     // DDA loop
     // TODO:  && t_value <= t_max
     vec3 axis = vec3(0);
@@ -703,7 +698,7 @@ bool ScatterDielectric(Material material, Ray r_in, vec3 hit_c_min, HitRecord hi
             float t_max = 9999.0;
             HitRecord c_hit = hit;
             const vec3 inv_ray_dir = 1 / r_in.direction;
-            AdvIntersect(hit_c_min, hit_c_min + vec3(0.125), scattered, inv_ray_dir, 0.0, t_max, c_hit);
+            AdvIntersect(hit_c_min - vec3(0.001), hit_c_min + vec3(0.126), scattered, inv_ray_dir, 0.0, t_max, c_hit);
             scattered = CreateRay(RayAt(scattered, t_max), scattered.direction);
         }
         // ray is traveling through non air medium
