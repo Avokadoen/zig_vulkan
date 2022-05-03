@@ -107,13 +107,16 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
         .{ .device_local_bit = true },
     );
 
+    // staging buffers are suggested to remain smaller than 64mb: https://gpuopen.com/learn/vulkan-device-memory/
+    const @"64mb" = 67_108_864;
+    staging_buffer_size = std.math.min(staging_buffer_size, @"64mb");
     // TODO: limit size, don't need to be as big as other buffers ...
     self.staging_buffer = try GpuBufferMemory.init(
         ctx,
         // Do not keep as big of a buffer in memory
         @intCast(vk.DeviceSize, staging_buffer_size),
         .{ .transfer_src_bit = true },
-        .{ .host_visible_bit = true },
+        .{ .host_visible_bit = true, .host_coherent_bit = true, .device_local_bit = true },
     );
     errdefer self.staging_buffer.deinit(ctx);
 
@@ -267,7 +270,7 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
         ctx.vkd.updateDescriptorSets(
             ctx.logical_device,
             @intCast(u32, write_descriptor_sets.len),
-            @ptrCast([*]const vk.WriteDescriptorSet, write_descriptor_sets.ptr),
+            write_descriptor_sets.ptr,
             0,
             undefined,
         );
