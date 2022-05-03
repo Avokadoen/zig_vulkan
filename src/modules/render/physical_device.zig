@@ -13,6 +13,7 @@ const Context = @import("Context.zig");
 
 pub const QueueFamilyIndices = struct {
     compute: u32,
+    compute_queue_count: u32,
     graphics: u32,
     present: u32,
 
@@ -36,12 +37,14 @@ pub const QueueFamilyIndices = struct {
         };
 
         var compute_index: ?u32 = null;
+        var compute_queue_count: u32 = 0;
         var graphics_index: ?u32 = null;
         var present_index: ?u32 = null;
         for (queue_families) |queue_family, i| {
             const index = @intCast(u32, i);
             if (compute_index == null and queue_family.queue_flags.contains(compute_bit)) {
                 compute_index = index;
+                compute_queue_count = queue_family.queue_count;
             }
             if (graphics_index == null and queue_family.queue_flags.contains(graphics_bit)) {
                 graphics_index = index;
@@ -63,6 +66,7 @@ pub const QueueFamilyIndices = struct {
 
         return QueueFamilyIndices{
             .compute = compute_index.?,
+            .compute_queue_count = compute_queue_count,
             .graphics = graphics_index.?,
             .present = present_index.?,
         };
@@ -197,13 +201,11 @@ pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
         queue_create_infos[i] = .{
             .flags = .{},
             .queue_family_index = family_index,
-            .queue_count = if (family_index == ctx.queue_indices.compute) 4 else 1,
+            .queue_count = if (family_index == ctx.queue_indices.compute) ctx.queue_indices.compute_queue_count else 1,
             .p_queue_priorities = &queue_priority,
         };
     }
-
     const device_features = vk.PhysicalDeviceFeatures{};
-
     const validation_layer_info = try validation_layer.Info.init(allocator, ctx.vkb);
 
     const create_info = vk.DeviceCreateInfo{

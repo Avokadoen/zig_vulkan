@@ -61,7 +61,7 @@ work_group_dim: extern struct {
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
 pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_path: []const u8, target_texture: *const Texture, state_config: StateConfigs) !ComputePipeline {
-    std.debug.assert(in_flight_count <= 4);
+    std.debug.assert(in_flight_count <= ctx.queue_indices.compute_queue_count);
 
     var self: ComputePipeline = undefined;
     self.allocator = allocator;
