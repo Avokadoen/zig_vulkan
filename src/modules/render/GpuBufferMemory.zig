@@ -73,6 +73,8 @@ pub const CopyConfig = struct {
     size: vk.DeviceSize = 0,
 };
 pub fn copy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, command_pool: vk.CommandPool, config: CopyConfig) !void {
+    const copy_zone = tracy.ZoneN(@src(), "copy buffer");
+    defer copy_zone.End();
     const command_buffer = try vk_utils.beginOneTimeCommandBuffer(ctx, command_pool);
     var copy_region = vk.BufferCopy{
         .src_offset = config.src_offset,

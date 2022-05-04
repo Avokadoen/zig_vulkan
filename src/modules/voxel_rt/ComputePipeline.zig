@@ -390,6 +390,8 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
 
 /// transfer to device storage buffer
 pub fn transferToStorage(self: *ComputePipeline, ctx: Context, offset: vk.DeviceSize, comptime T: type, data: []const T) !void {
+    const transfer_zone = tracy.ZoneN(@src(), "transfer to storage stage");
+    defer transfer_zone.End();
     try self.staging_buffer.transferToDevice(ctx, T, 0, data);
     const copy_config = .{
         .src_offset = 0,
@@ -401,6 +403,8 @@ pub fn transferToStorage(self: *ComputePipeline, ctx: Context, offset: vk.Device
 
 /// transfer to device storage buffer
 pub fn transferToUniform(self: *ComputePipeline, ctx: Context, offset: vk.DeviceSize, comptime T: type, data: []const T) !void {
+    const transfer_zone = tracy.ZoneN(@src(), "transfer to unfiform stage");
+    defer transfer_zone.End();
     try self.staging_buffer.transferToDevice(ctx, T, 0, data);
     const copy_config = .{
         .src_offset = 0,
