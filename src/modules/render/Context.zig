@@ -37,9 +37,6 @@ non_coherent_atom_size: vk.DeviceSize,
 surface: vk.SurfaceKHR,
 queue_indices: QueueFamilyIndices,
 
-gfx_cmd_pool: vk.CommandPool,
-comp_cmd_pool: vk.CommandPool,
-
 // TODO: utilize comptime for this (emit from struct if we are in release mode)
 messenger: ?vk.DebugUtilsMessengerEXT,
 
@@ -159,26 +156,6 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
     self.graphics_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.graphics, 0);
     self.present_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.present, 0);
 
-    self.gfx_cmd_pool = blk: {
-        const pool_info = vk.CommandPoolCreateInfo{
-            .flags = .{
-                .reset_command_buffer_bit = true,
-            },
-            .queue_family_index = self.queue_indices.graphics,
-        };
-        break :blk try self.vkd.createCommandPool(self.logical_device, &pool_info, null);
-    };
-
-    self.comp_cmd_pool = blk: {
-        const pool_info = vk.CommandPoolCreateInfo{
-            .flags = .{
-                .reset_command_buffer_bit = true,
-            },
-            .queue_family_index = self.queue_indices.compute,
-        };
-        break :blk try self.vkd.createCommandPool(self.logical_device, &pool_info, null);
-    };
-
     self.non_coherent_atom_size = blk: {
         const device_properties = self.getPhysicalDeviceProperties();
         break :blk device_properties.limits.non_coherent_atom_size;
@@ -200,8 +177,6 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
         .non_coherent_atom_size = self.non_coherent_atom_size,
         .surface = self.surface,
         .queue_indices = self.queue_indices,
-        .gfx_cmd_pool = self.gfx_cmd_pool,
-        .comp_cmd_pool = self.comp_cmd_pool,
         .messenger = self.messenger,
         .window_ptr = window,
     };
@@ -340,9 +315,6 @@ pub fn destroyRenderPass(self: Context, render_pass: vk.RenderPass) void {
 }
 
 pub fn deinit(self: Context) void {
-    self.vkd.destroyCommandPool(self.logical_device, self.gfx_cmd_pool, null);
-    self.vkd.destroyCommandPool(self.logical_device, self.comp_cmd_pool, null);
-
     self.vki.destroySurfaceKHR(self.instance, self.surface, null);
     self.vkd.destroyDevice(self.logical_device, null);
 

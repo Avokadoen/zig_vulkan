@@ -47,7 +47,7 @@ pub const Data = struct {
     support_details: SupportDetails,
 
     // create a swapchain data struct, caller must make sure to call deinit
-    pub fn init(allocator: Allocator, ctx: Context, old_swapchain: ?vk.SwapchainKHR) !Data {
+    pub fn init(allocator: Allocator, ctx: Context, command_pool: vk.CommandPool, old_swapchain: ?vk.SwapchainKHR) !Data {
         const support_details = try SupportDetails.init(allocator, ctx.vki, ctx.physical_device, ctx.surface);
         errdefer support_details.deinit(allocator);
 
@@ -117,7 +117,7 @@ pub const Data = struct {
         errdefer allocator.free(swapchain_images);
 
         for (swapchain_images) |image| {
-            try Texture.transitionImageLayout(ctx, ctx.gfx_cmd_pool, image, .@"undefined", .present_src_khr);
+            try Texture.transitionImageLayout(ctx, command_pool, image, .@"undefined", .present_src_khr);
         }
 
         const image_views = blk: {

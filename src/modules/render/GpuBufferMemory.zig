@@ -87,6 +87,36 @@ pub fn copy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, command
     try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, command_buffer);
 }
 
+/// Same as copy but caller manage buffers
+pub fn manualCopy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, command_buffer: vk.CommandBuffer, fence: vk.Fence, config: CopyConfig) !void {
+    var copy_region = vk.BufferCopy{
+        .src_offset = config.src_offset,
+        .dst_offset = config.dst_offset,
+        .size = config.size,
+    };
+    const begin_info = vk.CommandBufferBeginInfo{
+        .flags = .{
+            .one_time_submit_bit = true,
+        },
+        .p_inheritance_info = null,
+    };
+
+    try ctx.vkd.beginCommandBuffer(command_buffer, &begin_info);
+    ctx.vkd.cmdCopyBuffer(command_buffer, self.buffer, into.buffer, 1, @ptrCast([*]vk.BufferCopy, &copy_region));
+    try ctx.vkd.endCommandBuffer(command_buffer);
+
+    const submit_info = vk.SubmitInfo{
+        .wait_semaphore_count = 0,
+        .p_wait_semaphores = undefined,
+        .p_wait_dst_stage_mask = undefined,
+        .command_buffer_count = 1,
+        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+        .signal_semaphore_count = 0,
+        .p_signal_semaphores = undefined,
+    };
+    try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @ptrCast([*]const vk.SubmitInfo, &submit_info), fence);
+}
+
 /// Transfer data from host to device
 pub fn transferToDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, offset: usize, data: []const T) !void {
     const transfer_zone = tracy.ZoneN(@src(), @src().fn_name);

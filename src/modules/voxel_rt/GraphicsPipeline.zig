@@ -40,6 +40,7 @@ descriptor_set: vk.DescriptorSet,
 descriptor_pool: vk.DescriptorPool,
 
 current_frame: usize,
+command_pools: []vk.CommandPool,
 command_buffers: []vk.CommandBuffer,
 framebuffers: []vk.Framebuffer,
 
@@ -315,15 +316,36 @@ pub fn init(allocator: Allocator, ctx: Context, swapchain: Swapchain, render_pas
     );
     errdefer ctx.vkd.destroyPipeline(ctx.logical_device, pipeline, null);
 
-    const command_buffers = try render.pipeline.createCmdBuffers(allocator, ctx, ctx.gfx_cmd_pool, swapchain.images.len, null);
+    const pool_info = vk.CommandPoolCreateInfo{
+        .flags = .{},
+        .queue_family_index = ctx.queue_indices.graphics,
+    };
+    const command_pools = try allocator.alloc(vk.CommandPool, swapchain.images.len);
+    errdefer allocator.free(command_pools);
+    const command_buffers = try allocator.alloc(vk.CommandBuffer, swapchain.images.len);
+    errdefer allocator.free(command_buffers);
+    var initialized_pools: usize = 0;
+    var initialized_buffers: usize = 0;
+    for (command_pools) |*command_pool, i| {
+        command_pool.* = try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
+        initialized_pools = i + 1;
+        command_buffers[i] = try render.pipeline.createCmdBuffer(ctx, command_pool.*);
+        initialized_buffers = i + 1;
+    }
     errdefer {
-        ctx.vkd.freeCommandBuffers(
-            ctx.logical_device,
-            ctx.gfx_cmd_pool,
-            @intCast(u32, command_buffers.len),
-            command_buffers.ptr,
-        );
-        allocator.free(command_buffers);
+        var i: usize = 0;
+        while (i < initialized_buffers) : (i += 1) {
+            ctx.vkd.freeCommandBuffers(
+                ctx.logical_device,
+                command_pools[i],
+                1,
+                @ptrCast([*]const vk.CommandBuffer, &command_buffers[i]),
+            );
+        }
+        i = 0;
+        while (i < initialized_pools) : (i += 1) {
+            ctx.vkd.destroyCommandPool(ctx.logical_device, command_pools[i], null);
+        }
     }
 
     const framebuffers = try render.pipeline.createFramebuffers(allocator, ctx, &swapchain, render_pass, null);
@@ -350,6 +372,7 @@ pub fn init(allocator: Allocator, ctx: Context, swapchain: Swapchain, render_pas
         .descriptor_set = descriptor_set,
         .descriptor_pool = descriptor_pool,
         .current_frame = 0,
+        .command_pools = command_pools,
         .command_buffers = command_buffers,
         .framebuffers = framebuffers,
         .vertex_buffer = vertex_buffer,
@@ -366,13 +389,20 @@ pub fn deinit(self: GraphicsPipeline, allocator: Allocator, ctx: Context) void {
     }
     allocator.free(self.framebuffers);
 
-    ctx.vkd.freeCommandBuffers(
-        ctx.logical_device,
-        ctx.gfx_cmd_pool,
-        @intCast(u32, self.command_buffers.len),
-        self.command_buffers.ptr,
-    );
+    for (self.command_buffers) |command_buffer, i| {
+        ctx.vkd.freeCommandBuffers(
+            ctx.logical_device,
+            self.command_pools[i],
+            1,
+            @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+        );
+    }
+    for (self.command_pools) |command_pool| {
+        ctx.vkd.destroyCommandPool(ctx.logical_device, command_pool, null);
+    }
+    allocator.free(self.command_pools);
     allocator.free(self.command_buffers);
+
     ctx.vkd.destroyPipeline(ctx.logical_device, self.pipeline, null);
     ctx.vkd.destroyPipelineCache(ctx.logical_device, self.pipeline_cache, null);
     ctx.vkd.destroyShaderModule(ctx.logical_device, self.shader_modules[0], null);

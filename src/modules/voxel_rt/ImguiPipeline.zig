@@ -47,7 +47,7 @@ descriptor_set: vk.DescriptorSet,
 // shader modules stored for cleanup
 shader_modules: [2]vk.ShaderModule,
 
-pub fn init(ctx: Context, allocator: Allocator, render_pass: vk.RenderPass, swapchain_image_count: usize) !ImguiPipeline {
+pub fn init(ctx: Context, allocator: Allocator, command_pool: vk.CommandPool, render_pass: vk.RenderPass, swapchain_image_count: usize) !ImguiPipeline {
     // initialize imgui
     _ = imgui.igCreateContext(null);
     var io = imgui.igGetIO();
@@ -140,10 +140,10 @@ pub fn init(ctx: Context, allocator: Allocator, render_pass: vk.RenderPass, swap
         defer staging_buffer.deinit(ctx); // deinit buffer in any scope exit scenario
 
         try staging_buffer.transferToDevice(ctx, u8, 0, pixels[0..@intCast(usize, width * height * bytes_per_pixel)]);
-        try Texture.transitionImageLayout(ctx, ctx.gfx_cmd_pool, font_image, .@"undefined", .transfer_dst_optimal);
+        try Texture.transitionImageLayout(ctx, command_pool, font_image, .@"undefined", .transfer_dst_optimal);
         try Texture.copyBufferToImage(
             ctx,
-            ctx.gfx_cmd_pool,
+            command_pool,
             font_image,
             staging_buffer.buffer,
             .{
@@ -151,7 +151,7 @@ pub fn init(ctx: Context, allocator: Allocator, render_pass: vk.RenderPass, swap
                 .height = @intCast(u32, height),
             },
         );
-        try Texture.transitionImageLayout(ctx, ctx.gfx_cmd_pool, font_image, .transfer_dst_optimal, .shader_read_only_optimal);
+        try Texture.transitionImageLayout(ctx, command_pool, font_image, .transfer_dst_optimal, .shader_read_only_optimal);
     }
 
     const sampler = blk: {

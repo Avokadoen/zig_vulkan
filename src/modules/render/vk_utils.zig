@@ -59,8 +59,8 @@ pub inline fn beginOneTimeCommandBuffer(ctx: Context, command_pool: vk.CommandPo
         .level = .primary,
         .command_buffer_count = 1,
     };
-    var commmand_buffer: vk.CommandBuffer = undefined;
-    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &allocate_info, @ptrCast([*]vk.CommandBuffer, &commmand_buffer));
+    var command_buffer: vk.CommandBuffer = undefined;
+    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &allocate_info, @ptrCast([*]vk.CommandBuffer, &command_buffer));
 
     const begin_info = vk.CommandBufferBeginInfo{
         .flags = .{
@@ -68,9 +68,9 @@ pub inline fn beginOneTimeCommandBuffer(ctx: Context, command_pool: vk.CommandPo
         },
         .p_inheritance_info = null,
     };
-    try ctx.vkd.beginCommandBuffer(commmand_buffer, &begin_info);
+    try ctx.vkd.beginCommandBuffer(command_buffer, &begin_info);
 
-    return commmand_buffer;
+    return command_buffer;
 }
 
 // TODO: synchronization should be improved in this function (currently very sub optimal)!

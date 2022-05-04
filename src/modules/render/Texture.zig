@@ -165,7 +165,7 @@ pub fn deinit(self: Texture, ctx: Context) void {
     ctx.vkd.freeMemory(ctx.logical_device, self.image_memory, null);
 }
 
-pub fn copyToHost(self: Texture, ctx: Context, comptime T: type, buffer: []T) !void {
+pub fn copyToHost(self: Texture, command_pool: vk.CommandPool, ctx: Context, comptime T: type, buffer: []T) !void {
     var staging_buffer = try GpuBufferMemory.init(ctx, self.image_size, .{
         .transfer_dst_bit = true,
     }, .{
@@ -174,8 +174,8 @@ pub fn copyToHost(self: Texture, ctx: Context, comptime T: type, buffer: []T) !v
     });
     defer staging_buffer.deinit(ctx);
 
-    try transitionImageLayout(ctx, ctx.gfx_cmd_pool, self.image, self.layout, .transfer_src_optimal);
-    const command_buffer = try vk_utils.beginOneTimeCommandBuffer(ctx, ctx.gfx_cmd_pool);
+    try transitionImageLayout(ctx, command_pool, self.image, self.layout, .transfer_src_optimal);
+    const command_buffer = try vk_utils.beginOneTimeCommandBuffer(ctx, command_pool);
     {
         const region = vk.BufferImageCopy{
             .buffer_offset = 0,
@@ -202,8 +202,8 @@ pub fn copyToHost(self: Texture, ctx: Context, comptime T: type, buffer: []T) !v
         };
         ctx.vkd.cmdCopyImageToBuffer(command_buffer, self.image, .transfer_src_optimal, staging_buffer.buffer, 1, @ptrCast([*]const vk.BufferImageCopy, &region));
     }
-    try vk_utils.endOneTimeCommandBuffer(ctx, ctx.gfx_cmd_pool, command_buffer);
-    try transitionImageLayout(ctx, ctx.gfx_cmd_pool, self.image, .transfer_src_optimal, self.layout);
+    try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, command_buffer);
+    try transitionImageLayout(ctx, command_pool, self.image, .transfer_src_optimal, self.layout);
 
     try staging_buffer.transferFromDevice(ctx, T, buffer);
 }

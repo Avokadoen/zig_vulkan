@@ -28,7 +28,7 @@ pub const Config = struct {
     ctx: Context,
     viewport: vk.Viewport,
     buffer_count: usize, // TODO: rename to swapchain buffer count
-    /// the size of each storage buffer element, descriptor makes a copy of data 
+    /// the size of each storage buffer element, descriptor makes a copy of data
     buffer_sizes: []const u64,
 
     texture_configs: []ImageConfig,
@@ -75,7 +75,7 @@ pub const Descriptor = struct {
     textures: []Texture,
 
     // TODO: comptime check that config is const, since var triggers a bug in zig
-    pub fn init(config: Config) !Self {
+    pub fn init(command_pool: vk.CommandPool, config: Config) !Self {
         const owned_buffer_sizes = blk: {
             const sizes = try config.allocator.alloc(u64, config.buffer_sizes.len);
             std.mem.copy(u64, sizes, config.buffer_sizes);
@@ -125,7 +125,7 @@ pub const Descriptor = struct {
                 .queue_family_indices = indices[0..indices_len],
                 .format = format,
             };
-            textures[i] = try Texture.init(config.ctx, config.ctx.gfx_cmd_pool, layout, PixelType, texture_config);
+            textures[i] = try Texture.init(config.ctx, command_pool, layout, PixelType, texture_config);
             textures_initialized = i + 1;
         }
         errdefer {
@@ -473,7 +473,7 @@ fn createDescriptorSet(
 }
 
 /// Caller must make sure to clean up returned memory
-/// Create buffers for each image in the swapchain 
+/// Create buffers for each image in the swapchain
 inline fn createShaderBuffers(allocator: Allocator, comptime StorageType: type, buf_usage_flags: vk.BufferUsageFlags, ctx: Context, count: usize) ![]GpuBufferMemory {
     const buffers = try allocator.alloc(GpuBufferMemory, count);
     errdefer allocator.free(buffers);

@@ -29,6 +29,7 @@ pipeline_layout: vk.PipelineLayout,
 pipeline: *vk.Pipeline,
 
 current_queue_buffer: usize,
+command_pools: []vk.CommandPool,
 command_buffers: []vk.CommandBuffer,
 queues: []vk.Queue,
 complete_semaphores: []vk.Semaphore,
@@ -47,6 +48,9 @@ storage_offsets: []vk.DeviceSize,
 buffers: GpuBufferMemory,
 
 // intermediate buffer for storage and uniform buffers
+staging_command_pool: vk.CommandPool,
+staging_command_buffer: vk.CommandBuffer,
+staging_fence: vk.Fence,
 staging_buffer: GpuBufferMemory,
 
 work_group_dim: extern struct {
@@ -329,20 +333,60 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
         break :blk try ctx.createComputePipeline(allocator, pipeline_info);
     };
 
-    // TODO: we need to rescale pipeline dispatch
-    self.command_buffers = try render.pipeline.createCmdBuffers(allocator, ctx, ctx.comp_cmd_pool, in_flight_count, null);
+    self.command_pools = try allocator.alloc(vk.CommandPool, in_flight_count);
+    errdefer allocator.free(self.command_pools);
+    self.command_buffers = try allocator.alloc(vk.CommandBuffer, in_flight_count);
+    errdefer allocator.free(self.command_buffers);
+
+    var initialized_command_pools: usize = 0;
+    {
+        const pool_info = vk.CommandPoolCreateInfo{
+            .flags = .{},
+            .queue_family_index = ctx.queue_indices.compute,
+        };
+        for (self.command_pools) |*command_pool, i| {
+            command_pool.* = try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
+            self.command_buffers[i] = try render.pipeline.createCmdBuffer(ctx, command_pool.*);
+        }
+    }
     errdefer {
-        ctx.vkd.freeCommandBuffers(
-            ctx.logical_device,
-            ctx.comp_cmd_pool,
-            @intCast(u32, self.command_buffers.len),
-            @ptrCast([*]const vk.CommandBuffer, self.command_buffers.ptr),
-        );
-        allocator.free(self.command_buffers);
+        var i: usize = 0;
+        while (i < initialized_command_pools) : (i += 1) {
+            ctx.vkd.freeCommandBuffers(
+                ctx.logical_device,
+                self.command_pools[i],
+                @intCast(u32, 1),
+                @ptrCast([*]const vk.CommandBuffer, &self.command_buffers[i]),
+            );
+            ctx.vkd.destroyCommandPool(ctx.logical_device, self.command_pools[i], null);
+        }
     }
 
-    var semaphore_initialized: usize = 0;
+    {
+        const pool_info = vk.CommandPoolCreateInfo{
+            .flags = .{},
+            .queue_family_index = ctx.queue_indices.graphics,
+        };
+        self.staging_command_pool = try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
+    }
+    errdefer ctx.vkd.destroyCommandPool(ctx.logical_device, self.staging_command_pool, null);
+    self.staging_command_buffer = try render.pipeline.createCmdBuffer(ctx, self.staging_command_pool);
+    errdefer ctx.vkd.freeCommandBuffers(
+        ctx.logical_device,
+        self.staging_command_pool,
+        @intCast(u32, 1),
+        @ptrCast([*]const vk.CommandBuffer, &self.staging_command_buffer),
+    );
+
+    const fence_info = vk.FenceCreateInfo{
+        .flags = .{
+            .signaled_bit = true,
+        },
+    };
+    self.staging_fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
+
     const semaphore_info = vk.SemaphoreCreateInfo{ .flags = .{} };
+    var semaphore_initialized: usize = 0;
     self.complete_semaphores = try allocator.alloc(vk.Semaphore, in_flight_count);
     errdefer allocator.free(self.complete_semaphores);
     for (self.complete_semaphores) |*semaphore, i| {
@@ -356,11 +400,6 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
         }
     }
 
-    const fence_info = vk.FenceCreateInfo{
-        .flags = .{
-            .signaled_bit = true,
-        },
-    };
     self.complete_fences = try allocator.alloc(vk.Fence, in_flight_count);
     errdefer allocator.free(self.complete_fences);
     for (self.complete_fences) |*fence| {
@@ -372,6 +411,7 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
         .pipeline_layout = self.pipeline_layout,
         .pipeline = self.pipeline,
         .current_queue_buffer = 0,
+        .command_pools = self.command_pools,
         .command_buffers = self.command_buffers,
         .queues = self.queues,
         .complete_semaphores = self.complete_semaphores,
@@ -383,6 +423,9 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
         .uniform_offsets = self.uniform_offsets,
         .storage_offsets = self.storage_offsets,
         .buffers = self.buffers,
+        .staging_command_pool = self.staging_command_pool,
+        .staging_command_buffer = self.staging_command_buffer,
+        .staging_fence = self.staging_fence,
         .staging_buffer = self.staging_buffer,
         .work_group_dim = self.work_group_dim,
     };
@@ -392,26 +435,38 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
 pub fn transferToStorage(self: *ComputePipeline, ctx: Context, offset: vk.DeviceSize, comptime T: type, data: []const T) !void {
     const transfer_zone = tracy.ZoneN(@src(), "transfer to storage stage");
     defer transfer_zone.End();
+
+    // wait for previous transfer
+    _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.staging_fence), vk.TRUE, std.math.maxInt(u64));
+    try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.staging_fence));
+
     try self.staging_buffer.transferToDevice(ctx, T, 0, data);
     const copy_config = .{
         .src_offset = 0,
         .dst_offset = offset,
         .size = data.len * @sizeOf(T),
     };
-    try self.staging_buffer.copy(ctx, &self.buffers, ctx.gfx_cmd_pool, copy_config);
+    try ctx.vkd.resetCommandPool(ctx.logical_device, self.staging_command_pool, .{});
+    try self.staging_buffer.manualCopy(ctx, &self.buffers, self.staging_command_buffer, self.staging_fence, copy_config);
 }
 
 /// transfer to device storage buffer
 pub fn transferToUniform(self: *ComputePipeline, ctx: Context, offset: vk.DeviceSize, comptime T: type, data: []const T) !void {
     const transfer_zone = tracy.ZoneN(@src(), "transfer to unfiform stage");
     defer transfer_zone.End();
+
+    // wait for previous transfer
+    _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.staging_fence), vk.TRUE, std.math.maxInt(u64));
+    try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.staging_fence));
+
     try self.staging_buffer.transferToDevice(ctx, T, 0, data);
     const copy_config = .{
         .src_offset = 0,
         .dst_offset = offset,
         .size = data.len * @sizeOf(T),
     };
-    try self.staging_buffer.copy(ctx, &self.buffers, ctx.gfx_cmd_pool, copy_config);
+    try ctx.vkd.resetCommandPool(ctx.logical_device, self.staging_command_pool, .{});
+    try self.staging_buffer.manualCopy(ctx, &self.buffers, self.staging_command_buffer, self.staging_fence, copy_config);
 }
 
 pub fn deinit(self: ComputePipeline, ctx: Context) void {
@@ -424,18 +479,30 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
         std.math.maxInt(u64),
     ) catch |err| std.debug.print("failed to wait for gfx fence, err: {any}", .{err});
 
+    ctx.vkd.freeCommandBuffers(
+        ctx.logical_device,
+        self.staging_command_pool,
+        @intCast(u32, 1),
+        @ptrCast([*]const vk.CommandBuffer, &self.staging_command_buffer),
+    );
+    ctx.vkd.destroyCommandPool(ctx.logical_device, self.staging_command_pool, null);
+
+    for (self.command_pools) |command_pool, i| {
+        ctx.vkd.freeCommandBuffers(
+            ctx.logical_device,
+            command_pool,
+            @intCast(u32, 1),
+            @ptrCast([*]const vk.CommandBuffer, &self.command_buffers[i]),
+        );
+        ctx.vkd.destroyCommandPool(ctx.logical_device, command_pool, null);
+    }
+    self.allocator.free(self.command_buffers);
+    self.allocator.free(self.command_pools);
+
     self.allocator.free(self.uniform_offsets);
     self.allocator.free(self.storage_offsets);
     self.buffers.deinit(ctx);
     self.staging_buffer.deinit(ctx);
-
-    ctx.vkd.freeCommandBuffers(
-        ctx.logical_device,
-        ctx.comp_cmd_pool,
-        @intCast(u32, self.command_buffers.len),
-        @ptrCast([*]const vk.CommandBuffer, self.command_buffers.ptr),
-    );
-    self.allocator.free(self.command_buffers);
 
     for (self.complete_semaphores) |semaphore| {
         ctx.vkd.destroySemaphore(ctx.logical_device, semaphore, null);
@@ -461,6 +528,9 @@ pub inline fn dispatch(self: *ComputePipeline, ctx: Context, camera: Camera, sun
         const wait_compute_zone = tracy.ZoneN(@src(), "idle wait compute");
         defer wait_compute_zone.End();
 
+        // _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.staging_fence), vk.TRUE, std.math.maxInt(u64));
+        // try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.staging_fence));
+
         // wait for previous compute dispatch to complete
         _ = try ctx.vkd.waitForFences(
             ctx.logical_device,
@@ -476,7 +546,7 @@ pub inline fn dispatch(self: *ComputePipeline, ctx: Context, camera: Camera, sun
         );
     }
 
-    try ctx.vkd.resetCommandBuffer(self.command_buffers[self.current_queue_buffer], .{});
+    try ctx.vkd.resetCommandPool(ctx.logical_device, self.command_pools[self.current_queue_buffer], .{});
     try self.recordCommandBuffer(ctx, self.current_queue_buffer, camera, sun);
 
     const compute_complete_semaphore = self.complete_semaphores[self.current_queue_buffer];
@@ -506,10 +576,11 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, index: usize, ca
     defer draw_zone.End();
 
     const command_begin_info = vk.CommandBufferBeginInfo{
-        .flags = .{},
+        .flags = .{
+            .one_time_submit_bit = true,
+        },
         .p_inheritance_info = null,
     };
-
     try ctx.vkd.beginCommandBuffer(self.command_buffers[index], &command_begin_info);
 
     ctx.vkd.cmdBindPipeline(self.command_buffers[index], vk.PipelineBindPoint.compute, self.pipeline.*);

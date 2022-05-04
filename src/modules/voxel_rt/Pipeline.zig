@@ -63,6 +63,7 @@ sun: *Sun,
 gui: ImguiGui,
 
 requested_rescale_pipeline: bool = false,
+init_command_pool: vk.CommandPool, // kept in case of rescale
 
 pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.Extent2D, grid_state: GridState, camera: *Camera, sun: *Sun, config: Config) !Pipeline {
     const init_zone = tracy.ZoneN(@src(), "init pipeline");
@@ -70,6 +71,12 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
 
     const target_texture = try allocator.create(Texture);
     errdefer allocator.destroy(target_texture);
+
+    const pool_info = vk.CommandPoolCreateInfo{
+        .flags = .{},
+        .queue_family_index = ctx.queue_indices.graphics,
+    };
+    const init_command_pool = try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
 
     // use graphics and compute index
     // if they are the same, then we use that index
@@ -84,11 +91,11 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
             .queue_family_indices = indices[0..indices_len],
             .format = .r8g8b8a8_unorm,
         };
-        break :blk try Texture.init(ctx, ctx.gfx_cmd_pool, .general, Pixel, texture_config);
+        break :blk try Texture.init(ctx, init_command_pool, .general, Pixel, texture_config);
     };
     errdefer target_texture.deinit(ctx);
 
-    const swapchain = try render.swapchain.Data.init(allocator, ctx, null);
+    const swapchain = try render.swapchain.Data.init(allocator, ctx, init_command_pool, null);
     errdefer swapchain.deinit(ctx);
 
     const render_pass = try ctx.createRenderPass(swapchain.format);
@@ -137,7 +144,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     const gfx_pipeline = try GraphicsPipeline.init(allocator, ctx, swapchain, render_pass, target_texture, config.gfx_pipeline_config);
     errdefer gfx_pipeline.deinit(allocator, ctx);
 
-    const imgui_pipeline = try ImguiPipeline.init(ctx, allocator, render_pass, swapchain.images.len);
+    const imgui_pipeline = try ImguiPipeline.init(ctx, allocator, init_command_pool, render_pass, swapchain.images.len);
     errdefer imgui_pipeline.deinit(ctx);
 
     const render_pass_begin_info = vk.RenderPassBeginInfo{
@@ -179,6 +186,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .camera = camera,
         .sun = sun,
         .gui = gui,
+        .init_command_pool = init_command_pool,
     };
 }
 
@@ -201,6 +209,7 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     ctx.destroyRenderPass(self.render_pass);
     self.swapchain.deinit(ctx);
 
+    ctx.vkd.destroyCommandPool(ctx.logical_device, self.init_command_pool, null);
     self.target_texture.deinit(ctx);
     self.allocator.destroy(self.target_texture);
 }
@@ -255,7 +264,7 @@ pub inline fn draw(self: *Pipeline, ctx: Context) !void {
 
     // re-record command buffer to update any state
     var begin_info = self.render_pass_begin_info;
-    try ctx.vkd.resetCommandBuffer(self.gfx_pipeline.command_buffers[image_index], .{});
+    try ctx.vkd.resetCommandPool(ctx.logical_device, self.gfx_pipeline.command_pools[image_index], .{});
     try self.recordCommandBuffer(ctx, image_index, &begin_info);
 
     const stage_masks = [_]vk.PipelineStageFlags{ .{ .vertex_input_bit = true }, .{ .color_attachment_output_bit = true } };
@@ -446,7 +455,7 @@ fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
     const old_swapchain = self.swapchain;
     defer old_swapchain.deinit(ctx);
 
-    self.swapchain = try render.swapchain.Data.init(self.allocator, ctx, old_swapchain.swapchain);
+    self.swapchain = try render.swapchain.Data.init(self.allocator, ctx, self.init_command_pool, old_swapchain.swapchain);
     errdefer self.swapchain.deinit(ctx);
 
     // recreate renderpass
@@ -587,7 +596,9 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize, begin_info: *
 }
 
 const command_buffer_info = vk.CommandBufferBeginInfo{
-    .flags = .{},
+    .flags = .{
+        .one_time_submit_bit = true,
+    },
     .p_inheritance_info = null,
 };
 const clear_values = [_]vk.ClearValue{
