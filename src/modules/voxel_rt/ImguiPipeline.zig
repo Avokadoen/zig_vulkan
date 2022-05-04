@@ -28,9 +28,9 @@ pub const PushConstant = struct {
 
 sampler: vk.Sampler,
 
-vertex_buffer: GpuBufferMemory,
+buffers: GpuBufferMemory,
+vertex_size: vk.DeviceSize,
 vertex_buffer_len: c_int,
-index_buffer: GpuBufferMemory,
 index_buffer_len: c_int,
 
 font_memory: vk.DeviceMemory,
@@ -413,11 +413,19 @@ pub fn init(ctx: Context, allocator: Allocator, render_pass: vk.RenderPass, swap
     );
     errdefer ctx.vkd.destroyPipeline(ctx.logical_device, pipeline, null);
 
+    const buffers = try GpuBufferMemory.init(
+        ctx,
+        GpuBufferMemory.bytes_in_mb * 63,
+        .{ .vertex_buffer_bit = true, .index_buffer_bit = true },
+        .{ .host_visible_bit = true },
+    );
+    errdefer buffers.deinit(ctx);
+
     return ImguiPipeline{
         .sampler = sampler,
-        .vertex_buffer = GpuBufferMemory.@"undefined"(),
+        .buffers = buffers,
+        .vertex_size = 0,
         .vertex_buffer_len = 0,
-        .index_buffer = GpuBufferMemory.@"undefined"(),
         .index_buffer_len = 0,
         .font_memory = font_memory,
         .font_image = font_image,
@@ -445,8 +453,7 @@ pub fn deinit(self: ImguiPipeline, ctx: Context) void {
     ctx.vkd.destroyImage(ctx.logical_device, self.font_image, null);
     ctx.vkd.freeMemory(ctx.logical_device, self.font_memory, null);
 
-    self.vertex_buffer.deinit(ctx);
-    self.index_buffer.deinit(ctx);
+    self.buffers.deinit(ctx);
 }
 
 /// record a command buffer that can draw current frame
@@ -495,10 +502,10 @@ pub fn recordCommandBuffer(self: ImguiPipeline, ctx: Context, command_buffer: vk
             command_buffer,
             0,
             1,
-            @ptrCast([*]const vk.Buffer, &self.vertex_buffer.buffer),
+            @ptrCast([*]const vk.Buffer, &self.buffers.buffer),
             &offsets,
         );
-        ctx.vkd.cmdBindIndexBuffer(command_buffer, self.index_buffer.buffer, 0, .uint16);
+        ctx.vkd.cmdBindIndexBuffer(command_buffer, self.buffers.buffer, self.vertex_size, .uint16);
 
         const draw_cmd_list_count = @intCast(usize, im_draw_data.CmdListsCount);
         var i: usize = 0;
@@ -541,43 +548,27 @@ pub fn updateBuffers(self: *ImguiPipeline, ctx: Context) !void {
 
     const draw_data = imgui.igGetDrawData();
 
-    const vertex_buffer_size = draw_data.TotalVtxCount * @sizeOf(imgui.ImDrawVert);
-    const index_buffer_size = draw_data.TotalIdxCount * @sizeOf(imgui.ImDrawIdx);
-    if (index_buffer_size == 0 or vertex_buffer_size == 0) return; // nothing to draw
+    self.vertex_size = @intCast(vk.DeviceSize, draw_data.TotalVtxCount * @sizeOf(imgui.ImDrawVert));
+    const index_size = @intCast(vk.DeviceSize, draw_data.TotalIdxCount * @sizeOf(imgui.ImDrawIdx));
+    self.vertex_buffer_len = draw_data.TotalVtxCount;
+    self.index_buffer_len = draw_data.TotalIdxCount;
+    if (index_size == 0 or self.vertex_size == 0) return; // nothing to draw
+    std.debug.assert(self.vertex_size + index_size < self.buffers.size);
 
-    { // update vertex buffer size accordingly
-        if (self.vertex_buffer.buffer == .null_handle or self.vertex_buffer_len != draw_data.TotalVtxCount) {
-            self.vertex_buffer.unmap(ctx);
-            self.vertex_buffer.deinit(ctx);
-            self.vertex_buffer = try GpuBufferMemory.init(
-                ctx,
-                @intCast(vk.DeviceSize, vertex_buffer_size),
-                .{ .vertex_buffer_bit = true },
-                .{ .host_visible_bit = true },
-            );
-            self.vertex_buffer_len = draw_data.TotalVtxCount;
-            try self.vertex_buffer.map(ctx, 0, vk.WHOLE_SIZE);
-        }
-    }
-    { // update index buffer size accordingly
-        if (self.index_buffer.buffer == .null_handle or self.index_buffer_len != draw_data.TotalIdxCount) {
-            self.index_buffer.unmap(ctx);
-            self.index_buffer.deinit(ctx);
-            self.index_buffer = try GpuBufferMemory.init(
-                ctx,
-                @intCast(vk.DeviceSize, index_buffer_size),
-                .{ .index_buffer_bit = true },
-                .{ .host_visible_bit = true },
-            );
-            self.index_buffer_len = draw_data.TotalIdxCount;
-            try self.index_buffer.map(ctx, 0, vk.WHOLE_SIZE);
-        }
-    }
+    try self.buffers.map(ctx, 0, self.vertex_size + index_size);
+    defer self.buffers.unmap(ctx);
 
-    var vertex_dest = @ptrCast([*]imgui.ImDrawVert, @alignCast(@alignOf(imgui.ImDrawVert), self.vertex_buffer.mapped) orelse unreachable);
+    var vertex_dest = @ptrCast([*]imgui.ImDrawVert, @alignCast(@alignOf(imgui.ImDrawVert), self.buffers.mapped) orelse unreachable);
     var vertex_offset: usize = 0;
 
-    var index_dest = @ptrCast([*]imgui.ImDrawIdx, @alignCast(@alignOf(imgui.ImDrawIdx), self.index_buffer.mapped) orelse unreachable);
+    // map index_dest to be the buffer memory + vertex byte offset
+    var index_dest = @ptrCast(
+        [*]imgui.ImDrawIdx,
+        @alignCast(
+            @alignOf(imgui.ImDrawIdx),
+            @intToPtr(?*anyopaque, @ptrToInt(self.buffers.mapped) + @intCast(usize, self.vertex_size)),
+        ) orelse unreachable,
+    );
     var index_offset: usize = 0;
 
     var i: usize = 0;
@@ -607,6 +598,5 @@ pub fn updateBuffers(self: *ImguiPipeline, ctx: Context) !void {
     }
 
     // send changes to GPU
-    try self.vertex_buffer.flush(ctx, 0, vk.WHOLE_SIZE);
-    try self.index_buffer.flush(ctx, 0, vk.WHOLE_SIZE);
+    try self.buffers.flush(ctx, 0, self.vertex_size + index_size);
 }

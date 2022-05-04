@@ -32,6 +32,8 @@ compute_queue: vk.Queue,
 graphics_queue: vk.Queue,
 present_queue: vk.Queue,
 
+non_coherent_atom_size: vk.DeviceSize,
+
 surface: vk.SurfaceKHR,
 queue_indices: QueueFamilyIndices,
 
@@ -177,6 +179,11 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
         break :blk try self.vkd.createCommandPool(self.logical_device, &pool_info, null);
     };
 
+    self.non_coherent_atom_size = blk: {
+        const device_properties = self.getPhysicalDeviceProperties();
+        break :blk device_properties.limits.non_coherent_atom_size;
+    };
+
     // possibly a bit wasteful, but to get compile errors when forgetting to
     // init a variable the partial context variables are moved to a new context which we return
     return Context{
@@ -190,6 +197,7 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
         .compute_queue = self.compute_queue,
         .graphics_queue = self.graphics_queue,
         .present_queue = self.present_queue,
+        .non_coherent_atom_size = self.non_coherent_atom_size,
         .surface = self.surface,
         .queue_indices = self.queue_indices,
         .gfx_cmd_pool = self.gfx_cmd_pool,
