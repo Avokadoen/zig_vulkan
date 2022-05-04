@@ -65,7 +65,6 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
     const application_extensions = blk: {
         if (consts.enable_validation_layers) {
             const debug_extensions = [_][*:0]const u8{
-                vk.extension_info.ext_debug_report.name,
                 vk.extension_info.ext_debug_utils.name,
             } ++ common_extensions;
             break :blk debug_extensions[0..];
@@ -99,32 +98,33 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
 
     const validation_layer_info = try validation_layer.Info.init(allocator, self.vkb);
 
-    // const debug_features = [_]vk.ValidationFeatureEnableEXT{
-    //     .best_practices_ext, .synchronization_validation_ext,
-    // };
-    // const features: ?*const vk.ValidationFeaturesEXT = blk: {
-    //     if (consts.enable_validation_layers) {
-    //         break :blk &vk.ValidationFeaturesEXT{
-    //             .enabled_validation_feature_count = debug_features.len,
-    //             .p_enabled_validation_features = &debug_features,
-    //             .disabled_validation_feature_count = 0,
-    //             .p_disabled_validation_features = undefined,
-    //         };
-    //     }
-    //     break :blk null;
-    // };
-
     const debug_create_info: ?*const vk.DebugUtilsMessengerCreateInfoEXT = blk: {
         if (consts.enable_validation_layers) {
-            break :blk &createDefaultDebugCreateInfo(null); //&createDefaultDebugCreateInfo(@ptrCast(?*const anyopaque, features));
+            break :blk &createDefaultDebugCreateInfo();
         } else {
             break :blk null;
         }
     };
 
+    const debug_features = [_]vk.ValidationFeatureEnableEXT{
+        .best_practices_ext, // .synchronization_validation_ext,
+    };
+    const features: ?*const vk.ValidationFeaturesEXT = blk: {
+        if (consts.enable_validation_layers) {
+            break :blk &vk.ValidationFeaturesEXT{
+                .p_next = @ptrCast(?*const anyopaque, debug_create_info),
+                .enabled_validation_feature_count = debug_features.len,
+                .p_enabled_validation_features = &debug_features,
+                .disabled_validation_feature_count = 0,
+                .p_disabled_validation_features = undefined,
+            };
+        }
+        break :blk null;
+    };
+
     self.instance = blk: {
         const instance_info = vk.InstanceCreateInfo{
-            .p_next = @ptrCast(?*const anyopaque, debug_create_info),
+            .p_next = @ptrCast(?*const anyopaque, features),
             .flags = .{},
             .p_application_info = &app_info,
             .enabled_layer_count = validation_layer_info.enabled_layer_count,
@@ -353,7 +353,7 @@ pub fn deinit(self: Context) void {
 }
 
 // TODO: can probably drop function and inline it in init
-fn createDefaultDebugCreateInfo(p_next: ?*const anyopaque) vk.DebugUtilsMessengerCreateInfoEXT {
+fn createDefaultDebugCreateInfo() vk.DebugUtilsMessengerCreateInfoEXT {
     const message_severity = vk.DebugUtilsMessageSeverityFlagsEXT{
         .verbose_bit_ext = false,
         .info_bit_ext = false,
@@ -368,7 +368,7 @@ fn createDefaultDebugCreateInfo(p_next: ?*const anyopaque) vk.DebugUtilsMessenge
     };
 
     return vk.DebugUtilsMessengerCreateInfoEXT{
-        .p_next = p_next,
+        .p_next = null,
         .flags = .{},
         .message_severity = message_severity,
         .message_type = message_type,
