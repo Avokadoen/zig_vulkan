@@ -476,6 +476,7 @@ pub inline fn dispatch(self: *ComputePipeline, ctx: Context, camera: Camera, sun
         );
     }
 
+    try ctx.vkd.resetCommandBuffer(self.command_buffers[self.current_queue_buffer], .{});
     try self.recordCommandBuffer(ctx, self.current_queue_buffer, camera, sun);
 
     const compute_complete_semaphore = self.complete_semaphores[self.current_queue_buffer];

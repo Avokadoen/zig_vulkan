@@ -1,5 +1,5 @@
-/// This file contains the vk Wrapper types used to call vulkan functions. 
-/// Wrapper is a vulkan-zig construct that generates compile time types that 
+/// This file contains the vk Wrapper types used to call vulkan functions.
+/// Wrapper is a vulkan-zig construct that generates compile time types that
 /// links with vulkan functions depending on queried function requirements
 /// see vk X_Command types for implementation details
 const vk = @import("vulkan");
@@ -104,6 +104,7 @@ pub const Device = vk.DeviceWrapper(.{
     .queuePresentKHR = true,
     .queueSubmit = true,
     .queueWaitIdle = true,
+    .resetCommandBuffer = true, 
     .resetFences = true,
     .unmapMemory = true,
     .updateDescriptorSets = true,

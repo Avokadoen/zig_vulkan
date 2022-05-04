@@ -255,6 +255,7 @@ pub inline fn draw(self: *Pipeline, ctx: Context) !void {
 
     // re-record command buffer to update any state
     var begin_info = self.render_pass_begin_info;
+    try ctx.vkd.resetCommandBuffer(self.gfx_pipeline.command_buffers[image_index], .{});
     try self.recordCommandBuffer(ctx, image_index, &begin_info);
 
     const stage_masks = [_]vk.PipelineStageFlags{ .{ .vertex_input_bit = true }, .{ .color_attachment_output_bit = true } };
