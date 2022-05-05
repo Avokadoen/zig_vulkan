@@ -131,12 +131,11 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     errdefer ctx.vkd.freeMemory(ctx.logical_device, image_memory, null);
 
     try ctx.vkd.bindImageMemory(ctx.logical_device, compute_image, image_memory, 0);
-    const image_memory_size = memory_requirements.size;
+    var image_memory_size = memory_requirements.size;
 
     try Texture.transitionImageLayout(ctx, init_command_pool, compute_image, .@"undefined", .general);
 
     const compute_image_view = blk: {
-        // TODO: evaluate if this and swapchain should share logic (probably no)
         const image_view_info = vk.ImageViewCreateInfo{
             .flags = .{},
             .image = compute_image,
@@ -162,24 +161,23 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     };
 
     const sampler = blk: {
-        // const device_properties = ctx.vki.getPhysicalDeviceProperties(ctx.physical_device);
         const sampler_info = vk.SamplerCreateInfo{
             .flags = .{},
-            .mag_filter = .linear, // not sure what the application would need
-            .min_filter = .linear, // RT should use linear, pixel sim should be nearest
+            .mag_filter = .linear,
+            .min_filter = .linear,
             .mipmap_mode = .linear,
             .address_mode_u = .repeat,
             .address_mode_v = .repeat,
             .address_mode_w = .repeat,
             .mip_lod_bias = 0.0,
-            .anisotropy_enable = vk.FALSE, // TODO: test with, and without
-            .max_anisotropy = 1.0, // device_properties.limits.max_sampler_anisotropy,
+            .anisotropy_enable = vk.FALSE,
+            .max_anisotropy = 1.0,
             .compare_enable = vk.FALSE,
             .compare_op = .always,
             .min_lod = 0.0,
             .max_lod = 0.0,
             .border_color = .int_opaque_black,
-            .unnormalized_coordinates = vk.FALSE, // TODO: might be good for pixel sim to use true
+            .unnormalized_coordinates = vk.FALSE,
         };
         break :blk try ctx.vkd.createSampler(ctx.logical_device, &sampler_info, null);
     };
@@ -239,7 +237,17 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     const gfx_pipeline = try GraphicsPipeline.init(allocator, ctx, swapchain, render_pass, sampler, compute_image_view, config.gfx_pipeline_config);
     errdefer gfx_pipeline.deinit(allocator, ctx);
 
-    const imgui_pipeline = try ImguiPipeline.init(ctx, allocator, init_command_pool, render_pass, swapchain.images.len);
+    const imgui_pipeline = try ImguiPipeline.init(
+        ctx,
+        allocator,
+        init_command_pool,
+        render_pass,
+        swapchain.images.len,
+        image_memory_type_index,
+        image_memory,
+        image_memory_capacity,
+        &image_memory_size,
+    );
     errdefer imgui_pipeline.deinit(ctx);
 
     const render_pass_begin_info = vk.RenderPassBeginInfo{

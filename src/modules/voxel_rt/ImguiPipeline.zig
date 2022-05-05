@@ -33,7 +33,6 @@ vertex_size: vk.DeviceSize,
 vertex_buffer_len: c_int,
 index_buffer_len: c_int,
 
-font_memory: vk.DeviceMemory,
 font_image: vk.Image,
 font_view: vk.ImageView,
 
@@ -47,7 +46,17 @@ descriptor_set: vk.DescriptorSet,
 // shader modules stored for cleanup
 shader_modules: [2]vk.ShaderModule,
 
-pub fn init(ctx: Context, allocator: Allocator, command_pool: vk.CommandPool, render_pass: vk.RenderPass, swapchain_image_count: usize) !ImguiPipeline {
+pub fn init(
+    ctx: Context,
+    allocator: Allocator,
+    command_pool: vk.CommandPool,
+    render_pass: vk.RenderPass,
+    swapchain_image_count: usize,
+    image_memory_type: u32,
+    image_memory: vk.DeviceMemory,
+    image_memory_capacity: vk.DeviceSize,
+    image_memory_size: *vk.DeviceSize,
+) !ImguiPipeline {
     // initialize imgui
     _ = imgui.igCreateContext(null);
     var io = imgui.igGetIO();
@@ -88,21 +97,18 @@ pub fn init(ctx: Context, allocator: Allocator, command_pool: vk.CommandPool, re
     };
     errdefer ctx.vkd.destroyImage(ctx.logical_device, font_image, null);
 
-    const font_memory = blk: {
-        const memory_requirements = ctx.vkd.getImageMemoryRequirements(ctx.logical_device, font_image);
-        const memory_type_index = try render.vk_utils.findMemoryTypeIndex(
-            ctx,
-            memory_requirements.memory_type_bits,
-            .{ .device_local_bit = true },
-        );
-        const mem_alloc_info = vk.MemoryAllocateInfo{
-            .allocation_size = memory_requirements.size,
-            .memory_type_index = memory_type_index,
-        };
-        break :blk try ctx.vkd.allocateMemory(ctx.logical_device, &mem_alloc_info, null);
-    };
-    errdefer ctx.vkd.freeMemory(ctx.logical_device, font_memory, null);
-    try ctx.vkd.bindImageMemory(ctx.logical_device, font_image, font_memory, 0);
+    const memory_requirements = ctx.vkd.getImageMemoryRequirements(ctx.logical_device, font_image);
+    const memory_type_index = try render.vk_utils.findMemoryTypeIndex(
+        ctx,
+        memory_requirements.memory_type_bits,
+        .{ .device_local_bit = true },
+    );
+    // In the event that any of the asserts below fail, we should allocate more memory
+    // we will not handle this for now, but a memory abstraction is needed sooner or later ...
+    std.debug.assert(image_memory_type == memory_type_index);
+    std.debug.assert(image_memory_size.* + memory_requirements.size < image_memory_capacity);
+    try ctx.vkd.bindImageMemory(ctx.logical_device, font_image, image_memory, image_memory_size.*);
+    image_memory_size.* += memory_requirements.size;
 
     const font_view = blk: {
         const view_info = vk.ImageViewCreateInfo{
@@ -427,7 +433,6 @@ pub fn init(ctx: Context, allocator: Allocator, command_pool: vk.CommandPool, re
         .vertex_size = 0,
         .vertex_buffer_len = 0,
         .index_buffer_len = 0,
-        .font_memory = font_memory,
         .font_image = font_image,
         .font_view = font_view,
         .pipeline_cache = pipeline_cache,
@@ -451,7 +456,6 @@ pub fn deinit(self: ImguiPipeline, ctx: Context) void {
     ctx.vkd.destroyImageView(ctx.logical_device, self.font_view, null);
     ctx.vkd.destroySampler(ctx.logical_device, self.sampler, null);
     ctx.vkd.destroyImage(ctx.logical_device, self.font_image, null);
-    ctx.vkd.freeMemory(ctx.logical_device, self.font_memory, null);
 
     self.buffers.deinit(ctx);
 }
