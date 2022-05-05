@@ -53,12 +53,6 @@ uniform_offsets: []vk.DeviceSize,
 storage_offsets: []vk.DeviceSize,
 buffers: GpuBufferMemory,
 
-// intermediate buffer for storage and uniform buffers
-staging_command_pool: vk.CommandPool,
-staging_command_buffer: vk.CommandBuffer,
-staging_fence: vk.Fence,
-staging_buffer: GpuBufferMemory,
-
 work_group_dim: extern struct {
     x: u32,
     y: u32,
@@ -98,17 +92,14 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
     self.storage_offsets = try allocator.alloc(vk.DeviceSize, state_config.storage_sizes.len);
     errdefer allocator.free(self.storage_offsets);
 
-    var staging_buffer_size: u64 = 0;
     var buffer_size: u64 = 0;
     for (state_config.uniform_sizes) |size, i| {
         self.uniform_offsets[i] = buffer_size;
         buffer_size += size;
-        staging_buffer_size = std.math.max(staging_buffer_size, size);
     }
     for (state_config.storage_sizes) |size, i| {
         self.storage_offsets[i] = buffer_size;
         buffer_size += size;
-        staging_buffer_size = std.math.max(staging_buffer_size, size);
     }
     self.buffers = try GpuBufferMemory.init(
         ctx,
@@ -116,19 +107,6 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
         .{ .storage_buffer_bit = true, .uniform_buffer_bit = true, .transfer_dst_bit = true },
         .{ .device_local_bit = true },
     );
-
-    // staging buffers are suggested to remain smaller than 64mb: https://gpuopen.com/learn/vulkan-device-memory/
-    const @"64mb" = 67_108_864;
-    staging_buffer_size = std.math.min(staging_buffer_size, @"64mb");
-    // TODO: limit size, don't need to be as big as other buffers ...
-    self.staging_buffer = try GpuBufferMemory.init(
-        ctx,
-        // Do not keep as big of a buffer in memory
-        @intCast(vk.DeviceSize, staging_buffer_size),
-        .{ .transfer_src_bit = true },
-        .{ .host_visible_bit = true, .host_coherent_bit = true, .device_local_bit = true },
-    );
-    errdefer self.staging_buffer.deinit(ctx);
 
     const set_count = 1 + state_config.uniform_sizes.len + state_config.storage_sizes.len;
     const layout_bindings = try allocator.alloc(vk.DescriptorSetLayoutBinding, set_count);
@@ -368,29 +346,6 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
         }
     }
 
-    {
-        const pool_info = vk.CommandPoolCreateInfo{
-            .flags = .{},
-            .queue_family_index = ctx.queue_indices.graphics,
-        };
-        self.staging_command_pool = try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
-    }
-    errdefer ctx.vkd.destroyCommandPool(ctx.logical_device, self.staging_command_pool, null);
-    self.staging_command_buffer = try render.pipeline.createCmdBuffer(ctx, self.staging_command_pool);
-    errdefer ctx.vkd.freeCommandBuffers(
-        ctx.logical_device,
-        self.staging_command_pool,
-        @intCast(u32, 1),
-        @ptrCast([*]const vk.CommandBuffer, &self.staging_command_buffer),
-    );
-
-    const fence_info = vk.FenceCreateInfo{
-        .flags = .{
-            .signaled_bit = true,
-        },
-    };
-    self.staging_fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
-
     const semaphore_info = vk.SemaphoreCreateInfo{ .flags = .{} };
     var semaphore_initialized: usize = 0;
     self.complete_semaphores = try allocator.alloc(vk.Semaphore, in_flight_count);
@@ -406,6 +361,11 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
         }
     }
 
+    const fence_info = vk.FenceCreateInfo{
+        .flags = .{
+            .signaled_bit = true,
+        },
+    };
     self.complete_fences = try allocator.alloc(vk.Fence, in_flight_count);
     errdefer allocator.free(self.complete_fences);
     for (self.complete_fences) |*fence| {
@@ -429,50 +389,8 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
         .uniform_offsets = self.uniform_offsets,
         .storage_offsets = self.storage_offsets,
         .buffers = self.buffers,
-        .staging_command_pool = self.staging_command_pool,
-        .staging_command_buffer = self.staging_command_buffer,
-        .staging_fence = self.staging_fence,
-        .staging_buffer = self.staging_buffer,
         .work_group_dim = self.work_group_dim,
     };
-}
-
-/// transfer to device storage buffer
-pub fn transferToStorage(self: *ComputePipeline, ctx: Context, offset: vk.DeviceSize, comptime T: type, data: []const T) !void {
-    const transfer_zone = tracy.ZoneN(@src(), "transfer to storage stage");
-    defer transfer_zone.End();
-
-    // wait for previous transfer
-    _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.staging_fence), vk.TRUE, std.math.maxInt(u64));
-    try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.staging_fence));
-
-    try self.staging_buffer.transferToDevice(ctx, T, 0, data);
-    const copy_config = .{
-        .src_offset = 0,
-        .dst_offset = offset,
-        .size = data.len * @sizeOf(T),
-    };
-    try ctx.vkd.resetCommandPool(ctx.logical_device, self.staging_command_pool, .{});
-    try self.staging_buffer.manualCopy(ctx, &self.buffers, self.staging_command_buffer, self.staging_fence, copy_config);
-}
-
-/// transfer to device storage buffer
-pub fn transferToUniform(self: *ComputePipeline, ctx: Context, offset: vk.DeviceSize, comptime T: type, data: []const T) !void {
-    const transfer_zone = tracy.ZoneN(@src(), "transfer to unfiform stage");
-    defer transfer_zone.End();
-
-    // wait for previous transfer
-    _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.staging_fence), vk.TRUE, std.math.maxInt(u64));
-    try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.staging_fence));
-
-    try self.staging_buffer.transferToDevice(ctx, T, 0, data);
-    const copy_config = .{
-        .src_offset = 0,
-        .dst_offset = offset,
-        .size = data.len * @sizeOf(T),
-    };
-    try ctx.vkd.resetCommandPool(ctx.logical_device, self.staging_command_pool, .{});
-    try self.staging_buffer.manualCopy(ctx, &self.buffers, self.staging_command_buffer, self.staging_fence, copy_config);
 }
 
 pub fn deinit(self: ComputePipeline, ctx: Context) void {
@@ -484,14 +402,6 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
         vk.TRUE,
         std.math.maxInt(u64),
     ) catch |err| std.debug.print("failed to wait for gfx fence, err: {any}", .{err});
-
-    ctx.vkd.freeCommandBuffers(
-        ctx.logical_device,
-        self.staging_command_pool,
-        @intCast(u32, 1),
-        @ptrCast([*]const vk.CommandBuffer, &self.staging_command_buffer),
-    );
-    ctx.vkd.destroyCommandPool(ctx.logical_device, self.staging_command_pool, null);
 
     for (self.command_pools) |command_pool, i| {
         ctx.vkd.freeCommandBuffers(
@@ -508,7 +418,6 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
     self.allocator.free(self.uniform_offsets);
     self.allocator.free(self.storage_offsets);
     self.buffers.deinit(ctx);
-    self.staging_buffer.deinit(ctx);
 
     for (self.complete_semaphores) |semaphore| {
         ctx.vkd.destroySemaphore(ctx.logical_device, semaphore, null);
@@ -519,8 +428,6 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
     }
     self.allocator.free(self.complete_fences);
     self.allocator.free(self.queues);
-
-    ctx.vkd.destroyFence(ctx.logical_device, self.staging_fence, null);
 
     ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
     ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.target_descriptor_pool, null);
@@ -535,9 +442,6 @@ pub inline fn dispatch(self: *ComputePipeline, ctx: Context, camera: Camera, sun
     {
         const wait_compute_zone = tracy.ZoneN(@src(), "idle wait compute");
         defer wait_compute_zone.End();
-
-        // _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.staging_fence), vk.TRUE, std.math.maxInt(u64));
-        // try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.staging_fence));
 
         // wait for previous compute dispatch to complete
         _ = try ctx.vkd.waitForFences(

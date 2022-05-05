@@ -243,7 +243,7 @@ const TransitionBits = struct {
     src_stage: vk.PipelineStageFlags,
     dst_stage: vk.PipelineStageFlags,
 };
-fn getTransitionBits(old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) TransitionBits {
+pub fn getTransitionBits(old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) TransitionBits {
     var transition_bits: TransitionBits = undefined;
     switch (old_layout) {
         .@"undefined" => {

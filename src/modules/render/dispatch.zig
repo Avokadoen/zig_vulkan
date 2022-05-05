@@ -98,6 +98,7 @@ pub const Device = vk.DeviceWrapper(.{
     .freeMemory = true,
     .getBufferMemoryRequirements = true,
     .getDeviceQueue = true,
+    .getFenceStatus = true,
     .getImageMemoryRequirements = true,
     .getSwapchainImagesKHR = true,
     .mapMemory = true,

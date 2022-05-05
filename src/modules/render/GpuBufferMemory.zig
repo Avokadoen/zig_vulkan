@@ -87,7 +87,7 @@ pub fn copy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, command
     try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, command_buffer);
 }
 
-/// Same as copy but caller manage buffers
+/// Same as copy but caller manage synchronization
 pub fn manualCopy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, command_buffer: vk.CommandBuffer, fence: vk.Fence, config: CopyConfig) !void {
     var copy_region = vk.BufferCopy{
         .src_offset = config.src_offset,

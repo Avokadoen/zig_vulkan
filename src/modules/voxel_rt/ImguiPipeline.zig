@@ -14,6 +14,7 @@ const tracy = @import("../../tracy.zig");
 
 const render = @import("../render.zig");
 const GpuBufferMemory = render.GpuBufferMemory;
+const StagingBuffers = render.StagingBuffers;
 const Context = render.Context;
 const Texture = render.Texture;
 
@@ -49,9 +50,9 @@ shader_modules: [2]vk.ShaderModule,
 pub fn init(
     ctx: Context,
     allocator: Allocator,
-    command_pool: vk.CommandPool,
     render_pass: vk.RenderPass,
     swapchain_image_count: usize,
+    staging_buffers: *StagingBuffers,
     image_memory_type: u32,
     image_memory: vk.DeviceMemory,
     image_memory_capacity: vk.DeviceSize,
@@ -135,30 +136,14 @@ pub fn init(
     errdefer ctx.vkd.destroyImageView(ctx.logical_device, font_view, null);
 
     // upload texture data to gpu
-    {
-        const upload_size = width * height * bytes_per_pixel;
-        var staging_buffer = try GpuBufferMemory.init(
-            ctx,
-            @intCast(u64, upload_size),
-            .{ .transfer_src_bit = true },
-            .{ .host_visible_bit = true, .host_coherent_bit = true },
-        );
-        defer staging_buffer.deinit(ctx); // deinit buffer in any scope exit scenario
-
-        try staging_buffer.transferToDevice(ctx, u8, 0, pixels[0..@intCast(usize, width * height * bytes_per_pixel)]);
-        try Texture.transitionImageLayout(ctx, command_pool, font_image, .@"undefined", .transfer_dst_optimal);
-        try Texture.copyBufferToImage(
-            ctx,
-            command_pool,
-            font_image,
-            staging_buffer.buffer,
-            .{
-                .width = @intCast(u32, width),
-                .height = @intCast(u32, height),
-            },
-        );
-        try Texture.transitionImageLayout(ctx, command_pool, font_image, .transfer_dst_optimal, .shader_read_only_optimal);
-    }
+    try staging_buffers.transferToImage(
+        ctx,
+        font_image,
+        @intCast(u32, width),
+        @intCast(u32, height),
+        u8,
+        pixels[0..@intCast(usize, width * height * bytes_per_pixel)],
+    );
 
     const sampler = blk: {
         const sampler_info = vk.SamplerCreateInfo{
