@@ -29,7 +29,7 @@ pub const PushConstant = struct {
 
 sampler: vk.Sampler,
 
-buffers: GpuBufferMemory,
+vertex_index_buffer_offset: vk.DeviceSize,
 vertex_size: vk.DeviceSize,
 vertex_buffer_len: c_int,
 index_buffer_len: c_int,
@@ -53,6 +53,7 @@ pub fn init(
     render_pass: vk.RenderPass,
     swapchain_image_count: usize,
     staging_buffers: *StagingBuffers,
+    vertex_index_buffer_offset: vk.DeviceSize,
     image_memory_type: u32,
     image_memory: vk.DeviceMemory,
     image_memory_capacity: vk.DeviceSize,
@@ -404,17 +405,9 @@ pub fn init(
     );
     errdefer ctx.vkd.destroyPipeline(ctx.logical_device, pipeline, null);
 
-    const buffers = try GpuBufferMemory.init(
-        ctx,
-        GpuBufferMemory.bytes_in_mb * 63,
-        .{ .vertex_buffer_bit = true, .index_buffer_bit = true },
-        .{ .host_visible_bit = true },
-    );
-    errdefer buffers.deinit(ctx);
-
     return ImguiPipeline{
         .sampler = sampler,
-        .buffers = buffers,
+        .vertex_index_buffer_offset = vertex_index_buffer_offset,
         .vertex_size = 0,
         .vertex_buffer_len = 0,
         .index_buffer_len = 0,
@@ -441,12 +434,16 @@ pub fn deinit(self: ImguiPipeline, ctx: Context) void {
     ctx.vkd.destroyImageView(ctx.logical_device, self.font_view, null);
     ctx.vkd.destroySampler(ctx.logical_device, self.sampler, null);
     ctx.vkd.destroyImage(ctx.logical_device, self.font_image, null);
-
-    self.buffers.deinit(ctx);
 }
 
 /// record a command buffer that can draw current frame
-pub fn recordCommandBuffer(self: ImguiPipeline, ctx: Context, command_buffer: vk.CommandBuffer) !void {
+pub fn recordCommandBuffer(
+    self: ImguiPipeline,
+    ctx: Context,
+    command_buffer: vk.CommandBuffer,
+    buffer_offset: vk.DeviceSize,
+    vertex_index_buffer: GpuBufferMemory,
+) !void {
     const record_zone = tracy.ZoneN(@src(), "imgui commands");
     defer record_zone.End();
 
@@ -486,15 +483,15 @@ pub fn recordCommandBuffer(self: ImguiPipeline, ctx: Context, command_buffer: vk
     var index_offset: c_uint = 0;
 
     if (im_draw_data.CmdListsCount > 0) {
-        const offsets = [_]vk.DeviceSize{0};
+        const vertex_offsets = [_]vk.DeviceSize{buffer_offset};
         ctx.vkd.cmdBindVertexBuffers(
             command_buffer,
             0,
             1,
-            @ptrCast([*]const vk.Buffer, &self.buffers.buffer),
-            &offsets,
+            @ptrCast([*]const vk.Buffer, &vertex_index_buffer.buffer),
+            &vertex_offsets,
         );
-        ctx.vkd.cmdBindIndexBuffer(command_buffer, self.buffers.buffer, self.vertex_size, .uint16);
+        ctx.vkd.cmdBindIndexBuffer(command_buffer, vertex_index_buffer.buffer, buffer_offset + self.vertex_size, .uint16);
 
         const draw_cmd_list_count = @intCast(usize, im_draw_data.CmdListsCount);
         var i: usize = 0;
@@ -531,7 +528,11 @@ pub fn recordCommandBuffer(self: ImguiPipeline, ctx: Context, command_buffer: vk
 }
 
 // TODO: do not make new buffers if buffer is larger than total count
-pub fn updateBuffers(self: *ImguiPipeline, ctx: Context) !void {
+pub fn updateBuffers(
+    self: *ImguiPipeline,
+    ctx: Context,
+    vertex_index_buffer: *GpuBufferMemory,
+) !void {
     const update_buffers_zone = tracy.ZoneN(@src(), "imgui: vertex & index update");
     defer update_buffers_zone.End();
 
@@ -542,12 +543,12 @@ pub fn updateBuffers(self: *ImguiPipeline, ctx: Context) !void {
     self.vertex_buffer_len = draw_data.TotalVtxCount;
     self.index_buffer_len = draw_data.TotalIdxCount;
     if (index_size == 0 or self.vertex_size == 0) return; // nothing to draw
-    std.debug.assert(self.vertex_size + index_size < self.buffers.size);
+    std.debug.assert(self.vertex_size + index_size < vertex_index_buffer.size);
 
-    try self.buffers.map(ctx, 0, self.vertex_size + index_size);
-    defer self.buffers.unmap(ctx);
+    try vertex_index_buffer.map(ctx, self.vertex_index_buffer_offset, self.vertex_size + index_size);
+    defer vertex_index_buffer.unmap(ctx);
 
-    var vertex_dest = @ptrCast([*]imgui.ImDrawVert, @alignCast(@alignOf(imgui.ImDrawVert), self.buffers.mapped) orelse unreachable);
+    var vertex_dest = @ptrCast([*]imgui.ImDrawVert, @alignCast(@alignOf(imgui.ImDrawVert), vertex_index_buffer.mapped) orelse unreachable);
     var vertex_offset: usize = 0;
 
     // map index_dest to be the buffer memory + vertex byte offset
@@ -555,7 +556,7 @@ pub fn updateBuffers(self: *ImguiPipeline, ctx: Context) !void {
         [*]imgui.ImDrawIdx,
         @alignCast(
             @alignOf(imgui.ImDrawIdx),
-            @intToPtr(?*anyopaque, @ptrToInt(self.buffers.mapped) + @intCast(usize, self.vertex_size)),
+            @intToPtr(?*anyopaque, @ptrToInt(vertex_index_buffer.mapped) + @intCast(usize, self.vertex_size)),
         ) orelse unreachable,
     );
     var index_offset: usize = 0;
@@ -587,5 +588,5 @@ pub fn updateBuffers(self: *ImguiPipeline, ctx: Context) !void {
     }
 
     // send changes to GPU
-    try self.buffers.flush(ctx, 0, self.vertex_size + index_size);
+    try vertex_index_buffer.flush(ctx, self.vertex_index_buffer_offset, self.vertex_size + index_size);
 }

@@ -13,6 +13,16 @@ const Vertex = extern struct {
     uv: [2]f32,
 };
 
+pub const vertex_size = vertices.len * @sizeOf(Vertex);
+pub const indices_size = indices.len * @sizeOf(u16);
+pub const vertices = [_]Vertex{
+    .{ .pos = .{ 1.0, 1.0, 0.0 }, .uv = .{ 1.0, 1.0 } },
+    .{ .pos = .{ -1.0, 1.0, 0.0 }, .uv = .{ 0.0, 1.0 } },
+    .{ .pos = .{ -1.0, -1.0, 0.0 }, .uv = .{ 0.0, 0.0 } },
+    .{ .pos = .{ 1.0, -1.0, 0.0 }, .uv = .{ 1.0, 0.0 } },
+};
+pub const indices = [_]u16{ 0, 1, 2, 2, 3, 0 };
+
 pub const PushConstant = extern struct {
     samples: i32,
     distribution_bias: f32,
@@ -30,6 +40,8 @@ pub const Config = struct {
 /// Pipeline to draw a single texture to screen
 const GraphicsPipeline = @This();
 
+bytes_used_in_buffer: vk.DeviceSize,
+
 pipeline_cache: vk.PipelineCache,
 pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
@@ -43,9 +55,6 @@ command_pools: []vk.CommandPool,
 command_buffers: []vk.CommandBuffer,
 framebuffers: []vk.Framebuffer,
 
-vertex_buffer: GpuBufferMemory,
-index_buffer: GpuBufferMemory,
-
 shader_constants: *PushConstant,
 
 // shader modules stored for cleanup
@@ -58,32 +67,13 @@ pub fn init(
     render_pass: vk.RenderPass,
     draw_sampler: vk.Sampler,
     draw_image_view: vk.ImageView,
+    vertex_index_buffer: *GpuBufferMemory,
     config: Config,
 ) !GraphicsPipeline {
-    const vertices = [_]Vertex{
-        .{ .pos = .{ 1.0, 1.0, 0.0 }, .uv = .{ 1.0, 1.0 } },
-        .{ .pos = .{ -1.0, 1.0, 0.0 }, .uv = .{ 0.0, 1.0 } },
-        .{ .pos = .{ -1.0, -1.0, 0.0 }, .uv = .{ 0.0, 0.0 } },
-        .{ .pos = .{ 1.0, -1.0, 0.0 }, .uv = .{ 1.0, 0.0 } },
-    };
-    var vertex_buffer = try GpuBufferMemory.init(
-        ctx,
-        @sizeOf(Vertex) * vertices.len,
-        .{ .vertex_buffer_bit = true },
-        .{ .host_visible_bit = true, .host_coherent_bit = true },
-    );
-    errdefer vertex_buffer.deinit(ctx);
-    try vertex_buffer.transferToDevice(ctx, Vertex, 0, vertices[0..]);
+    try vertex_index_buffer.transferToDevice(ctx, Vertex, 0, vertices[0..]);
+    try vertex_index_buffer.transferToDevice(ctx, u16, vertex_size, indices[0..]);
 
-    const indices = [_]u16{ 0, 1, 2, 2, 3, 0 };
-    var index_buffer = try GpuBufferMemory.init(
-        ctx,
-        @sizeOf(u16) * indices.len,
-        .{ .index_buffer_bit = true },
-        .{ .host_visible_bit = true, .host_coherent_bit = true },
-    );
-    errdefer index_buffer.deinit(ctx);
-    try index_buffer.transferToDevice(ctx, u16, 0, indices[0..]);
+    const bytes_used_in_buffer = vertex_index_buffer.nonCoherentAtomSize(ctx, vertex_size * indices_size);
 
     const descriptor_pool = blk: {
         const pool_sizes = [_]vk.DescriptorPoolSize{.{
@@ -370,6 +360,7 @@ pub fn init(
     };
 
     return GraphicsPipeline{
+        .bytes_used_in_buffer = bytes_used_in_buffer,
         .pipeline_cache = pipeline_cache,
         .pipeline_layout = pipeline_layout,
         .pipeline = pipeline,
@@ -380,8 +371,6 @@ pub fn init(
         .command_pools = command_pools,
         .command_buffers = command_buffers,
         .framebuffers = framebuffers,
-        .vertex_buffer = vertex_buffer,
-        .index_buffer = index_buffer,
         .shader_modules = [2]vk.ShaderModule{ vert.module, frag.module },
         .shader_constants = shader_constants,
     };
@@ -414,8 +403,6 @@ pub fn deinit(self: GraphicsPipeline, allocator: Allocator, ctx: Context) void {
     ctx.vkd.destroyPipelineLayout(ctx.logical_device, self.pipeline_layout, null);
     ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.descriptor_set_layout, null);
     ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.descriptor_pool, null);
-    self.vertex_buffer.deinit(ctx);
-    self.index_buffer.deinit(ctx);
 
     allocator.destroy(self.shader_constants);
 }

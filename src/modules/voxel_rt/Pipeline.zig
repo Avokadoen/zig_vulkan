@@ -16,6 +16,7 @@ const ComputePipeline = @import("ComputePipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const ImguiPipeline = @import("ImguiPipeline.zig");
 const StagingBuffers = render.StagingBuffers;
+const GpuBufferMemory = render.GpuBufferMemory;
 
 const ImguiGui = @import("ImguiGui.zig");
 
@@ -79,6 +80,9 @@ gui: ImguiGui,
 
 requested_rescale_pipeline: bool = false,
 init_command_pool: vk.CommandPool, // kept in case of rescale
+
+// shared vertex index buffer for imgui and graphics pipeline
+vertex_index_buffer: GpuBufferMemory,
 
 pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.Extent2D, grid_state: GridState, camera: *Camera, sun: *Sun, config: Config) !Pipeline {
     const init_zone = tracy.ZoneN(@src(), "init pipeline");
@@ -241,15 +245,30 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     var staging_buffers = try StagingBuffers.init(ctx, allocator, config.staging_buffers);
     errdefer staging_buffers.deinit(ctx, allocator);
 
-    const gfx_pipeline = try GraphicsPipeline.init(allocator, ctx, swapchain, render_pass, sampler, compute_image_view, config.gfx_pipeline_config);
+    var vertex_index_buffer = try GpuBufferMemory.init(
+        ctx,
+        GpuBufferMemory.bytes_in_mb * 63,
+        .{ .vertex_buffer_bit = true, .index_buffer_bit = true },
+        .{ .host_visible_bit = true },
+    );
+    const gfx_pipeline = try GraphicsPipeline.init(
+        allocator,
+        ctx,
+        swapchain,
+        render_pass,
+        sampler,
+        compute_image_view,
+        &vertex_index_buffer,
+        config.gfx_pipeline_config,
+    );
     errdefer gfx_pipeline.deinit(allocator, ctx);
-
     const imgui_pipeline = try ImguiPipeline.init(
         ctx,
         allocator,
         render_pass,
         swapchain.images.len,
         &staging_buffers,
+        gfx_pipeline.bytes_used_in_buffer,
         image_memory_type_index,
         image_memory,
         image_memory_capacity,
@@ -304,6 +323,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .sun = sun,
         .gui = gui,
         .init_command_pool = init_command_pool,
+        .vertex_index_buffer = vertex_index_buffer,
     };
 }
 
@@ -326,6 +346,7 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     ctx.destroyRenderPass(self.render_pass);
     self.swapchain.deinit(ctx);
     self.staging_buffers.deinit(ctx, self.allocator);
+    self.vertex_index_buffer.deinit(ctx);
 
     ctx.vkd.destroyCommandPool(ctx.logical_device, self.init_command_pool, null);
 
@@ -381,7 +402,7 @@ pub inline fn draw(self: *Pipeline, ctx: Context) !void {
     }
 
     self.gui.newFrame(ctx, self, image_index == 0);
-    try self.imgui_pipeline.updateBuffers(ctx);
+    try self.imgui_pipeline.updateBuffers(ctx, &self.vertex_index_buffer);
 
     // re-record command buffer to update any state
     var begin_info = self.render_pass_begin_info;
@@ -712,13 +733,18 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize, begin_info: *
         command_buffer,
         0,
         1,
-        @ptrCast([*]const vk.Buffer, &self.gfx_pipeline.vertex_buffer.buffer),
+        @ptrCast([*]const vk.Buffer, &self.vertex_index_buffer.buffer),
         &vertex_zero_offset,
     );
-    ctx.vkd.cmdBindIndexBuffer(command_buffer, self.gfx_pipeline.index_buffer.buffer, 0, .uint16);
-    ctx.vkd.cmdDrawIndexed(command_buffer, self.gfx_pipeline.index_buffer.len, 1, 0, 0, 0);
+    ctx.vkd.cmdBindIndexBuffer(command_buffer, self.vertex_index_buffer.buffer, GraphicsPipeline.vertex_size, .uint16);
+    ctx.vkd.cmdDrawIndexed(command_buffer, GraphicsPipeline.indices.len, 1, 0, 0, 0);
 
-    try self.imgui_pipeline.recordCommandBuffer(ctx, command_buffer);
+    try self.imgui_pipeline.recordCommandBuffer(
+        ctx,
+        command_buffer,
+        self.gfx_pipeline.bytes_used_in_buffer,
+        self.vertex_index_buffer,
+    );
 
     ctx.vkd.cmdEndRenderPass(command_buffer);
 

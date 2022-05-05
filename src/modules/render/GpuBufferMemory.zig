@@ -248,7 +248,7 @@ pub fn deinit(self: GpuBufferMemory, ctx: Context) void {
     }
 }
 
-inline fn nonCoherentAtomSize(self: GpuBufferMemory, ctx: Context, size: vk.DeviceSize) vk.DeviceSize {
+pub inline fn nonCoherentAtomSize(self: GpuBufferMemory, ctx: Context, size: vk.DeviceSize) vk.DeviceSize {
     const map_size = ctx.non_coherent_atom_size * (std.math.divCeil(vk.DeviceSize, size, ctx.non_coherent_atom_size) catch unreachable);
     return std.math.min(self.size, map_size);
 }
