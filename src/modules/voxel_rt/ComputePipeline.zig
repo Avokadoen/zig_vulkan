@@ -520,6 +520,8 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
     self.allocator.free(self.complete_fences);
     self.allocator.free(self.queues);
 
+    ctx.vkd.destroyFence(ctx.logical_device, self.staging_fence, null);
+
     ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
     ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.target_descriptor_pool, null);
 

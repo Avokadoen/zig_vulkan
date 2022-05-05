@@ -323,6 +323,7 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     ctx.vkd.destroySampler(ctx.logical_device, self.sampler, null);
     ctx.vkd.destroyImageView(ctx.logical_device, self.compute_image_view, null);
     ctx.vkd.destroyImage(ctx.logical_device, self.compute_image, null);
+    ctx.vkd.freeMemory(ctx.logical_device, self.image_memory, null);
 }
 
 pub inline fn draw(self: *Pipeline, ctx: Context) !void {
