@@ -5,7 +5,6 @@ const vk = @import("vulkan");
 
 const render = @import("../render.zig");
 const Context = render.Context;
-const Texture = render.Texture;
 const GpuBufferMemory = render.GpuBufferMemory;
 const Swapchain = render.swapchain.Data;
 
@@ -52,9 +51,15 @@ shader_constants: *PushConstant,
 // shader modules stored for cleanup
 shader_modules: [2]vk.ShaderModule,
 
-texture: *const Texture,
-
-pub fn init(allocator: Allocator, ctx: Context, swapchain: Swapchain, render_pass: vk.RenderPass, texture: *const Texture, config: Config) !GraphicsPipeline {
+pub fn init(
+    allocator: Allocator,
+    ctx: Context,
+    swapchain: Swapchain,
+    render_pass: vk.RenderPass,
+    draw_sampler: vk.Sampler,
+    draw_image_view: vk.ImageView,
+    config: Config,
+) !GraphicsPipeline {
     const vertices = [_]Vertex{
         .{ .pos = .{ 1.0, 1.0, 0.0 }, .uv = .{ 1.0, 1.0 } },
         .{ .pos = .{ -1.0, 1.0, 0.0 }, .uv = .{ 0.0, 1.0 } },
@@ -137,8 +142,8 @@ pub fn init(allocator: Allocator, ctx: Context, swapchain: Swapchain, render_pas
 
     {
         const descriptor_info = vk.DescriptorImageInfo{
-            .sampler = texture.sampler,
-            .image_view = texture.image_view,
+            .sampler = draw_sampler,
+            .image_view = draw_image_view,
             .image_layout = .general,
         };
         const write_descriptor_sets = [_]vk.WriteDescriptorSet{.{
@@ -378,7 +383,6 @@ pub fn init(allocator: Allocator, ctx: Context, swapchain: Swapchain, render_pas
         .vertex_buffer = vertex_buffer,
         .index_buffer = index_buffer,
         .shader_modules = [2]vk.ShaderModule{ vert.module, frag.module },
-        .texture = texture,
         .shader_constants = shader_constants,
     };
 }

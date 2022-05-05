@@ -9,6 +9,7 @@ const vk = @import("vulkan");
 const render = @import("../render.zig");
 const Context = render.Context;
 const Texture = render.Texture;
+const vk_utils = render.vk_utils;
 
 // TODO: move pipelines to ./internal/render/
 const ComputePipeline = @import("ComputePipeline.zig");
@@ -43,7 +44,17 @@ const Pixel = packed struct {
 const Pipeline = @This();
 
 allocator: Allocator,
-target_texture: *Texture,
+
+image_memory_type_index: u32,
+image_memory_size: vk.DeviceSize,
+image_memory_capacity: vk.DeviceSize,
+image_memory: vk.DeviceMemory,
+
+compute_image_view: vk.ImageView,
+compute_image: vk.Image,
+
+sampler: vk.Sampler,
+
 swapchain: render.swapchain.Data,
 render_pass: vk.RenderPass,
 render_pass_begin_info: vk.RenderPassBeginInfo,
@@ -69,9 +80,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     const init_zone = tracy.ZoneN(@src(), "init pipeline");
     defer init_zone.End();
 
-    const target_texture = try allocator.create(Texture);
-    errdefer allocator.destroy(target_texture);
-
     const pool_info = vk.CommandPoolCreateInfo{
         .flags = .{},
         .queue_family_index = ctx.queue_indices.graphics,
@@ -82,18 +90,99 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     // if they are the same, then we use that index
     const indices = [_]u32{ ctx.queue_indices.graphics, ctx.queue_indices.compute };
     const indices_len: usize = if (ctx.queue_indices.graphics == ctx.queue_indices.compute) 1 else 2;
-    target_texture.* = blk: {
-        const texture_config = Texture.Config(Pixel){
-            .data = null,
-            .width = internal_render_resolution.width,
-            .height = internal_render_resolution.height,
-            .usage = .{ .sampled_bit = true, .storage_bit = true },
-            .queue_family_indices = indices[0..indices_len],
+
+    const compute_image = blk: {
+        const image_info = vk.ImageCreateInfo{
+            .flags = .{},
+            .image_type = .@"2d",
             .format = .r8g8b8a8_unorm,
+            .extent = vk.Extent3D{
+                .width = internal_render_resolution.width,
+                .height = internal_render_resolution.height,
+                .depth = 1,
+            },
+            .mip_levels = 1,
+            .array_layers = 1,
+            .samples = .{
+                .@"1_bit" = true,
+            },
+            .tiling = .optimal,
+            .usage = .{ .sampled_bit = true, .storage_bit = true },
+            .sharing_mode = .exclusive,
+            .queue_family_index_count = @intCast(u32, indices_len),
+            .p_queue_family_indices = &indices,
+            .initial_layout = .@"undefined",
         };
-        break :blk try Texture.init(ctx, init_command_pool, .general, Pixel, texture_config);
+        break :blk try ctx.vkd.createImage(ctx.logical_device, &image_info, null);
     };
-    errdefer target_texture.deinit(ctx);
+    errdefer ctx.vkd.destroyImage(ctx.logical_device, compute_image, null);
+
+    // Allocate memory for all pipeline images
+    const memory_requirements = ctx.vkd.getImageMemoryRequirements(ctx.logical_device, compute_image);
+    const image_memory_type_index = try vk_utils.findMemoryTypeIndex(ctx, memory_requirements.memory_type_bits, .{
+        .device_local_bit = true,
+    });
+    const image_memory_capacity = 250 * render.GpuBufferMemory.bytes_in_mb;
+    const image_alloc_info = vk.MemoryAllocateInfo{
+        .allocation_size = image_memory_capacity,
+        .memory_type_index = image_memory_type_index,
+    };
+    const image_memory = try ctx.vkd.allocateMemory(ctx.logical_device, &image_alloc_info, null);
+    errdefer ctx.vkd.freeMemory(ctx.logical_device, image_memory, null);
+
+    try ctx.vkd.bindImageMemory(ctx.logical_device, compute_image, image_memory, 0);
+    const image_memory_size = memory_requirements.size;
+
+    try Texture.transitionImageLayout(ctx, init_command_pool, compute_image, .@"undefined", .general);
+
+    const compute_image_view = blk: {
+        // TODO: evaluate if this and swapchain should share logic (probably no)
+        const image_view_info = vk.ImageViewCreateInfo{
+            .flags = .{},
+            .image = compute_image,
+            .view_type = .@"2d",
+            .format = .r8g8b8a8_unorm,
+            .components = .{
+                .r = .identity,
+                .g = .identity,
+                .b = .identity,
+                .a = .identity,
+            },
+            .subresource_range = .{
+                .aspect_mask = .{
+                    .color_bit = true,
+                },
+                .base_mip_level = 0,
+                .level_count = 1,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            },
+        };
+        break :blk try ctx.vkd.createImageView(ctx.logical_device, &image_view_info, null);
+    };
+
+    const sampler = blk: {
+        // const device_properties = ctx.vki.getPhysicalDeviceProperties(ctx.physical_device);
+        const sampler_info = vk.SamplerCreateInfo{
+            .flags = .{},
+            .mag_filter = .linear, // not sure what the application would need
+            .min_filter = .linear, // RT should use linear, pixel sim should be nearest
+            .mipmap_mode = .linear,
+            .address_mode_u = .repeat,
+            .address_mode_v = .repeat,
+            .address_mode_w = .repeat,
+            .mip_lod_bias = 0.0,
+            .anisotropy_enable = vk.FALSE, // TODO: test with, and without
+            .max_anisotropy = 1.0, // device_properties.limits.max_sampler_anisotropy,
+            .compare_enable = vk.FALSE,
+            .compare_op = .always,
+            .min_lod = 0.0,
+            .max_lod = 0.0,
+            .border_color = .int_opaque_black,
+            .unnormalized_coordinates = vk.FALSE, // TODO: might be good for pixel sim to use true
+        };
+        break :blk try ctx.vkd.createSampler(ctx.logical_device, &sampler_info, null);
+    };
 
     const swapchain = try render.swapchain.Data.init(allocator, ctx, init_command_pool, null);
     errdefer swapchain.deinit(ctx);
@@ -130,7 +219,13 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         };
         const state_configs = ComputePipeline.StateConfigs{ .uniform_sizes = uniform_sizes[0..], .storage_sizes = storage_sizes[0..] };
 
-        break :blk try ComputePipeline.init(allocator, ctx, config.in_flight_compute, "brick_raytracer.comp.spv", target_texture, state_configs);
+        const target_image_info = ComputePipeline.ImageInfo{
+            .width = @intToFloat(f32, internal_render_resolution.width),
+            .height = @intToFloat(f32, internal_render_resolution.height),
+            .sampler = sampler,
+            .image_view = compute_image_view,
+        };
+        break :blk try ComputePipeline.init(allocator, ctx, config.in_flight_compute, "brick_raytracer.comp.spv", target_image_info, state_configs);
     };
     errdefer compute_pipeline.deinit(ctx);
 
@@ -141,7 +236,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         }
     }
 
-    const gfx_pipeline = try GraphicsPipeline.init(allocator, ctx, swapchain, render_pass, target_texture, config.gfx_pipeline_config);
+    const gfx_pipeline = try GraphicsPipeline.init(allocator, ctx, swapchain, render_pass, sampler, compute_image_view, config.gfx_pipeline_config);
     errdefer gfx_pipeline.deinit(allocator, ctx);
 
     const imgui_pipeline = try ImguiPipeline.init(ctx, allocator, init_command_pool, render_pass, swapchain.images.len);
@@ -173,7 +268,13 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
 
     return Pipeline{
         .allocator = allocator,
-        .target_texture = target_texture,
+        .image_memory_type_index = image_memory_type_index,
+        .image_memory_size = image_memory_size,
+        .image_memory_capacity = image_memory_capacity,
+        .image_memory = image_memory,
+        .compute_image_view = compute_image_view,
+        .compute_image = compute_image,
+        .sampler = sampler,
         .swapchain = swapchain,
         .render_pass = render_pass,
         .render_pass_begin_info = render_pass_begin_info,
@@ -210,8 +311,10 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     self.swapchain.deinit(ctx);
 
     ctx.vkd.destroyCommandPool(ctx.logical_device, self.init_command_pool, null);
-    self.target_texture.deinit(ctx);
-    self.allocator.destroy(self.target_texture);
+
+    ctx.vkd.destroySampler(ctx.logical_device, self.sampler, null);
+    ctx.vkd.destroyImageView(ctx.logical_device, self.compute_image_view, null);
+    ctx.vkd.destroyImage(ctx.logical_device, self.compute_image, null);
 }
 
 pub inline fn draw(self: *Pipeline, ctx: Context) !void {
@@ -504,7 +607,7 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize, begin_info: *
         .new_layout = .general,
         .src_queue_family_index = ctx.queue_indices.compute,
         .dst_queue_family_index = ctx.queue_indices.graphics,
-        .image = self.target_texture.image,
+        .image = self.compute_image,
         .subresource_range = .{
             .aspect_mask = .{ .color_bit = true },
             .base_mip_level = 0,

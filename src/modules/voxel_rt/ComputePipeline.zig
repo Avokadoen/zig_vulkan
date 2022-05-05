@@ -23,6 +23,13 @@ pub const StateConfigs = struct {
     storage_sizes: []const u64,
 };
 
+pub const ImageInfo = struct {
+    width: f32,
+    height: f32,
+    sampler: vk.Sampler,
+    image_view: vk.ImageView,
+};
+
 allocator: Allocator,
 
 pipeline_layout: vk.PipelineLayout,
@@ -35,9 +42,8 @@ queues: []vk.Queue,
 complete_semaphores: []vk.Semaphore,
 complete_fences: []vk.Fence,
 
-// TODO: move this out?
-// compute pipelines *currently* should write to a texture
-target_texture: *const Texture,
+// info about the target image
+target_image_info: ImageInfo,
 target_descriptor_layout: vk.DescriptorSetLayout,
 target_descriptor_pool: vk.DescriptorPool,
 target_descriptor_set: vk.DescriptorSet,
@@ -64,12 +70,12 @@ work_group_dim: extern struct {
 
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
-pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_path: []const u8, target_texture: *const Texture, state_config: StateConfigs) !ComputePipeline {
+pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_path: []const u8, target_image_info: ImageInfo, state_config: StateConfigs) !ComputePipeline {
     std.debug.assert(in_flight_count <= ctx.queue_indices.compute_queue_count);
 
     var self: ComputePipeline = undefined;
     self.allocator = allocator;
-    self.target_texture = target_texture;
+    self.target_image_info = target_image_info;
 
     self.work_group_dim = blk: {
         const device_properties = ctx.getPhysicalDeviceProperties();
@@ -217,8 +223,8 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
         defer allocator.free(write_descriptor_sets);
 
         const image_info = vk.DescriptorImageInfo{
-            .sampler = self.target_texture.sampler,
-            .image_view = self.target_texture.image_view,
+            .sampler = self.target_image_info.sampler,
+            .image_view = self.target_image_info.image_view,
             .image_layout = .general,
         };
         write_descriptor_sets[0] = vk.WriteDescriptorSet{
@@ -416,7 +422,7 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
         .queues = self.queues,
         .complete_semaphores = self.complete_semaphores,
         .complete_fences = self.complete_fences,
-        .target_texture = self.target_texture,
+        .target_image_info = self.target_image_info,
         .target_descriptor_layout = self.target_descriptor_layout,
         .target_descriptor_pool = self.target_descriptor_pool,
         .target_descriptor_set = self.target_descriptor_set,
@@ -616,10 +622,8 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, index: usize, ca
         0,
         undefined,
     );
-    const img_width = self.target_texture.image_extent.width;
-    const img_height = self.target_texture.image_extent.height;
-    const x_dispatch = @ceil(@intToFloat(f32, img_width) / @intToFloat(f32, self.work_group_dim.x));
-    const y_dispatch = @ceil(@intToFloat(f32, img_height) / @intToFloat(f32, self.work_group_dim.y));
+    const x_dispatch = @ceil(self.target_image_info.width / @intToFloat(f32, self.work_group_dim.x));
+    const y_dispatch = @ceil(self.target_image_info.height / @intToFloat(f32, self.work_group_dim.y));
 
     ctx.vkd.cmdDispatch(self.command_buffers[index], @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
     try ctx.vkd.endCommandBuffer(self.command_buffers[index]);
