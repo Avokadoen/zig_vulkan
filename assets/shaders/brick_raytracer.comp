@@ -415,8 +415,8 @@ bool HigherGridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRec
 bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit) {
     // min point *and* base t value
     const vec3 g_min = brick_grid.min_point_base_t.xyz;
-    const vec3 g_max = brick_grid.max_point_scale.xyz - vec3(0.001);
     const float b_base_t = brick_grid.min_point_base_t.w;
+    const vec3 g_max = brick_grid.max_point_scale.xyz - vec3(0.001);
     const ivec3 brick_dim = ivec3(brick_grid.dim_x, brick_grid.dim_y, brick_grid.dim_z);
 
     const vec3 inv_ray_dir = vec3(
@@ -514,9 +514,10 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
         const int bit_offset = int(position.x + 8 * (position.z + 8 * position.y));
         const int mask_index = bit_offset / 32;
         const int mask_offset = bit_offset % 32;
-        const int set_bit = bitfieldExtract(brick.solid_mask[mask_index], mask_offset, 1);
+        const uint uint_mask = floatBitsToUint(intBitsToFloat(brick.solid_mask[mask_index]));
+        const uint bitfield_final_entry = bitfieldExtract(uint_mask, 0, mask_offset + 1);
         // TODO: if t_value >= t_min
-        if (set_bit != 0) {
+        if ((bitfield_final_entry & (1 << mask_offset)) != 0) {
             bool ignore_brick = false;
             { // calculate material data
                 int bits_before = 0;
@@ -524,15 +525,12 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
                 for (int i = 0; i < mask_index; i++) {
                     bits_before += bitCount(brick.solid_mask[i]);
                 }
-                // bitfieldExtract(brick.solid_mask[mask_index], 0, mask_offset)
-                // causes a weird bug where brick.solid_mask[mask_index] = 3, mask_offset = 1
-                // results in -1 which in turn results in 32 bit set which is wrong.
-                // this is a work around where we simply create a bitmask for solid_mask
-                int maskmask = 0;
-                for (int i = 0; i < mask_offset; i++) {
-                    maskmask |= 1 << i;
-                }
-                bits_before += bitCount(brick.solid_mask[mask_index] & maskmask);
+
+                const int bit_pad = 32 - mask_offset;
+                // remove bit that is current voxel (& ~(1 << mask_offset))
+                // shift any rogue bits to the left in order to remove them
+                // shift all bits to the right to reset
+                bits_before += bitCount(bitfield_final_entry & ~(1 << mask_offset));
 
                 const int material_index_index = (bits_before * 8) / 32;
                 const int material_index_bit_offset = (bits_before * 8) % 32;
