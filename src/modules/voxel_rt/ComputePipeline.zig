@@ -26,6 +26,7 @@ pub const StateConfigs = struct {
 pub const ImageInfo = struct {
     width: f32,
     height: f32,
+    image: vk.Image,
     sampler: vk.Sampler,
     image_view: vk.ImageView,
 };
@@ -494,7 +495,6 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, index: usize, ca
         .p_inheritance_info = null,
     };
     try ctx.vkd.beginCommandBuffer(self.command_buffers[index], &command_begin_info);
-
     ctx.vkd.cmdBindPipeline(self.command_buffers[index], vk.PipelineBindPoint.compute, self.pipeline.*);
 
     // push camera data as a push constant
@@ -515,6 +515,35 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, index: usize, ca
         @sizeOf(Camera.Device),
         @sizeOf(Sun.Device),
         &sun.device_data,
+    );
+
+    const image_barrier = vk.ImageMemoryBarrier{
+        .src_access_mask = .{ .shader_read_bit = true },
+        .dst_access_mask = .{ .shader_write_bit = true },
+        .old_layout = .shader_read_only_optimal,
+        .new_layout = .general,
+        .src_queue_family_index = ctx.queue_indices.graphics,
+        .dst_queue_family_index = ctx.queue_indices.compute,
+        .image = self.target_image_info.image,
+        .subresource_range = .{
+            .aspect_mask = .{ .color_bit = true },
+            .base_mip_level = 0,
+            .level_count = 1,
+            .base_array_layer = 0,
+            .layer_count = 1,
+        },
+    };
+    ctx.vkd.cmdPipelineBarrier(
+        self.command_buffers[index],
+        .{ .fragment_shader_bit = true },
+        .{ .compute_shader_bit = true },
+        .{},
+        0,
+        undefined,
+        0,
+        undefined,
+        1,
+        @ptrCast([*]const vk.ImageMemoryBarrier, &image_barrier),
     );
 
     // bind target texture

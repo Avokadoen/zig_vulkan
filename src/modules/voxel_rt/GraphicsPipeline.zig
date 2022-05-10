@@ -134,7 +134,7 @@ pub fn init(
         const descriptor_info = vk.DescriptorImageInfo{
             .sampler = draw_sampler,
             .image_view = draw_image_view,
-            .image_layout = .general,
+            .image_layout = .shader_read_only_optimal,
         };
         const write_descriptor_sets = [_]vk.WriteDescriptorSet{.{
             .dst_set = descriptor_set,

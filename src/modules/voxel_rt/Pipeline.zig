@@ -141,7 +141,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     try ctx.vkd.bindImageMemory(ctx.logical_device, compute_image, image_memory, 0);
     var image_memory_size = memory_requirements.size;
 
-    try Texture.transitionImageLayout(ctx, init_command_pool, compute_image, .@"undefined", .general);
+    try Texture.transitionImageLayout(ctx, init_command_pool, compute_image, .@"undefined", .shader_read_only_optimal);
 
     const compute_image_view = blk: {
         const image_view_info = vk.ImageViewCreateInfo{
@@ -228,6 +228,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         const target_image_info = ComputePipeline.ImageInfo{
             .width = @intToFloat(f32, internal_render_resolution.width),
             .height = @intToFloat(f32, internal_render_resolution.height),
+            .image = compute_image,
             .sampler = sampler,
             .image_view = compute_image_view,
         };
@@ -652,7 +653,7 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize, begin_info: *
         .src_access_mask = .{ .shader_write_bit = true },
         .dst_access_mask = .{ .shader_read_bit = true },
         .old_layout = .general,
-        .new_layout = .general,
+        .new_layout = .shader_read_only_optimal,
         .src_queue_family_index = ctx.queue_indices.compute,
         .dst_queue_family_index = ctx.queue_indices.graphics,
         .image = self.compute_image,
