@@ -195,9 +195,16 @@ pub fn build(b: *Builder) void {
     exe.step.dependOn(&gen.step);
     exe.addPackage(gen.package);
 
-    const shader_comp = vkgen.ShaderCompileStep.init(b,
     // TODO: -O (optimize), -I (includes)
-    &[_][]const u8{ "glslc", "--target-env=vulkan1.2" }, "shaders");
+    //  !always have -g as last entry! (see glslc_len definition)
+    const include_shader_debug = b.option(bool, "shader-debug-info", "include shader debug info, default is false") orelse false;
+    const glslc_flags = [_][]const u8{ "glslc", "--target-env=vulkan1.2", "-g" };
+    const glslc_len = if (include_shader_debug) glslc_flags.len else glslc_flags.len - 1;
+    const shader_comp = vkgen.ShaderCompileStep.init(
+        b,
+        glslc_flags[0..glslc_len],
+        "shaders",
+    );
     const shader_move_step = ShaderMoveStep.init(b, shader_comp) catch unreachable;
 
     {
@@ -225,8 +232,8 @@ pub fn build(b: *Builder) void {
     exe.step.dependOn(&shader_move_step.step);
 
     // link tracy if in debug mode and nothing else is specified
-    const no_tracy = b.option(bool, "no-tracy", "Force build to omit tracy") orelse false;
-    var tracy_path = if (no_tracy == false) @as([]const u8, "deps/Zig-Tracy/tracy-0.7.8") else null;
+    const enable_tracy = b.option(bool, "tracy", "Enable tracy bindings and communication, default is false") orelse false;
+    var tracy_path = if (enable_tracy) @as([]const u8, "deps/Zig-Tracy/tracy-0.7.8") else null;
     tracy.link(b, exe, tracy_path);
 
     const asset_move = AssetMoveStep.init(b) catch unreachable;

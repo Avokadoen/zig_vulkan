@@ -4,7 +4,7 @@
         {
             "label": "build",
             "type": "shell",
-            "command": "zig build",
+            "command": "zig build -Dshader-debug-info=true -Dtracy=true",
             "group": "build",
             "problemMatcher": [
                 "$gcc"
@@ -13,7 +13,7 @@
         {
             "label": "safe",
             "type": "shell",
-            "command": "zig build -Drelease-safe=true",
+            "command": "zig build -Drelease-safe=true -Dshader-debug-info=true -Dtracy=true",
             "group": "build",
             "problemMatcher": [
                 "$gcc"
