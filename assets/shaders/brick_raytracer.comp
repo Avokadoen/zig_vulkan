@@ -455,13 +455,19 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
 
     // DDA loop
     ivec3 axis = ivec3(0);
+    uint brick_bits;
+    uint brick_type_index;
     while (true) { 
         const uint grid_index = position.x + brick_dim.x * (position.z + brick_dim.z * position.y);
         // 1 bit pr type, so we divide 32 bit int
-        const uint brick_type_index = grid_index / 32;
+        const uint new_brick_type_index = grid_index / 32;
         const int brick_type_offset = int(grid_index % 32);
-        const uint bits = brick_type_bits[brick_type_index];
-        const uint entry_type = bitfieldExtract(bits, brick_type_offset, 1);
+        if (brick_type_index != new_brick_type_index) {
+            brick_bits = brick_type_bits[new_brick_type_index];
+            brick_type_index = new_brick_type_index;
+        }
+        // HACK: don't extract the bit, just isolate it and see if it is 1 (value is not 0)
+        const uint entry_type = brick_bits & (1 << brick_type_offset);
         if(entry_type != 0) { // TODO: actually check type
             vec3 brick_min = g_min + position;
             const vec3 t_value = (axis_t - delta) * vec3(axis);
@@ -500,6 +506,9 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
     const vec3 fposition = (RayAt(r, hit.t + 0.0001) - brick_position) * 8;
     vec3 position = vec3(floor(fposition));
 
+    // optimization: copy solid mask from SSBO to localize the mask memory
+    const uint solid_mask[16] = brick.solid_mask;
+
     const bvec3 less_than = bvec3(
         r.direction.x < 0,
         r.direction.y < 0,
@@ -516,7 +525,7 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
         const int bit_offset = int(position.x + 8 * (position.z + 8 * position.y));
         const int mask_index = bit_offset / 32;
         const int mask_offset = bit_offset % 32;
-        const uint uint_mask = brick.solid_mask[mask_index];
+        const uint uint_mask = solid_mask[mask_index];
         const uint bitfield_final_entry = bitfieldExtract(uint_mask, 0, mask_offset + 1);
         // TODO: if t_value >= t_min
         if ((bitfield_final_entry & (1 << mask_offset)) != 0) {
@@ -525,7 +534,7 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
                 int bits_before = 0;
                 // find and assign material index
                 for (int i = 0; i < mask_index; i++) {
-                    bits_before += bitCount(brick.solid_mask[i]);
+                    bits_before += bitCount(solid_mask[i]);
                 }
 
                 const int bit_pad = 32 - mask_offset;
