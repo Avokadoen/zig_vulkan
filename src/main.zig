@@ -93,7 +93,7 @@ pub fn main() anyerror!void {
     // force workers to sleep while terrain generate
     grid.sleepWorkers();
 
-    const model = try vox.load(false, allocator, "../assets/models/monu10.vox");
+    const model = try vox.load(false, allocator, "../assets/models/doom.vox");
     defer model.deinit();
 
     var albedo_color: [256]gpu_types.Albedo = undefined;
@@ -107,10 +107,9 @@ pub fn main() anyerror!void {
         materials[i] = material;
     }
 
-    const terrain_len = terrain.material_data.len;
-    for (model.rgba_chunk[terrain_len..]) |rgba, i| {
-        const index = i + terrain_len;
-        albedo_color[index] = .{
+    for (model.rgba_chunk[terrain.color_data.len..]) |rgba, i| {
+        const albedo_index = i + terrain.color_data.len;
+        albedo_color[albedo_index] = .{
             // zig fmt: off
             .color = za.Vec4.new(
                 @intToFloat(f32, rgba.r) / 255, 
@@ -120,17 +119,17 @@ pub fn main() anyerror!void {
             ).data,
             // zig fmt: on
         };
-        materials[index] = .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = @intCast(u8, index) };
+        const material_index = i + terrain.material_data.len;
+        materials[material_index] = .{ .@"type" = .metal, .type_index = 0, .albedo_index = @intCast(u8, albedo_index) };
     }
 
     // Test what we are loading
     for (model.xyzi_chunks[0]) |xyzi| {
-        grid.insert(@intCast(usize, xyzi.x), @intCast(usize, xyzi.z), @intCast(usize, xyzi.y), xyzi.color_index);
+        grid.insert(@intCast(usize, xyzi.x) + 200, @intCast(usize, xyzi.z) + 50, @intCast(usize, xyzi.y) + 150, xyzi.color_index);
     }
 
     // generate terrain on CPU
     try terrain.generateCpu(4, allocator, 420, 4, 20, &grid);
-    grid.wakeWorkers();
 
     var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, .{
         .internal_resolution_width = internal_render_resolution.x(),
@@ -155,6 +154,8 @@ pub fn main() anyerror!void {
     defer input.deinit(allocator);
     try input.setInputModeCursor(.disabled);
     input.setImguiWantInput(false);
+
+    grid.wakeWorkers();
 
     // Loop until the user closes the window
     while (!window.shouldClose()) {
