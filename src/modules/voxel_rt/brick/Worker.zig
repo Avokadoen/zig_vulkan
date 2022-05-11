@@ -173,10 +173,9 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
     // set the color information for the given voxel
     {
         // shift material position voxels that are after this voxel
-        const voxel_was_set: bool = (brick.solid_mask & @as(u512, 1) << nth_bit) != 0;
         const voxels_in_brick = countBits(brick.solid_mask, 512);
         // TODO: error
-        const bucket = self.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.grid.*.material_indices, voxel_was_set) catch {
+        const bucket = self.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.grid.*.material_indices) catch {
             std.debug.panic("at {d} {d} {d} no more buckets", .{ insert_job.x, insert_job.y, insert_job.z });
         };
         // set the brick's material index
@@ -185,6 +184,7 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
         // move all color data
         const bits_before = countBits(brick.solid_mask, nth_bit);
         const new_voxel_material_index = bucket.start_index + bits_before;
+        const voxel_was_set: bool = (brick.solid_mask & @as(u512, 1) << nth_bit) != 0;
         if (voxel_was_set == false) {
             var i: u32 = voxels_in_brick;
             while (i > bits_before) : (i -= 1) {

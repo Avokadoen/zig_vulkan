@@ -129,12 +129,12 @@ pub fn init(allocator: Allocator, start_index: u32, brick_count: usize, material
 // function handles assigning new buckets as needed and will transfer material indices to new slot in the event
 // that a new bucket is required
 // returns error if there is no more buckets of appropriate size
-pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_offset: usize, material_indices: []u8, was_set: bool) !Bucket.Entry {
+pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_count: usize, material_indices: []u8) !Bucket.Entry {
     // check if brick already have assigned a bucket
     if (self.index.get(brick_index)) |index| {
         const bucket_size = try std.math.powi(usize, 2, min_2_pow_size + index.bucket_index);
         // if bucket size is sufficent, or if voxel was set before, no change required
-        if (bucket_size > voxel_offset or was_set) {
+        if (bucket_size > voxel_count) {
             return self.buckets[index.bucket_index].occupied.items[index.element_index].?;
         }
 
@@ -177,7 +177,6 @@ pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_offset: us
             }
         }
     }
-    std.debug.assert(was_set == false);
     return BucketRequestError.NoSuitableBucket; // no free bucket big enough to store brick color data
 }
 
