@@ -5,9 +5,9 @@ const std = @import("std");
 const math = std.math;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
-const AtomicCount = std.atomic.Atomic(usize);
 
 const State = @import("State.zig");
+const AtomicCount = State.AtomicCount;
 const Worker = @import("Worker.zig");
 
 pub const Config = struct {
@@ -52,11 +52,16 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     errdefer allocator.free(higher_order_grid);
     std.mem.set(u8, higher_order_grid, 0);
 
-    const grid = try allocator.alloc(State.GridEntry, brick_count);
-    errdefer allocator.free(grid);
-    std.mem.set(State.GridEntry, grid, .{ .@"type" = .empty, .data = 0 });
+    // each mask has 32 entries
+    const brick_statuses = try allocator.alloc(State.BrickStatusMask, (std.math.divCeil(u32, brick_count, 32) catch unreachable));
+    errdefer allocator.free(brick_statuses);
+    std.mem.set(State.BrickStatusMask, brick_statuses, .{ .bits = 0 });
 
-    const brick_alloc = config.brick_alloc orelse grid.len;
+    const brick_indices = try allocator.alloc(State.BrickIndex, brick_count);
+    errdefer allocator.free(brick_indices);
+    std.mem.set(State.BrickIndex, brick_indices, 0);
+
+    const brick_alloc = config.brick_alloc orelse brick_count;
     const bricks = try allocator.alloc(State.Brick, brick_alloc);
     errdefer allocator.free(bricks);
     std.mem.set(State.Brick, bricks, .{ .solid_mask = 0, .index_type = .voxel_start_index, .index = 0 });
@@ -107,9 +112,13 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     errdefer allocator.destroy(higher_order_grid_delta);
     higher_order_grid_delta.* = State.DeviceDataDelta.init();
 
-    var grid_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
-    errdefer allocator.free(grid_deltas);
-    std.mem.set(State.DeviceDataDelta, grid_deltas, State.DeviceDataDelta.init());
+    var brick_statuses_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
+    errdefer allocator.free(brick_statuses_deltas);
+    std.mem.set(State.DeviceDataDelta, brick_statuses_deltas, State.DeviceDataDelta.init());
+
+    var brick_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
+    errdefer allocator.free(brick_indices_deltas);
+    std.mem.set(State.DeviceDataDelta, brick_indices_deltas, State.DeviceDataDelta.init());
 
     var bricks_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
     errdefer allocator.free(bricks_deltas);
@@ -121,12 +130,14 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 
     state.* = .{
         .higher_order_grid_delta = higher_order_grid_delta,
-        .grid_deltas = grid_deltas,
-        .bricks_deltas = bricks_deltas,
         .material_indices_deltas = material_indices_deltas,
         .higher_order_grid_mutex = .{},
         .higher_order_grid = higher_order_grid,
-        .grid = grid,
+        .brick_statuses = brick_statuses,
+        .brick_indices = brick_indices,
+        .brick_statuses_deltas = brick_statuses_deltas,
+        .brick_indices_deltas = brick_indices_deltas,
+        .bricks_deltas = bricks_deltas,
         .bricks = bricks,
         .material_indices = material_indices,
         .active_bricks = AtomicCount.init(0),
@@ -184,12 +195,14 @@ pub fn deinit(self: BrickGrid) void {
     }
 
     self.allocator.free(self.state.higher_order_grid);
-    self.allocator.free(self.state.grid);
+    self.allocator.free(self.state.brick_statuses);
+    self.allocator.free(self.state.brick_indices);
     self.allocator.free(self.state.bricks);
     self.allocator.free(self.state.material_indices);
 
     self.allocator.destroy(self.state.higher_order_grid_delta);
-    self.allocator.free(self.state.grid_deltas);
+    self.allocator.free(self.state.brick_statuses_deltas);
+    self.allocator.free(self.state.brick_indices_deltas);
     self.allocator.free(self.state.bricks_deltas);
     self.allocator.free(self.state.material_indices_deltas);
 

@@ -1,8 +1,9 @@
 const std = @import("std");
-const AtomicCount = std.atomic.Atomic(usize);
 const Mutex = std.Thread.Mutex;
 
 const BucketStorage = @import("./BucketStorage.zig");
+
+pub const AtomicCount = std.atomic.Atomic(u32);
 
 /// type used to record changes in host/device buffers in order to only send changed data to the gpu
 pub const DeviceDataDelta = struct {
@@ -84,16 +85,29 @@ pub const Device = extern struct {
 //     flags: u6,
 // };
 
-// TODO: move types?
-pub const GridEntry = packed struct {
-    pub const Type = enum(u2) {
+pub const BrickStatusMask = packed struct {
+    pub const Status = enum(u2) {
         empty = 0,
-        loaded,
-        unloaded,
+        loaded = 1,
     };
-    @"type": Type,
-    data: u30,
+
+    bits: c_uint,
+
+    pub fn write(self: *BrickStatusMask, state: Status, at: u5) void {
+        // zero out bits
+        self.bits &= ~(@as(u32, 0b1) << at);
+        self.bits |= @intCast(u32, @enumToInt(state)) << at;
+    }
+
+    pub fn read(self: BrickStatusMask, at: u5) Status {
+        var bits = self.bits;
+        bits &= @as(u32, 0b1) << at;
+        bits = bits >> at;
+        return @intToEnum(Status, @intCast(u2, bits));
+    }
 };
+
+pub const BrickIndex = c_uint;
 
 pub const Brick = packed struct {
     const IndexType = enum(u1) {
@@ -116,8 +130,11 @@ higher_order_grid_delta: *DeviceDataDelta,
 /// a entry is used to check if any brick in a 4x4x4 segment should be checked for hits or if nothing is set
 higher_order_grid: []u8,
 
-grid_deltas: []DeviceDataDelta,
-grid: []GridEntry,
+brick_statuses: []BrickStatusMask,
+brick_statuses_deltas: []DeviceDataDelta,
+brick_indices: []BrickIndex,
+brick_indices_deltas: []DeviceDataDelta,
+
 bricks_deltas: []DeviceDataDelta,
 bricks: []Brick,
 

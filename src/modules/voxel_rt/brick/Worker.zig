@@ -146,26 +146,25 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
     const actual_y = ((self.grid.device_state.dim_y * 8) - 1) - insert_job.y;
 
     const grid_index = gridAt(self.grid.*.device_state, insert_job.x, actual_y, insert_job.z);
-    var entry = self.grid.grid[grid_index];
+    const brick_status_index = grid_index / 32;
+    const brick_status_offset = @intCast(u5, (grid_index % 32));
+    const brick_status = self.grid.brick_statuses[brick_status_index].read(brick_status_offset);
+    const brick_index = blk: {
+        if (brick_status == .loaded) {
+            break :blk self.grid.brick_indices[grid_index];
+        }
 
-    // if entry is empty we need to populate the entry first
-    if (entry.@"type" == .empty) {
-        // atomically fetch previous brick count and then add 1 to count
-        const active_bricks = self.grid.*.active_bricks.fetchAdd(1, .SeqCst);
-        entry = State.GridEntry{
-            // TODO: loaded, or unloaded ??
-            .@"type" = .loaded,
-            .data = @intCast(u30, active_bricks),
-        };
-
+        // if entry is empty we need to populate the entry first
         const higher_grid_index = higherGridAt(self.grid.*.device_state, insert_job.x, actual_y, insert_job.z);
         self.grid.higher_order_grid_mutex.lock();
         self.grid.*.higher_order_grid[higher_grid_index] += 1;
         self.grid.higher_order_grid_mutex.unlock();
         self.grid.higher_order_grid_delta.registerDelta(higher_grid_index);
-    }
 
-    const brick_index = @intCast(usize, entry.data);
+        // atomically fetch previous brick count and then add 1 to count
+        break :blk self.grid.*.active_bricks.fetchAdd(1, .SeqCst);
+    };
+
     var brick = self.grid.bricks[brick_index];
 
     // set the voxel to exist
@@ -180,6 +179,7 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
         const bucket = self.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.grid.*.material_indices, voxel_was_set) catch {
             std.debug.panic("at {d} {d} {d} no more buckets", .{ insert_job.x, insert_job.y, insert_job.z });
         };
+        // set the brick's material index
         brick.index = @intCast(u31, bucket.start_index);
 
         // move all color data
@@ -208,13 +208,17 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
     // set voxel
     brick.solid_mask |= @as(i512, 1) << nth_bit;
 
-    // store changes
-    const bricks_index = @intCast(usize, entry.data);
-    self.grid.*.bricks[bricks_index] = brick;
-    self.grid.bricks_deltas[self.id].registerDelta(bricks_index);
+    // store brick changes
+    self.grid.*.bricks[brick_index] = brick;
+    self.grid.bricks_deltas[self.id].registerDelta(brick_index);
 
-    self.grid.*.grid[grid_index] = entry;
-    self.grid.grid_deltas[self.id].registerDelta(grid_index);
+    // set the brick as loaded
+    self.grid.brick_statuses[brick_status_index].write(.loaded, brick_status_offset);
+    self.grid.brick_statuses_deltas[self.id].registerDelta(brick_status_index);
+
+    // register brick index
+    self.grid.brick_indices[grid_index] = brick_index;
+    self.grid.brick_indices_deltas[self.id].registerDelta(grid_index);
 }
 
 // TODO: test

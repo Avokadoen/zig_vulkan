@@ -219,7 +219,8 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
             @sizeOf(gpu_types.Metal) * config.metal_buffer,
             @sizeOf(gpu_types.Dielectric) * config.dielectric_buffer,
             @sizeOf(u8) * grid_state.higher_order_grid.len,
-            @sizeOf(GridState.GridEntry) * grid_state.grid.len,
+            @sizeOf(GridState.BrickStatusMask) * grid_state.brick_statuses.len,
+            @sizeOf(GridState.BrickIndex) * grid_state.brick_indices.len,
             @sizeOf(GridState.Brick) * grid_state.bricks.len,
             @sizeOf(u8) * grid_state.material_indices.len,
         };
@@ -539,21 +540,33 @@ pub inline fn transferHigherOrderGrid(self: *Pipeline, ctx: Context, offset: usi
     );
 }
 
-/// Transfer dielectric data to GPU
-pub inline fn transferGridEntries(self: *Pipeline, ctx: Context, offset: usize, grid_entries: []const GridState.GridEntry) !void {
+/// Transfer entry types data to GPU
+pub inline fn transferBrickStatuses(self: *Pipeline, ctx: Context, offset: usize, brick_statuses: []const GridState.BrickStatusMask) !void {
     const buffer_offset = self.compute_pipeline.storage_offsets[5];
     try self.staging_buffers.transferToBuffer(
         ctx,
         &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(GridState.GridEntry),
-        GridState.GridEntry,
-        grid_entries,
+        buffer_offset + offset * @sizeOf(GridState.BrickStatusMask),
+        GridState.BrickStatusMask,
+        brick_statuses,
+    );
+}
+
+/// Transfer entry indices data to GPU
+pub inline fn transferBrickIndices(self: *Pipeline, ctx: Context, offset: usize, brick_indices: []const GridState.BrickIndex) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[6];
+    try self.staging_buffers.transferToBuffer(
+        ctx,
+        &self.compute_pipeline.buffers,
+        buffer_offset + offset * @sizeOf(GridState.BrickIndex),
+        GridState.BrickIndex,
+        brick_indices,
     );
 }
 
 /// Transfer bricks data to GPU
 pub inline fn transferBricks(self: *Pipeline, ctx: Context, offset: usize, bricks: []const GridState.Brick) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[6];
+    const buffer_offset = self.compute_pipeline.storage_offsets[7];
     try self.staging_buffers.transferToBuffer(
         ctx,
         &self.compute_pipeline.buffers,
@@ -565,7 +578,7 @@ pub inline fn transferBricks(self: *Pipeline, ctx: Context, offset: usize, brick
 
 /// Transfer material index data to GPU
 pub inline fn transferMaterialIndices(self: *Pipeline, ctx: Context, offset: usize, material_indices: []const u8) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[7];
+    const buffer_offset = self.compute_pipeline.storage_offsets[8];
     try self.staging_buffers.transferToBuffer(
         ctx,
         &self.compute_pipeline.buffers,

@@ -98,45 +98,13 @@ layout (binding = 1) uniform BrickGridState {
     vec4 max_point_scale;
 } brick_grid;
 
-layout (std430, binding = 6) buffer HigherGridBuffer {
-    // one entry hold 4 entries
-    readonly uint higher_grid_entries[];
-};
-
-// Grid types
-struct GridEntry {
-    // 2 first bits are type, 30 next are data according to type
-    uint bits;
-};
-layout (std430, binding = 7) buffer GridBuffer {
-    readonly GridEntry grid_entries[];
-};
-
-const uint VOXEL_START_INDEX = 0x0;
-const uint BRICK_LOD_INDEX = 0x1;
-struct Brick {
-    // 512 bit voxel set mask
-    int solid_mask[16];
-    // left-most bit is the index type (VOXEL_START_INDEX, or BRICK_LOD_INDEX) 
-    uint type_and_index;
-};
-layout (std430, binding = 8) buffer BrickBuffer {
-    readonly Brick bricks[];
-};
-
-layout (std430, binding = 9) buffer MaterialIndicesBuffer {
-    // one entry hold 4 indices
-    readonly uint material_indices[];
-};
-
-
 // material is represented by 32 bits:
 struct Material {
     int type;          // 2 left most bits
     int type_index;   // 6 shifted 2 bits
     int albedo_index; // 8 shifted 8 bits
 };
-layout (std430, binding = 2) buffer MaterialBuffer {
+layout (binding = 2) buffer MaterialBuffer {
     readonly int materials[];
 };
 bool ScatterLambertian(Material material, Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scattered);
@@ -147,7 +115,7 @@ bool ScatterDielectric(Material material, Ray r_in, vec3 hit_c_min, HitRecord hi
 struct Albedo {
     vec4 color;
 };
-layout (std430, binding = 3) buffer AlbedoBuffer {
+layout (binding = 3) buffer AlbedoBuffer {
     readonly Albedo albedos[];
 };
 vec3 AlbedoColor(Material mat);
@@ -156,7 +124,7 @@ vec3 AlbedoColor(Material mat);
 struct Metal {
     float fuzz;
 };
-layout (std430, binding = 4) buffer MetalBuffer {
+layout (binding = 4) buffer MetalBuffer {
     readonly Metal metal[];
 };
 
@@ -165,8 +133,39 @@ struct Dielectric {
     //             fuzz should define reflection/refraction ray spread
     float internal_reflection;
 };
-layout (std430, binding = 5) buffer DielectricBuffer {
+layout (binding = 5) buffer DielectricBuffer {
     readonly Dielectric dielectric[];
+};
+
+layout (binding = 6) buffer HigherGridBuffer {
+    // one entry hold 4 entries
+    readonly uint higher_grid_entries[];
+};
+
+layout (binding = 7) buffer GridBufferType {
+    // each entry is 2 bits
+    readonly uint brick_type_bits[];
+};
+
+layout (binding = 8) buffer GridBufferIndex {
+    readonly uint brick_index[];
+};
+
+const uint VOXEL_START_INDEX = 0x0;
+const uint BRICK_LOD_INDEX = 0x1;
+struct Brick {
+    // 512 bit voxel set mask
+    int solid_mask[16];
+    // left-most bit is the index type (VOXEL_START_INDEX, or BRICK_LOD_INDEX) 
+    uint type_and_index;
+};
+layout (binding = 9) buffer BrickBuffer {
+    readonly Brick bricks[];
+};
+
+layout (binding = 10) buffer MaterialIndicesBuffer {
+    // one entry hold 4 indices
+    readonly uint material_indices[];
 };
 
 bool HigherGridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit);
@@ -457,16 +456,19 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
     // DDA loop
     ivec3 axis = ivec3(0);
     while (true) { 
-        const uint index = position.x + brick_dim.x * (position.z + brick_dim.z * position.y);
-        const uint bits = grid_entries[index].bits;
-        const uint entry_type = bitfieldExtract(bits, 0, 2);
-        if(bits != 0) { // TODO: actually check type
+        const uint grid_index = position.x + brick_dim.x * (position.z + brick_dim.z * position.y);
+        // 1 bit pr type, so we divide 32 bit int
+        const uint brick_type_index = grid_index / 32;
+        const int brick_type_offset = int(grid_index % 32);
+        const uint bits = brick_type_bits[brick_type_index];
+        const uint entry_type = bitfieldExtract(bits, brick_type_offset, 1);
+        if(entry_type != 0) { // TODO: actually check type
             vec3 brick_min = g_min + position;
-            const uint brick_index = bitfieldExtract(bits, 2, 30);
             const vec3 t_value = (axis_t - delta) * vec3(axis);
             hit.t = fma(t_value.x + t_value.y + t_value.z, brick_grid.max_point_scale.w, hit_grid.t);
 
             // check if ray hits any voxel in the brick
+            const uint brick_index = brick_index[grid_index];
             if (BrickHit(r, t_min, t_grid_max, delta, bricks[brick_index], brick_min, hit)) {
                 hit_min = brick_min;
                 return true;
