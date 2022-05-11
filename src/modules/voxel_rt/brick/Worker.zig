@@ -173,7 +173,7 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
     // set the color information for the given voxel
     {
         // shift material position voxels that are after this voxel
-        const voxel_was_set: bool = (brick.solid_mask & @as(i512, 1) << nth_bit) != 0;
+        const voxel_was_set: bool = (brick.solid_mask & @as(u512, 1) << nth_bit) != 0;
         const voxels_in_brick = countBits(brick.solid_mask, 512);
         // TODO: error
         const bucket = self.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.grid.*.material_indices, voxel_was_set) catch {
@@ -206,7 +206,7 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
     }
 
     // set voxel
-    brick.solid_mask |= @as(i512, 1) << nth_bit;
+    brick.solid_mask |= @as(u512, 1) << nth_bit;
 
     // store brick changes
     self.grid.*.bricks[brick_index] = brick;
@@ -246,10 +246,10 @@ inline fn higherGridAt(device_state: State.Device, x: usize, y: usize, z: usize)
     return @intCast(usize, higher_grid_x + device_state.higher_dim_x * (higher_grid_z + device_state.higher_dim_z * higher_grid_y));
 }
 
-/// count the set bits of a i512, up to range_to (exclusive)
-inline fn countBits(bits: i512, range_to: u32) u32 {
+/// count the set bits of a u512, up to range_to (exclusive)
+inline fn countBits(bits: u512, range_to: u32) u32 {
     var bit = bits;
-    var count: i512 = 0;
+    var count: u512 = 0;
     var i: u32 = 0;
     while (i < range_to and bit != 0) : (i += 1) {
         count += bit & 1;

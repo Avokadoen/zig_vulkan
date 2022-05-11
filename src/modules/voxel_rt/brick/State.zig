@@ -116,7 +116,7 @@ pub const Brick = packed struct {
     };
 
     /// maps to a voxel grid of 8x8x8
-    solid_mask: i512,
+    solid_mask: u512,
     index: u31,
     index_type: IndexType,
 };

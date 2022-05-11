@@ -155,7 +155,7 @@ const uint VOXEL_START_INDEX = 0x0;
 const uint BRICK_LOD_INDEX = 0x1;
 struct Brick {
     // 512 bit voxel set mask
-    int solid_mask[16];
+    uint solid_mask[16];
     // left-most bit is the index type (VOXEL_START_INDEX, or BRICK_LOD_INDEX) 
     uint type_and_index;
 };
@@ -516,7 +516,7 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
         const int bit_offset = int(position.x + 8 * (position.z + 8 * position.y));
         const int mask_index = bit_offset / 32;
         const int mask_offset = bit_offset % 32;
-        const uint uint_mask = floatBitsToUint(intBitsToFloat(brick.solid_mask[mask_index]));
+        const uint uint_mask = brick.solid_mask[mask_index];
         const uint bitfield_final_entry = bitfieldExtract(uint_mask, 0, mask_offset + 1);
         // TODO: if t_value >= t_min
         if ((bitfield_final_entry & (1 << mask_offset)) != 0) {
