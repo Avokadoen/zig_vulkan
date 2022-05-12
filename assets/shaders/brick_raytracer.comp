@@ -100,9 +100,9 @@ layout (binding = 1) uniform BrickGridState {
 
 // material is represented by 32 bits:
 struct Material {
-    int type;          // 2 left most bits
-    int type_index;   // 6 shifted 2 bits
-    int albedo_index; // 8 shifted 8 bits
+    uint type;          // 2 left most bits
+    uint type_index;   // 6 shifted 2 bits
+    uint albedo_index; // 8 shifted 8 bits
 };
 layout (binding = 2) buffer MaterialBuffer {
     readonly int materials[];
@@ -259,7 +259,7 @@ vec3 RayColor(Ray r) {
         // data sets. We shift the bits if we are a odd material index to get the material bits we want:
         const uint material_index = hit.index / 2;
         const uint material_bit_offset = 16 * (hit.index % 2);
-        const int material_bits = (materials[material_index] >> material_bit_offset);
+        const uint material_bits = (materials[material_index] >> material_bit_offset);
         const Material material = Material(
             material_bits & 3,  // type
             bitfieldExtract(material_bits, 2, 6), // material index
