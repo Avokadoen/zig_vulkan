@@ -6,10 +6,10 @@ const Context = @import("Context.zig");
 
 const tracy = @import("../../tracy.zig");
 
+const memory_util = @import("memory.zig");
+
 /// Vulkan buffer abstraction
 const GpuBufferMemory = @This();
-
-pub const bytes_in_mb = 1048576;
 
 // TODO: might not make sense if different type, should be array
 /// how many elements does the buffer contain
@@ -130,7 +130,9 @@ pub fn transferToDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, 
     if (data.len <= 0) return;
 
     const size = data.len * @sizeOf(T);
-    const map_size = self.nonCoherentAtomSize(ctx, size);
+    const map_size = memory_util.nonCoherentAtomSize(ctx, size);
+    if (map_size + offset > self.size) return error.OutOfDeviceMemory; // size greater than buffer
+
     const gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, offset, map_size, .{})) orelse return error.FailedToMapGPUMem;
     const gpu_mem_start = @ptrToInt(gpu_mem);
     {
@@ -146,7 +148,15 @@ pub fn transferToDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, 
 }
 
 pub fn map(self: *GpuBufferMemory, ctx: Context, offset: vk.DeviceSize, size: vk.DeviceSize) !void {
-    const map_size = self.nonCoherentAtomSize(ctx, size);
+    const map_size = blk: {
+        if (size == vk.WHOLE_SIZE) {
+            break :blk vk.WHOLE_SIZE;
+        }
+        const atom_size = memory_util.nonCoherentAtomSize(ctx, size);
+        if (atom_size + offset > self.size) return error.InsufficientMemory; // size greater than buffer
+        break :blk atom_size;
+    };
+
     self.mapped = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, offset, map_size, .{})) orelse return error.FailedToMapGPUMem;
 }
 
@@ -158,7 +168,9 @@ pub fn unmap(self: *GpuBufferMemory, ctx: Context) void {
 }
 
 pub fn flush(self: GpuBufferMemory, ctx: Context, offset: vk.DeviceSize, size: vk.DeviceSize) !void {
-    const atom_size = self.nonCoherentAtomSize(ctx, size);
+    const atom_size = memory_util.nonCoherentAtomSize(ctx, size);
+    if (atom_size + offset > self.size) return error.InsufficientMemory; // size greater than buffer
+
     const map_range = vk.MappedMemoryRange{
         .memory = self.memory,
         .offset = offset,
@@ -246,9 +258,4 @@ pub fn deinit(self: GpuBufferMemory, ctx: Context) void {
     if (self.memory != .null_handle) {
         ctx.vkd.freeMemory(ctx.logical_device, self.memory, null);
     }
-}
-
-pub inline fn nonCoherentAtomSize(self: GpuBufferMemory, ctx: Context, size: vk.DeviceSize) vk.DeviceSize {
-    const map_size = ctx.non_coherent_atom_size * (std.math.divCeil(vk.DeviceSize, size, ctx.non_coherent_atom_size) catch unreachable);
-    return std.math.min(self.size, map_size);
 }

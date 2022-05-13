@@ -8,10 +8,11 @@ pub const StagingBuffers = @import("render/StagingBuffers.zig");
 pub const Texture = @import("render/Texture.zig");
 
 /// helper methods for handling of pipelines
-pub const pipeline = @import("render/pipeline.zig");
 pub const consts = @import("render/consts.zig");
 pub const dispatch = @import("render/dispatch.zig");
+pub const memory = @import("render/memory.zig");
 pub const physical_device = @import("render/physical_device.zig");
+pub const pipeline = @import("render/pipeline.zig");
 pub const swapchain = @import("render/swapchain.zig");
 pub const validation_layer = @import("render/validation_layer.zig");
 pub const vk_utils = @import("render/vk_utils.zig");

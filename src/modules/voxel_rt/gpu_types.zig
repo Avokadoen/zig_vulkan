@@ -33,7 +33,7 @@ pub const Material = packed struct {
 };
 
 pub const Albedo = extern struct {
-    color: Vec4,
+    color: [4]f32,
 };
 
 pub const Metal = extern struct {

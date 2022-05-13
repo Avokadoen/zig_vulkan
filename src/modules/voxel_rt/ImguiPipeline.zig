@@ -139,6 +139,8 @@ pub fn init(
     // upload texture data to gpu
     try staging_buffers.transferToImage(
         ctx,
+        .@"undefined",
+        .shader_read_only_optimal,
         font_image,
         @intCast(u32, width),
         @intCast(u32, height),
