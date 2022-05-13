@@ -17,17 +17,15 @@ const JobQueue = std.fifo.LinearFifo(Job, .Dynamic);
 const Signal = std.atomic.Atomic(bool);
 
 pub const Insert = struct { x: usize, y: usize, z: usize, material_index: u8 };
+pub const Remove = struct { x: usize, y: usize, z: usize };
+pub const UnsetBrick = struct { x: usize, y: usize, z: usize };
 pub const JobTag = enum {
     insert,
-    // remove,
+    remove,
 };
 pub const Job = union(JobTag) {
     insert: Insert,
-    // remove: struct {
-    //     x: usize,
-    //     y: usize,
-    //     z: usize,
-    // },
+    remove: Remove,
 };
 
 allocator: Allocator,
@@ -124,6 +122,9 @@ pub fn work(self: *Worker) void {
                     .insert => |insert_job| {
                         self.performInsert(insert_job);
                     },
+                    .remove => |remove_job| {
+                        self.performRemove(remove_job);
+                    },
                 }
                 self.job_mutex.lock();
                 i += 1;
@@ -155,7 +156,7 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
         }
 
         // if entry is empty we need to populate the entry first
-        const higher_grid_index = higherGridAt(self.grid.*.device_state, insert_job.x, actual_y, insert_job.z);
+        const higher_grid_index = higherGridAt(.grid, self.grid.*.device_state, insert_job.x, actual_y, insert_job.z);
         self.grid.higher_order_grid_mutex.lock();
         self.grid.*.higher_order_grid[higher_grid_index] += 1;
         self.grid.higher_order_grid_mutex.unlock();
@@ -221,6 +222,111 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
     self.grid.brick_indices_deltas[self.id].registerDelta(grid_index);
 }
 
+fn unsetBrick(self: *Worker, brick_job: UnsetBrick) !void {
+    const brick_status_index = grid_index / 32;
+    const brick_status_offset = @intCast(u5, (grid_index % 32));
+    const brick_status = self.grid.brick_statuses[brick_status_index].read(brick_status_offset);
+    if (brick_status == .empty) {
+        return;
+    }
+
+    self.grid.brick_statuses[brick_status_index].write(.empty, brick_status_offset);
+    const brick_index = self.grid.brick_indices[grid_index];
+    try self.bucket_storage.releaseBrickBucket(brick_index);
+
+    // if entry is empty we need to populate the entry first
+    const higher_grid_index = higherGridAt(.brick, self.grid.*.device_state, insert_job.x, actual_y, insert_job.z);
+    self.grid.higher_order_grid_mutex.lock();
+    self.grid.*.higher_order_grid[higher_grid_index] -= 1;
+    self.grid.higher_order_grid_mutex.unlock();
+    self.grid.higher_order_grid_delta.registerDelta(higher_grid_index);
+
+    // atomically fetch previous brick count and then add 1 to count
+    break :blk self.grid.*.active_bricks.fetchSub(1, .SeqCst);
+}
+
+// perform a remove in the grid
+fn performRemove(self: *Worker, remove_job: Remove) void {
+    _ = self;
+    _ = remove_job;
+    // const actual_y = ((self.grid.device_state.dim_y * 8) - 1) - remove_job.y;
+
+    // const grid_index = gridAt(self.grid.*.device_state, remove_job.x, actual_y, remove_job.z);
+    // const brick_status_index = grid_index / 32;
+    // const brick_status_offset = @intCast(u5, (grid_index % 32));
+    // const brick_status = self.grid.brick_statuses[brick_status_index].read(brick_status_offset);
+    // if (brick_status != .loaded) {
+    //     return;
+    // }
+
+    // // TODO: handle removing the brick
+    // // const higher_grid_index = higherGridAt(self.grid.*.device_state, insert_job.x, actual_y, insert_job.z);
+    // // self.grid.higher_order_grid_mutex.lock();
+    // // self.grid.*.higher_order_grid[higher_grid_index] -= 1;
+    // // self.grid.higher_order_grid_mutex.unlock();
+    // // self.grid.higher_order_grid_delta.registerDelta(higher_grid_index);
+    // // self.grid.brick_indices[] = self.grid.brick_indices[self.grid.*.active_bricks.fetchSub(1, .SeqCst) - 1]
+
+    // self.grid.brick_indices[grid_index];
+    // var brick = self.grid.bricks[brick_index];
+
+    // // set the voxel to exist
+    // const nth_bit = brickAt(insert_job.x, actual_y, insert_job.z);
+    // // if voxel is not set
+    // if ((brick.solid_mask & @as(u512, 1) << nth_bit) == 0) {
+    //     return;
+    // }
+    // const voxels_in_brick = countBits(brick.solid_mask, 512);
+
+    // // set the color information for the given voxel
+    // {
+
+    //     // TODO: error
+    //     const bucket = self.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.grid.*.material_indices, voxel_was_set) catch {
+    //         std.debug.panic("at {d} {d} {d} no more buckets", .{ insert_job.x, insert_job.y, insert_job.z });
+    //     };
+    //     // set the brick's material index
+    //     brick.index = @intCast(u31, bucket.start_index);
+
+    //     // move all color data
+    //     const bits_before = countBits(brick.solid_mask, nth_bit);
+    //     const new_voxel_material_index = bucket.start_index + bits_before;
+    //     if (voxel_was_set == false) {
+    //         var i: u32 = voxels_in_brick;
+    //         while (i > bits_before) : (i -= 1) {
+    //             const base_index = bucket.start_index + i;
+    //             self.grid.*.material_indices[base_index] = self.grid.material_indices[base_index - 1];
+    //         }
+    //     }
+    //     self.grid.*.material_indices[new_voxel_material_index] = insert_job.material_index;
+
+    //     // always register that the current voxel material has changed
+    //     const delta_from = new_voxel_material_index;
+    //     // we need to sync all of the voxel material data between current and last brick voxel since it has been shifted
+    //     const delta_to = if (voxel_was_set) new_voxel_material_index else bucket.start_index + voxels_in_brick;
+    //     self.grid.material_indices_deltas[self.id].registerDeltaRange(delta_from, delta_to);
+
+    //     // material indices is stored as 31bit on GPU and 8bit on CPU
+    //     // we divide by for to store the correct *GPU* index
+    //     brick.index /= 4;
+    // }
+
+    // // set voxel
+    // brick.solid_mask |= @as(u512, 1) << nth_bit;
+
+    // // store brick changes
+    // self.grid.*.bricks[brick_index] = brick;
+    // self.grid.bricks_deltas[self.id].registerDelta(brick_index);
+
+    // // set the brick as loaded
+    // self.grid.brick_statuses[brick_status_index].write(.loaded, brick_status_offset);
+    // self.grid.brick_statuses_deltas[self.id].registerDelta(brick_status_index);
+
+    // // register brick index
+    // self.grid.brick_indices[grid_index] = brick_index;
+    // self.grid.brick_indices_deltas[self.id].registerDelta(grid_index);
+}
+
 // TODO: test
 /// get brick index from global index coordinates
 inline fn brickAt(x: usize, y: usize, z: usize) u9 {
@@ -238,11 +344,16 @@ inline fn gridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize
     return @intCast(usize, grid_x + device_state.dim_x * (grid_z + device_state.dim_z * grid_y));
 }
 
+const InputCoordinate = enum { grid, brick };
 /// get higher grid index from global index coordinates
-inline fn higherGridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize {
-    const higher_grid_x: u32 = @intCast(u32, x / (8 * 4));
-    const higher_grid_y: u32 = @intCast(u32, y / (8 * 4));
-    const higher_grid_z: u32 = @intCast(u32, z / (8 * 4));
+inline fn higherGridAt(comptime coordinate: InputCoordinate, device_state: State.Device, x: usize, y: usize, z: usize) usize {
+    const transform = switch (coordinate) {
+        .grid => 8 * 4,
+        .brick => 4,
+    };
+    const higher_grid_x: u32 = @intCast(u32, x / transform);
+    const higher_grid_y: u32 = @intCast(u32, y / transform);
+    const higher_grid_z: u32 = @intCast(u32, z / transform);
     return @intCast(usize, higher_grid_x + device_state.higher_dim_x * (higher_grid_z + device_state.higher_dim_z * higher_grid_y));
 }
 

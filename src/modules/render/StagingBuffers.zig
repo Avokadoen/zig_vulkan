@@ -181,7 +181,25 @@ pub fn transferToBuffer(self: *StagingBuffers, ctx: Context, buffer: *GpuBufferM
 
     const index = try self.getIdleRamp(ctx);
 
-    try self.staging_ramps[index].device_buffer_memory.transferToDevice(ctx, T, 0, data);
+    // transfer data to staging buffer
+    {
+        const data_size = data.len * @sizeOf(T);
+        try self.staging_ramps[index].device_buffer_memory.map(ctx, 0, data_size);
+        defer self.staging_ramps[index].device_buffer_memory.unmap(ctx);
+
+        var dest_location = @ptrCast([*]T, @alignCast(@alignOf(T), self.staging_ramps[index].device_buffer_memory.mapped) orelse unreachable);
+
+        // runtime safety is turned off for performance
+        @setRuntimeSafety(false);
+        for (data) |elem, i| {
+            dest_location[i] = elem;
+        }
+
+        // TODO: ONLY FLUSH AND COPY AT END OF FRAME, OR WHEN OUT OF SPACE IN STAGING BUFFERS
+        // send changes to GPU
+        try self.staging_ramps[index].device_buffer_memory.flush(ctx, 0, data_size);
+    }
+
     const copy_config = .{
         .src_offset = 0,
         .dst_offset = offset,
@@ -245,7 +263,7 @@ const StagingRamp = struct {
             ctx,
             buffer_size,
             .{ .transfer_src_bit = true },
-            .{ .host_visible_bit = true, .host_coherent_bit = true, .device_local_bit = true },
+            .{ .host_visible_bit = true, .device_local_bit = true },
         );
         errdefer device_buffer_memory.deinit(ctx);
 

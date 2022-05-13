@@ -125,6 +125,18 @@ pub fn init(allocator: Allocator, start_index: u32, brick_count: usize, material
     };
 }
 
+pub fn releaseBrickBucket(self: *BucketStorage, brick_index) !void {
+    if (self.index.get(brick_index)) |index| {
+        const bucket_size = try std.math.powi(usize, 2, min_2_pow_size + index.bucket_index);
+        // free bucket
+        const previous_bucket = self.buckets[index.bucket_index].occupied.items[index.element_index].?;
+        try self.buckets[index.bucket_index].free.append(previous_bucket);
+        self.buckets[index.bucket_index].occupied.items[index.element_index] = null;
+
+        _ = self.index.remove(brick_index);
+    }
+}
+
 // return brick's bucket
 // function handles assigning new buckets as needed and will transfer material indices to new slot in the event
 // that a new bucket is required

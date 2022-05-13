@@ -132,6 +132,9 @@ higher_order_grid: []u8,
 
 brick_statuses: []BrickStatusMask,
 brick_statuses_deltas: []DeviceDataDelta,
+
+brick_mutex: Mutex,
+active_bricks: usize,
 brick_indices: []BrickIndex,
 brick_indices_deltas: []DeviceDataDelta,
 
@@ -141,9 +144,6 @@ bricks: []Brick,
 material_indices_deltas: []DeviceDataDelta,
 // assigned through a bucket
 material_indices: []u8,
-
-/// how many bricks are used in the grid, keep in mind that this is used in a multithread context
-active_bricks: AtomicCount,
 
 device_state: Device,
 
