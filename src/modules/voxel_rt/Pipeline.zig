@@ -360,11 +360,14 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
 }
 
 pub inline fn draw(self: *Pipeline, ctx: Context) !void {
-    // transfer any pending transfers
-    try self.staging_buffers.flush(ctx);
-
     const draw_zone = tracy.ZoneN(@src(), "draw");
     defer draw_zone.End();
+
+    {
+        const transfers_wait_zone = tracy.ZoneN(@src(), "transfer wait idle");
+        defer transfers_wait_zone.End();
+        try self.staging_buffers.waitIdle(ctx);
+    }
 
     const compute_semaphore = try self.compute_pipeline.dispatch(ctx, self.camera.*, self.sun.*);
 
@@ -453,6 +456,9 @@ pub inline fn draw(self: *Pipeline, ctx: Context) !void {
     }
 
     if (self.requested_rescale_pipeline) try self.rescalePipeline(ctx);
+
+    // transfer any pending transfers
+    try self.staging_buffers.flush(ctx);
 }
 
 pub fn setDenoiseSampleCount(self: *Pipeline, sample_count: i32) void {

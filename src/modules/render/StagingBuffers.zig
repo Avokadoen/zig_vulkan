@@ -25,6 +25,7 @@ const StagingBuffers = @This();
 
 last_buffer_used: usize,
 staging_ramps: []StagingRamp,
+wait_all_fences: []vk.Fence,
 deferred_buffer_transfers: std.ArrayList(DeferBufferTransfer),
 
 pub fn init(ctx: Context, allocator: Allocator, buffer_count: usize) !StagingBuffers {
@@ -39,13 +40,17 @@ pub fn init(ctx: Context, allocator: Allocator, buffer_count: usize) !StagingBuf
     errdefer {
         var i: usize = 0;
         while (i < buffers_initialized) : (i += 1) {
-            ramp[i].deinit(ctx);
+            staging_ramps[i].deinit(ctx);
         }
     }
+
+    const wait_all_fences = try allocator.alloc(vk.Fence, buffer_count);
+    errdefer allocator.free(wait_all_fences);
 
     return StagingBuffers{
         .last_buffer_used = 0,
         .staging_ramps = staging_ramps,
+        .wait_all_fences = wait_all_fences,
         .deferred_buffer_transfers = std.ArrayList(DeferBufferTransfer).init(allocator),
     };
 }
@@ -110,6 +115,20 @@ pub fn transferToBuffer(self: *StagingBuffers, ctx: Context, buffer: *GpuBufferM
         }
     };
     try self.staging_ramps[index].transferToBuffer(ctx, buffer, offset, T, data);
+}
+
+// wait until all pending transfers are done
+pub fn waitIdle(self: StagingBuffers, ctx: Context) !void {
+    for (self.staging_ramps) |ramp, i| {
+        self.wait_all_fences[i] = ramp.fence;
+    }
+    _ = try ctx.vkd.waitForFences(
+        ctx.logical_device,
+        @intCast(u32, self.wait_all_fences.len),
+        self.wait_all_fences.ptr,
+        vk.TRUE,
+        std.math.maxInt(u64),
+    );
 }
 
 pub fn deinit(self: StagingBuffers, ctx: Context, allocator: Allocator) void {
