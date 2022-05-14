@@ -59,8 +59,6 @@ pub fn init(id: usize, worker_count: usize, grid: *State, allocator: Allocator, 
     const bucket_storage = blk: {
         var brick_count = std.math.divFloor(usize, grid.bricks.len, worker_count) catch unreachable; // assert(worker_count != 0)
         var material_count = std.math.divFloor(usize, grid.material_indices.len, worker_count) catch unreachable;
-        // buckets store values segmenting using 2048 to split into different sizes. We modulo 2048 to get an accurate length of the bucket
-        material_count -= material_count % 2048;
         const start_index = @intCast(u32, material_count * id);
 
         if (id == worker_count - 1) {
@@ -187,9 +185,10 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
         const voxel_was_set: bool = (brick.solid_mask & @as(u512, 1) << nth_bit) != 0;
         if (voxel_was_set == false) {
             var i: u32 = voxels_in_brick;
-            while (i > bits_before) : (i -= 1) {
+            while (i > bits_before + 1) {
                 const base_index = bucket.start_index + i;
                 self.grid.*.material_indices[base_index] = self.grid.material_indices[base_index - 1];
+                i -= 1;
             }
         }
         self.grid.*.material_indices[new_voxel_material_index] = insert_job.material_index;
@@ -197,7 +196,7 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
         // always register that the current voxel material has changed
         const delta_from = new_voxel_material_index;
         // we need to sync all of the voxel material data between current and last brick voxel since it has been shifted
-        const delta_to = if (voxel_was_set) new_voxel_material_index else bucket.start_index + voxels_in_brick;
+        const delta_to = if (voxel_was_set) new_voxel_material_index else new_voxel_material_index + (voxels_in_brick - bits_before);
         self.grid.material_indices_deltas[self.id].registerDeltaRange(delta_from, delta_to);
 
         // material indices is stored as 31bit on GPU and 8bit on CPU

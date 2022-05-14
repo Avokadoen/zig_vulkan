@@ -10,6 +10,7 @@ const render = @import("../render.zig");
 const Context = render.Context;
 const Texture = render.Texture;
 const vk_utils = render.vk_utils;
+const memory = render.memory;
 
 // TODO: move pipelines to ./internal/render/
 const ComputePipeline = @import("ComputePipeline.zig");
@@ -130,7 +131,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     const image_memory_type_index = try vk_utils.findMemoryTypeIndex(ctx, memory_requirements.memory_type_bits, .{
         .device_local_bit = true,
     });
-    const image_memory_capacity = 250 * render.GpuBufferMemory.bytes_in_mb;
+    const image_memory_capacity = 250 * render.memory.bytes_in_mb;
     const image_alloc_info = vk.MemoryAllocateInfo{
         .allocation_size = image_memory_capacity,
         .memory_type_index = image_memory_type_index,
@@ -249,7 +250,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
 
     var vertex_index_buffer = try GpuBufferMemory.init(
         ctx,
-        GpuBufferMemory.bytes_in_mb * 63,
+        memory.bytes_in_mb * 63,
         .{ .vertex_buffer_bit = true, .index_buffer_bit = true },
         .{ .host_visible_bit = true },
     );
@@ -359,6 +360,9 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
 }
 
 pub inline fn draw(self: *Pipeline, ctx: Context) !void {
+    // transfer any pending transfers
+    try self.staging_buffers.flush(ctx);
+
     const draw_zone = tracy.ZoneN(@src(), "draw");
     defer draw_zone.End();
 
@@ -468,7 +472,7 @@ pub fn setDenoisePixelMultiplier(self: *Pipeline, pixel_multiplier: f32) void {
 }
 
 /// Transfer grid data to GPU
-pub inline fn transferGridState(self: *Pipeline, ctx: Context, grid: GridState) !void {
+pub fn transferGridState(self: *Pipeline, ctx: Context, grid: GridState) !void {
     const grid_data = [_]GridState.Device{grid.device_state};
     const buffer_offset = self.compute_pipeline.uniform_offsets[0];
     try self.staging_buffers.transferToBuffer(
@@ -481,7 +485,7 @@ pub inline fn transferGridState(self: *Pipeline, ctx: Context, grid: GridState) 
 }
 
 /// Transfer material data to GPU
-pub inline fn transferMaterials(self: *Pipeline, ctx: Context, offset: usize, materials: []const gpu_types.Material) !void {
+pub fn transferMaterials(self: *Pipeline, ctx: Context, offset: usize, materials: []const gpu_types.Material) !void {
     const buffer_offset = self.compute_pipeline.storage_offsets[0];
     try self.staging_buffers.transferToBuffer(
         ctx,
@@ -493,7 +497,7 @@ pub inline fn transferMaterials(self: *Pipeline, ctx: Context, offset: usize, ma
 }
 
 /// Transfer albedo data to GPU
-pub inline fn transferAlbedos(self: *Pipeline, ctx: Context, offset: usize, albedo: []const gpu_types.Albedo) !void {
+pub fn transferAlbedos(self: *Pipeline, ctx: Context, offset: usize, albedo: []const gpu_types.Albedo) !void {
     const buffer_offset = self.compute_pipeline.storage_offsets[1];
     try self.staging_buffers.transferToBuffer(
         ctx,
@@ -505,7 +509,7 @@ pub inline fn transferAlbedos(self: *Pipeline, ctx: Context, offset: usize, albe
 }
 
 /// Transfer metal data to GPU
-pub inline fn transferMetals(self: *Pipeline, ctx: Context, offset: usize, metals: []const gpu_types.Metal) !void {
+pub fn transferMetals(self: *Pipeline, ctx: Context, offset: usize, metals: []const gpu_types.Metal) !void {
     const buffer_offset = self.compute_pipeline.storage_offsets[2];
     try self.staging_buffers.transferToBuffer(
         ctx,
@@ -517,7 +521,7 @@ pub inline fn transferMetals(self: *Pipeline, ctx: Context, offset: usize, metal
 }
 
 /// Transfer dielectric data to GPU
-pub inline fn transferDielectrics(self: *Pipeline, ctx: Context, offset: usize, dielectrics: []const gpu_types.Dielectric) !void {
+pub fn transferDielectrics(self: *Pipeline, ctx: Context, offset: usize, dielectrics: []const gpu_types.Dielectric) !void {
     const buffer_offset = self.compute_pipeline.storage_offsets[3];
     try self.staging_buffers.transferToBuffer(
         ctx,
@@ -565,7 +569,7 @@ pub inline fn transferBrickIndices(self: *Pipeline, ctx: Context, offset: usize,
 }
 
 /// Transfer bricks data to GPU
-pub inline fn transferBricks(self: *Pipeline, ctx: Context, offset: usize, bricks: []const GridState.Brick) !void {
+pub fn transferBricks(self: *Pipeline, ctx: Context, offset: usize, bricks: []const GridState.Brick) !void {
     const buffer_offset = self.compute_pipeline.storage_offsets[7];
     try self.staging_buffers.transferToBuffer(
         ctx,

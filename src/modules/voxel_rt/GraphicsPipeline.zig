@@ -7,6 +7,7 @@ const render = @import("../render.zig");
 const Context = render.Context;
 const GpuBufferMemory = render.GpuBufferMemory;
 const Swapchain = render.swapchain.Data;
+const memory = render.memory;
 
 const Vertex = extern struct {
     pos: [3]f32,
@@ -73,7 +74,10 @@ pub fn init(
     try vertex_index_buffer.transferToDevice(ctx, Vertex, 0, vertices[0..]);
     try vertex_index_buffer.transferToDevice(ctx, u16, vertex_size, indices[0..]);
 
-    const bytes_used_in_buffer = vertex_index_buffer.nonCoherentAtomSize(ctx, vertex_size * indices_size);
+    const bytes_used_in_buffer = memory.nonCoherentAtomSize(ctx, vertex_size * indices_size);
+    if (bytes_used_in_buffer > vertex_index_buffer.size) {
+        return error.OutOfDeviceMemory;
+    }
 
     const descriptor_pool = blk: {
         const pool_sizes = [_]vk.DescriptorPoolSize{.{

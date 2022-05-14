@@ -98,8 +98,8 @@ pub fn pushAlbedo(self: *VoxelRT, ctx: Context, albedos: []const gpu_types.Albed
 /// Push all terrain data to GPU
 pub fn debugUpdateTerrain(self: *VoxelRT, ctx: Context) !void {
     try self.pipeline.transferHigherOrderGrid(ctx, 0, self.brick_grid.state.higher_order_grid);
-    try self.pipeline.transferBrickStatuses(ctx, 0, self.brick_grid.state.brick_status);
-    try self.pipeline.transferBrickIndices(ctx, 0, self.brick_grid.state.brick_index);
+    try self.pipeline.transferBrickStatuses(ctx, 0, self.brick_grid.state.brick_statuses);
+    try self.pipeline.transferBrickIndices(ctx, 0, self.brick_grid.state.brick_indices);
     try self.pipeline.transferBricks(ctx, 0, self.brick_grid.state.bricks);
     try self.pipeline.transferMaterialIndices(ctx, 0, self.brick_grid.state.material_indices);
 }
