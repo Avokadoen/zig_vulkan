@@ -209,7 +209,7 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
 
     // store brick changes
     self.grid.*.bricks[brick_index] = brick;
-    self.grid.bricks_deltas[self.id].registerDelta(brick_index);
+    self.grid.bricks_delta.registerDelta(brick_index);
 
     // set the brick as loaded
     self.grid.brick_statuses[brick_status_index].write(.loaded, brick_status_offset);

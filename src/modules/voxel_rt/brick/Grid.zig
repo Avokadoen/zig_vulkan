@@ -120,9 +120,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     errdefer allocator.free(brick_indices_deltas);
     std.mem.set(State.DeviceDataDelta, brick_indices_deltas, State.DeviceDataDelta.init());
 
-    var bricks_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
-    errdefer allocator.free(bricks_deltas);
-    std.mem.set(State.DeviceDataDelta, bricks_deltas, State.DeviceDataDelta.init());
+    const bricks_delta = State.DeviceDataDelta.init();
 
     var material_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
     errdefer allocator.free(material_indices_deltas);
@@ -137,7 +135,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         .brick_indices = brick_indices,
         .brick_statuses_deltas = brick_statuses_deltas,
         .brick_indices_deltas = brick_indices_deltas,
-        .bricks_deltas = bricks_deltas,
+        .bricks_delta = bricks_delta,
         .bricks = bricks,
         .material_indices = material_indices,
         .active_bricks = AtomicCount.init(0),
@@ -203,7 +201,6 @@ pub fn deinit(self: BrickGrid) void {
     self.allocator.destroy(self.state.higher_order_grid_delta);
     self.allocator.free(self.state.brick_statuses_deltas);
     self.allocator.free(self.state.brick_indices_deltas);
-    self.allocator.free(self.state.bricks_deltas);
     self.allocator.free(self.state.material_indices_deltas);
 
     self.allocator.free(self.worker_threads);

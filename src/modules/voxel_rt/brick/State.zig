@@ -135,7 +135,8 @@ brick_statuses_deltas: []DeviceDataDelta,
 brick_indices: []BrickIndex,
 brick_indices_deltas: []DeviceDataDelta,
 
-bricks_deltas: []DeviceDataDelta,
+// we keep a single bricks delta structure since active_bricks is shared
+bricks_delta: DeviceDataDelta,
 bricks: []Brick,
 
 material_indices_deltas: []DeviceDataDelta,
