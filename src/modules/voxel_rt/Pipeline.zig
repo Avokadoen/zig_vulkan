@@ -367,12 +367,6 @@ pub inline fn draw(self: *Pipeline, ctx: Context) !void {
     const draw_zone = tracy.ZoneN(@src(), "draw");
     defer draw_zone.End();
 
-    {
-        const transfers_wait_zone = tracy.ZoneN(@src(), "transfer wait idle");
-        defer transfers_wait_zone.End();
-        try self.staging_buffers.waitIdle(ctx);
-    }
-
     const compute_semaphore = try self.compute_pipeline.dispatch(ctx, self.camera.*, self.sun.*);
 
     const image_index = blk: {

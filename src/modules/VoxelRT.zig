@@ -148,14 +148,14 @@ pub fn updateGridDelta(self: *VoxelRT, ctx: Context) !void {
     {
         const transfer_zone = tracy.ZoneN(@src(), "bricks transfer");
         defer transfer_zone.End();
-        for (self.brick_grid.state.bricks_deltas) |*delta| {
-            delta.mutex.lock();
-            defer delta.mutex.unlock();
 
-            if (delta.state == .active) {
-                try self.pipeline.transferBricks(ctx, delta.from, self.brick_grid.state.bricks[delta.from..delta.to]);
-                delta.resetDelta();
-            }
+        const delta = &self.brick_grid.state.bricks_delta;
+        delta.mutex.lock();
+        defer delta.mutex.unlock();
+
+        if (delta.state == .active) {
+            try self.pipeline.transferBricks(ctx, delta.from, self.brick_grid.state.bricks[delta.from..delta.to]);
+            delta.resetDelta();
         }
     }
     {
