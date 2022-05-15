@@ -24,23 +24,23 @@ const DeferBufferTransfer = struct {
 const StagingRamp = @This();
 
 last_buffer_used: usize,
-staging_ramps: []StagingBuffer,
+staging_buffers: []StagingBuffer,
 wait_all_fences: []vk.Fence,
 deferred_buffer_transfers: std.ArrayList(DeferBufferTransfer),
 
 pub fn init(ctx: Context, allocator: Allocator, buffer_count: usize) !StagingRamp {
-    const staging_ramps = try allocator.alloc(StagingBuffer, buffer_count);
-    errdefer allocator.free(staging_ramps);
+    const staging_buffers = try allocator.alloc(StagingBuffer, buffer_count);
+    errdefer allocator.free(staging_buffers);
 
     var buffers_initialized: usize = 0;
-    for (staging_ramps) |*ramp, i| {
+    for (staging_buffers) |*ramp, i| {
         ramp.* = try StagingBuffer.init(ctx, allocator);
         buffers_initialized = i + 1;
     }
     errdefer {
         var i: usize = 0;
         while (i < buffers_initialized) : (i += 1) {
-            staging_ramps[i].deinit(ctx);
+            staging_buffers[i].deinit(ctx);
         }
     }
 
@@ -49,14 +49,14 @@ pub fn init(ctx: Context, allocator: Allocator, buffer_count: usize) !StagingRam
 
     return StagingRamp{
         .last_buffer_used = 0,
-        .staging_ramps = staging_ramps,
+        .staging_buffers = staging_buffers,
         .wait_all_fences = wait_all_fences,
         .deferred_buffer_transfers = std.ArrayList(DeferBufferTransfer).init(allocator),
     };
 }
 
 pub fn flush(self: *StagingRamp, ctx: Context) !void {
-    for (self.staging_ramps) |*ramp| {
+    for (self.staging_buffers) |*ramp| {
         try ramp.flush(ctx);
     }
 
@@ -91,7 +91,7 @@ pub fn transferToImage(
             else => return err,
         }
     };
-    try self.staging_ramps[index].transferToImage(ctx, src_layout, dst_layout, image, width, height, T, data);
+    try self.staging_buffers[index].transferToImage(ctx, src_layout, dst_layout, image, width, height, T, data);
 }
 
 /// transfer to device storage buffer
@@ -114,12 +114,12 @@ pub fn transferToBuffer(self: *StagingRamp, ctx: Context, buffer: *GpuBufferMemo
             else => return err,
         }
     };
-    try self.staging_ramps[index].transferToBuffer(ctx, buffer, offset, T, data);
+    try self.staging_buffers[index].transferToBuffer(ctx, buffer, offset, T, data);
 }
 
 // wait until all pending transfers are done
 pub fn waitIdle(self: StagingRamp, ctx: Context) !void {
-    for (self.staging_ramps) |ramp, i| {
+    for (self.staging_buffers) |ramp, i| {
         self.wait_all_fences[i] = ramp.fence;
     }
     _ = try ctx.vkd.waitForFences(
@@ -132,10 +132,10 @@ pub fn waitIdle(self: StagingRamp, ctx: Context) !void {
 }
 
 pub fn deinit(self: StagingRamp, ctx: Context, allocator: Allocator) void {
-    for (self.staging_ramps) |*ramp| {
+    for (self.staging_buffers) |*ramp| {
         ramp.deinit(ctx);
     }
-    allocator.free(self.staging_ramps);
+    allocator.free(self.staging_buffers);
     self.deferred_buffer_transfers.deinit();
     allocator.free(self.wait_all_fences);
 }
@@ -144,7 +144,7 @@ inline fn getIdleRamp(self: *StagingRamp, ctx: Context, size: vk.DeviceSize) !us
     var full_ramps: usize = 0;
     // get a idle buffer
     var index: usize = blk: {
-        for (self.staging_ramps) |ramp, i| {
+        for (self.staging_buffers) |ramp, i| {
             // if ramp is out of memory
             if (ramp.buffer_cursor + size >= buffer_size) {
                 full_ramps += 1;
@@ -155,19 +155,18 @@ inline fn getIdleRamp(self: *StagingRamp, ctx: Context, size: vk.DeviceSize) !us
                 break :blk i;
             }
         }
-        break :blk (self.last_buffer_used + 1) % self.staging_ramps.len;
+        break :blk (self.last_buffer_used + 1) % self.staging_buffers.len;
     };
-    if (full_ramps >= self.staging_ramps.len) {
+    if (full_ramps >= self.staging_buffers.len) {
         return error.StagingBuffersFull;
     }
-
     defer self.last_buffer_used = index;
 
     // wait for previous transfer
     _ = try ctx.vkd.waitForFences(
         ctx.logical_device,
         1,
-        @ptrCast([*]const vk.Fence, &self.staging_ramps[index].fence),
+        @ptrCast([*]const vk.Fence, &self.staging_buffers[index].fence),
         vk.TRUE,
         std.math.maxInt(u64),
     );
