@@ -137,6 +137,7 @@ pub fn deinit(self: StagingBuffers, ctx: Context, allocator: Allocator) void {
     }
     allocator.free(self.staging_ramps);
     self.deferred_buffer_transfers.deinit();
+    allocator.free(self.wait_all_fences);
 }
 
 inline fn getIdleRamp(self: *StagingBuffers, ctx: Context, size: vk.DeviceSize) !usize {
@@ -340,8 +341,8 @@ const StagingRamp = struct {
         var dest_location = @ptrCast([*]u8, @alignCast(@alignOf(u8), self.device_buffer_memory.mapped) orelse unreachable);
         {
             // runtime safety is turned off for performance
-            @setRuntimeSafety(false);
             const byte_data = std.mem.sliceAsBytes(data);
+            @setRuntimeSafety(false);
             for (byte_data) |elem, i| {
                 dest_location[i] = elem;
             }

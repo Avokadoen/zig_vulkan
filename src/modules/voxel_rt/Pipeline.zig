@@ -343,12 +343,16 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     ctx.vkd.destroySemaphore(ctx.logical_device, self.render_complete_semaphore, null);
     ctx.vkd.destroyFence(ctx.logical_device, self.render_complete_fence, null);
 
+    // wait for staging buffer transfer to finish before deinit staging buffer and
+    // any potential src buffers
+    self.staging_buffers.waitIdle(ctx) catch {};
+    self.staging_buffers.deinit(ctx, self.allocator);
+
     self.imgui_pipeline.deinit(ctx);
     self.gfx_pipeline.deinit(self.allocator, ctx);
     self.compute_pipeline.deinit(ctx);
     ctx.destroyRenderPass(self.render_pass);
     self.swapchain.deinit(ctx);
-    self.staging_buffers.deinit(ctx, self.allocator);
     self.vertex_index_buffer.deinit(ctx);
 
     ctx.vkd.destroyCommandPool(ctx.logical_device, self.init_command_pool, null);
