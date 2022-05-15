@@ -19,22 +19,22 @@ const DeferBufferTransfer = struct {
     data: []const u8,
 };
 
-/// StagingBuffers is a transfer abstraction used to transfer data from host
+/// StagingRamp is a transfer abstraction used to transfer data from host
 /// to device local memory (heap 0 memory)
-const StagingBuffers = @This();
+const StagingRamp = @This();
 
 last_buffer_used: usize,
-staging_ramps: []StagingRamp,
+staging_ramps: []StagingBuffer,
 wait_all_fences: []vk.Fence,
 deferred_buffer_transfers: std.ArrayList(DeferBufferTransfer),
 
-pub fn init(ctx: Context, allocator: Allocator, buffer_count: usize) !StagingBuffers {
-    const staging_ramps = try allocator.alloc(StagingRamp, buffer_count);
+pub fn init(ctx: Context, allocator: Allocator, buffer_count: usize) !StagingRamp {
+    const staging_ramps = try allocator.alloc(StagingBuffer, buffer_count);
     errdefer allocator.free(staging_ramps);
 
     var buffers_initialized: usize = 0;
     for (staging_ramps) |*ramp, i| {
-        ramp.* = try StagingRamp.init(ctx, allocator);
+        ramp.* = try StagingBuffer.init(ctx, allocator);
         buffers_initialized = i + 1;
     }
     errdefer {
@@ -47,7 +47,7 @@ pub fn init(ctx: Context, allocator: Allocator, buffer_count: usize) !StagingBuf
     const wait_all_fences = try allocator.alloc(vk.Fence, buffer_count);
     errdefer allocator.free(wait_all_fences);
 
-    return StagingBuffers{
+    return StagingRamp{
         .last_buffer_used = 0,
         .staging_ramps = staging_ramps,
         .wait_all_fences = wait_all_fences,
@@ -55,7 +55,7 @@ pub fn init(ctx: Context, allocator: Allocator, buffer_count: usize) !StagingBuf
     };
 }
 
-pub fn flush(self: *StagingBuffers, ctx: Context) !void {
+pub fn flush(self: *StagingRamp, ctx: Context) !void {
     for (self.staging_ramps) |*ramp| {
         try ramp.flush(ctx);
     }
@@ -68,7 +68,7 @@ pub fn flush(self: *StagingBuffers, ctx: Context) !void {
 
 /// transfer to device image
 pub fn transferToImage(
-    self: *StagingBuffers,
+    self: *StagingRamp,
     ctx: Context,
     src_layout: vk.ImageLayout,
     dst_layout: vk.ImageLayout,
@@ -85,7 +85,7 @@ pub fn transferToImage(
 
     const index = self.getIdleRamp(ctx, data.len * @sizeOf(T)) catch |err| {
         switch (err) {
-            error.StagingRampsFull => {
+            error.StagingBuffersFull => {
                 std.debug.panic("TODO: handle image transfer defer", .{});
             },
             else => return err,
@@ -95,13 +95,13 @@ pub fn transferToImage(
 }
 
 /// transfer to device storage buffer
-pub fn transferToBuffer(self: *StagingBuffers, ctx: Context, buffer: *GpuBufferMemory, offset: vk.DeviceSize, comptime T: type, data: []const T) !void {
+pub fn transferToBuffer(self: *StagingRamp, ctx: Context, buffer: *GpuBufferMemory, offset: vk.DeviceSize, comptime T: type, data: []const T) !void {
     const transfer_zone = tracy.ZoneN(@src(), "schedule buffers transfer");
     defer transfer_zone.End();
 
     const index = self.getIdleRamp(ctx, data.len * @sizeOf(T)) catch |err| {
         switch (err) {
-            error.StagingRampsFull => {
+            error.StagingBuffersFull => {
                 // TODO: RC: data might change between transfer call and final flush ...
                 try self.deferred_buffer_transfers.append(DeferBufferTransfer{
                     .ctx = ctx,
@@ -118,7 +118,7 @@ pub fn transferToBuffer(self: *StagingBuffers, ctx: Context, buffer: *GpuBufferM
 }
 
 // wait until all pending transfers are done
-pub fn waitIdle(self: StagingBuffers, ctx: Context) !void {
+pub fn waitIdle(self: StagingRamp, ctx: Context) !void {
     for (self.staging_ramps) |ramp, i| {
         self.wait_all_fences[i] = ramp.fence;
     }
@@ -131,7 +131,7 @@ pub fn waitIdle(self: StagingBuffers, ctx: Context) !void {
     );
 }
 
-pub fn deinit(self: StagingBuffers, ctx: Context, allocator: Allocator) void {
+pub fn deinit(self: StagingRamp, ctx: Context, allocator: Allocator) void {
     for (self.staging_ramps) |*ramp| {
         ramp.deinit(ctx);
     }
@@ -140,7 +140,7 @@ pub fn deinit(self: StagingBuffers, ctx: Context, allocator: Allocator) void {
     allocator.free(self.wait_all_fences);
 }
 
-inline fn getIdleRamp(self: *StagingBuffers, ctx: Context, size: vk.DeviceSize) !usize {
+inline fn getIdleRamp(self: *StagingRamp, ctx: Context, size: vk.DeviceSize) !usize {
     var full_ramps: usize = 0;
     // get a idle buffer
     var index: usize = blk: {
@@ -158,7 +158,7 @@ inline fn getIdleRamp(self: *StagingBuffers, ctx: Context, size: vk.DeviceSize) 
         break :blk (self.last_buffer_used + 1) % self.staging_ramps.len;
     };
     if (full_ramps >= self.staging_ramps.len) {
-        return error.StagingRampsFull;
+        return error.StagingBuffersFull;
     }
 
     defer self.last_buffer_used = index;
@@ -216,7 +216,7 @@ const fence_info = vk.FenceCreateInfo{
         .signaled_bit = true,
     },
 };
-const StagingRamp = struct {
+const StagingBuffer = struct {
     command_pool: vk.CommandPool,
     command_buffer: vk.CommandBuffer,
     fence: vk.Fence,
@@ -226,7 +226,7 @@ const StagingRamp = struct {
     buffer_copy: BufferCopyMap,
     image_copy: ImageCopyList,
 
-    fn init(ctx: Context, allocator: Allocator) !StagingRamp {
+    fn init(ctx: Context, allocator: Allocator) !StagingBuffer {
         const device_buffer_memory = try GpuBufferMemory.init(
             ctx,
             buffer_size,
@@ -253,7 +253,7 @@ const StagingRamp = struct {
         const fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
         errdefer ctx.vkd.destroyFence(ctx.logical_device, fence, null);
 
-        return StagingRamp{
+        return StagingBuffer{
             .command_pool = command_pool,
             .command_buffer = command_buffer,
             .fence = fence,
@@ -265,7 +265,7 @@ const StagingRamp = struct {
     }
 
     fn transferToImage(
-        self: *StagingRamp,
+        self: *StagingBuffer,
         ctx: Context,
         src_layout: vk.ImageLayout,
         dst_layout: vk.ImageLayout,
@@ -322,7 +322,7 @@ const StagingRamp = struct {
         self.buffer_cursor += data_size;
     }
 
-    fn transferToBuffer(self: *StagingRamp, ctx: Context, dst: *GpuBufferMemory, offset: vk.DeviceSize, comptime T: type, data: []const T) !void {
+    fn transferToBuffer(self: *StagingBuffer, ctx: Context, dst: *GpuBufferMemory, offset: vk.DeviceSize, comptime T: type, data: []const T) !void {
         const data_size = data.len * @sizeOf(T);
         if (offset + data_size > dst.size) {
             return error.DestOutOfDeviceMemory;
@@ -372,7 +372,7 @@ const StagingRamp = struct {
         self.buffer_cursor += data_size;
     }
 
-    fn flush(self: *StagingRamp, ctx: Context) !void {
+    fn flush(self: *StagingBuffer, ctx: Context) !void {
         if (self.buffer_cursor == 0) return;
 
         // wait for previous transfer
@@ -502,7 +502,7 @@ const StagingRamp = struct {
         self.buffer_cursor = 0;
     }
 
-    fn deinit(self: *StagingRamp, ctx: Context) void {
+    fn deinit(self: *StagingBuffer, ctx: Context) void {
         ctx.vkd.freeCommandBuffers(
             ctx.logical_device,
             self.command_pool,

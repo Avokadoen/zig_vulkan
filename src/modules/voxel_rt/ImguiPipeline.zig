@@ -14,7 +14,7 @@ const tracy = @import("../../tracy.zig");
 
 const render = @import("../render.zig");
 const GpuBufferMemory = render.GpuBufferMemory;
-const StagingBuffers = render.StagingBuffers;
+const StagingRamp = render.StagingRamp;
 const Context = render.Context;
 const Texture = render.Texture;
 
@@ -52,7 +52,7 @@ pub fn init(
     allocator: Allocator,
     render_pass: vk.RenderPass,
     swapchain_image_count: usize,
-    staging_buffers: *StagingBuffers,
+    staging_buffers: *StagingRamp,
     vertex_index_buffer_offset: vk.DeviceSize,
     image_memory_type: u32,
     image_memory: vk.DeviceMemory,

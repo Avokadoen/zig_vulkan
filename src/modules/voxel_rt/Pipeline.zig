@@ -16,7 +16,7 @@ const memory = render.memory;
 const ComputePipeline = @import("ComputePipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const ImguiPipeline = @import("ImguiPipeline.zig");
-const StagingBuffers = render.StagingBuffers;
+const StagingRamp = render.StagingRamp;
 const GpuBufferMemory = render.GpuBufferMemory;
 
 const ImguiGui = @import("ImguiGui.zig");
@@ -59,7 +59,7 @@ compute_image: vk.Image,
 sampler: vk.Sampler,
 
 // buffers used to transfer to device local memory
-staging_buffers: StagingBuffers,
+staging_buffers: StagingRamp,
 
 swapchain: render.swapchain.Data,
 render_pass: vk.RenderPass,
@@ -245,7 +245,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         }
     }
 
-    var staging_buffers = try StagingBuffers.init(ctx, allocator, config.staging_buffers);
+    var staging_buffers = try StagingRamp.init(ctx, allocator, config.staging_buffers);
     errdefer staging_buffers.deinit(ctx, allocator);
 
     var vertex_index_buffer = try GpuBufferMemory.init(
