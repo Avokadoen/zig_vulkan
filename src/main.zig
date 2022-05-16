@@ -185,8 +185,9 @@ pub fn main() anyerror!void {
             mouse_delta.data[1] = 0;
             // try voxel_rt.debugUpdateTerrain(ctx);
         }
-        try voxel_rt.updateGridDelta(ctx);
+        voxel_rt.updateSun(dt);
 
+        try voxel_rt.updateGridDelta(ctx);
         try voxel_rt.draw(ctx);
 
         // Poll for and process events

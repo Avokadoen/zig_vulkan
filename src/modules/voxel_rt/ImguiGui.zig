@@ -261,6 +261,20 @@ inline fn drawPostSunWindowIfEnabled(self: *ImguiGui) void {
     _ = imgui.igDragFloat3("position", &self.state_binding.sun_ptr.device_data.position, 1, -10000, 10000, null, 0);
     _ = imgui.igColorEdit3("color", &self.state_binding.sun_ptr.device_data.color, 0);
     _ = imgui.igDragFloat("radius", &self.state_binding.sun_ptr.device_data.radius, 0, 0, 20, null, 0);
+
+    if (imgui.igCollapsingHeaderBoolPtr("Animation", null, imgui.ImGuiTreeNodeFlags_None)) {
+        _ = imgui.igCheckbox("animate", &self.state_binding.sun_ptr.animate);
+        var speed: f32 = self.state_binding.sun_ptr.animate_speed / 3;
+        const speed_changed = imgui.igInputFloat("speed", &speed, 0, 0, null, 0);
+        imguiToolTip("how long a day and night last in seconds", .{});
+        if (speed_changed) {
+            self.state_binding.sun_ptr.animate_speed = speed * 3;
+        }
+        // TODO: allow these to be changed: (?)
+        // slerp_orientations: [3]za.Quat,
+        // lerp_color: [3]za.Vec3,
+        // static_pos_vec: za.Vec3,
+    }
 }
 
 const ToolTipConfig = struct {

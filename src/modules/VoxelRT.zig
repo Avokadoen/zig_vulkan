@@ -42,7 +42,7 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, config: 
 
     const sun = try allocator.create(Sun);
     errdefer allocator.destroy(sun);
-    sun.* = Sun.init(brick_grid.state.device_state.voxel_dim_y, config.sun);
+    sun.* = Sun.init(config.sun);
 
     var pipeline = try Pipeline.init(
         ctx,
@@ -83,6 +83,10 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, config: 
 
 pub fn draw(self: *VoxelRT, ctx: Context) !void {
     try self.pipeline.draw(ctx);
+}
+
+pub fn updateSun(self: *VoxelRT, delta_time: f32) void {
+    self.sun.update(delta_time);
 }
 
 /// push the materials to GPU
