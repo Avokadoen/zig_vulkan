@@ -65,8 +65,7 @@ pub fn init(id: usize, worker_count: usize, grid: *State, allocator: Allocator, 
             brick_count += std.math.rem(usize, grid.bricks.len, worker_count) catch unreachable;
             material_count += std.math.rem(usize, grid.material_indices.len, worker_count) catch unreachable;
         }
-
-        break :blk try BucketStorage.init(allocator, start_index, brick_count, material_count);
+        break :blk try BucketStorage.init(allocator, start_index, material_count, brick_count);
     };
     errdefer bucket_storage.deinit();
 
@@ -141,7 +140,7 @@ pub fn work(self: *Worker) void {
 
 // perform a insert in the grid
 fn performInsert(self: *Worker, insert_job: Insert) void {
-    const actual_y = ((self.grid.device_state.dim_y * 8) - 1) - insert_job.y;
+    const actual_y = self.grid.device_state.voxel_dim_y - 1 - insert_job.y;
 
     const grid_index = gridAt(self.grid.*.device_state, insert_job.x, actual_y, insert_job.z);
     const brick_status_index = grid_index / 32;
@@ -220,7 +219,7 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
     self.grid.brick_indices_deltas[self.id].registerDelta(grid_index);
 }
 
-// TODO: test
+// TODO: test, rename to voxelAt
 /// get brick index from global index coordinates
 inline fn brickAt(x: usize, y: usize, z: usize) u9 {
     const brick_x: usize = @rem(x, 8);

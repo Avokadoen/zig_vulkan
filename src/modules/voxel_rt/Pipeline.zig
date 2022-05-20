@@ -210,20 +210,33 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     };
     const render_complete_fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
 
+    const MinSize = struct {
+        fn storage(ctx1: Context, size: u64) u64 {
+            const storage_size = ctx1.physical_device_limits.min_storage_buffer_offset_alignment;
+            return storage_size * (std.math.divCeil(vk.DeviceSize, size, storage_size) catch unreachable);
+        }
+
+        fn uniform(ctx1: Context, size: u64) u64 {
+            const uniform_size = ctx1.physical_device_limits.min_uniform_buffer_offset_alignment;
+            return uniform_size * (std.math.divCeil(vk.DeviceSize, size, uniform_size) catch unreachable);
+        }
+    };
+
     var compute_pipeline = blk: {
         const uniform_sizes = [_]u64{
-            @sizeOf(GridState.Device),
+            // use storage min size for last uniform entry
+            MinSize.storage(ctx, @sizeOf(GridState.Device)),
         };
         const storage_sizes = [_]u64{
-            @sizeOf(gpu_types.Material) * config.material_buffer,
-            @sizeOf(gpu_types.Albedo) * config.albedo_buffer,
-            @sizeOf(gpu_types.Metal) * config.metal_buffer,
-            @sizeOf(gpu_types.Dielectric) * config.dielectric_buffer,
-            @sizeOf(u8) * grid_state.higher_order_grid.len,
-            @sizeOf(GridState.BrickStatusMask) * grid_state.brick_statuses.len,
-            @sizeOf(GridState.BrickIndex) * grid_state.brick_indices.len,
-            @sizeOf(GridState.Brick) * grid_state.bricks.len,
-            @sizeOf(u8) * grid_state.material_indices.len,
+            MinSize.storage(ctx, @sizeOf(gpu_types.Material) * config.material_buffer),
+            MinSize.storage(ctx, @sizeOf(gpu_types.Albedo) * config.albedo_buffer),
+            MinSize.storage(ctx, @sizeOf(gpu_types.Metal) * config.metal_buffer),
+            MinSize.storage(ctx, @sizeOf(gpu_types.Dielectric) * config.dielectric_buffer),
+            MinSize.storage(ctx, @sizeOf(u8) * grid_state.higher_order_grid.len),
+            MinSize.storage(ctx, @sizeOf(GridState.BrickStatusMask) * grid_state.brick_statuses.len),
+            MinSize.storage(ctx, @sizeOf(GridState.BrickIndex) * grid_state.brick_indices.len),
+            MinSize.storage(ctx, @sizeOf(GridState.Brick) * grid_state.bricks.len),
+            MinSize.storage(ctx, @sizeOf(u8) * grid_state.material_indices.len),
         };
         const state_configs = ComputePipeline.StateConfigs{ .uniform_sizes = uniform_sizes[0..], .storage_sizes = storage_sizes[0..] };
 

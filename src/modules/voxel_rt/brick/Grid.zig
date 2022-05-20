@@ -13,9 +13,6 @@ const Worker = @import("Worker.zig");
 pub const Config = struct {
     // Default value is all bricks
     brick_alloc: ?usize = null,
-    // Default is enough to iter paralell the longest axis
-    max_ray_iteration: ?u32 = null,
-
     base_t: f32 = 0.01,
     min_point: [3]f32 = [_]f32{ 0.0, 0.0, 0.0 },
     scale: f32 = 1.0,
@@ -93,16 +90,6 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         break :blk result;
     };
 
-    const max_ray_iteration = blk: {
-        if (config.max_ray_iteration) |some| {
-            break :blk some;
-        }
-
-        var biggest_axis = @maximum(dim_x, dim_y);
-        biggest_axis = @maximum(biggest_axis, dim_z);
-        break :blk biggest_axis * 8;
-    };
-
     const state = try allocator.create(State);
     errdefer allocator.destroy(state);
 
@@ -150,9 +137,6 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
             .higher_dim_x = @floatToInt(u32, @ceil(higher_dim_x)),
             .higher_dim_y = @floatToInt(u32, @ceil(higher_dim_y)),
             .higher_dim_z = @floatToInt(u32, @ceil(higher_dim_z)),
-            .padding1 = 0,
-            .padding2 = 0,
-            .max_ray_iteration = max_ray_iteration,
             .min_point_base_t = min_point_base_t,
             .max_point_scale = max_point_scale,
         },
@@ -241,12 +225,4 @@ pub fn insert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u8
         .z = z,
         .material_index = material_index,
     } });
-}
-
-/// get grid index from global index coordinates
-inline fn gridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize {
-    const grid_x: u32 = @intCast(u32, x / 8);
-    const grid_y: u32 = @intCast(u32, y / 8);
-    const grid_z: u32 = @intCast(u32, z / 8);
-    return @intCast(usize, grid_x + device_state.dim_x * (grid_z + device_state.dim_z * grid_y));
 }

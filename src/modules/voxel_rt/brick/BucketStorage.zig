@@ -61,7 +61,7 @@ buckets: [bucket_count]Bucket,
 
 /// init a bucket storage.
 /// caller must make sure to call deinit
-pub fn init(allocator: Allocator, start_index: u32, brick_count: usize, material_indices_len: usize) !BucketStorage {
+pub fn init(allocator: Allocator, start_index: u32, material_indices_len: usize, brick_count: usize) !BucketStorage {
     std.debug.assert(material_indices_len > 2048);
     const segments_2048 = std.math.divFloor(usize, material_indices_len, 2048) catch unreachable;
 

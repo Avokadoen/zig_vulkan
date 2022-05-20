@@ -7,5 +7,6 @@ const Context = @import("Context.zig");
 pub const bytes_in_mb = 1048576;
 
 pub inline fn nonCoherentAtomSize(ctx: Context, size: vk.DeviceSize) vk.DeviceSize {
-    return ctx.non_coherent_atom_size * (std.math.divCeil(vk.DeviceSize, size, ctx.non_coherent_atom_size) catch unreachable);
+    const atom_size = ctx.physical_device_limits.non_coherent_atom_size;
+    return atom_size * (std.math.divCeil(vk.DeviceSize, size, atom_size) catch unreachable);
 }

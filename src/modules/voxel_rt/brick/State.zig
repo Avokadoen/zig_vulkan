@@ -68,10 +68,10 @@ pub const Device = extern struct {
     higher_dim_y: u32,
     higher_dim_z: u32,
 
-    padding1: u32, // not in use
-    padding2: u32, // not in use
+    padding1: u32 = 0,
+    padding2: u32 = 0,
+    padding3: u32 = 0,
 
-    max_ray_iteration: u32,
     // holds the min point, and the base t advance
     // base t advance dictate the minimum stretch of distance a ray can go for each iteration
     // at 0.1 it will move atleast 10% of a given voxel

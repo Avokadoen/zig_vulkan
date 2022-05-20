@@ -25,14 +25,13 @@ vki: dispatch.Instance,
 vkd: dispatch.Device,
 
 instance: vk.Instance,
+physical_device_limits: vk.PhysicalDeviceLimits,
 physical_device: vk.PhysicalDevice,
 logical_device: vk.Device,
 
 compute_queue: vk.Queue,
 graphics_queue: vk.Queue,
 present_queue: vk.Queue,
-
-non_coherent_atom_size: vk.DeviceSize,
 
 surface: vk.SurfaceKHR,
 queue_indices: QueueFamilyIndices,
@@ -156,10 +155,7 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
     self.graphics_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.graphics, 0);
     self.present_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.present, 0);
 
-    self.non_coherent_atom_size = blk: {
-        const device_properties = self.getPhysicalDeviceProperties();
-        break :blk device_properties.limits.non_coherent_atom_size;
-    };
+    self.physical_device_limits = self.getPhysicalDeviceProperties().limits;
 
     // possibly a bit wasteful, but to get compile errors when forgetting to
     // init a variable the partial context variables are moved to a new context which we return
@@ -174,7 +170,7 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
         .compute_queue = self.compute_queue,
         .graphics_queue = self.graphics_queue,
         .present_queue = self.present_queue,
-        .non_coherent_atom_size = self.non_coherent_atom_size,
+        .physical_device_limits = self.physical_device_limits,
         .surface = self.surface,
         .queue_indices = self.queue_indices,
         .messenger = self.messenger,
