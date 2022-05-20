@@ -2,22 +2,21 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-// zig fmt: off
 /// A vox file
-pub const Vox = struct { 
+pub const Vox = struct {
     allocator: Allocator,
-    version_number: i32, 
-    nodes: ArrayList(ChunkNode), 
-    generic_chunks: ArrayList(Chunk), 
-    pack_chunk: Chunk.Pack, 
-    size_chunks: []Chunk.Size, 
+    version_number: i32,
+    nodes: ArrayList(ChunkNode),
+    generic_chunks: ArrayList(Chunk),
+    pack_chunk: Chunk.Pack,
+    size_chunks: []Chunk.Size,
     xyzi_chunks: [][]Chunk.XyziElement,
     rgba_chunk: [256]Chunk.RgbaElement,
 
     pub fn init(allocator: Allocator) Vox {
         return Vox{
             .allocator = allocator,
-            // if you enable strict parsing in the load function, then this will be validated in validateHeader 
+            // if you enable strict parsing in the load function, then this will be validated in validateHeader
             .version_number = 150,
             .nodes = ArrayList(ChunkNode).init(allocator),
             .generic_chunks = ArrayList(Chunk).init(allocator),
@@ -31,7 +30,7 @@ pub const Vox = struct {
     pub fn deinit(self: Vox) void {
         for (self.xyzi_chunks) |chunk| {
             self.allocator.free(chunk);
-        } 
+        }
 
         self.allocator.free(self.size_chunks);
         self.allocator.free(self.xyzi_chunks);
@@ -40,7 +39,6 @@ pub const Vox = struct {
         self.generic_chunks.deinit();
     }
 };
-// zig fmt: on
 
 pub const ChunkNode = struct {
     type_id: Chunk.Type,
@@ -51,7 +49,7 @@ pub const ChunkNode = struct {
 /// Generic Chunk and all Chunk types
 pub const Chunk = struct {
 
-    /// num bytes of chunk content 
+    /// num bytes of chunk content
     size: i32,
     /// num bytes of children chunks
     child_size: i32,

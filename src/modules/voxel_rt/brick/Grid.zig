@@ -78,15 +78,12 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         break :blk result;
     };
     const max_point_scale = blk: {
-        const scale = config.scale;
-        // zig fmt: off
-        var result = [4]f32{ 
-            min_point_base_t[0] + @intToFloat(f32, dim_x) * scale, 
-            min_point_base_t[1] + @intToFloat(f32, dim_y) * scale, 
-            min_point_base_t[2] + @intToFloat(f32, dim_z) * scale, 
-            scale 
+        var result = [4]f32{
+            min_point_base_t[0] + @intToFloat(f32, dim_x) * config.scale,
+            min_point_base_t[1] + @intToFloat(f32, dim_y) * config.scale,
+            min_point_base_t[2] + @intToFloat(f32, dim_z) * config.scale,
+            config.scale,
         };
-        // zig fmt: on
         break :blk result;
     };
 
@@ -152,14 +149,12 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         thread.* = try std.Thread.spawn(.{}, Worker.work, .{&workers[i]});
     }
 
-    // zig fmt: off
-    return BrickGrid{ 
-        .allocator = allocator, 
+    return BrickGrid{
+        .allocator = allocator,
         .state = state,
         .worker_threads = worker_threads,
         .workers = workers,
     };
-    // zig fmt: on
 }
 
 /// Clean up host memory, does not account for device

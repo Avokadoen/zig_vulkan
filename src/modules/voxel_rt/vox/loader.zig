@@ -29,17 +29,15 @@ pub fn load(comptime strict: bool, allocator: Allocator, path: []const u8) !Vox 
     return parseBuffer(strict, allocator, file_buffer);
 }
 
-// zig fmt: off
-pub const ParseError = error{ 
-    InvalidId, 
-    ExpectedSizeHeader, 
-    ExpectedXyziHeader, 
-    ExpectedRgbaHeader, 
-    UnexpectedVersion, 
-    InvalidFileContent, 
-    MultiplePackChunks 
+pub const ParseError = error{
+    InvalidId,
+    ExpectedSizeHeader,
+    ExpectedXyziHeader,
+    ExpectedRgbaHeader,
+    UnexpectedVersion,
+    InvalidFileContent,
+    MultiplePackChunks,
 };
-// zig fmt: on
 pub fn parseBuffer(comptime strict: bool, allocator: Allocator, buffer: []const u8) !Vox {
     if (strict == true) {
         try validateHeader(buffer);
@@ -203,7 +201,7 @@ inline fn parseI32(buffer: []const u8) i32 {
     return @ptrCast(*const i32, @alignCast(4, &buffer[0])).*;
 }
 
-/// Parse a buffer into a chunk, buffer *has* to start with the first character in the id 
+/// Parse a buffer into a chunk, buffer *has* to start with the first character in the id
 inline fn chunkFrom(buffer: []const u8) std.fmt.ParseIntError!Chunk {
     const size = parseI32(buffer[4..]);
     const child_size = parseI32(buffer[8..]);
@@ -244,7 +242,6 @@ inline fn buildPath(allocator: Allocator, path: []const u8) ![]const u8 {
     return zig_use_path;
 }
 
-// zig fmt: off
 const default_rgba = [256]u32{
     0x00000000, 0xffffffff, 0xffccffff, 0xff99ffff, 0xff66ffff, 0xff33ffff, 0xff00ffff, 0xffffccff, 0xffccccff, 0xff99ccff, 0xff66ccff, 0xff33ccff, 0xff00ccff, 0xffff99ff, 0xffcc99ff, 0xff9999ff,
     0xff6699ff, 0xff3399ff, 0xff0099ff, 0xffff66ff, 0xffcc66ff, 0xff9966ff, 0xff6666ff, 0xff3366ff, 0xff0066ff, 0xffff33ff, 0xffcc33ff, 0xff9933ff, 0xff6633ff, 0xff3333ff, 0xff0033ff, 0xffff00ff,
@@ -261,9 +258,8 @@ const default_rgba = [256]u32{
     0xff00cc00, 0xffff9900, 0xffcc9900, 0xff999900, 0xff669900, 0xff339900, 0xff009900, 0xffff6600, 0xffcc6600, 0xff996600, 0xff666600, 0xff336600, 0xff006600, 0xffff3300, 0xffcc3300, 0xff993300,
     0xff663300, 0xff333300, 0xff003300, 0xffff0000, 0xffcc0000, 0xff990000, 0xff660000, 0xff330000, 0xff0000ee, 0xff0000dd, 0xff0000bb, 0xff0000aa, 0xff000088, 0xff000077, 0xff000055, 0xff000044,
     0xff000022, 0xff000011, 0xff00ee00, 0xff00dd00, 0xff00bb00, 0xff00aa00, 0xff008800, 0xff007700, 0xff005500, 0xff004400, 0xff002200, 0xff001100, 0xffee0000, 0xffdd0000, 0xffbb0000, 0xffaa0000,
-    0xff880000, 0xff770000, 0xff550000, 0xff440000, 0xff220000, 0xff110000, 0xffeeeeee, 0xffdddddd, 0xffbbbbbb, 0xffaaaaaa, 0xff888888, 0xff777777, 0xff555555, 0xff444444, 0xff222222, 0xff111111
+    0xff880000, 0xff770000, 0xff550000, 0xff440000, 0xff220000, 0xff110000, 0xffeeeeee, 0xffdddddd, 0xffbbbbbb, 0xffaaaaaa, 0xff888888, 0xff777777, 0xff555555, 0xff444444, 0xff222222, 0xff111111,
 };
-// zig fmt: on
 
 test "validateHeader: valid header accepted" {
     const valid_test_buffer: []const u8 = "VOX " ++ [_]u8{ 150, 0, 0, 0 } ++ "MAIN";

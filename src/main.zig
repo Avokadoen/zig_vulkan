@@ -64,21 +64,17 @@ pub fn main() anyerror!void {
         std.debug.panic("vulkan not supported on device (glfw)", .{});
     }
 
-    // zig fmt: off
     // Create a windowed mode window
-    var window = glfw.Window.create(3840, 2160, application_name, null, null, 
-        .{ 
-            .center_cursor = true, 
-            .client_api = .no_api,
-            .maximized = true,
-            .scale_to_monitor = true,
-            .focused = true, 
-        }
-    ) catch |err| {
+    var window = glfw.Window.create(3840, 2160, application_name, null, null, .{
+        .center_cursor = true,
+        .client_api = .no_api,
+        .maximized = true,
+        .scale_to_monitor = true,
+        .focused = true,
+    }) catch |err| {
         try stderr.print("failed to create window, code: {}", .{err});
         return;
     };
-    // zig fmt: on
     defer window.destroy();
 
     const ctx = try render.Context.init(allocator, application_name, &window);
@@ -110,14 +106,12 @@ pub fn main() anyerror!void {
     for (model.rgba_chunk[terrain.color_data.len..]) |rgba, i| {
         const albedo_index = i + terrain.color_data.len;
         albedo_color[albedo_index] = .{
-            // zig fmt: off
             .color = za.Vec4.new(
-                @intToFloat(f32, rgba.r) / 255, 
-                @intToFloat(f32, rgba.g) / 255, 
-                @intToFloat(f32, rgba.b) / 255, 
-                @intToFloat(f32, rgba.a) / 255
+                @intToFloat(f32, rgba.r) / 255,
+                @intToFloat(f32, rgba.g) / 255,
+                @intToFloat(f32, rgba.b) / 255,
+                @intToFloat(f32, rgba.a) / 255,
             ).data,
-            // zig fmt: on
         };
         const material_index = i + terrain.material_data.len;
         materials[material_index] = .{ .@"type" = .metal, .type_index = 0, .albedo_index = @intCast(u8, albedo_index) };

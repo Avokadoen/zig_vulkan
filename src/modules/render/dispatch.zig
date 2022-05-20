@@ -31,17 +31,16 @@ pub const Instance = vk.InstanceWrapper(.{
     .getPhysicalDeviceSurfaceSupportKHR = true,
 });
 
-// zig fmt: off
-pub const Device = vk.DeviceWrapper(.{ 
-    .acquireNextImageKHR = true, 
-    .allocateCommandBuffers = true, 
-    .allocateDescriptorSets = true, 
-    .allocateMemory = true, 
-    .beginCommandBuffer = true, 
-    .bindBufferMemory = true, 
-    .bindImageMemory = true, 
-    .cmdBeginRenderPass = true, 
-    .cmdBindDescriptorSets = true, 
+pub const Device = vk.DeviceWrapper(.{
+    .acquireNextImageKHR = true,
+    .allocateCommandBuffers = true,
+    .allocateDescriptorSets = true,
+    .allocateMemory = true,
+    .beginCommandBuffer = true,
+    .bindBufferMemory = true,
+    .bindImageMemory = true,
+    .cmdBeginRenderPass = true,
+    .cmdBindDescriptorSets = true,
     .cmdBindIndexBuffer = true,
     .cmdBindPipeline = true,
     .cmdBindVertexBuffers = true,
@@ -109,8 +108,7 @@ pub const Device = vk.DeviceWrapper(.{
     .resetFences = true,
     .unmapMemory = true,
     .updateDescriptorSets = true,
-    .waitForFences = true, 
+    .waitForFences = true,
 });
-// zig fmt: on
 
 pub const BeginCommandBufferError = Device.BeginCommandBufferError;

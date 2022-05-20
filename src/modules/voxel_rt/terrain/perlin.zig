@@ -99,13 +99,12 @@ pub fn PerlinNoiseGenerator(comptime point_count: u32) type {
                         var dk: usize = 0;
                         while (dk < 2) : (dk += 1) {
                             c[di][dj][dk] = self.rand_float[
-                                // zig fmt: off
-                                @intCast(usize, 
-                                    self.perm_x[(i + di) & and_value] ^ 
-                                    self.perm_y[(j + dj) & and_value] ^ 
-                                    self.perm_z[(k + dk) & and_value]
+                                @intCast(
+                                    usize,
+                                    self.perm_x[(i + di) & and_value] ^
+                                        self.perm_y[(j + dj) & and_value] ^
+                                        self.perm_z[(k + dk) & and_value],
                                 )
-                                // zig fmt: on
                             ];
                         }
                     }
