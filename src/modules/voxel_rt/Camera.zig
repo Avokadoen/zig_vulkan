@@ -33,12 +33,9 @@ d_camera: Device,
 pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Config) Camera {
     const aspect_ratio = @intToFloat(f32, image_width) / @intToFloat(f32, image_height);
 
-    const inv_180: comptime_float = comptime blk: {
-        break :blk 1.0 / 180.0;
-    };
-
+    const a: comptime_float = std.math.pi * (1.0 / 180.0);
     const viewport_height = blk: {
-        const theta = vertical_fov * std.math.pi * inv_180;
+        const theta = vertical_fov * a;
         const height = config.viewport_height;
         break :blk height * @tan(theta * 0.5);
     };
@@ -50,18 +47,13 @@ pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Conf
 
     const horizontal = right.scale(viewport_width);
     const vertical = up.scale(viewport_height);
-
     const lower_left_corner = config.origin - horizontal.scale(0.5).data - vertical.scale(0.5).data - forward.data;
 
-    // TODO: Camera own texture ...
-    // const render_texture = ;
-
-    const normal_speed = config.normal_speed;
     return Camera{
         .turn_rate = config.turn_rate,
-        .normal_speed = normal_speed,
+        .normal_speed = config.normal_speed,
         .sprint_speed = config.sprint_speed,
-        .movement_speed = normal_speed,
+        .movement_speed = config.normal_speed,
         .viewport_width = viewport_width,
         .viewport_height = viewport_height,
         .vertical_fov = vertical_fov,

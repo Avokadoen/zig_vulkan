@@ -13,6 +13,7 @@ layout(Rgba8, binding = 0) uniform writeonly image2D img_output;
 #define MAX_BOUNCES 32
 #define BIG_NUMBER 1e30
 #define AMBIENT vec3(0.005)
+#define PRECISION 0.000001
  
 // Constants
 const int MAT_LAMBERTIAN = 0;
@@ -90,8 +91,7 @@ layout (binding = 1) uniform BrickGridState {
 
     uint padding1; // not in use
     uint padding2; // not in use
-
-    uint max_ray_iteration;
+    uint padding3; // not in use
 
     // min point *and* base t value
     vec4 min_point_base_t;
@@ -174,7 +174,7 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
 
 // slab hit tests
 bool FastInstersect(vec3 p0, vec3 p1, Ray r);
-bool AdvIntersect(vec3 p0, vec3 p1, Ray r, vec3 inv_ray_dir, float t_min, inout float t_max, inout HitRecord hit);
+bool AdvIntersect(vec3 p0, vec3 p1, Ray r, vec3 inv_ray_dir, inout float t_min, inout float t_max);
 
 // TODO: higher level grid optimization
 // TODO: re-enable hack in ScatterDielectric
@@ -276,6 +276,7 @@ vec3 RayColor(Ray r) {
                 result = ScatterDielectric(material, current_ray, hit_v_min, hit, attenuation, scattered);
                 break;
             default: 
+                loop_count -= 1;
                 result = false;
                 break;
         }
@@ -302,27 +303,27 @@ vec3 RayColor(Ray r) {
         current_ray = scattered;
     }
 
+    vec3 color = vec3(0);
     if (sun_enabled) {
         if (loop_count == 0) {
-            return BackgroundColor(current_ray) * push_constant.sun_color;
+            color = BackgroundColor(current_ray) * push_constant.sun_color;
+        } else {
+            color = vec3(0);
+            for (int i = loop_count - 1; i >= 0; i--) {
+                color = (color * attenuations[i]) + emits[i];
+            }
         }
-
-        vec3 color = vec3(0);
-        for (int i = loop_count - 1; i >= 0; i--) {
-            color = (color * attenuations[i]) + emits[i];
-        }
-        return color;
     } else {
         if (loop_count == 0) {
             return BackgroundColor(current_ray);
+        } else {
+            color = vec3(1);
+            for (int i = loop_count - 1; i >= 0; i--) {
+                color *= attenuations[i];
+            }
         }
-
-        vec3 color = vec3(1);
-        for (int i = loop_count - 1; i >= 0; i--) {
-            color *= attenuations[i];
-        }
-        return color;
     }
+    return color;
 }
 
 /*
@@ -412,31 +413,30 @@ bool HigherGridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRec
 
 /// Traverses the brick grid and calculates any potential hit with the grid
 bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit) {
-    // min point *and* base t value
     const vec3 g_min = brick_grid.min_point_base_t.xyz;
     const float b_base_t = brick_grid.min_point_base_t.w;
-    const vec3 g_max = brick_grid.max_point_scale.xyz - vec3(0.001);
+    const vec3 g_max = brick_grid.max_point_scale.xyz;
+    const float g_scale = brick_grid.max_point_scale.w;
     const ivec3 brick_dim = ivec3(brick_grid.dim_x, brick_grid.dim_y, brick_grid.dim_z);
 
     const vec3 inv_ray_dir = vec3(
-        (r.direction.x != 0) ? 1.0 / r.direction.x : BIG_NUMBER,
-        (r.direction.y != 0) ? 1.0 / r.direction.y : BIG_NUMBER,
-        (r.direction.z != 0) ? 1.0 / r.direction.z : BIG_NUMBER
+        (r.direction.x < -PRECISION || r.direction.x > PRECISION) ? 1.0 / r.direction.x : BIG_NUMBER,
+        (r.direction.y < -PRECISION || r.direction.y > PRECISION) ? 1.0 / r.direction.y : BIG_NUMBER,
+        (r.direction.z < -PRECISION || r.direction.z > PRECISION) ? 1.0 / r.direction.z : BIG_NUMBER
     );
 
+    float t_grid_min = t_min;
     float t_grid_max = t_max;
-    HitRecord hit_grid;
-    if (!AdvIntersect(g_min, g_max, r, inv_ray_dir, t_min, t_grid_max, hit_grid)) {
+    if (!AdvIntersect(g_min, g_max, r, inv_ray_dir, t_grid_min, t_grid_max)) {
         return false;
     }
-    
     // HACK: workaround for precision issues with t being too low for "penetrating" grid 
-    hit_grid.t += 0.001;
+    t_grid_min += 0.001;
 
     // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
     
     /// get position in grid space from global position
-    const vec3 fposition = RayAt(r, hit_grid.t) - g_min;
+    const vec3 fposition = RayAt(r, t_grid_min) - g_min; 
     ivec3 position = ivec3(floor(fposition));
 
     // in the event of a axis of direction is 0 we get infinity according to 
@@ -456,9 +456,10 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
     // DDA loop
     ivec3 axis = ivec3(0);
     uint brick_bits;
-    uint brick_type_index;
+    // store max uint value to avoid false positive cache hit
+    uint brick_type_index = ~0;
     while (true) { 
-        const uint grid_index = position.x + brick_dim.x * (position.z + brick_dim.z * position.y);
+        const uint grid_index = position.x + brick_dim.y * (position.y + brick_dim.x * position.z);
         // 1 bit pr type, so we divide 32 bit int
         const uint new_brick_type_index = grid_index / 32;
         const int brick_type_offset = int(grid_index % 32);
@@ -471,7 +472,7 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
         if(entry_type != 0) { // TODO: actually check type
             vec3 brick_min = g_min + position;
             const vec3 t_value = (axis_t - delta) * vec3(axis);
-            hit.t = fma(t_value.x + t_value.y + t_value.z, brick_grid.max_point_scale.w, hit_grid.t);
+            hit.t = fma(t_value.x + t_value.y + t_value.z, brick_grid.max_point_scale.w, t_grid_min);
 
             // check if ray hits any voxel in the brick
             const uint brick_index = brick_index[grid_index];
@@ -504,7 +505,7 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
     /// get position in brick space from global position
     /// caller should make sure that p is in fact inside the grid
     const vec3 fposition = (RayAt(r, hit.t + 0.0001) - brick_position) * 8;
-    vec3 position = vec3(floor(fposition));
+    ivec3 position = ivec3(floor(fposition));
 
     // optimization: copy solid mask from SSBO to localize the mask memory
     const uint solid_mask[16] = brick.solid_mask;
@@ -522,7 +523,7 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
     // TODO:  && t_value <= t_max
     vec3 axis = vec3(0);
     while (true) { 
-        const int bit_offset = int(position.x + 8 * (position.z + 8 * position.y));
+        const int bit_offset = position.x + 8 * (position.y + 8 * position.z);
         const int mask_index = bit_offset / 32;
         const int mask_offset = bit_offset % 32;
         const uint uint_mask = solid_mask[mask_index];
@@ -571,7 +572,6 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
                     normal.z = sign(normal.z) * float(abs_normal.z >= abs_normal.x && abs_normal.z >= abs_normal.y);
                     hit.normal = normalize(normal);
                 }
-
                 return true;
             }
         }
@@ -580,7 +580,7 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
         const bool axis_y = (axis_t.x >= axis_t.y) && (axis_t.y < axis_t.z);
         axis = vec3(axis_x, axis_y, !axis_x && !axis_y);
         // progress position with DDA
-        position += pos_step * axis;
+        position += pos_step * ivec3(axis);
         const vec3 position_delta_axis = position * axis; 
         const float position_delta = position_delta_axis.x + position_delta_axis.y + position_delta_axis.z;
         if (position_delta < 0 || position_delta >= 8) {
@@ -622,9 +622,9 @@ bool FastInstersect(vec3 p0, vec3 p1, Ray r) {
 /// Test if a ray intersect with min point p0 and max p1 of a slab
 /// This function will also computes the ray t_min and t_max and register a hit in a record in the event of an intersection
 /// If calc_hit is false: only compute t values (t_min is still stored in hit.t)
-bool AdvIntersect(vec3 p0, vec3 p1, Ray r, vec3 inv_ray_dir, float t_min, inout float t_max, inout HitRecord hit) {
-    const vec3 t_lower = (p0 - r.origin) * inv_ray_dir;
-    const vec3 t_upper = (p1 - r.origin) * inv_ray_dir;
+bool AdvIntersect(vec3 box_min_point, vec3 box_max_point, Ray r, vec3 inv_ray_dir, inout float t_min, inout float t_max) {
+    const vec3 t_lower = (box_min_point - r.origin) * inv_ray_dir;
+    const vec3 t_upper = (box_max_point - r.origin) * inv_ray_dir;
 
     const vec3 t_mins = vec3(min(t_lower, t_upper));
     const vec3 t_maxes = vec3(max(t_lower, t_upper));
@@ -638,8 +638,8 @@ bool AdvIntersect(vec3 p0, vec3 p1, Ray r, vec3 inv_ray_dir, float t_min, inout 
     t_cube_max = min(t_cube_max, t_maxes.y);
     t_cube_max = min(t_cube_max, t_maxes.z);
 
-    // store the exit t in t_max
-    hit.t = t_cube_min; 
+    // store the t values
+    t_min = t_cube_min; 
     t_max = t_cube_max;
 
     return t_cube_min <= t_cube_max;
@@ -702,9 +702,9 @@ bool ScatterDielectric(Material material, Ray r_in, vec3 hit_c_min, HitRecord hi
         // HACK: move scattered ray out of current cube explicitly
         {
             float t_max = 9999.0;
-            HitRecord c_hit = hit;
+            hit.t = 0;
             const vec3 inv_ray_dir = 1 / r_in.direction;
-            AdvIntersect(hit_c_min - vec3(0.001), hit_c_min + vec3(0.126), scattered, inv_ray_dir, 0.0, t_max, c_hit);
+            AdvIntersect(hit_c_min - vec3(0.001), hit_c_min + vec3(0.126), scattered, inv_ray_dir, hit.t, t_max);
             scattered = CreateRay(RayAt(scattered, t_max), scattered.direction);
         }
         // ray is traveling through non air medium
