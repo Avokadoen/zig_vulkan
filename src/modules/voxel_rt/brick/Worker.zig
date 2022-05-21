@@ -184,7 +184,7 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
         const voxel_was_set: bool = (brick.solid_mask & @as(u512, 1) << nth_bit) != 0;
         if (voxel_was_set == false) {
             var i: u32 = voxels_in_brick;
-            while (i > bits_before + 1) {
+            while (i > bits_before) {
                 const base_index = bucket.start_index + i;
                 self.grid.*.material_indices[base_index] = self.grid.material_indices[base_index - 1];
                 i -= 1;
