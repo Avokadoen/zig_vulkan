@@ -459,7 +459,7 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
     // store max uint value to avoid false positive cache hit
     uint brick_type_index = ~0;
     while (true) { 
-        const uint grid_index = position.x + brick_dim.y * (position.y + brick_dim.x * position.z);
+        const uint grid_index = position.x + brick_dim.x * (position.z + brick_dim.z * position.y);
         // 1 bit pr type, so we divide 32 bit int
         const uint new_brick_type_index = grid_index / 32;
         const int brick_type_offset = int(grid_index % 32);
@@ -523,7 +523,7 @@ bool BrickHit(Ray r, float t_min, float t_max, vec3 delta, Brick brick, inout ve
     // TODO:  && t_value <= t_max
     vec3 axis = vec3(0);
     while (true) { 
-        const int bit_offset = position.x + 8 * (position.y + 8 * position.z);
+        const int bit_offset = position.x + 8 * (position.z + 8 * position.y);
         const int mask_index = bit_offset / 32;
         const int mask_offset = bit_offset % 32;
         const uint uint_mask = solid_mask[mask_index];
