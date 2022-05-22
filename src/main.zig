@@ -128,6 +128,13 @@ pub fn main() anyerror!void {
     var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, .{
         .internal_resolution_width = internal_render_resolution.x(),
         .internal_resolution_height = internal_render_resolution.y(),
+        .camera = .{
+            .samples_per_pixel = 2,
+            .max_bounce = 2,
+        },
+        .sun = .{
+            .enabled = true,
+        },
     });
     defer voxel_rt.deinit(allocator, ctx);
 

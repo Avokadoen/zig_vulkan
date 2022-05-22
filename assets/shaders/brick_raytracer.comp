@@ -294,12 +294,11 @@ vec3 RayColor(Ray r) {
                 emits[loop_count-1] = attenuation * AMBIENT;
             }
         }
-        if (!result) {
-            attenuations[loop_count-1] = vec3(0);
-            break;
-        }
-
         attenuations[loop_count-1] = attenuation;
+
+        // if the material scatter function report that the ray failed to scatter
+        if (!result) break;
+
         current_ray = scattered;
     }
 
