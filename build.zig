@@ -186,6 +186,8 @@ pub fn build(b: *Builder) void {
     exe.addPackagePath("glfw", "deps/mach-glfw/src/main.zig");
     exe.addPackagePath("zalgebra", "deps/zalgebra/src/main.zig");
 
+    // until imgui is a optional component we need to always link c++ system libraries
+    exe.linkSystemLibrary("c++");
     imgui.linkArtifact(b, exe, target, "deps/zig-gamekit/");
 
     stbi.linkStep(b, exe);
