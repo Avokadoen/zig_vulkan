@@ -264,17 +264,17 @@ const default_rgba = [256]u32{
 test "validateHeader: valid header accepted" {
     const valid_test_buffer: []const u8 = "VOX " ++ [_]u8{ 150, 0, 0, 0 } ++ "MAIN";
 
-    try validateHeader(valid_test_buffer[0..]);
+    try validateHeader(valid_test_buffer);
 }
 
 test "validateHeader: invalid id detected" {
     const invalid_test_buffer: []const u8 = "!VOX" ++ [_]u8{ 150, 0, 0, 0 } ++ "MAIN";
 
-    try std.testing.expectError(ParseError.InvalidId, validateHeader(invalid_test_buffer[0..]));
+    try std.testing.expectError(ParseError.InvalidId, validateHeader(invalid_test_buffer));
 }
 
 test "validateHeader: invalid version detected" {
     const invalid_test_buffer: []const u8 = "VOX " ++ [_]u8{ 169, 0, 0, 0 } ++ "MAIN";
 
-    try std.testing.expectError(ParseError.UnexpectedVersion, validateHeader(invalid_test_buffer[0..]));
+    try std.testing.expectError(ParseError.UnexpectedVersion, validateHeader(invalid_test_buffer));
 }
