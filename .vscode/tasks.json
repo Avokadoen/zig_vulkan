@@ -18,6 +18,15 @@
             "problemMatcher": [
                 "$gcc"
             ]
+        },
+        {
+            "label": "release",
+            "type": "shell",
+            "command": "zig build -Drelease-safe=true -Dshader-debug-info=false -Dtracy=false",
+            "group": "build",
+            "problemMatcher": [
+                "$gcc"
+            ]
         }
     ]
 }

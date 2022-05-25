@@ -29,6 +29,15 @@
             "preLaunchTask": "safe"
         },
         {
+            "name": "(Windows) Launch Release",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/zig-out/bin/zig_vulkan",
+            "args": [],
+            "cwd": "${fileDirname}",
+            "preLaunchTask": "release"
+        },
+        {
             "name": "(Linux) Launch Debug",
             "type": "lldb",
             "request": "launch",
@@ -45,6 +54,15 @@
             "args": [],
             "cwd": "${fileDirname}",
             "preLaunchTask": "safe"
+        },
+        {
+            "name": "(Linux) Launch Release",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/zig-out/bin/zig_vulkan",
+            "args": [],
+            "cwd": "${fileDirname}",
+            "preLaunchTask": "release"
         }
     ]
 }
