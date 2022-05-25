@@ -110,6 +110,8 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     errdefer allocator.free(material_indices_deltas);
     std.mem.set(State.DeviceDataDelta, material_indices_deltas, State.DeviceDataDelta.init());
 
+    const work_segment_size = try std.math.divCeil(u32, dim_x, @intCast(u32, config.workers_count));
+
     state.* = .{
         .higher_order_grid_delta = higher_order_grid_delta,
         .material_indices_deltas = material_indices_deltas,
@@ -123,7 +125,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         .bricks = bricks,
         .material_indices = material_indices,
         .active_bricks = AtomicCount.init(0),
-        .work_segment_size = dim_x / config.workers_count,
+        .work_segment_size = work_segment_size,
         .device_state = State.Device{
             .voxel_dim_x = dim_x * 8,
             .voxel_dim_y = dim_y * 8,

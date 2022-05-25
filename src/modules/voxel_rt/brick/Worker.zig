@@ -60,7 +60,6 @@ pub fn init(id: usize, worker_count: usize, grid: *State, allocator: Allocator, 
         var brick_count = std.math.divFloor(usize, grid.bricks.len, worker_count) catch unreachable; // assert(worker_count != 0)
         var material_count = std.math.divFloor(usize, grid.material_indices.len, worker_count) catch unreachable;
         const start_index = @intCast(u32, material_count * id);
-
         if (id == worker_count - 1) {
             brick_count += std.math.rem(usize, grid.bricks.len, worker_count) catch unreachable;
             material_count += std.math.rem(usize, grid.material_indices.len, worker_count) catch unreachable;
@@ -159,13 +158,13 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
         self.grid.higher_order_grid_delta.registerDelta(higher_grid_index);
 
         // atomically fetch previous brick count and then add 1 to count
-        break :blk self.grid.*.active_bricks.fetchAdd(1, .SeqCst);
+        break :blk self.grid.*.active_bricks.fetchAdd(1, .Monotonic);
     };
 
     var brick = self.grid.bricks[brick_index];
 
     // set the voxel to exist
-    const nth_bit = brickAt(insert_job.x, actual_y, insert_job.z);
+    const nth_bit = voxelAt(insert_job.x, actual_y, insert_job.z);
 
     // set the color information for the given voxel
     {
@@ -219,9 +218,9 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
     self.grid.brick_indices_deltas[self.id].registerDelta(grid_index);
 }
 
-// TODO: test, rename to voxelAt
+// TODO: test
 /// get brick index from global index coordinates
-inline fn brickAt(x: usize, y: usize, z: usize) u9 {
+inline fn voxelAt(x: usize, y: usize, z: usize) u9 {
     const brick_x: usize = @rem(x, 8);
     const brick_y: usize = @rem(y, 8);
     const brick_z: usize = @rem(z, 8);

@@ -174,7 +174,7 @@ inline fn getIdleRamp(self: *StagingRamp, ctx: Context, size: vk.DeviceSize) !us
     return index;
 }
 
-const RegionCount = 32;
+const RegionCount = 256;
 const BufferCopies = struct {
     len: u32,
     regions: [RegionCount]vk.BufferCopy,
