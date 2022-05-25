@@ -14,6 +14,7 @@ pub const Camera = @import("voxel_rt/Camera.zig");
 pub const Sun = @import("voxel_rt/Sun.zig");
 pub const BrickGrid = @import("voxel_rt/brick/Grid.zig");
 pub const GridState = @import("voxel_rt/brick/State.zig");
+pub const Benchmark = @import("voxel_rt/Benchmark.zig");
 pub const gpu_types = @import("voxel_rt/gpu_types.zig");
 pub const terrain = @import("voxel_rt/terrain/terrain.zig");
 pub const vox = @import("voxel_rt/vox/loader.zig");
@@ -81,8 +82,12 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, config: 
     };
 }
 
-pub fn draw(self: *VoxelRT, ctx: Context) !void {
-    try self.pipeline.draw(ctx);
+pub fn createBenchmark(self: *VoxelRT) Benchmark {
+    return Benchmark.init(self.camera, self.brick_grid.state.*);
+}
+
+pub fn draw(self: *VoxelRT, ctx: Context, delta_time: f32) !void {
+    try self.pipeline.draw(ctx, delta_time);
 }
 
 pub fn updateSun(self: *VoxelRT, delta_time: f32) void {

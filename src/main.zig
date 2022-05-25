@@ -141,7 +141,6 @@ pub fn main() anyerror!void {
     try voxel_rt.pushAlbedo(ctx, albedo_color[0..]);
     try voxel_rt.pushMaterials(ctx, materials[0..]);
 
-    var prev_frame = std.time.milliTimestamp();
     try window.setInputMode(glfw.Window.InputMode.cursor, glfw.Window.InputModeCursor.disabled);
 
     // init input module with default input handler functions
@@ -156,8 +155,9 @@ pub fn main() anyerror!void {
     try input.setInputModeCursor(.disabled);
     input.setImguiWantInput(false);
 
-    grid.wakeWorkers();
+    voxel_rt.brick_grid.wakeWorkers();
 
+    var prev_frame = std.time.milliTimestamp();
     // Loop until the user closes the window
     while (!window.shouldClose()) {
         const current_frame = std.time.milliTimestamp();
@@ -189,7 +189,7 @@ pub fn main() anyerror!void {
         voxel_rt.updateSun(dt);
 
         try voxel_rt.updateGridDelta(ctx);
-        try voxel_rt.draw(ctx);
+        try voxel_rt.draw(ctx, dt);
 
         // Poll for and process events
         try glfw.pollEvents();

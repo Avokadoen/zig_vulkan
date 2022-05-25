@@ -10,6 +10,7 @@ pub const Config = struct {
     turn_rate: f32 = 0.1,
     normal_speed: f32 = 1,
     sprint_speed: f32 = 2,
+    user_input_diabled: bool = false,
 };
 
 const Camera = @This();
@@ -19,6 +20,8 @@ turn_rate: f32,
 normal_speed: f32,
 sprint_speed: f32,
 movement_speed: f32,
+
+user_input_diabled: bool,
 
 /// changes to viewport_x should call propogatePitchChange
 viewport_width: f32,
@@ -54,6 +57,7 @@ pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Conf
         .normal_speed = config.normal_speed,
         .sprint_speed = config.sprint_speed,
         .movement_speed = config.normal_speed,
+        .user_input_diabled = config.user_input_diabled,
         .viewport_width = viewport_width,
         .viewport_height = viewport_height,
         .vertical_fov = vertical_fov,
@@ -87,8 +91,27 @@ pub fn setOrigin(self: *Camera, origin: Vec3) void {
     self.propogatePitchChange();
 }
 
+pub fn disableInput(self: *Camera) void {
+    self.user_input_diabled = true;
+}
+
+pub fn enableInput(self: *Camera) void {
+    self.user_input_diabled = false;
+}
+
+/// camera should always be reset after being used
+/// programtically to avoid invalid camera state
+pub fn reset(self: *Camera) void {
+    self.enableInput();
+    self.yaw = za.Quat.zero();
+    self.pitch = za.Quat.zero();
+    self.propogatePitchChange();
+}
+
 /// Move camera
 pub fn translate(self: *Camera, delta_time: f32, by: za.Vec3) void {
+    if (self.user_input_diabled) return;
+
     const norm = by.norm();
     const delta = self.orientation().rotateVec(norm.scale(delta_time * self.movement_speed));
     if (std.math.isNan(delta.x())) {
@@ -99,6 +122,8 @@ pub fn translate(self: *Camera, delta_time: f32, by: za.Vec3) void {
 }
 
 pub fn turnPitch(self: *Camera, angle: f32) void {
+    if (self.user_input_diabled) return;
+
     // Axis angle to quaternion: https://www.euclideanspace.com/maths/geometry/rotations/conversions/angleToQuaternion/index.htm
     const h_angle = angle * self.turn_rate;
     const i = @sin(h_angle);
@@ -116,6 +141,8 @@ pub fn turnPitch(self: *Camera, angle: f32) void {
 }
 
 pub fn turnYaw(self: *Camera, angle: f32) void {
+    if (self.user_input_diabled) return;
+
     const h_angle = angle * self.turn_rate;
     const j = @sin(h_angle);
     const w = @cos(h_angle);
@@ -136,7 +163,8 @@ inline fn forwardDir(self: Camera) za.Vec3 {
     return self.orientation().rotateVec(za.Vec3.new(0, 0, 1));
 }
 
-inline fn propogatePitchChange(self: *Camera) void {
+// used to update values that depend on camera orientation
+pub inline fn propogatePitchChange(self: *Camera) void {
     const forward = self.forwardDir();
     const right = za.Vec3.up().cross(forward).norm();
     const up = forward.cross(right).norm();

@@ -8,11 +8,15 @@ const Context = render.Context;
 
 const Camera = @import("Camera.zig");
 const Sun = @import("Sun.zig");
+const BrickState = @import("brick/State.zig");
 const Pipeline = @import("Pipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
+const Benchmark = @import("Benchmark.zig");
 
 pub const StateBinding = struct {
     camera_ptr: *Camera,
+    /// used in benchmark report
+    grid_state: BrickState,
     sun_ptr: *Sun,
     gfx_pipeline_shader_constants: *GraphicsPipeline.PushConstant,
 };
@@ -27,7 +31,6 @@ pub const Config = struct {
 
 const MetricState = struct {
     update_frame_timings: bool,
-    prev_frame_ts: i128,
     frame_times: [50]f32,
     min_frame_time: f32,
     max_frame_time: f32,
@@ -46,6 +49,8 @@ sun_window_active: bool,
 device_properties: vk.PhysicalDeviceProperties,
 
 metrics_state: MetricState,
+
+benchmark: ?Benchmark = null,
 
 pub fn init(ctx: Context, gui_width: f32, gui_height: f32, state_binding: StateBinding, config: Config) ImguiGui {
     // Color scheme
@@ -70,7 +75,6 @@ pub fn init(ctx: Context, gui_width: f32, gui_height: f32, state_binding: StateB
         .device_properties = ctx.getPhysicalDeviceProperties(),
         .metrics_state = .{
             .update_frame_timings = config.update_frame_timings,
-            .prev_frame_ts = std.time.nanoTimestamp(),
             .frame_times = [_]f32{0} ** 50,
             .min_frame_time = std.math.f32_max,
             .max_frame_time = std.math.f32_min,
@@ -87,7 +91,7 @@ pub fn handleRescale(self: ImguiGui, gui_width: f32, gui_height: f32) void {
 }
 
 // Starts a new imGui frame and sets up windows and ui elements
-pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metrics: bool) void {
+pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metrics: bool, dt: f32) void {
     _ = ctx;
     imgui.igNewFrame();
 
@@ -143,14 +147,23 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
         if (!self.metrics_state.update_frame_timings or !update_metrics) {
             break :blk;
         }
-        const now = std.time.nanoTimestamp();
-        const frame_time = @intToFloat(f32, now - self.metrics_state.prev_frame_ts) / std.time.ns_per_ms;
-        self.metrics_state.prev_frame_ts = now;
-        std.mem.copy(f32, self.metrics_state.frame_times[0..], self.metrics_state.frame_times[1..]);
+        std.mem.rotate(f32, self.metrics_state.frame_times[0..], 1);
+        const frame_time = dt * std.time.ms_per_s;
         self.metrics_state.frame_times[49] = frame_time;
         self.metrics_state.min_frame_time = std.math.min(self.metrics_state.min_frame_time, frame_time);
         self.metrics_state.max_frame_time = std.math.max(self.metrics_state.max_frame_time, frame_time);
     }
+
+    self.benchmark = blk: {
+        if (self.benchmark) |*b| {
+            if (b.update(dt)) {
+                self.state_binding.camera_ptr.reset();
+                b.printReport(self.device_properties.device_name[0..]);
+                break :blk null;
+            }
+        }
+        break :blk self.benchmark;
+    };
 
     self.drawCameraWindowIfEnabled();
     self.drawMetricsWindowIfEnabled();
@@ -227,6 +240,34 @@ inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
     zigImguiText(buffer[0..], "Recent", self.metrics_state.frame_times[self.metrics_state.frame_times.len - 1]);
     zigImguiText(buffer[0..], "Minimum", self.metrics_state.min_frame_time);
     zigImguiText(buffer[0..], "Maximum", self.metrics_state.max_frame_time);
+
+    if (imgui.igCollapsingHeaderBoolPtr("Benchmark", null, imgui.ImGuiTreeNodeFlags_None)) {
+        { // benchmark button
+            const benchmark_active = self.benchmark != null;
+            if (benchmark_active) {
+                // TODO: use imgui.ImGuiButtonFlags_Disabled:
+                //  using imgui.ImGuiButtonFlags_Disabled causes compile error in
+                //  imgui library issue: https://github.com/prime31/zig-gamekit/issues/13
+                const ImGuiButtonFlags_Disabled = 16384;
+                imgui.igPushItemFlag(ImGuiButtonFlags_Disabled, true);
+                imgui.igPushStyleVarFloat(imgui.ImGuiStyleVar_Alpha, imgui.igGetStyle().Alpha * 0.5);
+            }
+            if (imgui.igButton("Start benchmark", imgui.ImVec2{ .x = 200, .y = 80 })) {
+                if (benchmark_active == false) {
+                    // reset sun to avoid any difference in lighting affecting performance
+                    if (self.state_binding.sun_ptr.animate) {
+                        self.state_binding.sun_ptr.* = Sun.init(.{});
+                    }
+                    self.benchmark = Benchmark.init(self.state_binding.camera_ptr, self.state_binding.grid_state);
+                }
+            }
+            imguiToolTip("benchmark will control camera and create a report to stdout", .{});
+            if (benchmark_active) {
+                imgui.igPopItemFlag();
+                imgui.igPopStyleVar(1);
+            }
+        }
+    }
 }
 
 inline fn drawPostProcessWindowIfEnabled(self: *ImguiGui) void {

@@ -305,6 +305,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
 
     const state_binding = ImguiGui.StateBinding{
         .camera_ptr = camera,
+        .grid_state = grid_state,
         .sun_ptr = sun,
         .gfx_pipeline_shader_constants = gfx_pipeline.shader_constants,
     };
@@ -376,7 +377,8 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     ctx.vkd.freeMemory(ctx.logical_device, self.image_memory, null);
 }
 
-pub inline fn draw(self: *Pipeline, ctx: Context) !void {
+/// draw a new frame, delta time is only used by gui
+pub inline fn draw(self: *Pipeline, ctx: Context, dt: f32) !void {
     const draw_zone = tracy.ZoneN(@src(), "draw");
     defer draw_zone.End();
 
@@ -421,7 +423,7 @@ pub inline fn draw(self: *Pipeline, ctx: Context) !void {
         try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence));
     }
 
-    self.gui.newFrame(ctx, self, image_index == 0);
+    self.gui.newFrame(ctx, self, image_index == 0, dt);
     try self.imgui_pipeline.updateBuffers(ctx, &self.vertex_index_buffer);
 
     // re-record command buffer to update any state
