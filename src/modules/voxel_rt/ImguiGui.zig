@@ -258,7 +258,11 @@ inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
                     if (self.state_binding.sun_ptr.animate) {
                         self.state_binding.sun_ptr.* = Sun.init(.{});
                     }
-                    self.benchmark = Benchmark.init(self.state_binding.camera_ptr, self.state_binding.grid_state);
+                    self.benchmark = Benchmark.init(
+                        self.state_binding.camera_ptr,
+                        self.state_binding.grid_state,
+                        (self.state_binding.sun_ptr.device_data.enabled > 0),
+                    );
                 }
             }
             imguiToolTip("benchmark will control camera and create a report to stdout", .{});

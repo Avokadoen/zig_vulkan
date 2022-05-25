@@ -9,6 +9,7 @@ const Context = @import("../render.zig").Context;
 const Benchmark = @This();
 
 brick_state: BrickState,
+sun_enabled: bool,
 camera: *Camera,
 timer: f32,
 
@@ -18,7 +19,7 @@ path_orientation_fraction: f32,
 report: Report,
 
 /// You should probably use VoxelRT.createBenchmark ...
-pub fn init(camera: *Camera, brick_state: BrickState) Benchmark {
+pub fn init(camera: *Camera, brick_state: BrickState, sun_enabled: bool) Benchmark {
     const path_point_fraction = Configuration.benchmark_duration / @intToFloat(f32, Configuration.path_points.len);
     const path_orientation_fraction = Configuration.benchmark_duration / @intToFloat(f32, Configuration.path_orientations.len);
 
@@ -32,6 +33,7 @@ pub fn init(camera: *Camera, brick_state: BrickState) Benchmark {
 
     return Benchmark{
         .brick_state = brick_state,
+        .sun_enabled = sun_enabled,
         .camera = camera,
         .timer = 0,
         .path_point_fraction = path_point_fraction,
@@ -72,7 +74,7 @@ pub fn update(self: *Benchmark, dt: f32) bool {
 }
 
 pub fn printReport(self: Benchmark, device_name: []const u8) void {
-    self.report.print(device_name, self.camera.d_camera);
+    self.report.print(device_name, self.camera.d_camera, self.sun_enabled);
 }
 
 pub const Report = struct {
@@ -103,16 +105,24 @@ pub const Report = struct {
         return self.delta_time_sum / @intToFloat(f32, self.delta_time_sum_samples);
     }
 
-    pub fn print(self: Report, device_name: []const u8, d_camera: Camera.Device) void {
-        const camera_fmt = "Camera state info:\n{s: <25}: (x = {d}, y = {d})\n{s: <25}: {d}\n{s: <25}: {d}";
-        const report_fmt = "Min frame time: {d:>8.3}\nMax frame time: {d:>8.3}\nAvg frame time: {d:>8.3}";
-        std.log.info("\n{s:-^50}\nGPU: {s}\n" ++ report_fmt ++ "\nBrick state info: {any}\n" ++ camera_fmt, .{
+    pub fn print(self: Report, device_name: []const u8, d_camera: Camera.Device, sun_enabled: bool) void {
+        const report_fmt = "{s: <25}: {d:>8.3}\n{s: <25}: {d:>8.3}\n{s: <25}: {d:>8.3}\n";
+        const sun_fmt = "{s: <25}: {s}\n";
+        const camera_fmt = "Camera state info:\n{s: <30}: (x = {d}, y = {d})\n{s: <30}: {d}\n{s: <30}: {d}\n";
+        std.log.info("\n{s:-^50}\n{s: <25}: {s}\n" ++ report_fmt ++ "{s: <25}: {any}\n" ++ sun_fmt ++ camera_fmt, .{
             "BENCHMARK REPORT",
+            "GPU",
             device_name,
+            "Min frame time",
             self.min_delta_time * std.time.ms_per_s,
+            "Max frame time",
             self.max_delta_time * std.time.ms_per_s,
+            "Avg frame time",
             self.average() * std.time.ms_per_s,
+            "Brick state info",
             self.brick_dim.data,
+            "Sun enabled",
+            if (sun_enabled) "true " else "false",
             " > image dimentions",
             d_camera.image_width,
             d_camera.image_height,
