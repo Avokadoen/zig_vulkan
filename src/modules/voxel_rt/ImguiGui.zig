@@ -255,7 +255,7 @@ inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
             if (imgui.igButton("Start benchmark", imgui.ImVec2{ .x = 200, .y = 80 })) {
                 if (benchmark_active == false) {
                     // reset sun to avoid any difference in lighting affecting performance
-                    if (self.state_binding.sun_ptr.animate) {
+                    if (self.state_binding.sun_ptr.device_data.enabled > 0 and self.state_binding.sun_ptr.animate) {
                         self.state_binding.sun_ptr.* = Sun.init(.{});
                     }
                     self.benchmark = Benchmark.init(
