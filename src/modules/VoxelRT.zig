@@ -83,7 +83,7 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, config: 
 }
 
 pub fn createBenchmark(self: *VoxelRT) Benchmark {
-    return Benchmark.init(self.camera, self.brick_grid.state.*);
+    return Benchmark.init(self.camera, self.brick_grid.state.*, self.sun.device_data.enabled > 0);
 }
 
 pub fn draw(self: *VoxelRT, ctx: Context, delta_time: f32) !void {
