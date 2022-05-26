@@ -123,7 +123,7 @@ pub const Report = struct {
             self.brick_dim.data,
             "Sun enabled",
             if (sun_enabled) "true " else "false",
-            " > image dimentions",
+            " > image dimensions",
             d_camera.image_width,
             d_camera.image_height,
             " > max bounce",
