@@ -107,7 +107,7 @@ pub const Report = struct {
 
     pub fn print(self: Report, device_name: []const u8, d_camera: Camera.Device, sun_enabled: bool) void {
         const report_fmt = "{s: <25}: {d:>8.3}\n{s: <25}: {d:>8.3}\n{s: <25}: {d:>8.3}\n";
-        const sun_fmt = "{s: <25}: {s}\n";
+        const sun_fmt = "{s: <25}: {any}\n";
         const camera_fmt = "Camera state info:\n{s: <30}: (x = {d}, y = {d})\n{s: <30}: {d}\n{s: <30}: {d}\n";
         std.log.info("\n{s:-^50}\n{s: <25}: {s}\n" ++ report_fmt ++ "{s: <25}: {any}\n" ++ sun_fmt ++ camera_fmt, .{
             "BENCHMARK REPORT",
@@ -122,7 +122,7 @@ pub const Report = struct {
             "Brick state info",
             self.brick_dim.data,
             "Sun enabled",
-            if (sun_enabled) "true " else "false",
+            sun_enabled,
             " > image dimensions",
             d_camera.image_width,
             d_camera.image_height,
