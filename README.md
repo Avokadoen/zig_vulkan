@@ -11,12 +11,23 @@ Zig build toolchain does most of the heavy lifting. The only systems
 requirement is the [Vulkan SDK](https://www.lunarg.com/vulkan-sdk/). 
 Make sure you download Vulkan 1.2 or up 
 
+**This project also uses latest zig version**
+
 # Run the project
 
 Do the following steps 
 ```bash
 $ git clone --recurse-submodules -j4 <repo>
 $ cd <folder>
+$ zig build run
+```
+
+Or
+
+```bash
+$ git clone <repo>
+$ cd <folder>
+$ git submodule update --init --recursive
 $ zig build run
 ```
 
