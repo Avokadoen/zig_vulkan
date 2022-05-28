@@ -1,6 +1,6 @@
 [submodule "deps/vulkan-zig"]
 	path = deps/vulkan-zig
-	url = https://github.com/Snektron/vulkan-zig.git
+	url = https://github.com/Avokadoen/vulkan-zig.git
 [submodule "deps/mach-glfw"]
 	path = deps/mach-glfw
 	url = https://github.com/hexops/mach-glfw.git
@@ -15,4 +15,4 @@
 	url = https://github.com/Avokadoen/Zig-Tracy.git
 [submodule "deps/zig-gamekit"]
 	path = deps/zig-gamekit
-	url = https://github.com/prime31/zig-gamekit.git
+	url = https://github.com/Avokadoen/zig-gamekit.git
