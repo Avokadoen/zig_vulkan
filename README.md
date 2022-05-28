@@ -5,6 +5,12 @@
 
 A toy renderer written in zig using vulkan and glfw
 
+# Requirements
+
+Zig build toolchain does most of the heavy lifting. The only systems
+requirement is the [Vulkan SDK](https://www.lunarg.com/vulkan-sdk/). 
+Make sure you download Vulkan 1.2 or up 
+
 # Run the project
 
 Do the following steps 

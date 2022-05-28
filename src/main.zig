@@ -83,6 +83,7 @@ pub fn main() anyerror!void {
     var grid = try BrickGrid.init(allocator, 64, 32, 64, .{
         .min_point = [3]f32{ -32, -16, -32 },
         .material_indices_per_brick = 128,
+        .workers_count = 4,
     });
     defer grid.deinit();
 

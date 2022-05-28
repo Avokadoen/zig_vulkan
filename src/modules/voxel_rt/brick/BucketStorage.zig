@@ -44,9 +44,8 @@ pub const BucketRequestError = error{
 
 const BucketStorage = @This();
 
-// the smallest bucket size in 2^n
 const bucket_count = 4;
-// max bucket is always the size of brick which is 2^9
+// max bucket is always the size of brick which is 2^9 = 512
 const min_2_pow_size = 9 - (bucket_count - 1);
 
 pub const Index = packed struct {
