@@ -143,7 +143,7 @@ layout (binding = 6) buffer HigherGridBuffer {
 };
 
 layout (binding = 7) buffer GridBufferType {
-    // each entry is 2 bits
+    // each entry is 1 bit
     readonly uint brick_type_bits[];
 };
 
@@ -184,7 +184,25 @@ bool AdvIntersect(vec3 p0, vec3 p1, Ray r, vec3 inv_ray_dir, inout float t_min, 
 // TODO: bug with refract vs reflect in diel
 // TODO: store the current chunk index we stand in for further sampling and bounces!
 
+const int brick_type_bit_len = 4096;
+shared uint shared_brick_type_bits[brick_type_bit_len];
+
 void main() {
+    // assign our shared grid bits
+    {
+        uint assign_count = brick_type_bit_len / (gl_WorkGroupSize.x + gl_WorkGroupSize.y + gl_WorkGroupSize.z);
+        const uint assing_start = gl_LocalInvocationIndex * assign_count;
+        uint assing_index = assing_start;
+        int assing_offset = 0;
+        while (assing_index < brick_type_bits.length() && assing_offset < assign_count) {
+            shared_brick_type_bits[assing_index] = brick_type_bits[assing_index];
+            assing_offset += 1;
+            assing_index = assing_start + assing_offset;
+        }
+        barrier();
+    }
+
+
     const ivec2 pixel_coord = ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y);
     const ivec2 image_size = imageSize(img_output);
     if (pixel_coord.x >= image_size.x || pixel_coord.y >= image_size.y) {
@@ -463,7 +481,7 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
         const uint new_brick_type_index = grid_index / 32;
         const int brick_type_offset = int(grid_index % 32);
         if (brick_type_index != new_brick_type_index) {
-            brick_bits = brick_type_bits[new_brick_type_index];
+            brick_bits = shared_brick_type_bits[new_brick_type_index];
             brick_type_index = new_brick_type_index;
         }
         // HACK: don't extract the bit, just isolate it and see if it is 1 (value is not 0)
