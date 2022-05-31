@@ -32,7 +32,7 @@ pub const Config = struct {
     metal_buffer: u64 = 256,
     dielectric_buffer: u64 = 256,
 
-    staging_buffers: usize = 3,
+    staging_buffers: usize = 2,
     in_flight_compute: usize = 1,
     gfx_pipeline_config: GraphicsPipeline.Config = .{},
 };

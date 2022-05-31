@@ -136,6 +136,9 @@ pub fn main() anyerror!void {
         .sun = .{
             .enabled = true,
         },
+        .pipeline = .{
+            .staging_buffers = 3,
+        },
     });
     defer voxel_rt.deinit(allocator, ctx);
 
