@@ -45,7 +45,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     const higher_dim_x = @intToFloat(f64, dim_x) * 0.25;
     const higher_dim_y = @intToFloat(f64, dim_y) * 0.25;
     const higher_dim_z = @intToFloat(f64, dim_z) * 0.25;
-    const higher_order_grid = try allocator.alloc(u8, @floatToInt(usize, higher_dim_x * higher_dim_y * higher_dim_z));
+    const higher_order_grid = try allocator.alloc(u8, @floatToInt(usize, @ceil(higher_dim_x * higher_dim_y * higher_dim_z)));
     errdefer allocator.free(higher_order_grid);
     std.mem.set(u8, higher_order_grid, 0);
 
@@ -133,9 +133,9 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
             .dim_x = dim_x,
             .dim_y = dim_y,
             .dim_z = dim_z,
-            .higher_dim_x = @floatToInt(u32, @ceil(higher_dim_x)),
-            .higher_dim_y = @floatToInt(u32, @ceil(higher_dim_y)),
-            .higher_dim_z = @floatToInt(u32, @ceil(higher_dim_z)),
+            .higher_dim_x = @floatToInt(u32, higher_dim_x),
+            .higher_dim_y = @floatToInt(u32, higher_dim_y),
+            .higher_dim_z = @floatToInt(u32, higher_dim_z),
             .min_point_base_t = min_point_base_t,
             .max_point_scale = max_point_scale,
         },
