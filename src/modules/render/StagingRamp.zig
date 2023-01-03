@@ -195,7 +195,7 @@ const BufferImageCopy = struct {
 const BufferCopyMapContext = struct {
     pub fn hash(self: BufferCopyMapContext, key: vk.Buffer) u32 {
         _ = self;
-        const v = @bitCast(u64, key);
+        const v: u64 = @enumToInt(key);
         const left_value = (v >> 32) / 4;
         const right_value = ((v << 32) >> 32) / 2;
         return @intCast(u32, left_value + right_value);
@@ -235,7 +235,7 @@ const StagingBuffer = struct {
         errdefer device_buffer_memory.deinit(ctx);
 
         const pool_info = vk.CommandPoolCreateInfo{
-            .flags = .{},
+            .flags = .{ .transient_bit = true },
             .queue_family_index = ctx.queue_indices.graphics,
         };
         const command_pool = try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
@@ -485,16 +485,22 @@ const StagingBuffer = struct {
         }
         try ctx.vkd.endCommandBuffer(self.command_buffer);
 
-        const submit_info = vk.SubmitInfo{
-            .wait_semaphore_count = 0,
-            .p_wait_semaphores = undefined,
-            .p_wait_dst_stage_mask = undefined,
-            .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
-            .signal_semaphore_count = 0,
-            .p_signal_semaphores = undefined,
-        };
-        try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @ptrCast([*]const vk.SubmitInfo, &submit_info), self.fence);
+        {
+            @setRuntimeSafety(false);
+            var semo_null_ptr: [*c]const vk.Semaphore = null;
+            var wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
+            // perform the compute ray tracing, draw to target texture
+            const submit_info = vk.SubmitInfo{
+                .wait_semaphore_count = 0,
+                .p_wait_semaphores = semo_null_ptr,
+                .p_wait_dst_stage_mask = wait_null_ptr,
+                .command_buffer_count = 1,
+                .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
+                .signal_semaphore_count = 0,
+                .p_signal_semaphores = semo_null_ptr,
+            };
+            try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @ptrCast([*]const vk.SubmitInfo, &submit_info), self.fence);
+        }
 
         self.buffer_copy.clearRetainingCapacity();
         self.image_copy.clearRetainingCapacity();

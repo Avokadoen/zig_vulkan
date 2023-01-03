@@ -1,3 +1,0 @@
-# Voxel Raytracing API
-
-TODO

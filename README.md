@@ -35,10 +35,6 @@ $ zig build run
 
 Currently the code base is not really well tested, but you can run the few tests by doin ``zig build test``
 
-# Examples
-
-There are some [example programs](https://github.com/Avokadoen/zig_vulkan/tree/main/examples) 
-
 # Sources:
 
 * Vulkan fundementals: 

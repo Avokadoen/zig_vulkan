@@ -36,9 +36,9 @@ pub const CursorPosEvent = struct {
     y: f64,
 };
 
-pub const KeyHandleFn = fn (KeyEvent) void;
-pub const MouseButtonHandleFn = fn (MouseButtonEvent) void;
-pub const CursorPosHandleFn = fn (CursorPosEvent) void;
+pub const KeyHandleFn = *const fn (KeyEvent) void;
+pub const MouseButtonHandleFn = *const fn (MouseButtonEvent) void;
+pub const CursorPosHandleFn = *const fn (CursorPosEvent) void;
 
 const WindowContext = struct {
     allocator: Allocator,
@@ -267,13 +267,13 @@ fn linkImguiCodes() !ImguiContext {
     std.mem.set(?glfw.Cursor, self.mouse_cursors[0..], null);
     self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_Arrow)] = try glfw.Cursor.createStandard(Shape.arrow);
     self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_TextInput)] = try glfw.Cursor.createStandard(Shape.ibeam);
-    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_ResizeAll)] = try glfw.Cursor.createStandard(Shape.crosshair);
-    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_ResizeNS)] = try glfw.Cursor.createStandard(Shape.vresize);
-    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_ResizeEW)] = try glfw.Cursor.createStandard(Shape.hresize);
-    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_ResizeNESW)] = try glfw.Cursor.createStandard(Shape.crosshair);
-    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_ResizeNWSE)] = try glfw.Cursor.createStandard(Shape.crosshair);
-    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_Hand)] = try glfw.Cursor.createStandard(Shape.hand);
-    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_NotAllowed)] = try glfw.Cursor.createStandard(Shape.hand);
+    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_ResizeAll)] = try glfw.Cursor.createStandard(Shape.resize_all);
+    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_ResizeNS)] = try glfw.Cursor.createStandard(Shape.resize_ns);
+    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_ResizeEW)] = try glfw.Cursor.createStandard(Shape.resize_ew);
+    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_ResizeNESW)] = try glfw.Cursor.createStandard(Shape.resize_nesw);
+    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_ResizeNWSE)] = try glfw.Cursor.createStandard(Shape.resize_nwse);
+    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_Hand)] = try glfw.Cursor.createStandard(Shape.resize_all);
+    self.mouse_cursors[@intCast(usize, imgui.ImGuiMouseCursor_NotAllowed)] = try glfw.Cursor.createStandard(Shape.not_allowed);
 
     return self;
 }

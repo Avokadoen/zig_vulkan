@@ -85,7 +85,7 @@ pub const Device = extern struct {
 //     flags: u6,
 // };
 
-pub const BrickStatusMask = packed struct {
+pub const BrickStatusMask = extern struct {
     pub const Status = enum(u2) {
         empty = 0,
         loaded = 1,

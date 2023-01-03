@@ -28,7 +28,7 @@ pub fn init(camera: *Camera, brick_state: BrickState, sun_enabled: bool) Benchma
     camera.d_camera.origin = Configuration.path_points[0].data;
     // HACK: use yaw quat as orientation and ignore pitch
     camera.yaw = Configuration.path_orientations[0];
-    camera.pitch = za.Quat.zero();
+    camera.pitch = za.Quat.identity();
     camera.propogatePitchChange();
 
     return Benchmark{
@@ -60,7 +60,7 @@ pub fn update(self: *Benchmark, dt: f32) bool {
         const left = Configuration.path_orientations[path_orientation_index];
         const right = Configuration.path_orientations[path_orientation_index + 1];
         self.camera.yaw = left.lerp(right, path_orientation_lerp_pos);
-        self.camera.pitch = za.Quat.zero();
+        self.camera.pitch = za.Quat.identity();
     }
 
     self.camera.propogatePitchChange();
@@ -157,7 +157,7 @@ pub const Configuration = struct {
     };
 
     pub const path_orientations = [_]za.Quat{
-        za.Quat.zero(),
+        za.Quat.identity(),
         za.Quat.fromEulerAngles(za.Vec3.new(0, 45, 0)),
         za.Quat.fromEulerAngles(za.Vec3.new(10, -20, 0)),
         za.Quat.fromEulerAngles(za.Vec3.new(20, 180, 0)),

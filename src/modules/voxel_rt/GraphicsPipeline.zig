@@ -9,6 +9,8 @@ const GpuBufferMemory = render.GpuBufferMemory;
 const Swapchain = render.swapchain.Data;
 const memory = render.memory;
 
+const shaders = @import("shaders");
+
 const Vertex = extern struct {
     pos: [3]f32,
     uv: [2]f32,
@@ -81,7 +83,7 @@ pub fn init(
 
     const descriptor_pool = blk: {
         const pool_sizes = [_]vk.DescriptorPoolSize{.{
-            .@"type" = .combined_image_sampler,
+            .type = .combined_image_sampler,
             .descriptor_count = 1, // TODO: swap image size ?
         }};
         const descriptor_pool_info = vk.DescriptorPoolCreateInfo{
@@ -246,9 +248,39 @@ pub fn init(
         .p_dynamic_states = &dynamic_state_enabled,
     };
 
-    const vert = try render.pipeline.loadShaderStage(ctx, allocator, null, "image.vert.spv", .{ .vertex_bit = true }, null);
+    const vert = blk: {
+        const create_info = vk.ShaderModuleCreateInfo{
+            .flags = .{},
+            .p_code = @ptrCast([*]const u32, &shaders.image_vert_spv),
+            .code_size = shaders.image_vert_spv.len,
+        };
+        const module = try ctx.vkd.createShaderModule(ctx.logical_device, &create_info, null);
+
+        break :blk vk.PipelineShaderStageCreateInfo{
+            .flags = .{},
+            .stage = .{ .vertex_bit = true },
+            .module = module,
+            .p_name = "main",
+            .p_specialization_info = null,
+        };
+    };
     errdefer ctx.vkd.destroyShaderModule(ctx.logical_device, vert.module, null);
-    const frag = try render.pipeline.loadShaderStage(ctx, allocator, null, "image.frag.spv", .{ .fragment_bit = true }, null);
+    const frag = blk: {
+        const create_info = vk.ShaderModuleCreateInfo{
+            .flags = .{},
+            .p_code = @ptrCast([*]const u32, &shaders.image_frag_spv),
+            .code_size = shaders.image_frag_spv.len,
+        };
+        const module = try ctx.vkd.createShaderModule(ctx.logical_device, &create_info, null);
+
+        break :blk vk.PipelineShaderStageCreateInfo{
+            .flags = .{},
+            .stage = .{ .fragment_bit = true },
+            .module = module,
+            .p_name = "main",
+            .p_specialization_info = null,
+        };
+    };
     errdefer ctx.vkd.destroyShaderModule(ctx.logical_device, frag.module, null);
     const shader_stages = [_]vk.PipelineShaderStageCreateInfo{ vert, frag };
 
@@ -316,7 +348,7 @@ pub fn init(
     errdefer ctx.vkd.destroyPipeline(ctx.logical_device, pipeline, null);
 
     const pool_info = vk.CommandPoolCreateInfo{
-        .flags = .{},
+        .flags = .{ .transient_bit = true },
         .queue_family_index = ctx.queue_indices.graphics,
     };
     const command_pools = try allocator.alloc(vk.CommandPool, swapchain.images.len);

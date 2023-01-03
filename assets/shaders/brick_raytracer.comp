@@ -158,6 +158,7 @@ struct Brick {
     uint solid_mask[16];
     // left-most bit is the index type (VOXEL_START_INDEX, or BRICK_LOD_INDEX) 
     uint type_and_index;
+    uint pad;
 };
 layout (binding = 9) buffer BrickBuffer {
     readonly Brick bricks[];

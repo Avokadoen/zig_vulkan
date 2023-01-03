@@ -213,7 +213,7 @@ pub fn insert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u8
     // find a workers that should be assigned insert
     const worker_index = blk: {
         const grid_x = x / 8;
-        break :blk grid_x / self.state.work_segment_size;
+        break :blk @min(grid_x / self.state.work_segment_size, self.workers.len - 1);
     };
 
     self.workers[worker_index].registerJob(Worker.Job{ .insert = .{

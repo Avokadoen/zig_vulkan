@@ -115,7 +115,7 @@ pub fn main() anyerror!void {
             ).data,
         };
         const material_index = i + terrain.material_data.len;
-        materials[material_index] = .{ .@"type" = .metal, .type_index = 0, .albedo_index = @intCast(u8, albedo_index) };
+        materials[material_index] = .{ .type = .metal, .type_index = 0, .albedo_index = @intCast(u8, albedo_index) };
     }
 
     // Test what we are loading

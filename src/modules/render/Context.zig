@@ -86,7 +86,10 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
     self.allocator = allocator;
 
     // load base dispatch wrapper
-    const vk_proc = @ptrCast(vk.PfnGetInstanceProcAddr, glfw.getInstanceProcAddress);
+    const vk_proc = @ptrCast(
+        *const fn (instance: vk.Instance, procname: [*:0]const u8) callconv(.C) vk.PfnVoidFunction,
+        &glfw.getInstanceProcAddress,
+    );
     self.vkb = try dispatch.Base.load(vk_proc);
     if (!(try vk_utils.isInstanceExtensionsPresent(allocator, self.vkb, extensions.items))) {
         return error.InstanceExtensionNotPresent;
@@ -178,17 +181,6 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
     };
 }
 
-// TODO: remove create/destroy that are thin wrappers (make data public instead)
-/// caller must destroy returned module
-pub fn createShaderModule(self: Context, spir_v: []const u8) !vk.ShaderModule {
-    const create_info = vk.ShaderModuleCreateInfo{
-        .flags = .{},
-        .p_code = @ptrCast([*]const u32, @alignCast(4, spir_v.ptr)),
-        .code_size = spir_v.len,
-    };
-    return self.vkd.createShaderModule(self.logical_device, &create_info, null);
-}
-
 pub fn destroyShaderModule(self: Context, module: vk.ShaderModule) void {
     self.vkd.destroyShaderModule(self.logical_device, module, null);
 }
@@ -251,7 +243,7 @@ pub fn createRenderPass(self: Context, format: vk.Format) !vk.RenderPass {
             .samples = .{
                 .@"1_bit" = true,
             },
-            .load_op = .load,
+            .load_op = .dont_care,
             .store_op = .store,
             .stencil_load_op = .dont_care,
             .stencil_store_op = .dont_care,
@@ -340,7 +332,7 @@ fn createDefaultDebugCreateInfo() vk.DebugUtilsMessengerCreateInfoEXT {
         .flags = .{},
         .message_severity = message_severity,
         .message_type = message_type,
-        .pfn_user_callback = validation_layer.messageCallback,
+        .pfn_user_callback = &validation_layer.messageCallback,
         .p_user_data = null,
     };
 }
