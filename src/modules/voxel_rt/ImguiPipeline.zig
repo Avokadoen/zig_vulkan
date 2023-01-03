@@ -12,6 +12,8 @@ const vk = @import("vulkan");
 const za = @import("zalgebra");
 const tracy = @import("../../tracy.zig");
 
+const shaders = @import("shaders");
+
 const render = @import("../render.zig");
 const GpuBufferMemory = render.GpuBufferMemory;
 const StagingRamp = render.StagingRamp;
@@ -49,7 +51,6 @@ shader_modules: [2]vk.ShaderModule,
 
 pub fn init(
     ctx: Context,
-    allocator: Allocator,
     render_pass: vk.RenderPass,
     swapchain_image_count: usize,
     staging_buffers: *StagingRamp,
@@ -93,7 +94,7 @@ pub fn init(
             .sharing_mode = .exclusive,
             .queue_family_index_count = 0,
             .p_queue_family_indices = undefined,
-            .initial_layout = .@"undefined",
+            .initial_layout = .undefined,
         };
         break :blk try ctx.vkd.createImage(ctx.logical_device, &image_info, null);
     };
@@ -139,7 +140,7 @@ pub fn init(
     // upload texture data to gpu
     try staging_buffers.transferToImage(
         ctx,
-        .@"undefined",
+        .undefined,
         .shader_read_only_optimal,
         font_image,
         @intCast(u32, width),
@@ -173,7 +174,7 @@ pub fn init(
 
     const descriptor_pool = blk: {
         const pool_sizes = [_]vk.DescriptorPoolSize{.{
-            .@"type" = .combined_image_sampler,
+            .type = .combined_image_sampler,
             .descriptor_count = 1, // TODO: swap image size ?
         }};
         const descriptor_pool_info = vk.DescriptorPoolCreateInfo{
@@ -342,9 +343,40 @@ pub fn init(
         .p_dynamic_states = &dynamic_state_enabled,
     };
 
-    const vert = try render.pipeline.loadShaderStage(ctx, allocator, null, "ui.vert.spv", .{ .vertex_bit = true }, null);
+    const vert = blk: {
+        const create_info = vk.ShaderModuleCreateInfo{
+            .flags = .{},
+            .p_code = @ptrCast([*]const u32, &shaders.ui_vert_spv),
+            .code_size = shaders.ui_vert_spv.len,
+        };
+        const module = try ctx.vkd.createShaderModule(ctx.logical_device, &create_info, null);
+
+        break :blk vk.PipelineShaderStageCreateInfo{
+            .flags = .{},
+            .stage = .{ .vertex_bit = true },
+            .module = module,
+            .p_name = "main",
+            .p_specialization_info = null,
+        };
+    };
     errdefer ctx.vkd.destroyShaderModule(ctx.logical_device, vert.module, null);
-    const frag = try render.pipeline.loadShaderStage(ctx, allocator, null, "ui.frag.spv", .{ .fragment_bit = true }, null);
+
+    const frag = blk: {
+        const create_info = vk.ShaderModuleCreateInfo{
+            .flags = .{},
+            .p_code = @ptrCast([*]const u32, &shaders.ui_frag_spv),
+            .code_size = shaders.ui_frag_spv.len,
+        };
+        const module = try ctx.vkd.createShaderModule(ctx.logical_device, &create_info, null);
+
+        break :blk vk.PipelineShaderStageCreateInfo{
+            .flags = .{},
+            .stage = .{ .fragment_bit = true },
+            .module = module,
+            .p_name = "main",
+            .p_specialization_info = null,
+        };
+    };
     errdefer ctx.vkd.destroyShaderModule(ctx.logical_device, frag.module, null);
     const shader_stages = [_]vk.PipelineShaderStageCreateInfo{ vert, frag };
 

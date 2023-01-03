@@ -5,6 +5,8 @@ const glfw = @import("glfw");
 
 const tracy = @import("../../tracy.zig");
 
+const shaders = @import("shaders");
+
 const vk = @import("vulkan");
 const render = @import("../render.zig");
 const Context = render.Context;
@@ -63,7 +65,6 @@ staging_buffers: StagingRamp,
 
 swapchain: render.swapchain.Data,
 render_pass: vk.RenderPass,
-render_pass_begin_info: vk.RenderPassBeginInfo,
 
 present_complete_semaphore: vk.Semaphore,
 render_complete_semaphore: vk.Semaphore,
@@ -90,7 +91,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     defer init_zone.End();
 
     const pool_info = vk.CommandPoolCreateInfo{
-        .flags = .{},
+        .flags = .{ .transient_bit = true },
         .queue_family_index = ctx.queue_indices.graphics,
     };
     const init_command_pool = try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
@@ -120,7 +121,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
             .sharing_mode = .exclusive,
             .queue_family_index_count = @intCast(u32, indices_len),
             .p_queue_family_indices = &indices,
-            .initial_layout = .@"undefined",
+            .initial_layout = .undefined,
         };
         break :blk try ctx.vkd.createImage(ctx.logical_device, &image_info, null);
     };
@@ -142,7 +143,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     try ctx.vkd.bindImageMemory(ctx.logical_device, compute_image, image_memory, 0);
     var image_memory_size = memory_requirements.size;
 
-    try Texture.transitionImageLayout(ctx, init_command_pool, compute_image, .@"undefined", .shader_read_only_optimal);
+    try Texture.transitionImageLayout(ctx, init_command_pool, compute_image, .undefined, .shader_read_only_optimal);
 
     const compute_image_view = blk: {
         const image_view_info = vk.ImageViewCreateInfo{
@@ -247,7 +248,13 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
             .sampler = sampler,
             .image_view = compute_image_view,
         };
-        break :blk try ComputePipeline.init(allocator, ctx, config.in_flight_compute, "brick_raytracer.comp.spv", target_image_info, state_configs);
+        break :blk try ComputePipeline.init(
+            allocator,
+            ctx,
+            config.in_flight_compute,
+            target_image_info,
+            state_configs,
+        );
     };
     errdefer compute_pipeline.deinit(ctx);
 
@@ -280,7 +287,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     errdefer gfx_pipeline.deinit(allocator, ctx);
     const imgui_pipeline = try ImguiPipeline.init(
         ctx,
-        allocator,
         render_pass,
         swapchain.images.len,
         &staging_buffers,
@@ -291,17 +297,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         &image_memory_size,
     );
     errdefer imgui_pipeline.deinit(ctx);
-
-    const render_pass_begin_info = vk.RenderPassBeginInfo{
-        .render_pass = render_pass,
-        .framebuffer = undefined,
-        .render_area = .{
-            .offset = .{ .x = 0, .y = 0 },
-            .extent = swapchain.extent,
-        },
-        .clear_value_count = clear_values.len,
-        .p_clear_values = &clear_values,
-    };
 
     const state_binding = ImguiGui.StateBinding{
         .camera_ptr = camera,
@@ -329,7 +324,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .staging_buffers = staging_buffers,
         .swapchain = swapchain,
         .render_pass = render_pass,
-        .render_pass_begin_info = render_pass_begin_info,
         .present_complete_semaphore = present_complete_semaphore,
         .render_complete_semaphore = render_complete_semaphore,
         .render_complete_fence = render_complete_fence,
@@ -345,13 +339,9 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
 }
 
 pub fn deinit(self: Pipeline, ctx: Context) void {
-    _ = ctx.vkd.waitForFences(
-        ctx.logical_device,
-        1,
-        @ptrCast([*]const vk.Fence, &self.render_complete_fence),
-        vk.TRUE,
-        std.math.maxInt(u64),
-    ) catch |err| std.debug.print("failed to wait for compute fence, err: {any}", .{err});
+    ctx.vkd.queueWaitIdle(ctx.compute_queue) catch {};
+    ctx.vkd.queueWaitIdle(ctx.graphics_queue) catch {};
+    ctx.vkd.queueWaitIdle(ctx.present_queue) catch {};
 
     ctx.vkd.destroySemaphore(ctx.logical_device, self.present_complete_semaphore, null);
     ctx.vkd.destroySemaphore(ctx.logical_device, self.render_complete_semaphore, null);
@@ -377,8 +367,44 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     ctx.vkd.freeMemory(ctx.logical_device, self.image_memory, null);
 }
 
+// TODO: split these into multiple errors
+pub const DrawError = error{
+    DeviceLost,
+    FullScreenExclusiveModeLostEXT,
+    OutOfDateKHR,
+    OutOfDeviceMemory,
+    OutOfHostMemory,
+    SurfaceLostKHR,
+    UnhandledAcquireResult,
+    Unknown,
+    InsufficientMemory,
+    MemoryMapFailed,
+    FailedToMapGPUMem,
+    PlatformError,
+    APIUnavailable,
+    CursorUnavailable,
+    FeatureUnavailable,
+    FeatureUnimplemented,
+    FormatUnavailable,
+    InvalidEnum,
+    InvalidValue,
+    NoCurrentContext,
+    NoWindowContext,
+    NotInitialized,
+    OutOfMemory,
+    PlatformUnavailable,
+    VersionUnavailable,
+    InitializationFailed,
+    NativeWindowInUseKHR,
+    NoSurfaceFormatsSupported,
+    NoPresentModesSupported,
+    StagingBuffersFull,
+    DestOutOfDeviceMemory,
+    StageOutOfDeviceMemory,
+    OutOfRegions,
+};
 /// draw a new frame, delta time is only used by gui
-pub inline fn draw(self: *Pipeline, ctx: Context, dt: f32) !void {
+pub inline fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
     const draw_zone = tracy.ZoneN(@src(), "draw");
     defer draw_zone.End();
 
@@ -427,9 +453,8 @@ pub inline fn draw(self: *Pipeline, ctx: Context, dt: f32) !void {
     try self.imgui_pipeline.updateBuffers(ctx, &self.vertex_index_buffer);
 
     // re-record command buffer to update any state
-    var begin_info = self.render_pass_begin_info;
     try ctx.vkd.resetCommandPool(ctx.logical_device, self.gfx_pipeline.command_pools[image_index], .{});
-    try self.recordCommandBuffer(ctx, image_index, &begin_info);
+    try self.recordCommandBuffer(ctx, image_index);
 
     const stage_masks = [_]vk.PipelineStageFlags{ .{ .vertex_input_bit = true }, .{ .color_attachment_output_bit = true } };
     const wait_semaphores = [stage_masks.len]vk.Semaphore{ compute_semaphore, self.present_complete_semaphore };
@@ -650,7 +675,6 @@ fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
     ctx.destroyRenderPass(self.render_pass);
     self.render_pass = try ctx.createRenderPass(self.swapchain.format);
     errdefer ctx.destroyRenderPass(self.render_pass);
-    self.render_pass_begin_info.render_pass = self.render_pass;
 
     // recreate framebuffers
     for (self.gfx_pipeline.framebuffers) |framebuffer| {
@@ -658,10 +682,10 @@ fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
     }
     self.gfx_pipeline.framebuffers = try render.pipeline.createFramebuffers(self.allocator, ctx, &self.swapchain, self.render_pass, self.gfx_pipeline.framebuffers);
     errdefer {
-        for (framebuffers) |buffer| {
+        for (self.gfx_pipeline.framebuffers) |buffer| {
             ctx.vkd.destroyFramebuffer(ctx.logical_device, buffer, null);
         }
-        self.allocator.free(framebuffers);
+        self.allocator.free(self.gfx_pipeline.framebuffers);
     }
 
     self.gui.handleRescale(@intToFloat(f32, window_size.width), @intToFloat(f32, window_size.height));
@@ -670,14 +694,13 @@ fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
 /// prepare gfx_pipeline + imgui_pipeline command buffer
 fn recordCommandBuffers(self: Pipeline, ctx: Context) !void {
     // copy begin info
-    var begin_info = self.render_pass_begin_info;
     for (self.gfx_pipeline.command_buffers) |_, i| {
-        try self.recordCommandBuffer(ctx, i, &begin_info);
+        try self.recordCommandBuffer(ctx, i);
     }
 }
 
 // TODO: properly handling of errors
-fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize, begin_info: *vk.RenderPassBeginInfo) !void {
+fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
     const record_zone = tracy.ZoneN(@src(), "record gfx & imgui commands");
     defer record_zone.End();
 
@@ -714,9 +737,17 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize, begin_info: *
         @ptrCast([*]const vk.ImageMemoryBarrier, &image_barrier),
     );
 
-    // set target framebuffer
-    begin_info.framebuffer = self.gfx_pipeline.framebuffers[index];
-    ctx.vkd.cmdBeginRenderPass(command_buffer, begin_info, .@"inline");
+    const render_pass_begin_info = vk.RenderPassBeginInfo{
+        .render_pass = self.render_pass,
+        .framebuffer = self.gfx_pipeline.framebuffers[index],
+        .render_area = .{
+            .offset = .{ .x = 0, .y = 0 },
+            .extent = self.swapchain.extent,
+        },
+        .clear_value_count = 0,
+        .p_clear_values = undefined,
+    };
+    ctx.vkd.cmdBeginRenderPass(command_buffer, &render_pass_begin_info, .@"inline");
 
     {
         const viewport = vk.Viewport{
@@ -793,13 +824,5 @@ const command_buffer_info = vk.CommandBufferBeginInfo{
         .one_time_submit_bit = true,
     },
     .p_inheritance_info = null,
-};
-const clear_values = [_]vk.ClearValue{
-    .{
-        .color = .{ .float_32 = .{ 0.025, 0.025, 0.025, 1.0 } },
-    },
-    .{
-        .depth_stencil = .{ .depth = 1.0, .stencil = 0.0 },
-    },
 };
 const vertex_zero_offset = [_]vk.DeviceSize{0};

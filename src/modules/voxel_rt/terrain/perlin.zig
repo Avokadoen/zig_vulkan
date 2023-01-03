@@ -20,7 +20,8 @@ pub fn PerlinNoiseGenerator(comptime point_count: u32) type {
         rng: std.rand.Random,
 
         pub fn init(seed: u64) Perlin {
-            const rng = std.rand.DefaultPrng.init(seed).random();
+            var prng = std.rand.DefaultPrng.init(seed);
+            const rng = prng.random();
             const generate_perm_fn = struct {
                 inline fn generate_perm(random: std.rand.Random) [point_count]PermInt {
                     var perm: [point_count]PermInt = undefined;

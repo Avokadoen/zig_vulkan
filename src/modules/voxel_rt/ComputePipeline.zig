@@ -5,6 +5,8 @@ const vk = @import("vulkan");
 const glfw = @import("glfw");
 const tracy = @import("../../tracy.zig");
 
+const shaders = @import("shaders");
+
 const render = @import("../render.zig");
 const Context = render.Context;
 const GpuBufferMemory = render.GpuBufferMemory;
@@ -65,7 +67,7 @@ work_group_dim: extern struct {
 
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
-pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_path: []const u8, target_image_info: ImageInfo, state_config: StateConfigs) !ComputePipeline {
+pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, target_image_info: ImageInfo, state_config: StateConfigs) !ComputePipeline {
     std.debug.assert(in_flight_count <= ctx.queue_indices.compute_queue_count);
 
     var self: ComputePipeline = undefined;
@@ -160,19 +162,19 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
     defer allocator.free(pool_sizes);
     self.target_descriptor_pool = blk: {
         pool_sizes[0] = vk.DescriptorPoolSize{
-            .@"type" = .storage_image,
+            .type = .storage_image,
             .descriptor_count = 1,
         };
         for (state_config.uniform_sizes) |_, i| {
             pool_sizes[1 + i] = vk.DescriptorPoolSize{
-                .@"type" = .uniform_buffer,
+                .type = .uniform_buffer,
                 .descriptor_count = 1,
             };
         }
         const index_offset = 1 + state_config.uniform_sizes.len;
         for (state_config.storage_sizes) |_, i| {
             pool_sizes[index_offset + i] = vk.DescriptorPoolSize{
-                .@"type" = .storage_buffer,
+                .type = .storage_buffer,
                 .descriptor_count = 1,
             };
         }
@@ -297,14 +299,20 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
             .data_size = @sizeOf(SpecType),
             .p_data = @ptrCast(*const anyopaque, &self.work_group_dim),
         };
-        const stage = try render.pipeline.loadShaderStage(
-            ctx,
-            allocator,
-            null,
-            shader_path,
-            .{ .compute_bit = true },
-            @ptrCast(?*const vk.SpecializationInfo, &specialization),
-        );
+        const module_create_info = vk.ShaderModuleCreateInfo{
+            .flags = .{},
+            .p_code = @ptrCast([*]const u32, &shaders.brick_raytracer_comp_spv),
+            .code_size = shaders.brick_raytracer_comp_spv.len,
+        };
+        const module = try ctx.vkd.createShaderModule(ctx.logical_device, &module_create_info, null);
+
+        const stage = vk.PipelineShaderStageCreateInfo{
+            .flags = .{},
+            .stage = .{ .compute_bit = true },
+            .module = module,
+            .p_name = "main",
+            .p_specialization_info = @ptrCast(?*const vk.SpecializationInfo, &specialization),
+        };
         defer ctx.destroyShaderModule(stage.module);
 
         // TOOD: read on defer_compile_bit_nv
@@ -326,7 +334,7 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, shader_p
     var initialized_command_pools: usize = 0;
     {
         const pool_info = vk.CommandPoolCreateInfo{
-            .flags = .{},
+            .flags = .{ .transient_bit = true },
             .queue_family_index = ctx.queue_indices.compute,
         };
         for (self.command_pools) |*command_pool, i| {
@@ -463,22 +471,27 @@ pub inline fn dispatch(self: *ComputePipeline, ctx: Context, camera: Camera, sun
     try self.recordCommandBuffer(ctx, self.current_queue_buffer, camera, sun);
 
     const compute_complete_semaphore = self.complete_semaphores[self.current_queue_buffer];
-    // perform the compute ray tracing, draw to target texture
-    const compute_submit_info = vk.SubmitInfo{
-        .wait_semaphore_count = 0,
-        .p_wait_semaphores = undefined,
-        .p_wait_dst_stage_mask = undefined,
-        .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers[self.current_queue_buffer]),
-        .signal_semaphore_count = 1,
-        .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &compute_complete_semaphore),
-    };
-    try ctx.vkd.queueSubmit(
-        self.queues[self.current_queue_buffer],
-        1,
-        @ptrCast([*]const vk.SubmitInfo, &compute_submit_info),
-        self.complete_fences[self.current_queue_buffer],
-    );
+    {
+        @setRuntimeSafety(false);
+        var semo_null_ptr: [*c]const vk.Semaphore = null;
+        var wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
+        // perform the compute ray tracing, draw to target texture
+        const compute_submit_info = vk.SubmitInfo{
+            .wait_semaphore_count = 0,
+            .p_wait_semaphores = semo_null_ptr,
+            .p_wait_dst_stage_mask = wait_null_ptr,
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffers[self.current_queue_buffer]),
+            .signal_semaphore_count = 1,
+            .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &compute_complete_semaphore),
+        };
+        try ctx.vkd.queueSubmit(
+            self.queues[self.current_queue_buffer],
+            1,
+            @ptrCast([*]const vk.SubmitInfo, &compute_submit_info),
+            self.complete_fences[self.current_queue_buffer],
+        );
+    }
 
     self.current_queue_buffer = (self.current_queue_buffer + 1) % self.command_buffers.len;
     return compute_complete_semaphore;

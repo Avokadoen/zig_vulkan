@@ -32,38 +32,18 @@ pub fn createFramebuffers(allocator: Allocator, ctx: Context, swapchain_data: *c
 
 pub fn loadShaderStage(
     ctx: Context,
-    allocator: Allocator,
-    exe_path: ?[]const u8,
-    file_name: []const u8,
+    // TODO: validate and document anytype here
+    shader_code: anytype,
     stage: vk.ShaderStageFlags,
     specialization: ?*const vk.SpecializationInfo,
 ) !vk.PipelineShaderStageCreateInfo {
-    var x_path: []const u8 = undefined;
-    var free_x_path: bool = undefined;
-    if (exe_path) |some| {
-        x_path = some;
-        free_x_path = false;
-    } else {
-        x_path = try std.fs.selfExePathAlloc(allocator);
-        free_x_path = true;
-    }
-    defer {
-        if (free_x_path) {
-            allocator.free(x_path);
-        }
-    }
-
-    const code = blk1: {
-        const abs_path = blk2: {
-            const join_path = [_][]const u8{ x_path, "../../", file_name };
-            break :blk2 try std.fs.path.resolve(allocator, join_path[0..]);
-        };
-        defer allocator.free(abs_path);
-
-        break :blk1 try utils.readFile(allocator, abs_path);
+    const create_info = vk.ShaderModuleCreateInfo{
+        .flags = .{},
+        .p_code = @ptrCast([*]const u32, &shader_code),
+        .code_size = shader_code.len,
     };
-    defer code.deinit();
-    const module = try ctx.createShaderModule(code.items[0..]);
+    const module = try ctx.vkd.createShaderModule(ctx.logical_device, &create_info, null);
+
     return vk.PipelineShaderStageCreateInfo{
         .flags = .{},
         .stage = stage,

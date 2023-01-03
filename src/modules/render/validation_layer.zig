@@ -75,8 +75,8 @@ fn isLayersPresent(allocator: Allocator, vkb: dispatch.Base, target_layers: []co
 }
 
 pub fn messageCallback(
-    message_severity: vk.DebugUtilsMessageSeverityFlagsEXT.IntType,
-    message_types: vk.DebugUtilsMessageTypeFlagsEXT.IntType,
+    message_severity: vk.DebugUtilsMessageSeverityFlagsEXT,
+    message_types: vk.DebugUtilsMessageTypeFlagsEXT,
     p_callback_data: ?*const vk.DebugUtilsMessengerCallbackDataEXT,
     p_user_data: ?*anyopaque,
 ) callconv(vk.vulkan_call_conv) vk.Bool32 {
@@ -89,7 +89,7 @@ pub fn messageCallback(
             .error_bit_ext = true,
         };
     };
-    const is_severe = (error_mask.toInt() & message_severity) > 0;
+    const is_severe = (error_mask.toInt() & message_severity.toInt()) > 0;
     const writer = if (is_severe) std.io.getStdErr().writer() else std.io.getStdOut().writer();
 
     if (p_callback_data) |data| {

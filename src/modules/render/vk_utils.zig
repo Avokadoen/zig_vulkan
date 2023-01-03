@@ -77,16 +77,23 @@ pub inline fn beginOneTimeCommandBuffer(ctx: Context, command_pool: vk.CommandPo
 pub inline fn endOneTimeCommandBuffer(ctx: Context, command_pool: vk.CommandPool, command_buffer: vk.CommandBuffer) !void {
     try ctx.vkd.endCommandBuffer(command_buffer);
 
-    const submit_info = vk.SubmitInfo{
-        .wait_semaphore_count = 0,
-        .p_wait_semaphores = undefined,
-        .p_wait_dst_stage_mask = undefined,
-        .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
-        .signal_semaphore_count = 0,
-        .p_signal_semaphores = undefined,
-    };
-    try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @ptrCast([*]const vk.SubmitInfo, &submit_info), .null_handle);
+    {
+        @setRuntimeSafety(false);
+        var semo_null_ptr: [*c]const vk.Semaphore = null;
+        var wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
+        // perform the compute ray tracing, draw to target texture
+        const submit_info = vk.SubmitInfo{
+            .wait_semaphore_count = 0,
+            .p_wait_semaphores = semo_null_ptr,
+            .p_wait_dst_stage_mask = wait_null_ptr,
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            .signal_semaphore_count = 0,
+            .p_signal_semaphores = semo_null_ptr,
+        };
+        try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @ptrCast([*]const vk.SubmitInfo, &submit_info), .null_handle);
+    }
+
     try ctx.vkd.queueWaitIdle(ctx.graphics_queue);
 
     ctx.vkd.freeCommandBuffers(ctx.logical_device, command_pool, 1, @ptrCast([*]const vk.CommandBuffer, &command_buffer));

@@ -61,8 +61,8 @@ pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Conf
         .viewport_width = viewport_width,
         .viewport_height = viewport_height,
         .vertical_fov = vertical_fov,
-        .pitch = za.Quat.zero(), // (1, 0, 0, 0)
-        .yaw = za.Quat.zero(),
+        .pitch = za.Quat.identity(),
+        .yaw = za.Quat.identity(),
         .d_camera = Device{
             .image_width = image_width,
             .image_height = image_height,
@@ -103,8 +103,8 @@ pub fn enableInput(self: *Camera) void {
 /// programtically to avoid invalid camera state
 pub fn reset(self: *Camera) void {
     self.enableInput();
-    self.yaw = za.Quat.zero();
-    self.pitch = za.Quat.zero();
+    self.yaw = za.Quat.identity();
+    self.pitch = za.Quat.identity();
     self.propogatePitchChange();
 }
 

@@ -105,16 +105,22 @@ pub fn manualCopy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, c
     ctx.vkd.cmdCopyBuffer(command_buffer, self.buffer, into.buffer, 1, @ptrCast([*]vk.BufferCopy, &copy_region));
     try ctx.vkd.endCommandBuffer(command_buffer);
 
-    const submit_info = vk.SubmitInfo{
-        .wait_semaphore_count = 0,
-        .p_wait_semaphores = undefined,
-        .p_wait_dst_stage_mask = undefined,
-        .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
-        .signal_semaphore_count = 0,
-        .p_signal_semaphores = undefined,
-    };
-    try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @ptrCast([*]const vk.SubmitInfo, &submit_info), fence);
+    {
+        @setRuntimeSafety(false);
+        var semo_null_ptr: [*c]const vk.Semaphore = null;
+        var wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
+        // perform the compute ray tracing, draw to target texture
+        const submit_info = vk.SubmitInfo{
+            .wait_semaphore_count = 0,
+            .p_wait_semaphores = semo_null_ptr,
+            .p_wait_dst_stage_mask = wait_null_ptr,
+            .command_buffer_count = 1,
+            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            .signal_semaphore_count = 0,
+            .p_signal_semaphores = semo_null_ptr,
+        };
+        try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @ptrCast([*]const vk.SubmitInfo, &submit_info), fence);
+    }
 }
 
 /// Transfer data from host to device

@@ -24,7 +24,7 @@ pub const Material = packed struct {
         dielectric = 2,
     };
 
-    @"type": Type,
+    type: Type,
     /// index in the type array
     /// i.e: type = material, type_index = 0 points to index 0 in metal array
     type_index: u6,
@@ -51,6 +51,6 @@ pub const Node = extern struct {
         leaf,
     };
 
-    @"type": Type,
+    type: Type,
     value: u32,
 };
