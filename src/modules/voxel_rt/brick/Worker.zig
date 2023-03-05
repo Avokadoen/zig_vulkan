@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 const Mutex = std.Thread.Mutex;
 const Condition = std.Thread.Condition;
 
-const tracy = @import("../../../tracy.zig");
+const tracy = @import("ztracy");
 
 const State = @import("State.zig");
 const BucketStorage = @import("BucketStorage.zig");

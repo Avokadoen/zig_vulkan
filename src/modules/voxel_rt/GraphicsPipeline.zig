@@ -357,7 +357,7 @@ pub fn init(
     errdefer allocator.free(command_buffers);
     var initialized_pools: usize = 0;
     var initialized_buffers: usize = 0;
-    for (command_pools) |*command_pool, i| {
+    for (command_pools, 0..) |*command_pool, i| {
         command_pool.* = try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
         initialized_pools = i + 1;
         command_buffers[i] = try render.pipeline.createCmdBuffer(ctx, command_pool.*);
@@ -418,7 +418,7 @@ pub fn deinit(self: GraphicsPipeline, allocator: Allocator, ctx: Context) void {
     }
     allocator.free(self.framebuffers);
 
-    for (self.command_buffers) |command_buffer, i| {
+    for (self.command_buffers, 0..) |command_buffer, i| {
         ctx.vkd.freeCommandBuffers(
             ctx.logical_device,
             self.command_pools[i],

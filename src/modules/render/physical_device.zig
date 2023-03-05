@@ -40,7 +40,7 @@ pub const QueueFamilyIndices = struct {
         var compute_queue_count: u32 = 0;
         var graphics_index: ?u32 = null;
         var present_index: ?u32 = null;
-        for (queue_families) |queue_family, i| {
+        for (queue_families, 0..) |queue_family, i| {
             const index = @intCast(u32, i);
             if (compute_index == null and queue_family.queue_flags.contains(compute_bit)) {
                 compute_index = index;
@@ -118,7 +118,7 @@ pub fn selectPrimary(allocator: Allocator, vki: dispatch.Instance, instance: vk.
 
     var device_score: i32 = -1;
     var device_index: ?usize = null;
-    for (devices) |device, i| {
+    for (devices, 0..) |device, i| {
         const new_score = try deviceHeuristic(allocator, vki, device, surface);
         if (device_score < new_score) {
             device_score = new_score;
@@ -197,7 +197,7 @@ pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
     defer allocator.free(queue_create_infos);
 
     const queue_priority = [_]f32{1.0};
-    for (family_indices[0..indices]) |family_index, i| {
+    for (family_indices[0..indices], 0..) |family_index, i| {
         queue_create_infos[i] = .{
             .flags = .{},
             .queue_family_index = family_index,

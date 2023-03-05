@@ -5,7 +5,7 @@ const ArrayList = std.ArrayList;
 
 const glfw = @import("glfw");
 const za = @import("zalgebra");
-const tracy = @import("tracy.zig");
+const ztracy = @import("ztracy");
 
 const render = @import("modules/render.zig");
 const consts = render.consts;
@@ -37,9 +37,8 @@ var mouse_delta = za.Vec2.zero();
 var mouse_ignore_frames: u32 = 5;
 
 pub fn main() anyerror!void {
-    tracy.InitThread();
-    tracy.SetThreadName("main thread");
-    const main_zone = tracy.ZoneN(@src(), "main");
+    ztracy.SetThreadName("main thread");
+    const main_zone = ztracy.ZoneN(@src(), "main");
     defer main_zone.End();
 
     const stderr = std.io.getStdErr().writer();
@@ -57,7 +56,9 @@ pub fn main() anyerror!void {
     const allocator = if (consts.enable_validation_layers) alloc.allocator() else alloc;
 
     // Initialize the library *
-    try glfw.init(.{});
+    if (glfw.init(.{}) == false) {
+        return error.GlfwFailedToInitialize;
+    }
     defer glfw.terminate();
 
     if (!glfw.vulkanSupported()) {
@@ -71,9 +72,8 @@ pub fn main() anyerror!void {
         .maximized = true,
         .scale_to_monitor = true,
         .focused = true,
-    }) catch |err| {
-        try stderr.print("failed to create window, code: {}", .{err});
-        return;
+    }) orelse {
+        return error.GlfwCreateWindowFailed;
     };
     defer window.destroy();
 
@@ -96,15 +96,15 @@ pub fn main() anyerror!void {
     var albedo_color: [256]gpu_types.Albedo = undefined;
     var materials: [256]gpu_types.Material = undefined;
     // insert terrain color
-    for (terrain.color_data) |color, i| {
+    for (terrain.color_data, 0..) |color, i| {
         albedo_color[i] = color;
     }
     // insert terrain materials
-    for (terrain.material_data) |material, i| {
+    for (terrain.material_data, 0..) |material, i| {
         materials[i] = material;
     }
 
-    for (model.rgba_chunk[terrain.color_data.len..]) |rgba, i| {
+    for (model.rgba_chunk[terrain.color_data.len..], 0..) |rgba, i| {
         const albedo_index = i + terrain.color_data.len;
         albedo_color[albedo_index] = .{
             .color = za.Vec4.new(
@@ -145,7 +145,7 @@ pub fn main() anyerror!void {
     try voxel_rt.pushAlbedo(ctx, albedo_color[0..]);
     try voxel_rt.pushMaterials(ctx, materials[0..]);
 
-    try window.setInputMode(glfw.Window.InputMode.cursor, glfw.Window.InputModeCursor.disabled);
+    window.setInputMode(glfw.Window.InputMode.cursor, glfw.Window.InputModeCursor.disabled);
 
     // init input module with default input handler functions
     input = try Input.init(
@@ -156,7 +156,7 @@ pub fn main() anyerror!void {
         gameCursorPosInputFn,
     );
     defer input.deinit(allocator);
-    try input.setInputModeCursor(.disabled);
+    input.setInputModeCursor(.disabled);
     input.setImguiWantInput(false);
 
     voxel_rt.brick_grid.wakeWorkers();
@@ -196,12 +196,12 @@ pub fn main() anyerror!void {
         try voxel_rt.draw(ctx, dt);
 
         // Poll for and process events
-        try glfw.pollEvents();
+        glfw.pollEvents();
         prev_frame = current_frame;
 
         input.updateCursor() catch {};
 
-        tracy.FrameMark();
+        ztracy.FrameMark();
     }
 }
 
@@ -236,7 +236,7 @@ fn gameKeyInputFn(event: Input.KeyEvent) void {
             Input.Key.escape => {
                 input.setCursorPosCallback(menuCursorPosInputFn);
                 input.setKeyCallback(menuKeyInputFn);
-                input.setInputModeCursor(.normal) catch {};
+                input.setInputModeCursor(.normal);
                 input.setImguiWantInput(true);
             },
             else => {},
@@ -282,7 +282,7 @@ fn menuKeyInputFn(event: Input.KeyEvent) void {
                 input.setCursorPosCallback(gameCursorPosInputFn);
                 input.setKeyCallback(gameKeyInputFn);
                 input.setImguiWantInput(false);
-                input.setInputModeCursor(.disabled) catch {};
+                input.setInputModeCursor(.disabled);
 
                 // ignore first 5 frames of input after
                 mouse_ignore_frames = 5;

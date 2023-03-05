@@ -117,7 +117,7 @@ pub const Data = struct {
         errdefer allocator.free(swapchain_images);
 
         for (swapchain_images) |image| {
-            try Texture.transitionImageLayout(ctx, command_pool, image, .@"undefined", .present_src_khr);
+            try Texture.transitionImageLayout(ctx, command_pool, image, .undefined, .present_src_khr);
         }
 
         const image_views = blk: {
@@ -137,7 +137,7 @@ pub const Data = struct {
                 .base_array_layer = 0,
                 .layer_count = 1,
             };
-            for (swapchain_images) |image, i| {
+            for (swapchain_images, 0..) |image, i| {
                 const create_info = vk.ImageViewCreateInfo{
                     .flags = .{},
                     .image = image,
@@ -245,12 +245,12 @@ pub const SupportDetails = struct {
         return .fifo_khr;
     }
 
-    pub fn constructSwapChainExtent(self: Self, window: glfw.Window) glfw.Error!vk.Extent2D {
+    pub fn constructSwapChainExtent(self: Self, window: glfw.Window) !vk.Extent2D {
         if (self.capabilities.current_extent.width != std.math.maxInt(u32)) {
             return self.capabilities.current_extent;
         } else {
             var window_size = blk: {
-                const size = try window.getFramebufferSize();
+                const size = window.getFramebufferSize();
                 break :blk vk.Extent2D{ .width = @intCast(u32, size.width), .height = @intCast(u32, size.height) };
             };
 

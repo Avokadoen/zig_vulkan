@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const imgui = @import("imgui");
+const zgui = @import("zgui");
 const vk = @import("vulkan");
 
 const render = @import("../render.zig");
@@ -54,17 +54,17 @@ benchmark: ?Benchmark = null,
 
 pub fn init(ctx: Context, gui_width: f32, gui_height: f32, state_binding: StateBinding, config: Config) ImguiGui {
     // Color scheme
-    const style = imgui.igGetStyle();
-    style.Colors[imgui.ImGuiCol_TitleBg] = imgui.ImVec4{ .x = 0.1, .y = 0.1, .z = 0.1, .w = 0.85 };
-    style.Colors[imgui.ImGuiCol_TitleBgActive] = imgui.ImVec4{ .x = 0.15, .y = 0.15, .z = 0.15, .w = 0.9 };
-    style.Colors[imgui.ImGuiCol_MenuBarBg] = imgui.ImVec4{ .x = 0.1, .y = 0.1, .z = 0.1, .w = 0.8 };
-    style.Colors[imgui.ImGuiCol_Header] = imgui.ImVec4{ .x = 0.1, .y = 0.1, .z = 0.1, .w = 0.8 };
-    style.Colors[imgui.ImGuiCol_CheckMark] = imgui.ImVec4{ .x = 0, .y = 1, .z = 0, .w = 1 };
+    const StyleCol = zgui.StyleCol;
+    const style = zgui.getStyle();
+    style.setColor(StyleCol.title_bg, [4]f32{ 0.1, 0.1, 0.1, 0.85 });
+    style.setColor(StyleCol.title_bg_active, [4]f32{ 0.15, 0.15, 0.15, 0.9 });
+    style.setColor(StyleCol.menu_bar_bg, [4]f32{ 0.1, 0.1, 0.1, 0.8 });
+    style.setColor(StyleCol.header, [4]f32{ 0.1, 0.1, 0.1, 0.8 });
+    style.setColor(StyleCol.check_mark, [4]f32{ 0, 1, 0, 1 });
 
     // Dimensions
-    const io = imgui.igGetIO();
-    io.DisplaySize = imgui.ImVec2.init(gui_width, gui_height);
-    io.DisplayFramebufferScale = imgui.ImVec2.init(1, 1);
+    zgui.io.setDisplaySize(gui_width, gui_height);
+    zgui.io.setDisplayFramebufferScale(1.0, 1.0);
 
     return ImguiGui{
         .state_binding = state_binding,
@@ -86,62 +86,59 @@ pub fn init(ctx: Context, gui_width: f32, gui_height: f32, state_binding: StateB
 pub fn handleRescale(self: ImguiGui, gui_width: f32, gui_height: f32) void {
     _ = self;
 
-    const io = imgui.igGetIO();
-    io.DisplaySize = imgui.ImVec2.init(gui_width, gui_height);
+    zgui.io.setDisplaySize(gui_width, gui_height);
 }
 
 // Starts a new imGui frame and sets up windows and ui elements
 pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metrics: bool, dt: f32) void {
     _ = ctx;
-    imgui.igNewFrame();
+    zgui.newFrame();
 
-    const style = imgui.igGetStyle();
-    const rounding = style.WindowRounding;
-    style.WindowRounding = 0; // no rounding for top menu
+    const style = zgui.getStyle();
+    const rounding = style.window_rounding;
+    style.window_rounding = 0; // no rounding for top menu
 
-    imgui.igSetNextWindowSize(
+    zgui.setNextWindowSize(
         .{
-            .x = @intToFloat(f32, pipeline.swapchain.extent.width),
-            .y = 0,
+            .w = @intToFloat(f32, pipeline.swapchain.extent.width),
+            .h = 0,
+            .cond = .always,
         },
-        imgui.ImGuiCond_Always,
     );
-    imgui.igSetNextWindowPos(.{ .x = 0, .y = 0 }, imgui.ImGuiCond_Always, .{ .x = 0, .y = 0 });
-    _ = imgui.igBegin(
-        "Main menu",
-        null,
-        imgui.ImGuiWindowFlags_MenuBar |
-            imgui.ImGuiWindowFlags_NoMove |
-            imgui.ImGuiWindowFlags_NoResize |
-            imgui.ImGuiWindowFlags_NoTitleBar |
-            imgui.ImGuiWindowFlags_NoScrollbar |
-            imgui.ImGuiWindowFlags_NoScrollWithMouse |
-            imgui.ImGuiWindowFlags_NoCollapse |
-            imgui.ImGuiWindowFlags_NoBackground,
-    );
-    style.WindowRounding = rounding;
+    zgui.setNextWindowPos(.{ .x = 0, .y = 0, .cond = .always });
+    _ = zgui.begin("Main menu", .{ .flags = .{
+        .menu_bar = true,
+        .no_move = true,
+        .no_resize = true,
+        .no_title_bar = true,
+        .no_scrollbar = true,
+        .no_scroll_with_mouse = true,
+        .no_collapse = true,
+        .no_background = true,
+    } });
+    style.window_rounding = rounding;
 
     blk: {
-        if (imgui.igBeginMenuBar() == false) break :blk;
-        defer imgui.igEndMenuBar();
+        if (zgui.beginMenuBar() == false) break :blk;
+        defer zgui.endMenuBar();
 
-        if (imgui.igBeginMenu("Windows", true) == false) break :blk;
-        defer imgui.igEndMenu();
+        if (zgui.beginMenu("Windows", true) == false) break :blk;
+        defer zgui.endMenu();
 
-        if (imgui.igMenuItemBool("Camera", null, self.camera_window_active, true)) {
+        if (zgui.menuItem("Camera", .{ .selected = self.camera_window_active, .enabled = true })) {
             self.camera_window_active = !self.camera_window_active;
         }
-        if (imgui.igMenuItemBool("Metrics", null, self.metrics_window_active, true)) {
+        if (zgui.menuItem("Metrics", .{ .selected = self.metrics_window_active, .enabled = true })) {
             self.metrics_window_active = !self.metrics_window_active;
         }
-        if (imgui.igMenuItemBool("Post process", null, self.post_process_window_active, true)) {
+        if (zgui.menuItem("Post process", .{ .selected = self.post_process_window_active, .enabled = true })) {
             self.post_process_window_active = !self.post_process_window_active;
         }
-        if (imgui.igMenuItemBool("Sun", null, self.sun_window_active, true)) {
+        if (zgui.menuItem("Sun", .{ .selected = self.sun_window_active, .enabled = true })) {
             self.sun_window_active = !self.sun_window_active;
         }
     }
-    imgui.igEnd();
+    zgui.end();
 
     blk: {
         if (!self.metrics_state.update_frame_timings or !update_metrics) {
@@ -173,27 +170,39 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
     // imgui.igSetNextWindowPos(.{ .x = 650, .y = 20 }, imgui.ImGuiCond_FirstUseEver, .{ .x = 0, .y = 0 });
     // imgui.igShowDemoWindow(null);
 
-    imgui.igRender();
+    zgui.render();
 }
 
 inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
     if (self.camera_window_active == false) return;
 
-    imgui.igSetNextWindowSize(.{ .x = 400, .y = 500 }, imgui.ImGuiCond_FirstUseEver);
-    const early_exit = imgui.igBegin("Camera", &self.camera_window_active, imgui.ImGuiWindowFlags_None) == false;
-    defer imgui.igEnd();
-    if (early_exit) return;
+    zgui.setNextWindowSize(.{
+        .w = 400,
+        .h = 500,
+        .cond = .first_use_ever,
+    });
+    const camera_open = zgui.begin("Camera", .{ .popen = &self.camera_window_active });
+    defer zgui.end();
+    if (camera_open == false) return;
 
-    _ = imgui.igSliderInt("max bounces", &self.state_binding.camera_ptr.d_camera.max_bounce, 1, 32, null, 0);
+    _ = zgui.sliderInt("max bounces", .{
+        .v = &self.state_binding.camera_ptr.d_camera.max_bounce,
+        .min = 1,
+        .max = 32,
+    });
     imguiToolTip("how many times a ray is allowed to bounce before terminating", .{});
-    _ = imgui.igSliderInt("samples per pixel", &self.state_binding.camera_ptr.d_camera.samples_per_pixel, 1, 32, null, 0);
+    _ = zgui.sliderInt("samples per pixel", .{
+        .v = &self.state_binding.camera_ptr.d_camera.samples_per_pixel,
+        .min = 1,
+        .max = 32,
+    });
     imguiToolTip("how many rays per pixel", .{});
 
-    _ = imgui.igInputFloat("move speed", &self.state_binding.camera_ptr.normal_speed, 0, 0, null, 0);
-    _ = imgui.igInputFloat("turn rate", &self.state_binding.camera_ptr.turn_rate, 0, 0, null, 0);
+    _ = zgui.inputFloat("move speed", .{ .v = &self.state_binding.camera_ptr.normal_speed });
+    _ = zgui.inputFloat("turn rate", .{ .v = &self.state_binding.camera_ptr.turn_rate });
 
     var camera_origin: [3]f32 = self.state_binding.camera_ptr.d_camera.origin;
-    const camera_origin_changed = imgui.igInputFloat3("position", &camera_origin, null, 0);
+    const camera_origin_changed = zgui.inputFloat3("position", .{ .v = &camera_origin });
     if (camera_origin_changed) {
         self.state_binding.camera_ptr.setOrigin(camera_origin);
     }
@@ -202,74 +211,53 @@ inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
 inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
     if (self.metrics_window_active == false) return;
 
-    imgui.igSetNextWindowSize(.{ .x = 400, .y = 500 }, imgui.ImGuiCond_FirstUseEver);
-    const early_exit = imgui.igBegin("Metrics", &self.metrics_window_active, imgui.ImGuiWindowFlags_None) == false;
-    defer imgui.igEnd();
-    if (early_exit) return;
+    zgui.setNextWindowSize(.{
+        .w = 400,
+        .h = 500,
+        .cond = .first_use_ever,
+    });
+    const metrics_open = zgui.begin("Metrics", .{ .popen = &self.metrics_window_active });
+    defer zgui.end();
+    if (metrics_open == false) return;
 
-    imgui.igTextUnformatted(self.device_properties.device_name[0..], null);
+    const zero_index = std.mem.indexOf(u8, &self.device_properties.device_name, &[_]u8{0});
+    zgui.textUnformatted(self.device_properties.device_name[0..zero_index.?]);
 
-    imgui.igPlotLinesFloatPtr(
-        "Frame times",
-        &self.metrics_state.frame_times,
-        self.metrics_state.frame_times.len,
-        0,
-        "",
-        self.metrics_state.min_frame_time,
-        self.metrics_state.max_frame_time,
-        imgui.ImVec2{ .x = 0, .y = 80 },
-        @sizeOf(f32),
-    );
+    // TODO: improve this graph
+    if (zgui.plot.beginPlot("Frame times", .{})) {
+        defer zgui.plot.endPlot();
+        zgui.plot.plotLineValues("Frame times", f32, .{
+            .v = &self.metrics_state.frame_times,
+        });
+    }
 
-    const zigImguiText = struct {
-        pub inline fn fmt(buffer: []u8, begin: []const u8, number: f32) void {
-            const fmt_str = "{s:<7} frame time: {d:>8.3}";
-            const ok = std.fmt.bufPrint(buffer[0..], fmt_str, .{ begin, number }) catch {
-                imgui.igTextUnformatted("error", null);
-                return;
-            };
-            if (buffer.len - 1 <= ok.len) {
-                imgui.igTextUnformatted("error", null);
-                return;
-            }
-            buffer[ok.len] = 0;
-            imgui.igTextUnformatted(buffer[0..].ptr, null);
+    zgui.text("Recent frame time: {d:>8.3}", .{self.metrics_state.frame_times[self.metrics_state.frame_times.len - 1]});
+    zgui.text("Minimum frame time: {d:>8.3}", .{self.metrics_state.min_frame_time});
+    zgui.text("Maximum frame time: {d:>8.3}", .{self.metrics_state.max_frame_time});
+
+    if (zgui.collapsingHeader("Benchmark", .{})) {
+        const benchmark_active = self.benchmark != null;
+        if (benchmark_active) {
+            // imgui.igPushItemFlag(ImGuiButtonFlags_Disabled, true);
+            zgui.pushStyleVar1f(.{ .idx = .alpha, .v = zgui.getStyle().alpha * 0.5 });
         }
-    }.fmt;
-    var buffer: ["Minimum frame time: 99999999999999".len]u8 = undefined;
-    zigImguiText(buffer[0..], "Recent", self.metrics_state.frame_times[self.metrics_state.frame_times.len - 1]);
-    zigImguiText(buffer[0..], "Minimum", self.metrics_state.min_frame_time);
-    zigImguiText(buffer[0..], "Maximum", self.metrics_state.max_frame_time);
-
-    if (imgui.igCollapsingHeaderBoolPtr("Benchmark", null, imgui.ImGuiTreeNodeFlags_None)) {
-        { // benchmark button
-            const benchmark_active = self.benchmark != null;
-            if (benchmark_active) {
-                // TODO: use imgui.ImGuiButtonFlags_Disabled:
-                //  using imgui.ImGuiButtonFlags_Disabled causes compile error in
-                //  imgui library issue: https://github.com/prime31/zig-gamekit/issues/13
-                const ImGuiButtonFlags_Disabled = 16384;
-                imgui.igPushItemFlag(ImGuiButtonFlags_Disabled, true);
-                imgui.igPushStyleVarFloat(imgui.ImGuiStyleVar_Alpha, imgui.igGetStyle().Alpha * 0.5);
-            }
-            if (imgui.igButton("Start benchmark", imgui.ImVec2{ .x = 200, .y = 80 })) {
-                if (benchmark_active == false) {
-                    // reset sun to avoid any difference in lighting affecting performance
-                    if (self.state_binding.sun_ptr.device_data.enabled > 0 and self.state_binding.sun_ptr.animate) {
-                        self.state_binding.sun_ptr.* = Sun.init(.{});
-                    }
-                    self.benchmark = Benchmark.init(
-                        self.state_binding.camera_ptr,
-                        self.state_binding.grid_state,
-                        (self.state_binding.sun_ptr.device_data.enabled > 0),
-                    );
+        if (zgui.button("Start benchmark", .{ .w = 200, .h = 80 })) {
+            if (benchmark_active == false) {
+                // reset sun to avoid any difference in lighting affecting performance
+                if (self.state_binding.sun_ptr.device_data.enabled > 0 and self.state_binding.sun_ptr.animate) {
+                    self.state_binding.sun_ptr.* = Sun.init(.{});
                 }
+                self.benchmark = Benchmark.init(
+                    self.state_binding.camera_ptr,
+                    self.state_binding.grid_state,
+                    (self.state_binding.sun_ptr.device_data.enabled > 0),
+                );
             }
-            imguiToolTip("benchmark will control camera and create a report to stdout", .{});
-            if (benchmark_active) {
-                imgui.igPopItemFlag();
-                imgui.igPopStyleVar(1);
-            }
+        }
+        imguiToolTip("benchmark will control camera and create a report to stdout", .{});
+        if (benchmark_active) {
+            // imgui.igPopItemFlag();
+            zgui.popStyleVar(.{});
         }
     }
 }
@@ -277,40 +265,66 @@ inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
 inline fn drawPostProcessWindowIfEnabled(self: *ImguiGui) void {
     if (self.post_process_window_active == false) return;
 
-    imgui.igSetNextWindowSize(.{ .x = 400, .y = 500 }, imgui.ImGuiCond_FirstUseEver);
-    const early_exit = imgui.igBegin("Post process", &self.post_process_window_active, imgui.ImGuiWindowFlags_None) == false;
-    defer imgui.igEnd();
-    if (early_exit) return;
+    zgui.setNextWindowSize(.{
+        .w = 400,
+        .h = 500,
+        .cond = .first_use_ever,
+    });
+    const post_window_open = zgui.begin("Post process", .{ .popen = &self.post_process_window_active });
+    defer zgui.end();
+    if (post_window_open == false) return;
 
-    const none_flag = imgui.ImGuiInputTextFlags_None;
-    _ = imgui.igInputInt("Samples", &self.state_binding.gfx_pipeline_shader_constants.samples, 1, 2, none_flag);
+    _ = zgui.inputInt("Samples", .{ .v = &self.state_binding.gfx_pipeline_shader_constants.samples, .step_fast = 2 });
     imguiToolTip("Higher sample count result in less noise\nThis comes at the cost of performance", .{});
-    _ = imgui.igSliderFloat("Distribution bias", &self.state_binding.gfx_pipeline_shader_constants.distribution_bias, 0, 1, null, none_flag);
-    _ = imgui.igSliderFloat("Pixel Multiplier", &self.state_binding.gfx_pipeline_shader_constants.pixel_multiplier, 1, 3, null, none_flag);
+
+    _ = zgui.sliderFloat("Distribution bias", .{
+        .v = &self.state_binding.gfx_pipeline_shader_constants.distribution_bias,
+        .min = 0,
+        .max = 1,
+    });
+    _ = zgui.sliderFloat("Pixel Multiplier", .{
+        .v = &self.state_binding.gfx_pipeline_shader_constants.pixel_multiplier,
+        .min = 1,
+        .max = 3,
+    });
     imguiToolTip("should be kept low", .{});
-    _ = imgui.igSliderFloat("Inverse Hue Tolerance", &self.state_binding.gfx_pipeline_shader_constants.inverse_hue_tolerance, 2, 30, null, none_flag);
+    _ = zgui.sliderFloat("Inverse Hue Tolerance", .{
+        .v = &self.state_binding.gfx_pipeline_shader_constants.inverse_hue_tolerance,
+        .min = 2,
+        .max = 30,
+    });
 }
 
 inline fn drawPostSunWindowIfEnabled(self: *ImguiGui) void {
     if (self.sun_window_active == false) return;
 
-    imgui.igSetNextWindowSize(.{ .x = 400, .y = 500 }, imgui.ImGuiCond_FirstUseEver);
-    const early_exit = imgui.igBegin("Sun", &self.sun_window_active, imgui.ImGuiWindowFlags_None) == false;
-    defer imgui.igEnd();
-    if (early_exit) return;
+    zgui.setNextWindowSize(.{
+        .w = 400,
+        .h = 500,
+        .cond = .first_use_ever,
+    });
+
+    const sun_open = zgui.begin("Sun", .{ .popen = &self.sun_window_active });
+    defer zgui.end();
+    if (sun_open == false) return;
 
     var enabled = (self.state_binding.sun_ptr.device_data.enabled > 0);
-    _ = imgui.igCheckbox("enabled", &enabled);
+    _ = zgui.checkbox("enabled", .{ .v = &enabled });
     self.state_binding.sun_ptr.device_data.enabled = if (enabled) 1 else 0;
 
-    _ = imgui.igDragFloat3("position", &self.state_binding.sun_ptr.device_data.position, 1, -10000, 10000, null, 0);
-    _ = imgui.igColorEdit3("color", &self.state_binding.sun_ptr.device_data.color, 0);
-    _ = imgui.igDragFloat("radius", &self.state_binding.sun_ptr.device_data.radius, 0, 0, 20, null, 0);
+    _ = zgui.dragFloat3("position", .{
+        .v = &self.state_binding.sun_ptr.device_data.position,
+        .speed = 1,
+        .min = -10000,
+        .max = 10000,
+    });
+    _ = zgui.colorEdit3("color", .{ .col = &self.state_binding.sun_ptr.device_data.color });
+    _ = zgui.dragFloat("radius", .{ .v = &self.state_binding.sun_ptr.device_data.radius, .speed = 1, .min = 0, .max = 20 });
 
-    if (imgui.igCollapsingHeaderBoolPtr("Animation", null, imgui.ImGuiTreeNodeFlags_None)) {
-        _ = imgui.igCheckbox("animate", &self.state_binding.sun_ptr.animate);
+    if (zgui.collapsingHeader("Animation", .{})) {
+        _ = zgui.checkbox("animate", .{ .v = &self.state_binding.sun_ptr.animate });
         var speed: f32 = self.state_binding.sun_ptr.animate_speed / 3;
-        const speed_changed = imgui.igInputFloat("speed", &speed, 0, 0, null, 0);
+        const speed_changed = zgui.inputFloat("speed", .{ .v = &speed });
         imguiToolTip("how long a day and night last in seconds", .{});
         if (speed_changed) {
             self.state_binding.sun_ptr.animate_speed = speed * 3;
@@ -326,14 +340,17 @@ const ToolTipConfig = struct {
     offset_from_start: f32 = 0,
     spacing: f32 = 10,
 };
-fn imguiToolTip(comptime tip: [*c]const u8, config: ToolTipConfig) void {
-    imgui.igSameLine(config.offset_from_start, config.spacing);
-    imgui.igTextDisabled("(?)");
-    if (imgui.igIsItemHovered(imgui.ImGuiHoveredFlags_None)) {
-        imgui.igBeginTooltip();
-        imgui.igPushTextWrapPos(450);
-        imgui.igTextUnformatted(tip, null);
-        imgui.igPopTextWrapPos();
-        imgui.igEndTooltip();
+fn imguiToolTip(comptime tip: []const u8, config: ToolTipConfig) void {
+    zgui.sameLine(.{
+        .offset_from_start_x = config.offset_from_start,
+        .spacing = config.spacing,
+    });
+    zgui.textDisabled("(?)", .{});
+    if (zgui.isItemHovered(.{})) {
+        zgui.beginTooltip();
+        zgui.pushTextWrapPos(450);
+        zgui.textUnformatted(tip);
+        zgui.popTextWrapPos();
+        zgui.endTooltip();
     }
 }

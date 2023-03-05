@@ -68,7 +68,7 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
         break :blk common_extensions[0..];
     };
 
-    const glfw_extensions_slice = try glfw.getRequiredInstanceExtensions();
+    const glfw_extensions_slice = glfw.getRequiredInstanceExtensions() orelse unreachable;
     // Due to a zig bug we need arraylist to append instead of preallocate slice
     // in release it fail and length turns out to be 1
     var extensions = try ArrayList([*:0]const u8).initCapacity(allocator, glfw_extensions_slice.len + application_extensions.len);
@@ -137,8 +137,9 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
     self.vki = try dispatch.Instance.load(self.instance, vk_proc);
     errdefer self.vki.destroyInstance(self.instance, null);
 
-    if ((try glfw.createWindowSurface(self.instance, window.*, null, &self.surface)) != @enumToInt(vk.Result.success)) {
-        return error.SurfaceInitFailed;
+    const result = @intToEnum(vk.Result, glfw.createWindowSurface(self.instance, window.*, null, &self.surface));
+    if (result != .success) {
+        return error.FailedToCreateSurface;
     }
     errdefer self.vki.destroySurfaceKHR(self.instance, self.surface, null);
 

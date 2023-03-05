@@ -48,7 +48,6 @@ pub const ChunkNode = struct {
 
 /// Generic Chunk and all Chunk types
 pub const Chunk = struct {
-
     /// num bytes of chunk content
     size: i32,
     /// num bytes of children chunks

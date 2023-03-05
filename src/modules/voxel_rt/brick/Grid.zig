@@ -71,9 +71,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         const min_point = config.min_point;
         const base_t = config.base_t;
         var result: [4]f32 = undefined;
-        for (min_point) |axis, i| {
-            result[i] = axis;
-        }
+        std.mem.copy(f32, &result, &min_point);
         result[3] = base_t;
         break :blk result;
     };
@@ -146,7 +144,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 
     var worker_threads = try allocator.alloc(std.Thread, config.workers_count);
     errdefer allocator.free(worker_threads);
-    for (worker_threads) |*thread, i| {
+    for (worker_threads, 0..) |*thread, i| {
         workers[i] = try Worker.init(i, config.workers_count, state, allocator, 4096);
         thread.* = try std.Thread.spawn(.{}, Worker.work, .{&workers[i]});
     }

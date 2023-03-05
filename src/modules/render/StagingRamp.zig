@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const vk = @import("vulkan");
-const tracy = @import("../../tracy.zig");
+const tracy = @import("ztracy");
 
 const render = @import("../render.zig");
 const Context = render.Context;
@@ -33,7 +33,7 @@ pub fn init(ctx: Context, allocator: Allocator, buffer_count: usize) !StagingRam
     errdefer allocator.free(staging_buffers);
 
     var buffers_initialized: usize = 0;
-    for (staging_buffers) |*ramp, i| {
+    for (staging_buffers, 0..) |*ramp, i| {
         ramp.* = try StagingBuffer.init(ctx, allocator);
         buffers_initialized = i + 1;
     }
@@ -119,7 +119,7 @@ pub fn transferToBuffer(self: *StagingRamp, ctx: Context, buffer: *GpuBufferMemo
 
 // wait until all pending transfers are done
 pub fn waitIdle(self: StagingRamp, ctx: Context) !void {
-    for (self.staging_buffers) |ramp, i| {
+    for (self.staging_buffers, 0..) |ramp, i| {
         self.wait_all_fences[i] = ramp.fence;
     }
     _ = try ctx.vkd.waitForFences(
@@ -144,7 +144,7 @@ inline fn getIdleRamp(self: *StagingRamp, ctx: Context, size: vk.DeviceSize) !us
     var full_ramps: usize = 0;
     // get a idle buffer
     var index: usize = blk: {
-        for (self.staging_buffers) |ramp, i| {
+        for (self.staging_buffers, 0..) |ramp, i| {
             // if ramp is out of memory
             if (ramp.buffer_cursor + size >= buffer_size) {
                 full_ramps += 1;
@@ -280,14 +280,7 @@ const StagingBuffer = struct {
         defer self.device_buffer_memory.unmap(ctx);
 
         var dest_location = @ptrCast([*]T, @alignCast(@alignOf(T), self.device_buffer_memory.mapped) orelse unreachable);
-
-        {
-            // runtime safety is turned off for performance
-            @setRuntimeSafety(false);
-            for (data) |elem, i| {
-                dest_location[i] = elem;
-            }
-        }
+        std.mem.copy(T, dest_location[0..data.len], data);
 
         const region = vk.BufferImageCopy{
             .buffer_offset = self.buffer_cursor,
@@ -342,7 +335,7 @@ const StagingBuffer = struct {
             // runtime safety is turned off for performance
             const byte_data = std.mem.sliceAsBytes(data);
             @setRuntimeSafety(false);
-            for (byte_data) |elem, i| {
+            for (byte_data, 0..) |elem, i| {
                 dest_location[i] = elem;
             }
         }

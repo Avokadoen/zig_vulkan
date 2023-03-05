@@ -11,7 +11,7 @@ const Context = @import("Context.zig");
 pub fn createFramebuffers(allocator: Allocator, ctx: Context, swapchain_data: *const swapchain.Data, render_pass: vk.RenderPass, prev_framebuffer: ?[]vk.Framebuffer) ![]vk.Framebuffer {
     const image_views = swapchain_data.image_views;
     var framebuffers = prev_framebuffer orelse try allocator.alloc(vk.Framebuffer, image_views.len);
-    for (image_views) |view, i| {
+    for (image_views, 0..) |view, i| {
         const attachments = [_]vk.ImageView{
             view,
         };

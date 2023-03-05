@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 
 const glfw = @import("glfw");
 
-const tracy = @import("../../tracy.zig");
+const tracy = @import("ztracy");
 
 const shaders = @import("shaders");
 
@@ -258,11 +258,8 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     };
     errdefer compute_pipeline.deinit(ctx);
 
-    {
-        var i: usize = 0;
-        while (i < config.in_flight_compute) : (i += 1) {
-            try compute_pipeline.recordCommandBuffer(ctx, i, camera.*, sun.*);
-        }
+    for (0..config.in_flight_compute) |i| {
+        try compute_pipeline.recordCommandBuffer(ctx, i, camera.*, sun.*);
     }
 
     var staging_buffers = try StagingRamp.init(ctx, allocator, config.staging_buffers);
@@ -287,6 +284,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     errdefer gfx_pipeline.deinit(allocator, ctx);
     const imgui_pipeline = try ImguiPipeline.init(
         ctx,
+        allocator,
         render_pass,
         swapchain.images.len,
         &staging_buffers,
@@ -643,10 +641,10 @@ fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
     const rescale_zone = tracy.ZoneN(@src(), "rescale pipeline");
     defer rescale_zone.End();
 
-    var window_size = try ctx.window_ptr.*.getFramebufferSize();
+    var window_size = ctx.window_ptr.*.getFramebufferSize();
     if (window_size.width == 0 or window_size.height == 0) {
-        window_size = try ctx.window_ptr.*.getFramebufferSize();
-        try glfw.waitEvents();
+        window_size = ctx.window_ptr.*.getFramebufferSize();
+        glfw.waitEvents();
     }
 
     self.requested_rescale_pipeline = false;
@@ -694,7 +692,7 @@ fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
 /// prepare gfx_pipeline + imgui_pipeline command buffer
 fn recordCommandBuffers(self: Pipeline, ctx: Context) !void {
     // copy begin info
-    for (self.gfx_pipeline.command_buffers) |_, i| {
+    for (0..self.gfx_pipeline.command_buffers.len) |i| {
         try self.recordCommandBuffer(ctx, i);
     }
 }

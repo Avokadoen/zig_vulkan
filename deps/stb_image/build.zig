@@ -11,9 +11,9 @@ pub fn linkStep(b: *std.build.Builder, step: *std.build.LibExeObjStep) void {
     const src_paths = [_][]u8{src_path};
     step.addCSourceFiles(src_paths[0..], &.{});
 
-    var package_path = std.fs.path.join(b.allocator, &.{ this_dir, "src/main.zig" }) catch unreachable;
-    defer b.allocator.free(package_path);
-    step.addPackagePath("stbi", package_path);
+    step.addModule("stbi", b.createModule(.{
+        .source_file = .{ .path = "src/main.zig" },
+    }));
 }
 
 pub fn build(b: *std.build.Builder) void {

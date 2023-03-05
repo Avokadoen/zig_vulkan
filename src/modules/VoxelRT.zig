@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const tracy = @import("../tracy.zig");
+const tracy = @import("ztracy");
 
 const za = @import("zalgebra");
 const Vec2 = @Vector(2, f32);

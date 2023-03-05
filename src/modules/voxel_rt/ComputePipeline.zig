@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 
 const vk = @import("vulkan");
 const glfw = @import("glfw");
-const tracy = @import("../../tracy.zig");
+const tracy = @import("ztracy");
 
 const shaders = @import("shaders");
 
@@ -86,7 +86,7 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, target_i
 
     self.queues = try allocator.alloc(vk.Queue, in_flight_count);
     errdefer allocator.free(self.queues);
-    for (self.queues) |*queue, i| {
+    for (self.queues, 0..) |*queue, i| {
         queue.* = ctx.vkd.getDeviceQueue(ctx.logical_device, ctx.queue_indices.compute, @intCast(u32, i));
     }
 
@@ -96,11 +96,11 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, target_i
     errdefer allocator.free(self.storage_offsets);
 
     var buffer_size: u64 = 0;
-    for (state_config.uniform_sizes) |size, i| {
+    for (state_config.uniform_sizes, 0..) |size, i| {
         self.uniform_offsets[i] = buffer_size;
         buffer_size += size;
     }
-    for (state_config.storage_sizes) |size, i| {
+    for (state_config.storage_sizes, 0..) |size, i| {
         self.storage_offsets[i] = buffer_size;
         buffer_size += size;
     }
@@ -125,7 +125,7 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, target_i
             },
             .p_immutable_samplers = null,
         };
-        for (state_config.uniform_sizes) |_, i| {
+        for (state_config.uniform_sizes, 0..) |_, i| {
             layout_bindings[1 + i] = vk.DescriptorSetLayoutBinding{
                 .binding = @intCast(u32, 1 + i),
                 .descriptor_type = .uniform_buffer,
@@ -137,7 +137,7 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, target_i
             };
         }
         const index_offset = 1 + state_config.uniform_sizes.len;
-        for (state_config.storage_sizes) |_, i| {
+        for (state_config.storage_sizes, 0..) |_, i| {
             layout_bindings[index_offset + i] = vk.DescriptorSetLayoutBinding{
                 .binding = @intCast(u32, index_offset + i),
                 .descriptor_type = .storage_buffer,
@@ -165,14 +165,14 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, target_i
             .type = .storage_image,
             .descriptor_count = 1,
         };
-        for (state_config.uniform_sizes) |_, i| {
+        for (state_config.uniform_sizes, 0..) |_, i| {
             pool_sizes[1 + i] = vk.DescriptorPoolSize{
                 .type = .uniform_buffer,
                 .descriptor_count = 1,
             };
         }
         const index_offset = 1 + state_config.uniform_sizes.len;
-        for (state_config.storage_sizes) |_, i| {
+        for (state_config.storage_sizes, 0..) |_, i| {
             pool_sizes[index_offset + i] = vk.DescriptorPoolSize{
                 .type = .storage_buffer,
                 .descriptor_count = 1,
@@ -219,7 +219,7 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, target_i
             .p_texel_buffer_view = undefined,
         };
 
-        for (state_config.uniform_sizes) |size, i| {
+        for (state_config.uniform_sizes, 0..) |size, i| {
             buffer_infos[i] = vk.DescriptorBufferInfo{
                 .buffer = self.buffers.buffer,
                 .offset = self.uniform_offsets[i],
@@ -238,7 +238,7 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, target_i
         }
 
         // store any user defined shader buffers
-        for (state_config.storage_sizes) |size, i| {
+        for (state_config.storage_sizes, 0..) |size, i| {
             const index = 1 + state_config.uniform_sizes.len + i;
             // descriptor for buffer info
             buffer_infos[index - 1] = vk.DescriptorBufferInfo{
@@ -337,7 +337,7 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, target_i
             .flags = .{ .transient_bit = true },
             .queue_family_index = ctx.queue_indices.compute,
         };
-        for (self.command_pools) |*command_pool, i| {
+        for (self.command_pools, 0..) |*command_pool, i| {
             command_pool.* = try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
             self.command_buffers[i] = try render.pipeline.createCmdBuffer(ctx, command_pool.*);
         }
@@ -359,7 +359,7 @@ pub fn init(allocator: Allocator, ctx: Context, in_flight_count: usize, target_i
     var semaphore_initialized: usize = 0;
     self.complete_semaphores = try allocator.alloc(vk.Semaphore, in_flight_count);
     errdefer allocator.free(self.complete_semaphores);
-    for (self.complete_semaphores) |*semaphore, i| {
+    for (self.complete_semaphores, 0..) |*semaphore, i| {
         semaphore.* = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
         semaphore_initialized = i + 1;
     }
@@ -412,7 +412,7 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
         std.math.maxInt(u64),
     ) catch |err| std.debug.print("failed to wait for gfx fence, err: {any}", .{err});
 
-    for (self.command_pools) |command_pool, i| {
+    for (self.command_pools, 0..) |command_pool, i| {
         ctx.vkd.freeCommandBuffers(
             ctx.logical_device,
             command_pool,

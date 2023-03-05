@@ -58,7 +58,7 @@ pub fn init(ctx: Context, command_pool: vk.CommandPool, layout: vk.ImageLayout, 
             .sharing_mode = .exclusive, // TODO: concurrent if (queue_family_indices.len > 1)
             .queue_family_index_count = @intCast(u32, config.queue_family_indices.len),
             .p_queue_family_indices = config.queue_family_indices.ptr,
-            .initial_layout = .@"undefined",
+            .initial_layout = .undefined,
         };
         break :blk try ctx.vkd.createImage(ctx.logical_device, &image_info, null);
     };
@@ -90,11 +90,11 @@ pub fn init(ctx: Context, command_pool: vk.CommandPool, layout: vk.ImageLayout, 
         defer staging_buffer.deinit(ctx);
         try staging_buffer.transferToDevice(ctx, T, 0, data);
 
-        try transitionImageLayout(ctx, command_pool, image, .@"undefined", .transfer_dst_optimal);
+        try transitionImageLayout(ctx, command_pool, image, .undefined, .transfer_dst_optimal);
         try copyBufferToImage(ctx, command_pool, image, staging_buffer.buffer, image_extent);
         try transitionImageLayout(ctx, command_pool, image, .transfer_dst_optimal, layout);
     } else {
-        try transitionImageLayout(ctx, command_pool, image, .@"undefined", layout);
+        try transitionImageLayout(ctx, command_pool, image, .undefined, layout);
     }
 
     const image_view = blk: {
@@ -246,7 +246,7 @@ const TransitionBits = struct {
 pub fn getTransitionBits(old_layout: vk.ImageLayout, new_layout: vk.ImageLayout) TransitionBits {
     var transition_bits: TransitionBits = undefined;
     switch (old_layout) {
-        .@"undefined" => {
+        .undefined => {
             transition_bits.src_mask = .{};
             transition_bits.src_stage = .{
                 .top_of_pipe_bit = true,
@@ -291,7 +291,7 @@ pub fn getTransitionBits(old_layout: vk.ImageLayout, new_layout: vk.ImageLayout)
         },
     }
     switch (new_layout) {
-        .@"undefined" => {
+        .undefined => {
             transition_bits.dst_mask = .{};
             transition_bits.dst_stage = .{
                 .top_of_pipe_bit = true,

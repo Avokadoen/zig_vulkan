@@ -26,7 +26,7 @@ pub fn PerlinNoiseGenerator(comptime point_count: u32) type {
                 inline fn generate_perm(random: std.rand.Random) [point_count]PermInt {
                     var perm: [point_count]PermInt = undefined;
                     // TODO: replace for with while to avoid casting in loop
-                    for (perm) |*p, i| {
+                    for (&perm, 0..) |*p, i| {
                         p.* = @intCast(PermInt, i);
                     }
 
@@ -44,7 +44,7 @@ pub fn PerlinNoiseGenerator(comptime point_count: u32) type {
             }.generate_perm;
 
             var rand_float: [point_count]NoiseFloat = undefined;
-            for (rand_float) |*float| {
+            for (&rand_float) |*float| {
                 float.* = rng.float(NoiseFloat);
             }
             const perm_x = generate_perm_fn(rng);

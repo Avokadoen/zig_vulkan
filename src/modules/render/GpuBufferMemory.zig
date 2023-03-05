@@ -4,7 +4,7 @@ const vk = @import("vulkan");
 const vk_utils = @import("vk_utils.zig");
 const Context = @import("Context.zig");
 
-const tracy = @import("../../tracy.zig");
+const tracy = @import("ztracy");
 
 const memory_util = @import("memory.zig");
 
@@ -139,16 +139,9 @@ pub fn transferToDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, 
     const map_size = memory_util.nonCoherentAtomSize(ctx, size);
     if (map_size + offset > self.size) return error.OutOfDeviceMemory; // size greater than buffer
 
-    const gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, offset, map_size, .{})) orelse return error.FailedToMapGPUMem;
-    const gpu_mem_start = @ptrToInt(gpu_mem);
-    {
-        @setRuntimeSafety(false);
-        for (data) |element, i| {
-            const mem_location = gpu_mem_start + i * @sizeOf(T);
-            var ptr = @intToPtr(*T, mem_location);
-            ptr.* = element;
-        }
-    }
+    var gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, offset, map_size, .{})) orelse return error.FailedToMapGPUMem;
+    var typed_gpu_mem = @ptrCast([*]T, @alignCast(@alignOf(T), gpu_mem));
+    std.mem.copy(T, typed_gpu_mem[0..data.len], data);
     ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
     self.len = @intCast(u32, data.len);
 }
@@ -239,9 +232,9 @@ pub fn batchTransfer(self: *GpuBufferMemory, ctx: Context, comptime T: type, off
     const gpu_mem_start = @ptrToInt(gpu_mem);
     {
         @setRuntimeSafety(false);
-        for (offsets) |offset, i| {
+        for (offsets, 0..) |offset, i| {
             const byte_offset = offset * @sizeOf(T);
-            for (datas[i]) |element, j| {
+            for (datas[i], 0..) |element, j| {
                 const mem_location = gpu_mem_start + byte_offset + j * @sizeOf(T);
                 var ptr = @intToPtr(*T, mem_location);
                 ptr.* = element;

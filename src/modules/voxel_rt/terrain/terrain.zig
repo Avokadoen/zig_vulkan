@@ -4,7 +4,7 @@ const Allocator = std.mem.Allocator;
 const za = @import("zalgebra");
 const stbi = @import("stbi");
 
-const tracy = @import("../../../tracy.zig");
+const tracy = @import("ztracy");
 
 const render = @import("../../render.zig");
 const Context = render.Context;
@@ -145,19 +145,19 @@ pub const color_data = [_]gpu_types.Albedo{
 /// material information expect by terrain to exist from 0.. in the material buffer
 pub const material_data = [_]gpu_types.Material{
     // water
-    .{ .@"type" = .dielectric, .type_index = 0, .albedo_index = 0 },
+    .{ .type = .dielectric, .type_index = 0, .albedo_index = 0 },
     // grass 1
-    .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 1 },
+    .{ .type = .lambertian, .type_index = 0, .albedo_index = 1 },
     // grass 2
-    .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 2 },
+    .{ .type = .lambertian, .type_index = 0, .albedo_index = 2 },
     // dirt 1
-    .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 3 },
+    .{ .type = .lambertian, .type_index = 0, .albedo_index = 3 },
     // dirt 2
-    .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 4 },
+    .{ .type = .lambertian, .type_index = 0, .albedo_index = 4 },
     // rock
-    .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 5 },
+    .{ .type = .lambertian, .type_index = 0, .albedo_index = 5 },
     // rock
-    .{ .@"type" = .lambertian, .type_index = 0, .albedo_index = 6 },
+    .{ .type = .lambertian, .type_index = 0, .albedo_index = 6 },
     // iron
-    .{ .@"type" = .metal, .type_index = 0, .albedo_index = 4 },
+    .{ .type = .metal, .type_index = 0, .albedo_index = 4 },
 };

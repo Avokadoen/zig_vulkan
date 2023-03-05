@@ -10,8 +10,8 @@ const ArrayList = std.ArrayList;
 const vkgen = @import("deps/vulkan-zig/generator/index.zig");
 const glfw = @import("deps/mach-glfw/build.zig");
 const stbi = @import("deps/stb_image/build.zig");
-const tracy = @import("deps/Zig-Tracy/build_tracy.zig");
-const imgui = @import("deps/zig-gamekit/gamekit/deps/imgui/build.zig");
+const ztracy = @import("deps/ztracy/build.zig");
+const zgui = @import("deps/zgui/build.zig");
 
 // TODO: this file could use a refactor pass or atleast some comments to make it more readable
 
@@ -175,28 +175,31 @@ inline fn createFolder(path: []const u8) std.os.MakeDirError!void {
 
 pub fn build(b: *Builder) void {
     const target = b.standardTargetOptions(.{});
-    const mode = b.standardReleaseOptions();
+    const mode = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable("zig_vulkan", "src/main.zig");
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
+    var exe = b.addExecutable(.{
+        .name = "zig_vulkan",
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = mode,
+    });
     exe.linkLibC();
 
     // compile and link with glfw statically
-    glfw.link(b, exe, .{}) catch unreachable;
-    exe.addPackagePath("glfw", "deps/mach-glfw/src/main.zig");
-    exe.addPackagePath("zalgebra", "deps/zalgebra/src/main.zig");
+    const glfw_module = glfw.module(b);
+    exe.addModule("glfw", glfw_module);
+    glfw.link(b, exe, .{}) catch @panic("failed to link glfw");
 
-    // until imgui is a optional component we need to always link c++ system libraries
-    exe.linkSystemLibrary("c++");
-    imgui.linkArtifact(b, exe, target, "deps/zig-gamekit/");
+    exe.addModule("zalgebra", b.createModule(.{
+        .source_file = .{ .path = "deps/zalgebra/src/main.zig" },
+    }));
 
     stbi.linkStep(b, exe);
 
     const vk_xml_path = b.option([]const u8, "vulkan-registry", "Override to the Vulkan registry") orelse thisDir() ++ "/deps/vk.xml";
-    const gen = vkgen.VkGenerateStep.create(b, vk_xml_path, "vk.zig");
-    exe.step.dependOn(&gen.step);
-    exe.addPackage(gen.getPackage("vulkan"));
+    const gen = vkgen.VkGenerateStep.create(b, vk_xml_path);
+    // Add the generated file as package to the final executable
+    exe.addModule("vulkan", gen.getModule());
 
     // TODO: -O (optimize), -I (includes)
     //  !always have -g as last entry! (see glslc_len definition)
@@ -206,25 +209,35 @@ pub fn build(b: *Builder) void {
     const shader_comp = vkgen.ShaderCompileStep.create(
         b,
         glslc_flags[0..glslc_len],
+        "-o",
     );
     const shader_move_step = ShaderMoveStep.init(b, shader_comp) catch unreachable;
 
     {
-        shader_comp.add("image_vert_spv", "assets/shaders/image.vert", .{ .stage = .vertex });
-        shader_comp.add("image_frag_spv", "assets/shaders/image.frag", .{ .stage = .fragment });
-        shader_comp.add("ui_vert_spv", "assets/shaders/ui.vert", .{ .stage = .vertex });
-        shader_comp.add("ui_frag_spv", "assets/shaders/ui.frag", .{ .stage = .fragment });
-        shader_comp.add("brick_raytracer_comp_spv", "assets/shaders/brick_raytracer.comp", .{ .stage = .compute });
-        shader_comp.add("height_map_gen_comp_spv", "assets/shaders/height_map_gen.comp", .{ .stage = .compute });
+        shader_comp.add("image_vert_spv", "assets/shaders/image.vert", .{});
+        shader_comp.add("image_frag_spv", "assets/shaders/image.frag", .{});
+        shader_comp.add("ui_vert_spv", "assets/shaders/ui.vert", .{});
+        shader_comp.add("ui_frag_spv", "assets/shaders/ui.frag", .{});
+        shader_comp.add("brick_raytracer_comp_spv", "assets/shaders/brick_raytracer.comp", .{});
+        shader_comp.add("height_map_gen_comp_spv", "assets/shaders/height_map_gen.comp", .{});
     }
 
-    exe.addPackage(shader_comp.getPackage("shaders"));
     exe.step.dependOn(&shader_move_step.step);
+    shader_move_step.step.dependOn(&shader_comp.step);
+    exe.addModule("shaders", shader_comp.getModule());
 
     // link tracy if in debug mode and nothing else is specified
     const enable_tracy = b.option(bool, "tracy", "Enable tracy bindings and communication, default is false") orelse false;
-    var tracy_path = if (enable_tracy) @as([]const u8, "deps/Zig-Tracy/tracy-0.7.8") else null;
-    tracy.link(b, exe, tracy_path);
+    var ztracy_package = ztracy.Package.build(b, target, mode, .{ .options = .{ .enable_ztracy = enable_tracy } });
+    ztracy_package.link(exe);
+    exe.addModule("ztracy", ztracy_package.ztracy);
+
+    // link zgui
+    const zgui_pkg = zgui.Package.build(b, target, mode, .{
+        .options = .{ .backend = .no_backend },
+    });
+    zgui_pkg.link(exe);
+    exe.addModule("zgui", zgui_pkg.zgui);
 
     const asset_move = AssetMoveStep.init(b) catch unreachable;
     exe.step.dependOn(&asset_move.step);
@@ -240,11 +253,16 @@ pub fn build(b: *Builder) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    var tests = b.addTest("src/test.zig");
-    tests.setBuildMode(mode);
+    const tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/test.zig" },
+        .optimize = mode,
+    });
 
-    tests.addPackagePath("glfw", "deps/mach-glfw/src/main.zig");
-    tests.addPackagePath("zalgebra", "deps/zalgebra/src/main.zig");
+    tests.addModule("glfw", glfw_module);
+    glfw.link(b, tests, .{}) catch @panic("failed to link glfw");
+    tests.addModule("zalgebra", b.createModule(.{
+        .source_file = .{ .path = "deps/zalgebra/src/main.zig" },
+    }));
 
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&tests.step);

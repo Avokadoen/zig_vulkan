@@ -13,7 +13,6 @@
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],
-            "console": "externalTerminal",
             "preLaunchTask": "build"
         },
         {
@@ -25,7 +24,6 @@
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],
-            "console": "externalTerminal",
             "preLaunchTask": "safe"
         },
         {

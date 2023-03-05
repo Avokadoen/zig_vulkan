@@ -26,7 +26,7 @@ pub const Bucket = struct {
     /// returns index of item
     pub inline fn appendOccupied(self: *Bucket, item: Entry) !usize {
         // replace first null element with item
-        for (self.occupied.items) |elem, i| {
+        for (self.occupied.items, 0..) |elem, i| {
             if (elem == null) {
                 self.occupied.items[i] = item;
                 return i;
@@ -162,7 +162,7 @@ pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_count: usi
         }
     } else {
         // fetch the smallest free bucket
-        for (self.buckets) |*bucket, i| {
+        for (&self.buckets, 0..) |*bucket, i| {
             if (bucket.free.items.len > 0) {
                 const take = bucket.free.pop();
                 const oc_index = try bucket.appendOccupied(take);
