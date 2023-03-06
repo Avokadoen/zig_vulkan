@@ -7,6 +7,4 @@
 [submodule "deps/zalgebra"]
 	path = deps/zalgebra
 	url = https://github.com/kooparse/zalgebra.git
-[submodule "deps/miniaudio/c"]
-	path = deps/miniaudio/c
-	url = https://github.com/mackron/miniaudio
+
