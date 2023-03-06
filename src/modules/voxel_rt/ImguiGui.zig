@@ -31,7 +31,7 @@ pub const Config = struct {
 
 const MetricState = struct {
     update_frame_timings: bool,
-    frame_times: [50]f32,
+    frame_times: [128]f32,
     min_frame_time: f32,
     max_frame_time: f32,
 };
@@ -75,7 +75,7 @@ pub fn init(ctx: Context, gui_width: f32, gui_height: f32, state_binding: StateB
         .device_properties = ctx.getPhysicalDeviceProperties(),
         .metrics_state = .{
             .update_frame_timings = config.update_frame_timings,
-            .frame_times = [_]f32{0} ** 50,
+            .frame_times = [_]f32{0} ** 128,
             .min_frame_time = std.math.f32_max,
             .max_frame_time = std.math.f32_min,
         },
@@ -146,7 +146,7 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
         }
         std.mem.rotate(f32, self.metrics_state.frame_times[0..], 1);
         const frame_time = dt * std.time.ms_per_s;
-        self.metrics_state.frame_times[49] = frame_time;
+        self.metrics_state.frame_times[self.metrics_state.frame_times.len - 1] = frame_time;
         self.metrics_state.min_frame_time = std.math.min(self.metrics_state.min_frame_time, frame_time);
         self.metrics_state.max_frame_time = std.math.max(self.metrics_state.max_frame_time, frame_time);
     }
@@ -223,9 +223,19 @@ inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
     const zero_index = std.mem.indexOf(u8, &self.device_properties.device_name, &[_]u8{0});
     zgui.textUnformatted(self.device_properties.device_name[0..zero_index.?]);
 
-    // TODO: improve this graph
     if (zgui.plot.beginPlot("Frame times", .{})) {
         defer zgui.plot.endPlot();
+
+        // x axis
+        zgui.plot.setupAxis(.x1, .{ .label = "frame" });
+        zgui.plot.setupAxisLimits(.x1, .{ .min = 0, .max = self.metrics_state.frame_times.len });
+
+        // y axis
+        zgui.plot.setupAxis(.y1, .{ .label = "time (ms)" });
+        zgui.plot.setupAxisLimits(.y1, .{ .min = 0, .max = @floatCast(f64, 30) });
+
+        zgui.plot.setupFinish();
+
         zgui.plot.plotLineValues("Frame times", f32, .{
             .v = &self.metrics_state.frame_times,
         });
