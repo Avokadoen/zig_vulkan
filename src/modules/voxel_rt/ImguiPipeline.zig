@@ -459,8 +459,8 @@ pub fn init(
 }
 
 pub fn deinit(self: ImguiPipeline, ctx: Context) void {
-    zgui.deinit();
     zgui.plot.deinit();
+    zgui.deinit();
 
     ctx.vkd.destroyPipeline(ctx.logical_device, self.pipeline, null);
     ctx.vkd.destroyPipelineLayout(ctx.logical_device, self.pipeline_layout, null);
@@ -572,6 +572,9 @@ pub fn updateBuffers(
     defer update_buffers_zone.End();
 
     const draw_data = zgui.getDrawData();
+    if (draw_data.valid == false) {
+        return;
+    }
 
     self.vertex_size = @intCast(vk.DeviceSize, draw_data.total_vtx_count * @sizeOf(zgui.DrawVert));
     const index_size = @intCast(vk.DeviceSize, draw_data.total_idx_count * @sizeOf(zgui.DrawIdx));

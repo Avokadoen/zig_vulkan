@@ -58,8 +58,6 @@ const ImguiContext = struct {
     resize_nesw: glfw.Cursor,
     resize_nwse: glfw.Cursor,
     not_allowed: glfw.Cursor,
-
-    hid_cursor: bool,
 };
 
 const Input = @This();
@@ -138,18 +136,12 @@ pub fn setKeyCallback(self: Input, input_key_handle_fn: KeyHandleFn) void {
 pub fn updateCursor(self: *Input) !void {
     const context = if (self.window.getUserPointer(WindowContext)) |some| some else return;
     if (context.imgui_want_input == false) {
-        self.imgui_context.hid_cursor = true;
-        self.window.setInputModeCursor(.hidden);
         return;
     }
 
     self.window.setInputModeCursor(.normal);
-    self.imgui_context.hid_cursor = false;
     switch (zgui.getMouseCursor()) {
-        .none => {
-            self.imgui_context.hid_cursor = true;
-            self.window.setInputModeCursor(.hidden);
-        },
+        .none => self.window.setInputModeCursor(.hidden),
         .arrow => self.window.setCursor(self.imgui_context.arrow),
         .text_input => self.window.setCursor(self.imgui_context.ibeam),
         .resize_all => self.window.setCursor(self.imgui_context.crosshair),
@@ -236,14 +228,17 @@ fn cursorPosCallback(window: glfw.Window, x_pos: f64, y_pos: f64) void {
     const context = if (window.getUserPointer(WindowContext)) |some| some else return;
     context.cursor_pos_handle_fn(event);
 
-    zgui.io.addMousePositionEvent(@floatCast(f32, x_pos), @floatCast(f32, y_pos));
+    if (context.imgui_want_input) {
+        zgui.io.addMousePositionEvent(@floatCast(f32, x_pos), @floatCast(f32, y_pos));
+    }
 }
 
 fn scrollCallback(window: glfw.Window, xoffset: f64, yoffset: f64) void {
     const context = if (window.getUserPointer(WindowContext)) |some| some else return;
-    if (context.imgui_want_input == false) return;
 
-    zgui.io.addMouseWheelEvent(@floatCast(f32, xoffset), @floatCast(f32, yoffset));
+    if (context.imgui_want_input) {
+        zgui.io.addMouseWheelEvent(@floatCast(f32, xoffset), @floatCast(f32, yoffset));
+    }
 }
 
 /// link imgui and glfw codes
@@ -258,7 +253,6 @@ fn linkImguiCodes() !ImguiContext {
         .resize_nesw = undefined,
         .resize_nwse = undefined,
         .not_allowed = undefined,
-        .hid_cursor = false,
     };
     self.pointing_hand = glfw.Cursor.createStandard(.pointing_hand) orelse return error.CreateCursorFailed;
     errdefer self.pointing_hand.destroy();
