@@ -35,7 +35,6 @@ pub const Config = struct {
     dielectric_buffer: u64 = 256,
 
     staging_buffers: usize = 2,
-    in_flight_compute: usize = 1,
     gfx_pipeline_config: GraphicsPipeline.Config = .{},
 };
 
@@ -251,16 +250,13 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         break :blk try ComputePipeline.init(
             allocator,
             ctx,
-            config.in_flight_compute,
             target_image_info,
             state_configs,
         );
     };
     errdefer compute_pipeline.deinit(ctx);
 
-    for (0..config.in_flight_compute) |i| {
-        try compute_pipeline.recordCommandBuffer(ctx, i, camera.*, sun.*);
-    }
+    try compute_pipeline.recordCommandBuffer(ctx, camera.*, sun.*);
 
     var staging_buffers = try StagingRamp.init(ctx, allocator, config.staging_buffers);
     errdefer staging_buffers.deinit(ctx, allocator);
@@ -653,8 +649,8 @@ fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
     {
         _ = ctx.vkd.waitForFences(
             ctx.logical_device,
-            @intCast(u32, self.compute_pipeline.complete_fences.len),
-            self.compute_pipeline.complete_fences.ptr,
+            1,
+            @ptrCast([*]vk.Fence, &self.compute_pipeline.complete_fence),
             vk.TRUE,
             std.math.maxInt(u64),
         ) catch |err| std.debug.print("failed to wait for compute fences, err: {any}", .{err});
