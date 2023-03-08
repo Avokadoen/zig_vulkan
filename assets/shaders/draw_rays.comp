@@ -1,0 +1,34 @@
+#version 450
+
+#extension GL_EXT_debug_printf : disable
+// debugPrintfEXT("hello world %f", 1.0);
+
+// This extension is strictly not required for vulkan 1.2 target, but is used to silence validator...
+#extension GL_GOOGLE_include_directive : enable
+#include "ray_commons.glsl"
+
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z = 1) in;
+
+layout(Rgba8, binding = 0) uniform writeonly image2D img_output;
+
+layout (set = 0, binding = 1) buffer RayBufferCursor
+{
+    int ray_cursor;
+};
+
+layout (set = 0, binding = 2) buffer RayBuffer {
+    Ray rays[];
+};
+
+void main() {
+    // TODO: can't do -1 on uint :( ?
+    const int ray_index = atomicAdd(ray_cursor, -1);
+    if (ray_index < 0) return;
+
+    const Ray ray = rays[ray_index];
+    const ivec2 pixel_coord = ivec2(
+        bitfieldExtract(ray.pixel_coord, 16, 16),
+        bitfieldExtract(ray.pixel_coord, 0, 16)
+    );
+    imageStore(img_output, pixel_coord, vec4(ray.color, 1.0));
+}

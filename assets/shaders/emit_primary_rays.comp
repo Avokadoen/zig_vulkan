@@ -1,0 +1,65 @@
+#version 450
+
+#extension GL_EXT_debug_printf : disable
+// debugPrintfEXT("hello world %f", 1.0);
+
+// This extension is strictly not required for vulkan 1.2 target, but is used to silence validator...
+#extension GL_GOOGLE_include_directive : enable
+#include "rand.comp"
+#include "ray_commons.glsl"
+
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z = 1) in;
+
+// TODO: only need image width, height (and potentially image offset width and height)!
+layout (push_constant) uniform PushConstants {
+    vec3 horizontal;
+    uint image_width;
+    vec3 vertical;
+    uint image_height;
+    vec3 lower_left_corner;
+    int samples_per_pixel;
+    vec3 origin;
+    int max_bounce;
+} push_constant;
+
+layout (set = 0, binding = 0) buffer RayBufferCursor
+{
+    int ray_cursor;
+};
+
+
+layout (set = 0, binding = 1) buffer RayBuffer {
+    Ray rays[];
+};
+
+void main() {
+    const uvec2 pixel_coord = uvec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y);
+    if (pixel_coord.x >= push_constant.image_width || pixel_coord.y >= push_constant.image_height) {
+        // don't emit ray for discarded pixels
+        return;
+    }
+
+    const float x = float(pixel_coord.x);
+    const float y = float(pixel_coord.y);
+    // TODO: proper random (blue noise)
+    // TODO: remove division
+    const float noise_x = hash12(vec2(x + sample_i, y) * 0.2 * float(sample_i > 0));
+    const float u = (x + noise_x) / float(push_constant.image_width - 1);
+    const float noise_y = hash12(vec2(x, y + sample_i) * 0.2 * float(sample_i > 0));
+    const float v = (y + noise_y) / float(push_constant.image_height - 1);
+    
+    const int ray_index = atomicAdd(ray_cursor, 1);
+
+    const vec3 ray_dir = fma(push_constant.horizontal, vec3(u), push_constant.lower_left_corner) + fma(vec3(v), push_constant.vertical, -push_constant.origin);
+    const uint pixel = pixel_coord.x << 16 | pixel_coord.y;
+    const vec3 test_color = vec3(pixel_coord.x / float(push_constant.image_width), pixel_coord.y / float(push_constant.image_height), 1); // color
+    rays[ray_index] = Ray(
+        push_constant.origin, // positions
+        1,                    // internal_reflection
+        ray_dir,              // direction
+        IGNORE_MAT_NONE,      // ignore material
+        // TODO: this is just to test 
+        test_color,           // color
+        pixel                 // pixel coord
+    );
+}

@@ -51,6 +51,7 @@ pub const Device = vk.DeviceWrapper(.{
     .cmdDispatch = true,
     .cmdDrawIndexed = true,
     .cmdEndRenderPass = true,
+    .cmdFillBuffer = true,
     .cmdPipelineBarrier = true,
     .cmdPushConstants = true,
     .cmdSetScissor = true,

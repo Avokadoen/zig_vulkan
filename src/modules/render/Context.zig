@@ -210,14 +210,13 @@ pub inline fn createGraphicsPipeline(self: Context, create_info: vk.GraphicsPipe
 }
 
 /// caller must both destroy pipeline from the heap and in vulkan
-pub fn createComputePipeline(self: Context, allocator: Allocator, create_info: vk.ComputePipelineCreateInfo) !*vk.Pipeline {
-    var pipeline = try allocator.create(vk.Pipeline);
-    errdefer allocator.destroy(pipeline);
+pub fn createComputePipeline(self: Context, create_info: vk.ComputePipelineCreateInfo) !vk.Pipeline {
+    var pipeline: vk.Pipeline = undefined;
 
     const create_infos = [_]vk.ComputePipelineCreateInfo{
         create_info,
     };
-    const result = try self.vkd.createComputePipelines(self.logical_device, .null_handle, create_infos.len, @ptrCast([*]const vk.ComputePipelineCreateInfo, &create_infos), null, @ptrCast([*]vk.Pipeline, pipeline));
+    const result = try self.vkd.createComputePipelines(self.logical_device, .null_handle, create_infos.len, @ptrCast([*]const vk.ComputePipelineCreateInfo, &create_infos), null, @ptrCast([*]vk.Pipeline, &pipeline));
     if (result != vk.Result.success) {
         // TODO: not panic?
         std.debug.panic("failed to initialize pipeline!", .{});
@@ -227,8 +226,8 @@ pub fn createComputePipeline(self: Context, allocator: Allocator, create_info: v
 }
 
 /// destroy pipeline from vulkan *not* from the application memory
-pub fn destroyPipeline(self: Context, pipeline: *vk.Pipeline) void {
-    self.vkd.destroyPipeline(self.logical_device, pipeline.*, null);
+pub fn destroyPipeline(self: Context, pipeline: vk.Pipeline) void {
+    self.vkd.destroyPipeline(self.logical_device, pipeline, null);
 }
 
 pub fn getPhysicalDeviceProperties(self: Context) vk.PhysicalDeviceProperties {

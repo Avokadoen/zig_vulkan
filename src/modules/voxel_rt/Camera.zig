@@ -181,13 +181,12 @@ inline fn lowerLeftCorner(self: Camera) Vec3 {
 
 // uniform Camera, binding: 1
 pub const Device = extern struct {
+    horizontal: [3]f32,
     image_width: u32,
+    vertical: [3]f32,
     image_height: u32,
-
-    horizontal: Vec3,
-    vertical: Vec3,
-    lower_left_corner: Vec3,
-    origin: Vec3,
+    lower_left_corner: [3]f32,
     samples_per_pixel: i32,
+    origin: [3]f32,
     max_bounce: i32,
 };

@@ -218,8 +218,18 @@ pub fn build(b: *Builder) void {
         shader_comp.add("image_frag_spv", "assets/shaders/image.frag", .{});
         shader_comp.add("ui_vert_spv", "assets/shaders/ui.vert", .{});
         shader_comp.add("ui_frag_spv", "assets/shaders/ui.frag", .{});
+
+        // TODO: delete this brick_raytracer_comp_spv
         shader_comp.add("brick_raytracer_comp_spv", "assets/shaders/brick_raytracer.comp", .{});
+
+        // TODO: actually implement this! :)
         shader_comp.add("height_map_gen_comp_spv", "assets/shaders/height_map_gen.comp", .{});
+
+        shader_comp.add("emit_primary_rays_spv", "assets/shaders/emit_primary_rays.comp", .{});
+        // TODO: traverse step
+        // TODO: scatter step(s)
+        // TODO: order ray step
+        shader_comp.add("draw_rays_spv", "assets/shaders/draw_rays.comp", .{});
     }
 
     exe.step.dependOn(&shader_move_step.step);

@@ -67,6 +67,9 @@ work_group_dim: extern struct {
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
 pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, state_config: StateConfigs) !ComputePipeline {
+    const draw_zone = tracy.ZoneN(@src(), "compute init");
+    defer draw_zone.End();
+
     var self: ComputePipeline = undefined;
     self.allocator = allocator;
     self.target_image_info = target_image_info;
@@ -90,12 +93,12 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
     errdefer allocator.free(self.storage_offsets);
 
     var buffer_size: u64 = 0;
-    for (state_config.uniform_sizes, 0..) |size, i| {
-        self.uniform_offsets[i] = buffer_size;
+    for (self.uniform_offsets, state_config.uniform_sizes) |*offset, size| {
+        offset.* = buffer_size;
         buffer_size += size;
     }
-    for (state_config.storage_sizes, 0..) |size, i| {
-        self.storage_offsets[i] = buffer_size;
+    for (self.storage_offsets, state_config.storage_sizes) |*offset, size| {
+        offset.* = buffer_size;
         buffer_size += size;
     }
     self.buffers = try GpuBufferMemory.init(
@@ -119,9 +122,9 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
             },
             .p_immutable_samplers = null,
         };
-        for (state_config.uniform_sizes, 0..) |_, i| {
-            layout_bindings[1 + i] = vk.DescriptorSetLayoutBinding{
-                .binding = @intCast(u32, 1 + i),
+        for (layout_bindings[1 .. 1 + state_config.uniform_sizes.len], 1..) |*layout_binding, i| {
+            layout_binding.* = vk.DescriptorSetLayoutBinding{
+                .binding = @intCast(u32, i),
                 .descriptor_type = .uniform_buffer,
                 .descriptor_count = 1,
                 .stage_flags = .{
@@ -131,9 +134,9 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
             };
         }
         const index_offset = 1 + state_config.uniform_sizes.len;
-        for (state_config.storage_sizes, 0..) |_, i| {
-            layout_bindings[index_offset + i] = vk.DescriptorSetLayoutBinding{
-                .binding = @intCast(u32, index_offset + i),
+        for (layout_bindings[index_offset .. index_offset + state_config.storage_sizes.len], index_offset..) |*layout_binding, i| {
+            layout_binding.* = vk.DescriptorSetLayoutBinding{
+                .binding = @intCast(u32, i),
                 .descriptor_type = .storage_buffer,
                 .descriptor_count = 1,
                 .stage_flags = .{
@@ -317,8 +320,9 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
             .base_pipeline_handle = .null_handle, // TODO: GfxPipeline?
             .base_pipeline_index = -1,
         };
-        break :blk try ctx.createComputePipeline(allocator, pipeline_info);
+        break :blk try ctx.createComputePipeline(pipeline_info);
     };
+    errdefer ctx.destroyPipeline(self.pipeline);
 
     {
         const pool_info = vk.CommandPoolCreateInfo{
@@ -374,6 +378,9 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
 }
 
 pub fn deinit(self: ComputePipeline, ctx: Context) void {
+    const draw_zone = tracy.ZoneN(@src(), "compute deinit");
+    defer draw_zone.End();
+
     // wait for all fences
     _ = ctx.vkd.waitForFences(
         ctx.logical_device,
@@ -403,11 +410,12 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
 
     ctx.destroyPipelineLayout(self.pipeline_layout);
     ctx.destroyPipeline(self.pipeline);
-
-    self.allocator.destroy(self.pipeline);
 }
 
 pub inline fn dispatch(self: *ComputePipeline, ctx: Context, camera: Camera, sun: Sun) !vk.Semaphore {
+    const draw_zone = tracy.ZoneN(@src(), "compute dispatch");
+    defer draw_zone.End();
+
     {
         const wait_compute_zone = tracy.ZoneN(@src(), "idle wait compute");
         defer wait_compute_zone.End();

@@ -14,7 +14,12 @@ const Texture = render.Texture;
 const vk_utils = render.vk_utils;
 const memory = render.memory;
 
+const ray_pipeline_types = @import("ray_pipeline_types.zig");
+
 // TODO: move pipelines to ./internal/render/
+const EmitRayPipeline = @import("EmitRayPipeline.zig");
+const DrawRayPipeline = @import("DrawRayPipeline.zig");
+
 const ComputePipeline = @import("ComputePipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const ImguiPipeline = @import("ImguiPipeline.zig");
@@ -69,7 +74,10 @@ present_complete_semaphore: vk.Semaphore,
 render_complete_semaphore: vk.Semaphore,
 render_complete_fence: vk.Fence,
 
-compute_pipeline: ComputePipeline,
+emit_ray_pipeline: EmitRayPipeline,
+draw_ray_pipeline: DrawRayPipeline,
+
+// compute_pipeline: ComputePipeline,
 // TODO: rename pipeline
 gfx_pipeline: GraphicsPipeline,
 imgui_pipeline: ImguiPipeline,
@@ -142,7 +150,8 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     try ctx.vkd.bindImageMemory(ctx.logical_device, compute_image, image_memory, 0);
     var image_memory_size = memory_requirements.size;
 
-    try Texture.transitionImageLayout(ctx, init_command_pool, compute_image, .undefined, .shader_read_only_optimal);
+    try Texture.transitionImageLayout(ctx, init_command_pool, compute_image, .undefined, .general);
+    try Texture.transitionImageLayout(ctx, init_command_pool, compute_image, .general, .shader_read_only_optimal);
 
     const compute_image_view = blk: {
         const image_view_info = vk.ImageViewCreateInfo{
@@ -210,56 +219,62 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     };
     const render_complete_fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
 
-    const MinSize = struct {
-        fn storage(ctx1: Context, size: u64) u64 {
-            const storage_size = ctx1.physical_device_limits.min_storage_buffer_offset_alignment;
-            return storage_size * (std.math.divCeil(vk.DeviceSize, size, storage_size) catch unreachable);
-        }
+    // const MinSize = struct {
+    //     fn storage(ctx1: Context, size: u64) u64 {
+    //         const storage_size = ctx1.physical_device_limits.min_storage_buffer_offset_alignment;
+    //         return storage_size * (std.math.divCeil(vk.DeviceSize, size, storage_size) catch unreachable);
+    //     }
 
-        fn uniform(ctx1: Context, size: u64) u64 {
-            const uniform_size = ctx1.physical_device_limits.min_uniform_buffer_offset_alignment;
-            return uniform_size * (std.math.divCeil(vk.DeviceSize, size, uniform_size) catch unreachable);
-        }
-    };
+    //     fn uniform(ctx1: Context, size: u64) u64 {
+    //         const uniform_size = ctx1.physical_device_limits.min_uniform_buffer_offset_alignment;
+    //         return uniform_size * (std.math.divCeil(vk.DeviceSize, size, uniform_size) catch unreachable);
+    //     }
+    // };
 
-    var compute_pipeline = blk: {
-        const uniform_sizes = [_]u64{
-            // use storage min size for last uniform entry
-            MinSize.storage(ctx, @sizeOf(GridState.Device)),
-        };
-        const storage_sizes = [_]u64{
-            MinSize.storage(ctx, @sizeOf(gpu_types.Material) * config.material_buffer),
-            MinSize.storage(ctx, @sizeOf(gpu_types.Albedo) * config.albedo_buffer),
-            MinSize.storage(ctx, @sizeOf(gpu_types.Metal) * config.metal_buffer),
-            MinSize.storage(ctx, @sizeOf(gpu_types.Dielectric) * config.dielectric_buffer),
-            MinSize.storage(ctx, @sizeOf(u8) * grid_state.higher_order_grid.len),
-            MinSize.storage(ctx, @sizeOf(GridState.BrickStatusMask) * grid_state.brick_statuses.len),
-            MinSize.storage(ctx, @sizeOf(GridState.BrickIndex) * grid_state.brick_indices.len),
-            MinSize.storage(ctx, @sizeOf(GridState.Brick) * grid_state.bricks.len),
-            MinSize.storage(ctx, @sizeOf(u8) * grid_state.material_indices.len),
-        };
-        const state_configs = ComputePipeline.StateConfigs{ .uniform_sizes = uniform_sizes[0..], .storage_sizes = storage_sizes[0..] };
+    // var compute_pipeline = blk: {
+    //     const uniform_sizes = [_]u64{
+    //         // use storage min size for last uniform entry
+    //         MinSize.storage(ctx, @sizeOf(GridState.Device)),
+    //     };
+    //     const storage_sizes = [_]u64{
+    //         MinSize.storage(ctx, @sizeOf(gpu_types.Material) * config.material_buffer),
+    //         MinSize.storage(ctx, @sizeOf(gpu_types.Albedo) * config.albedo_buffer),
+    //         MinSize.storage(ctx, @sizeOf(gpu_types.Metal) * config.metal_buffer),
+    //         MinSize.storage(ctx, @sizeOf(gpu_types.Dielectric) * config.dielectric_buffer),
+    //         MinSize.storage(ctx, @sizeOf(u8) * grid_state.higher_order_grid.len),
+    //         MinSize.storage(ctx, @sizeOf(GridState.BrickStatusMask) * grid_state.brick_statuses.len),
+    //         MinSize.storage(ctx, @sizeOf(GridState.BrickIndex) * grid_state.brick_indices.len),
+    //         MinSize.storage(ctx, @sizeOf(GridState.Brick) * grid_state.bricks.len),
+    //         MinSize.storage(ctx, @sizeOf(u8) * grid_state.material_indices.len),
+    //     };
+    //     const state_configs = ComputePipeline.StateConfigs{ .uniform_sizes = uniform_sizes[0..], .storage_sizes = storage_sizes[0..] };
 
-        const target_image_info = ComputePipeline.ImageInfo{
-            .width = @intToFloat(f32, internal_render_resolution.width),
-            .height = @intToFloat(f32, internal_render_resolution.height),
-            .image = compute_image,
-            .sampler = sampler,
-            .image_view = compute_image_view,
-        };
-        break :blk try ComputePipeline.init(
-            allocator,
-            ctx,
-            target_image_info,
-            state_configs,
-        );
-    };
-    errdefer compute_pipeline.deinit(ctx);
+    //     break :blk try ComputePipeline.init(
+    //         allocator,
+    //         ctx,
+    //         target_image_info,
+    //         state_configs,
+    //     );
+    // };
+    // errdefer compute_pipeline.deinit(ctx);
 
-    try compute_pipeline.recordCommandBuffer(ctx, camera.*, sun.*);
+    // try compute_pipeline.recordCommandBuffer(ctx, camera.*, sun.*);
 
     var staging_buffers = try StagingRamp.init(ctx, allocator, config.staging_buffers);
     errdefer staging_buffers.deinit(ctx, allocator);
+
+    const emit_ray_pipeline = try EmitRayPipeline.init(allocator, ctx, internal_render_resolution, &staging_buffers);
+    errdefer emit_ray_pipeline.deinit(ctx);
+
+    const target_image_info = ray_pipeline_types.ImageInfo{
+        .width = @intToFloat(f32, internal_render_resolution.width),
+        .height = @intToFloat(f32, internal_render_resolution.height),
+        .image = compute_image,
+        .sampler = sampler,
+        .image_view = compute_image_view,
+    };
+    const draw_ray_pipeline = try DrawRayPipeline.init(allocator, ctx, &emit_ray_pipeline.ray_buffer, target_image_info);
+    errdefer draw_ray_pipeline.deinit(ctx);
 
     var vertex_index_buffer = try GpuBufferMemory.init(
         ctx,
@@ -321,7 +336,9 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .present_complete_semaphore = present_complete_semaphore,
         .render_complete_semaphore = render_complete_semaphore,
         .render_complete_fence = render_complete_fence,
-        .compute_pipeline = compute_pipeline,
+        .emit_ray_pipeline = emit_ray_pipeline,
+        .draw_ray_pipeline = draw_ray_pipeline,
+        // .compute_pipeline = compute_pipeline,
         .gfx_pipeline = gfx_pipeline,
         .imgui_pipeline = imgui_pipeline,
         .camera = camera,
@@ -346,9 +363,11 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     self.staging_buffers.waitIdle(ctx) catch {};
     self.staging_buffers.deinit(ctx, self.allocator);
 
+    self.emit_ray_pipeline.deinit(ctx);
+    self.draw_ray_pipeline.deinit(ctx);
     self.imgui_pipeline.deinit(ctx);
     self.gfx_pipeline.deinit(self.allocator, ctx);
-    self.compute_pipeline.deinit(ctx);
+    // self.compute_pipeline.deinit(ctx);
     ctx.destroyRenderPass(self.render_pass);
     self.swapchain.deinit(ctx);
     self.vertex_index_buffer.deinit(ctx);
@@ -402,7 +421,7 @@ pub inline fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
     const draw_zone = tracy.ZoneN(@src(), "draw");
     defer draw_zone.End();
 
-    const compute_semaphore = try self.compute_pipeline.dispatch(ctx, self.camera.*, self.sun.*);
+    // const compute_semaphore = try self.compute_pipeline.dispatch(ctx, self.camera.*, self.sun.*);
 
     const image_index = blk: {
         const aquired = ctx.vkd.acquireNextImageKHR(
@@ -443,6 +462,9 @@ pub inline fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
         try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence));
     }
 
+    const emit_ray_semaphore = try self.emit_ray_pipeline.dispatch(ctx, self.camera.*);
+    const draw_ray_semaphore = try self.draw_ray_pipeline.dispatch(ctx, emit_ray_semaphore);
+
     self.gui.newFrame(ctx, self, image_index == 0, dt);
     try self.imgui_pipeline.updateBuffers(ctx, &self.vertex_index_buffer);
 
@@ -450,8 +472,14 @@ pub inline fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
     try ctx.vkd.resetCommandPool(ctx.logical_device, self.gfx_pipeline.command_pools[image_index], .{});
     try self.recordCommandBuffer(ctx, image_index);
 
-    const stage_masks = [_]vk.PipelineStageFlags{ .{ .vertex_input_bit = true }, .{ .color_attachment_output_bit = true } };
-    const wait_semaphores = [stage_masks.len]vk.Semaphore{ compute_semaphore, self.present_complete_semaphore };
+    const stage_masks = [_]vk.PipelineStageFlags{
+        .{ .fragment_shader_bit = true },
+        .{ .color_attachment_output_bit = true },
+    };
+    const wait_semaphores = [stage_masks.len]vk.Semaphore{
+        draw_ray_semaphore.*,
+        self.present_complete_semaphore,
+    };
     const render_submit_info = vk.SubmitInfo{
         .wait_semaphore_count = wait_semaphores.len,
         .p_wait_semaphores = &wait_semaphores,
@@ -511,123 +539,162 @@ pub fn setDenoisePixelMultiplier(self: *Pipeline, pixel_multiplier: f32) void {
 
 /// Transfer grid data to GPU
 pub fn transferGridState(self: *Pipeline, ctx: Context, grid: GridState) !void {
-    const grid_data = [_]GridState.Device{grid.device_state};
-    const buffer_offset = self.compute_pipeline.uniform_offsets[0];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset,
-        GridState.Device,
-        grid_data[0..],
-    );
+    _ = self;
+    _ = ctx;
+    _ = grid;
+    // const grid_data = [_]GridState.Device{grid.device_state};
+    // const buffer_offset = self.compute_pipeline.uniform_offsets[0];
+    // try self.staging_buffers.transferToBuffer(
+    //     ctx,
+    //     &self.compute_pipeline.buffers,
+    //     buffer_offset,
+    //     GridState.Device,
+    //     grid_data[0..],
+    // );
 }
 
 /// Transfer material data to GPU
 pub fn transferMaterials(self: *Pipeline, ctx: Context, offset: usize, materials: []const gpu_types.Material) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[0];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(gpu_types.Material),
-        gpu_types.Material,
-        materials,
-    );
+    _ = self;
+    _ = ctx;
+    _ = offset;
+    _ = materials;
+    // const buffer_offset = self.compute_pipeline.storage_offsets[0];
+    // try self.staging_buffers.transferToBuffer(
+    //     ctx,
+    //     &self.compute_pipeline.buffers,
+    //     buffer_offset + offset * @sizeOf(gpu_types.Material),
+    //     gpu_types.Material,
+    //     materials,
+    // );
 }
 
 /// Transfer albedo data to GPU
 pub fn transferAlbedos(self: *Pipeline, ctx: Context, offset: usize, albedo: []const gpu_types.Albedo) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[1];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(gpu_types.Albedo),
-        gpu_types.Albedo,
-        albedo,
-    );
+    _ = self;
+    _ = ctx;
+    _ = offset;
+    _ = albedo;
+    // const buffer_offset = self.compute_pipeline.storage_offsets[1];
+    // try self.staging_buffers.transferToBuffer(
+    //     ctx,
+    //     &self.compute_pipeline.buffers,
+    //     buffer_offset + offset * @sizeOf(gpu_types.Albedo),
+    //     gpu_types.Albedo,
+    //     albedo,
+    // );
 }
 
 /// Transfer metal data to GPU
 pub fn transferMetals(self: *Pipeline, ctx: Context, offset: usize, metals: []const gpu_types.Metal) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[2];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(gpu_types.Metal),
-        gpu_types.Metal,
-        metals,
-    );
+    _ = self;
+    _ = ctx;
+    _ = offset;
+    _ = metals;
+    // const buffer_offset = self.compute_pipeline.storage_offsets[2];
+    // try self.staging_buffers.transferToBuffer(
+    //     ctx,
+    //     &self.compute_pipeline.buffers,
+    //     buffer_offset + offset * @sizeOf(gpu_types.Metal),
+    //     gpu_types.Metal,
+    //     metals,
+    // );
 }
 
 /// Transfer dielectric data to GPU
 pub fn transferDielectrics(self: *Pipeline, ctx: Context, offset: usize, dielectrics: []const gpu_types.Dielectric) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[3];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(gpu_types.Dielectric),
-        gpu_types.Dielectric,
-        dielectrics,
-    );
+    _ = self;
+    _ = ctx;
+    _ = offset;
+    _ = dielectrics;
+    // const buffer_offset = self.compute_pipeline.storage_offsets[3];
+    // try self.staging_buffers.transferToBuffer(
+    //     ctx,
+    //     &self.compute_pipeline.buffers,
+    //     buffer_offset + offset * @sizeOf(gpu_types.Dielectric),
+    //     gpu_types.Dielectric,
+    //     dielectrics,
+    // );
 }
 
 /// Transfer higher order grid data to GPU
 pub inline fn transferHigherOrderGrid(self: *Pipeline, ctx: Context, offset: usize, higher_order_grid: []const u8) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[4];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(u8),
-        u8,
-        higher_order_grid,
-    );
+    _ = self;
+    _ = ctx;
+    _ = offset;
+    _ = higher_order_grid;
+    // const buffer_offset = self.compute_pipeline.storage_offsets[4];
+    // try self.staging_buffers.transferToBuffer(
+    //     ctx,
+    //     &self.compute_pipeline.buffers,
+    //     buffer_offset + offset * @sizeOf(u8),
+    //     u8,
+    //     higher_order_grid,
+    // );
 }
 
 /// Transfer entry types data to GPU
 pub inline fn transferBrickStatuses(self: *Pipeline, ctx: Context, offset: usize, brick_statuses: []const GridState.BrickStatusMask) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[5];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(GridState.BrickStatusMask),
-        GridState.BrickStatusMask,
-        brick_statuses,
-    );
+    _ = self;
+    _ = ctx;
+    _ = offset;
+    _ = brick_statuses;
+    // const buffer_offset = self.compute_pipeline.storage_offsets[5];
+    // try self.staging_buffers.transferToBuffer(
+    //     ctx,
+    //     &self.compute_pipeline.buffers,
+    //     buffer_offset + offset * @sizeOf(GridState.BrickStatusMask),
+    //     GridState.BrickStatusMask,
+    //     brick_statuses,
+    // );
 }
 
 /// Transfer entry indices data to GPU
 pub inline fn transferBrickIndices(self: *Pipeline, ctx: Context, offset: usize, brick_indices: []const GridState.BrickIndex) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[6];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(GridState.BrickIndex),
-        GridState.BrickIndex,
-        brick_indices,
-    );
+    _ = self;
+    _ = ctx;
+    _ = offset;
+    _ = brick_indices;
+    // const buffer_offset = self.compute_pipeline.storage_offsets[6];
+    // try self.staging_buffers.transferToBuffer(
+    //     ctx,
+    //     &self.compute_pipeline.buffers,
+    //     buffer_offset + offset * @sizeOf(GridState.BrickIndex),
+    //     GridState.BrickIndex,
+    //     brick_indices,
+    // );
 }
 
 /// Transfer bricks data to GPU
 pub fn transferBricks(self: *Pipeline, ctx: Context, offset: usize, bricks: []const GridState.Brick) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[7];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(GridState.Brick),
-        GridState.Brick,
-        bricks,
-    );
+    _ = self;
+    _ = ctx;
+    _ = offset;
+    _ = bricks;
+    // const buffer_offset = self.compute_pipeline.storage_offsets[7];
+    // try self.staging_buffers.transferToBuffer(
+    //     ctx,
+    //     &self.compute_pipeline.buffers,
+    //     buffer_offset + offset * @sizeOf(GridState.Brick),
+    //     GridState.Brick,
+    //     bricks,
+    // );
 }
 
 /// Transfer material index data to GPU
 pub inline fn transferMaterialIndices(self: *Pipeline, ctx: Context, offset: usize, material_indices: []const u8) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[8];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(u8),
-        u8,
-        material_indices,
-    );
+    _ = self;
+    _ = ctx;
+    _ = offset;
+    _ = material_indices;
+    // const buffer_offset = self.compute_pipeline.storage_offsets[8];
+    // try self.staging_buffers.transferToBuffer(
+    //     ctx,
+    //     &self.compute_pipeline.buffers,
+    //     buffer_offset + offset * @sizeOf(u8),
+    //     u8,
+    //     material_indices,
+    // );
 }
 
 // TODO: make allow to multithread this
@@ -645,18 +712,18 @@ fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
 
     self.requested_rescale_pipeline = false;
 
-    // Wait for pipeline to become idle
-    {
-        _ = ctx.vkd.waitForFences(
-            ctx.logical_device,
-            1,
-            @ptrCast([*]vk.Fence, &self.compute_pipeline.complete_fence),
-            vk.TRUE,
-            std.math.maxInt(u64),
-        ) catch |err| std.debug.print("failed to wait for compute fences, err: {any}", .{err});
-        // wait for previous texture draw before updating buffers and command buffers
-        _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
-    }
+    // // Wait for pipeline to become idle
+    // {
+    //     _ = ctx.vkd.waitForFences(
+    //         ctx.logical_device,
+    //         1,
+    //         @ptrCast([*]vk.Fence, &self.compute_pipeline.complete_fence),
+    //         vk.TRUE,
+    //         std.math.maxInt(u64),
+    //     ) catch |err| std.debug.print("failed to wait for compute fences, err: {any}", .{err});
+    //     // wait for previous texture draw before updating buffers and command buffers
+    //     _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
+    // }
 
     // recreate swapchain utilizing the old one
     const old_swapchain = self.swapchain;

@@ -298,9 +298,7 @@ pub fn getTransitionBits(old_layout: vk.ImageLayout, new_layout: vk.ImageLayout)
             };
         },
         .present_src_khr => {
-            transition_bits.dst_mask = .{
-                .shader_read_bit = true,
-            };
+            transition_bits.dst_mask = .{};
             transition_bits.dst_stage = .{
                 .fragment_shader_bit = true,
             };
