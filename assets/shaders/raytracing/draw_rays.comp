@@ -15,7 +15,6 @@ layout (set = 0, binding = 1) buffer RayBufferCursor
 {
     int ray_cursor;
 };
-
 layout (set = 0, binding = 2) buffer RayBuffer {
     Ray rays[];
 };

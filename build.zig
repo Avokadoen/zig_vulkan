@@ -225,11 +225,11 @@ pub fn build(b: *Builder) void {
         // TODO: actually implement this! :)
         shader_comp.add("height_map_gen_comp_spv", "assets/shaders/height_map_gen.comp", .{});
 
-        shader_comp.add("emit_primary_rays_spv", "assets/shaders/emit_primary_rays.comp", .{});
-        // TODO: traverse step
-        // TODO: scatter step(s)
-        // TODO: order ray step
-        shader_comp.add("draw_rays_spv", "assets/shaders/draw_rays.comp", .{});
+        shader_comp.add("emit_primary_rays_spv", "assets/shaders/raytracing/emit_primary_rays.comp", .{});
+        shader_comp.add("traverse_rays_spv", "assets/shaders/raytracing/traverse_rays.comp", .{});
+        // TODO: scatter step(s): calculate new scatter ray + shadow ray + potential reflect + refract ray
+        // TODO: order ray step: change sort based if last loop or not i.e writing ray to image or doing more scatter + traversal
+        shader_comp.add("draw_rays_spv", "assets/shaders/raytracing/draw_rays.comp", .{});
     }
 
     exe.step.dependOn(&shader_move_step.step);

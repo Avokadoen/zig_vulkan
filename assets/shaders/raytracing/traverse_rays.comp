@@ -1,0 +1,62 @@
+#version 450
+
+#extension GL_EXT_debug_printf : disable
+// debugPrintfEXT("hello world %f", 1.0);
+
+// This extension is strictly not required for vulkan 1.2 target, but is used to silence validator...
+#extension GL_GOOGLE_include_directive : enable
+#include "ray_commons.glsl"
+
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z = 1) in;
+
+// See glsl 4.40 spec chapter 4.7.1 for info on infinity
+// https://www.khronos.org/registry/OpenGL/specs/gl/GLSLangSpec.4.40.pdf
+const float infinity = 0.001 / 0;
+const float pi = 3.14159265358; // 3.1415926535897932385
+const float faccuracy = 0.000001;
+
+layout (set = 0, binding = 0) buffer InRayBufferCursor
+{
+    int in_ray_cursor;
+};
+layout (set = 0, binding = 1) buffer InRayBuffer {
+    Ray in_rays[];
+};
+
+layout (set = 0, binding = 2) buffer OutRayBufferCursor
+{
+    int out_ray_cursor;
+};
+layout (set = 0, binding = 3) buffer OutRayBuffer {
+    Ray out_rays[];
+};
+
+// layout (set = 0, binding = 4) uniform BrickGridState {
+//     // how many voxels in each axis
+//     vec3 voxel_dim;
+//     float padding0;
+
+//     // how many bricks in each axis
+//     vec3 dim;
+//     float padding1;
+
+//     vec3 min_point;
+//     float padding2;
+//     vec3 max_point;
+//     float scale;
+// } brick_grid;
+
+void main() {
+    const int in_ray_index = atomicAdd(in_ray_cursor, -1);
+    if (in_ray_index < 0) return;
+
+    Ray in_ray = in_rays[in_ray_index];
+
+    // TODO: traverse
+    // inverse color so we know that it works
+    in_ray.color = vec3(1) - in_ray.color;
+
+    const int out_ray_index = atomicAdd(out_ray_cursor, 1);
+    out_rays[out_ray_index] = in_ray;
+}
+

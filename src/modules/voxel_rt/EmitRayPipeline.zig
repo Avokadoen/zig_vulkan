@@ -40,6 +40,7 @@ target_descriptor_pool: vk.DescriptorPool,
 target_descriptor_set: vk.DescriptorSet,
 
 image_size: vk.Extent2D,
+// TODO: ray_buffer: *const GpuBufferMemory,
 ray_buffer: GpuBufferMemory,
 
 work_group_dim: Dispatch2,
@@ -49,17 +50,8 @@ work_group_dim: Dispatch2,
 
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
-pub fn init(allocator: Allocator, ctx: Context, image_size: vk.Extent2D, staging_ramp: *StagingRamp) !EmitRayPipeline {
-    // TODO: change based on NVIDIA vs AMD vs Others?
-    const work_group_dim = blk: {
-        const device_properties = ctx.getPhysicalDeviceProperties();
-        const dim_size = device_properties.limits.max_compute_work_group_invocations;
-        const uniform_dim = @floatToInt(u32, @floor(@sqrt(@intToFloat(f64, dim_size))));
-        break :blk .{
-            .x = uniform_dim,
-            .y = uniform_dim / 2,
-        };
-    };
+pub fn init(allocator: Allocator, ctx: Context, image_size: vk.Extent2D) !EmitRayPipeline {
+    const work_group_dim = Dispatch2.init(ctx);
 
     // TODO: grab a dedicated compute queue if available https://github.com/Avokadoen/zig_vulkan/issues/163
     const queue = ctx.vkd.getDeviceQueue(ctx.logical_device, ctx.queue_indices.compute, @intCast(u32, 0));
@@ -140,11 +132,12 @@ pub fn init(allocator: Allocator, ctx: Context, image_size: vk.Extent2D, staging
         };
         const ray_buffer_buffer_info = vk.DescriptorBufferInfo{
             .buffer = ray_buffer.buffer,
-            .offset = pow2Align(@sizeOf(RayBufferCursor), ctx.physical_device_limits.min_storage_buffer_offset_alignment),
+            .offset = pow2Align(
+                ray_buffer_cursor_buffer_info.offset + ray_buffer_cursor_buffer_info.range,
+                ctx.physical_device_limits.min_storage_buffer_offset_alignment,
+            ),
             .range = image_size.width * image_size.height * @sizeOf(Ray),
         };
-        // ensure zeroing does not pollute the actual ray data (see recordCommandBuffer)
-        std.debug.assert(pow2Align(@sizeOf(RayBufferCursor), 4) <= pow2Align(@sizeOf(RayBufferCursor), ctx.physical_device_limits.min_storage_buffer_offset_alignment));
 
         const write_descriptor_set = [_]vk.WriteDescriptorSet{ .{
             .dst_set = target_descriptor_set,
@@ -258,10 +251,6 @@ pub fn init(allocator: Allocator, ctx: Context, image_size: vk.Extent2D, staging
     };
     errdefer ctx.vkd.destroySemaphore(ctx.logical_device, complete_semaphore, null);
 
-    // TODO: use ecez_vulkan buffers instead
-    try staging_ramp.transferToBuffer(ctx, &ray_buffer, 0, RayBufferCursor, &[_]RayBufferCursor{.{ .count = 0 }});
-    try staging_ramp.flush(ctx);
-
     return EmitRayPipeline{
         .allocator = allocator,
         .pipeline_layout = pipeline_layout,
@@ -310,7 +299,6 @@ pub inline fn dispatch(self: *EmitRayPipeline, ctx: Context, camera: Camera) !*v
         @setRuntimeSafety(false);
         var semo_null_ptr: [*c]const vk.Semaphore = null;
         var wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
-        // perform the compute ray tracing, draw to target texture
         const compute_submit_info = vk.SubmitInfo{
             .wait_semaphore_count = 0,
             .p_wait_semaphores = semo_null_ptr,
@@ -334,8 +322,8 @@ pub inline fn dispatch(self: *EmitRayPipeline, ctx: Context, camera: Camera) !*v
 
 // TODO: static command buffer (only record once)
 pub fn recordCommandBuffer(self: EmitRayPipeline, ctx: Context, camera: Camera) !void {
-    const draw_zone = tracy.ZoneN(@src(), "emit ray compute record");
-    defer draw_zone.End();
+    const record_zone = tracy.ZoneN(@src(), "emit ray compute record");
+    defer record_zone.End();
 
     const command_begin_info = vk.CommandBufferBeginInfo{
         .flags = .{

@@ -18,6 +18,7 @@ const ray_pipeline_types = @import("ray_pipeline_types.zig");
 
 // TODO: move pipelines to ./internal/render/
 const EmitRayPipeline = @import("EmitRayPipeline.zig");
+const TraverseRayPipeline = @import("TraverseRayPipeline.zig");
 const DrawRayPipeline = @import("DrawRayPipeline.zig");
 
 const ComputePipeline = @import("ComputePipeline.zig");
@@ -75,6 +76,7 @@ render_complete_semaphore: vk.Semaphore,
 render_complete_fence: vk.Fence,
 
 emit_ray_pipeline: EmitRayPipeline,
+traverse_ray_pipeline: TraverseRayPipeline,
 draw_ray_pipeline: DrawRayPipeline,
 
 // compute_pipeline: ComputePipeline,
@@ -263,8 +265,11 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     var staging_buffers = try StagingRamp.init(ctx, allocator, config.staging_buffers);
     errdefer staging_buffers.deinit(ctx, allocator);
 
-    const emit_ray_pipeline = try EmitRayPipeline.init(allocator, ctx, internal_render_resolution, &staging_buffers);
+    const emit_ray_pipeline = try EmitRayPipeline.init(allocator, ctx, internal_render_resolution);
     errdefer emit_ray_pipeline.deinit(ctx);
+
+    const traverse_ray_pipeline = try TraverseRayPipeline.init(allocator, ctx, &emit_ray_pipeline.ray_buffer, internal_render_resolution);
+    errdefer traverse_ray_pipeline.deinit(ctx);
 
     const target_image_info = ray_pipeline_types.ImageInfo{
         .width = @intToFloat(f32, internal_render_resolution.width),
@@ -273,12 +278,18 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .sampler = sampler,
         .image_view = compute_image_view,
     };
-    const draw_ray_pipeline = try DrawRayPipeline.init(allocator, ctx, &emit_ray_pipeline.ray_buffer, target_image_info);
+    const draw_ray_pipeline = try DrawRayPipeline.init(
+        allocator,
+        ctx,
+        &emit_ray_pipeline.ray_buffer,
+        target_image_info,
+        traverse_ray_pipeline.out_ray_buffer_infos,
+    );
     errdefer draw_ray_pipeline.deinit(ctx);
 
     var vertex_index_buffer = try GpuBufferMemory.init(
         ctx,
-        memory.bytes_in_mb * 63,
+        memory.bytes_in_mb * 64,
         .{ .vertex_buffer_bit = true, .index_buffer_bit = true },
         .{ .host_visible_bit = true },
     );
@@ -337,6 +348,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .render_complete_semaphore = render_complete_semaphore,
         .render_complete_fence = render_complete_fence,
         .emit_ray_pipeline = emit_ray_pipeline,
+        .traverse_ray_pipeline = traverse_ray_pipeline,
         .draw_ray_pipeline = draw_ray_pipeline,
         // .compute_pipeline = compute_pipeline,
         .gfx_pipeline = gfx_pipeline,
@@ -364,7 +376,9 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     self.staging_buffers.deinit(ctx, self.allocator);
 
     self.emit_ray_pipeline.deinit(ctx);
+    self.traverse_ray_pipeline.deinit(ctx);
     self.draw_ray_pipeline.deinit(ctx);
+
     self.imgui_pipeline.deinit(ctx);
     self.gfx_pipeline.deinit(self.allocator, ctx);
     // self.compute_pipeline.deinit(ctx);
@@ -463,7 +477,8 @@ pub inline fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
     }
 
     const emit_ray_semaphore = try self.emit_ray_pipeline.dispatch(ctx, self.camera.*);
-    const draw_ray_semaphore = try self.draw_ray_pipeline.dispatch(ctx, emit_ray_semaphore);
+    const traverse_ray_semaphore = try self.traverse_ray_pipeline.dispatch(ctx, emit_ray_semaphore);
+    const draw_ray_semaphore = try self.draw_ray_pipeline.dispatch(ctx, traverse_ray_semaphore);
 
     self.gui.newFrame(ctx, self, image_index == 0, dt);
     try self.imgui_pipeline.updateBuffers(ctx, &self.vertex_index_buffer);
