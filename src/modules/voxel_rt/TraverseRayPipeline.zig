@@ -19,6 +19,21 @@ const RayBufferCursor = ray_types.RayBufferCursor;
 const Ray = ray_types.Ray;
 const Dispatch2 = ray_types.Dispatch2;
 
+const BrickGridState = extern struct {
+    /// how many voxels in each axis
+    voxel_dim: [3]f32,
+    padding0: f32,
+
+    /// how many bricks in each axis
+    dim: [3]f32,
+    padding1: f32,
+
+    min_point: [3]f32,
+    padding2: f32,
+    max_point: [3]f32,
+
+    scale: f32,
+};
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
 /// compute shader that draws to a target texture
@@ -43,6 +58,9 @@ target_descriptor_set: vk.DescriptorSet,
 image_size: vk.Extent2D,
 ray_buffer: *const GpuBufferMemory,
 
+brick_grid_state: BrickGridState,
+voxel_scene_buffer: GpuBufferMemory,
+
 work_group_dim: Dispatch2,
 submit_wait_stage: [1]vk.PipelineStageFlags = .{.{ .compute_shader_bit = true }},
 
@@ -52,12 +70,42 @@ submit_wait_stage: [1]vk.PipelineStageFlags = .{.{ .compute_shader_bit = true }}
 
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
-pub fn init(allocator: Allocator, ctx: Context, ray_buffer: *const GpuBufferMemory, image_size: vk.Extent2D) !TraverseRayPipeline {
+pub fn init(
+    allocator: Allocator,
+    ctx: Context,
+    ray_buffer: *const GpuBufferMemory,
+    image_size: vk.Extent2D,
+    staging_buffer: *StagingRamp,
+) !TraverseRayPipeline {
     // TODO: change based on NVIDIA vs AMD vs Others?
     const work_group_dim = Dispatch2.init(ctx);
 
     // TODO: grab a dedicated compute queue if available https://github.com/Avokadoen/zig_vulkan/issues/163
     const queue = ctx.vkd.getDeviceQueue(ctx.logical_device, ctx.queue_indices.compute, @intCast(u32, 0));
+
+    var voxel_scene_buffer = try GpuBufferMemory.init(
+        ctx,
+        @intCast(vk.DeviceSize, 250 * 1024 * 1024), // alloc 250mb
+        .{
+            .storage_buffer_bit = true,
+            .uniform_buffer_bit = true,
+            .transfer_dst_bit = true,
+        },
+        .{ .device_local_bit = true },
+    );
+    errdefer voxel_scene_buffer.deinit(ctx);
+
+    const brick_grid_state = BrickGridState{
+        .voxel_dim = [_]f32{8} ** 3,
+        .padding0 = 0,
+        .dim = [_]f32{1} ** 3,
+        .padding1 = 0,
+        .min_point = [_]f32{-10} ** 3,
+        .padding2 = 0,
+        .max_point = [_]f32{0} ** 3,
+        .scale = 1,
+    };
+    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, 0, BrickGridState, &.{brick_grid_state});
 
     const target_descriptor_layout = blk: {
         const layout_bindings = [_]vk.DescriptorSetLayoutBinding{
@@ -101,6 +149,15 @@ pub fn init(allocator: Allocator, ctx: Context, ray_buffer: *const GpuBufferMemo
                 },
                 .p_immutable_samplers = null,
             },
+            .{
+                .binding = 4,
+                .descriptor_type = .uniform_buffer,
+                .descriptor_count = 1,
+                .stage_flags = .{
+                    .compute_bit = true,
+                },
+                .p_immutable_samplers = null,
+            },
         };
         const layout_info = vk.DescriptorSetLayoutCreateInfo{
             .flags = .{},
@@ -123,6 +180,9 @@ pub fn init(allocator: Allocator, ctx: Context, ray_buffer: *const GpuBufferMemo
             .descriptor_count = 1,
         }, .{
             .type = .storage_buffer,
+            .descriptor_count = 1,
+        }, .{
+            .type = .uniform_buffer,
             .descriptor_count = 1,
         } };
         const pool_info = vk.DescriptorPoolCreateInfo{
@@ -181,43 +241,64 @@ pub fn init(allocator: Allocator, ctx: Context, ray_buffer: *const GpuBufferMemo
             },
         };
 
-        const write_descriptor_set = [_]vk.WriteDescriptorSet{ .{
-            .dst_set = target_descriptor_set,
-            .dst_binding = 0,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .storage_buffer,
-            .p_image_info = undefined,
-            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &in_ray_buffer_cursor_buffer_info),
-            .p_texel_buffer_view = undefined,
-        }, .{
-            .dst_set = target_descriptor_set,
-            .dst_binding = 1,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .storage_buffer,
-            .p_image_info = undefined,
-            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &in_ray_buffer_buffer_info),
-            .p_texel_buffer_view = undefined,
-        }, .{
-            .dst_set = target_descriptor_set,
-            .dst_binding = 2,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .storage_buffer,
-            .p_image_info = undefined,
-            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &out_ray_buffer_infos[0]),
-            .p_texel_buffer_view = undefined,
-        }, .{
-            .dst_set = target_descriptor_set,
-            .dst_binding = 3,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .storage_buffer,
-            .p_image_info = undefined,
-            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &out_ray_buffer_infos[1]),
-            .p_texel_buffer_view = undefined,
-        } };
+        const brick_grid_state_infos = vk.DescriptorBufferInfo{
+            .buffer = voxel_scene_buffer.buffer,
+            .offset = 0,
+            .range = @sizeOf(BrickGridState),
+        };
+
+        const write_descriptor_set = [_]vk.WriteDescriptorSet{
+            .{
+                .dst_set = target_descriptor_set,
+                .dst_binding = 0,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &in_ray_buffer_cursor_buffer_info),
+                .p_texel_buffer_view = undefined,
+            },
+            .{
+                .dst_set = target_descriptor_set,
+                .dst_binding = 1,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &in_ray_buffer_buffer_info),
+                .p_texel_buffer_view = undefined,
+            },
+            .{
+                .dst_set = target_descriptor_set,
+                .dst_binding = 2,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &out_ray_buffer_infos[0]),
+                .p_texel_buffer_view = undefined,
+            },
+            .{
+                .dst_set = target_descriptor_set,
+                .dst_binding = 3,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &out_ray_buffer_infos[1]),
+                .p_texel_buffer_view = undefined,
+            },
+            .{
+                .dst_set = target_descriptor_set,
+                .dst_binding = 4,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .uniform_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &brick_grid_state_infos),
+                .p_texel_buffer_view = undefined,
+            },
+        };
 
         ctx.vkd.updateDescriptorSets(
             ctx.logical_device,
@@ -319,12 +400,15 @@ pub fn init(allocator: Allocator, ctx: Context, ray_buffer: *const GpuBufferMemo
         .target_descriptor_set = target_descriptor_set,
         .image_size = image_size,
         .ray_buffer = ray_buffer,
+        .brick_grid_state = brick_grid_state,
+        .voxel_scene_buffer = voxel_scene_buffer,
         .work_group_dim = work_group_dim,
     };
 }
 
 pub fn deinit(self: TraverseRayPipeline, ctx: Context) void {
     // TODO: waitDeviceIdle?
+    self.voxel_scene_buffer.deinit(ctx);
 
     ctx.vkd.freeCommandBuffers(
         ctx.logical_device,

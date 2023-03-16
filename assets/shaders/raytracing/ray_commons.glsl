@@ -14,7 +14,7 @@ struct Ray {
     vec3 direction;
     // TODO: Bitmask instead of single ignore value.
     //       Refactor needed to make material types 1, 2, 3 instead of 0, 1, 2
-    uint material_ignore;
+    float t_value;
     vec3 color;
     uint pixel_coord;
 };
@@ -30,11 +30,6 @@ vec3 BackgroundColor(Ray r) {
     return background_color;
 }
 
-// TODO: remove
-Ray CreateRay(vec3 origin, vec3 direction, uint material_ignore_mask) {
-    const float internal_reflection = 1.0;
-    return Ray(origin, internal_reflection, normalize(direction), material_ignore_mask, vec3(1), 0);
-}
 
 struct HitRecord {
     vec3 point;

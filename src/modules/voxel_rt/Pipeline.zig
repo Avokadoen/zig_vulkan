@@ -268,7 +268,13 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     const emit_ray_pipeline = try EmitRayPipeline.init(allocator, ctx, internal_render_resolution);
     errdefer emit_ray_pipeline.deinit(ctx);
 
-    const traverse_ray_pipeline = try TraverseRayPipeline.init(allocator, ctx, &emit_ray_pipeline.ray_buffer, internal_render_resolution);
+    const traverse_ray_pipeline = try TraverseRayPipeline.init(
+        allocator,
+        ctx,
+        &emit_ray_pipeline.ray_buffer,
+        internal_render_resolution,
+        &staging_buffers,
+    );
     errdefer traverse_ray_pipeline.deinit(ctx);
 
     const target_image_info = ray_pipeline_types.ImageInfo{

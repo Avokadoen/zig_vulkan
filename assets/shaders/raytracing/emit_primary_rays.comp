@@ -26,7 +26,7 @@ layout (set = 0, binding = 0) buffer RayBufferCursor
 {
     int ray_cursor;
 };
-layout (set = 0, binding = 1) buffer RayBuffer {
+layout (set = 0, binding = 1) writeonly buffer RayBuffer {
     Ray rays[];
 };
 
@@ -50,14 +50,12 @@ void main() {
 
     const vec3 ray_dir = fma(push_constant.horizontal, vec3(u), push_constant.lower_left_corner) + fma(vec3(v), push_constant.vertical, -push_constant.origin);
     const uint pixel = pixel_coord.x << 16 | pixel_coord.y;
-    const vec3 test_color = vec3(pixel_coord.x / float(push_constant.image_width), pixel_coord.y / float(push_constant.image_height), 1); // color
     rays[ray_index] = Ray(
         push_constant.origin, // positions
         1,                    // internal_reflection
         ray_dir,              // direction
         IGNORE_MAT_NONE,      // ignore material
-        // TODO: this is just to test 
-        test_color,           // color
+        vec3(0),              // color
         pixel                 // pixel coord
     );
 }

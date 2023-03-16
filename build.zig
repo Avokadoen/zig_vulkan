@@ -219,9 +219,6 @@ pub fn build(b: *Builder) void {
         shader_comp.add("ui_vert_spv", "assets/shaders/ui.vert", .{});
         shader_comp.add("ui_frag_spv", "assets/shaders/ui.frag", .{});
 
-        // TODO: delete this brick_raytracer_comp_spv
-        shader_comp.add("brick_raytracer_comp_spv", "assets/shaders/brick_raytracer.comp", .{});
-
         // TODO: actually implement this! :)
         shader_comp.add("height_map_gen_comp_spv", "assets/shaders/height_map_gen.comp", .{});
 
