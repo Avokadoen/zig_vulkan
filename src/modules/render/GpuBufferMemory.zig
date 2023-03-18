@@ -87,6 +87,18 @@ pub fn copy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, command
     try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, command_buffer);
 }
 
+pub const FillConfig = struct {
+    dst_offset: vk.DeviceSize = 0,
+    size: vk.DeviceSize = 0,
+};
+pub fn fill(self: GpuBufferMemory, ctx: Context, command_pool: vk.CommandPool, dst_offset: vk.DeviceSize, size: vk.DeviceSize, data: u32) !void {
+    const copy_zone = tracy.ZoneN(@src(), "fill buffer");
+    defer copy_zone.End();
+    const command_buffer = try vk_utils.beginOneTimeCommandBuffer(ctx, command_pool);
+    ctx.vkd.cmdFillBuffer(command_buffer, self.buffer, dst_offset, size, data);
+    try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, command_buffer);
+}
+
 /// Same as copy but caller manage synchronization
 pub fn manualCopy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, command_buffer: vk.CommandBuffer, fence: vk.Fence, config: CopyConfig) !void {
     var copy_region = vk.BufferCopy{

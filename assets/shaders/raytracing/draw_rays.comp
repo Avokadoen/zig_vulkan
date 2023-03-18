@@ -19,9 +19,15 @@ layout (set = 0, binding = 2) readonly buffer RayBuffer {
     Ray rays[];
 };
 
+shared int warp_start_index;
+
 void main() {
-    // TODO: can't do -1 on uint :( ?
-    const int ray_index = atomicAdd(ray_cursor, -1);
+    if (gl_LocalInvocationIndex == 0) {
+        const int work_size = int(gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z);
+        warp_start_index = work_size * atomicAdd(ray_cursor, -1);
+    }
+    barrier();
+    const int ray_index = warp_start_index + int(gl_LocalInvocationIndex);
     if (ray_index < 0) return;
 
     const Ray ray = rays[ray_index];
