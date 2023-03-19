@@ -44,7 +44,7 @@ const ShaderMoveStep = struct {
     abs_len: usize = 0,
 
     fn init(b: *Builder, shader_step: *vkgen.ShaderCompileStep) !*ShaderMoveStep {
-        var step = Step.init(.custom, "shader_resource", b.allocator, make);
+        var step = Step.init(.{ .id = .custom, .name = "shader_resource", .owner = b, .makeFn = make });
         step.dependOn(&shader_step.step);
 
         const self = try b.allocator.create(ShaderMoveStep);
@@ -65,7 +65,7 @@ const ShaderMoveStep = struct {
         self.abs_from[self.abs_len] = new_abs;
     }
 
-    fn make(step: *Step) anyerror!void {
+    fn make(step: *Step, prog_node: *std.Progress.Node) anyerror!void {
         const self: *ShaderMoveStep = @fieldParentPtr(ShaderMoveStep, "step", step);
 
         try createFolder(self.builder.install_prefix);
@@ -77,6 +77,7 @@ const ShaderMoveStep = struct {
                 break;
             }
         }
+        prog_node.completeOne();
     }
 
     /// moves a given resource to a given path relative to the output binary
@@ -97,7 +98,7 @@ const AssetMoveStep = struct {
     builder: *Builder,
 
     fn init(b: *Builder) !*AssetMoveStep {
-        var step = Step.init(.custom, "assets", b.allocator, make);
+        var step = Step.init(.{ .id = .custom, .name = "assets", .owner = b, .makeFn = make });
 
         const self = try b.allocator.create(AssetMoveStep);
         self.* = .{
@@ -108,7 +109,7 @@ const AssetMoveStep = struct {
         return self;
     }
 
-    fn make(step: *Step) anyerror!void {
+    fn make(step: *Step, prog_node: *std.Progress.Node) anyerror!void {
         const self: *AssetMoveStep = @fieldParentPtr(AssetMoveStep, "step", step);
 
         try createFolder(self.builder.install_prefix);
@@ -127,6 +128,8 @@ const AssetMoveStep = struct {
         defer src_assets_dir.close();
 
         copyDir(self.builder, src_assets_dir, dst_assets_dir);
+
+        prog_node.completeOne();
     }
 };
 

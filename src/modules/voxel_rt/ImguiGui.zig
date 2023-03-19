@@ -357,10 +357,11 @@ fn imguiToolTip(comptime tip: []const u8, config: ToolTipConfig) void {
     });
     zgui.textDisabled("(?)", .{});
     if (zgui.isItemHovered(.{})) {
-        zgui.beginTooltip();
-        zgui.pushTextWrapPos(450);
-        zgui.textUnformatted(tip);
-        zgui.popTextWrapPos();
-        zgui.endTooltip();
+        if (zgui.beginTooltip()) {
+            zgui.pushTextWrapPos(450);
+            zgui.textUnformatted(tip);
+            zgui.popTextWrapPos();
+            zgui.endTooltip();
+        }
     }
 }
