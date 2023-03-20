@@ -10,7 +10,6 @@
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z = 1) in;
 layout(Rgba8, binding = 0) uniform writeonly image2D img_output;
 
-#define MAX_BOUNCES 32
 #define BIG_NUMBER 1e30
 #define AMBIENT vec3(0.005)
 #define PRECISION 0.000001
@@ -248,8 +247,7 @@ vec3 RayColor(Ray r) {
     HitRecord shadow_hit;
     Ray shadow_ray;
 
-    vec3 emits[MAX_BOUNCES];
-    vec3 attenuations[MAX_BOUNCES];
+    vec3 color = vec3(0);
     vec3 hit_v_min;
     while (loop_count < push_constant.max_bounce && GridHit(current_ray, 0.00001, infinity, hit_v_min, hit)){         
         loop_count += 1;
@@ -290,13 +288,9 @@ vec3 RayColor(Ray r) {
 
             // if lit by sun
             if (!GridHit(shadow_ray, 0.00001, infinity, hit_v_min, shadow_hit)) {
-                emits[loop_count-1] = attenuation * push_constant.sun_color;
-            } else {
-                // cheat and apply some ambient :)
-                emits[loop_count-1] = attenuation * AMBIENT;
+                color += attenuation * push_constant.sun_color;
             }
         }
-        attenuations[loop_count-1] = attenuation;
 
         // if the material scatter function report that the ray failed to scatter
         if (!result) break;
@@ -304,27 +298,11 @@ vec3 RayColor(Ray r) {
         current_ray = scattered;
     }
 
-    vec3 color = vec3(0);
-    if (sun_enabled) {
-        if (loop_count == 0) {
-            color = BackgroundColor(current_ray) * push_constant.sun_color;
-        } else {
-            color = vec3(0);
-            for (int i = loop_count - 1; i >= 0; i--) {
-                color = (color * attenuations[i]) + emits[i];
-            }
-        }
-    } else {
-        if (loop_count == 0) {
-            return BackgroundColor(current_ray);
-        } else {
-            color = vec3(1);
-            for (int i = loop_count - 1; i >= 0; i--) {
-                color *= attenuations[i];
-            }
-        }
+    if (loop_count == 0) {
+        color += BackgroundColor(current_ray) * ((sun_enabled) ? push_constant.sun_color : vec3(1));
     }
-    return color;
+
+    return color / (color + 1);
 }
 
 /*

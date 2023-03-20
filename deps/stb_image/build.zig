@@ -11,8 +11,10 @@ pub fn linkStep(b: *std.build.Builder, step: *std.build.LibExeObjStep) void {
     const src_paths = [_][]u8{src_path};
     step.addCSourceFiles(src_paths[0..], &.{});
 
+    var src_file = std.fs.path.join(b.allocator, &.{ this_dir, "src/main.zig" }) catch unreachable;
+
     step.addModule("stbi", b.createModule(.{
-        .source_file = .{ .path = "src/main.zig" },
+        .source_file = .{ .path = src_file },
     }));
 }
 
