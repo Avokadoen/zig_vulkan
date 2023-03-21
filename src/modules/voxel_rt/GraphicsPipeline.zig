@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const vk = @import("vulkan");
+const tracy = @import("ztracy");
 
 const render = @import("../render.zig");
 const Context = render.Context;
@@ -73,6 +74,9 @@ pub fn init(
     vertex_index_buffer: *GpuBufferMemory,
     config: Config,
 ) !GraphicsPipeline {
+    const zone = tracy.ZoneN(@src(), @typeName(GraphicsPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     try vertex_index_buffer.transferToDevice(ctx, Vertex, 0, vertices[0..]);
     try vertex_index_buffer.transferToDevice(ctx, u16, vertex_size, indices[0..]);
 
@@ -413,6 +417,9 @@ pub fn init(
 }
 
 pub fn deinit(self: GraphicsPipeline, allocator: Allocator, ctx: Context) void {
+    const zone = tracy.ZoneN(@src(), @typeName(GraphicsPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     for (self.framebuffers) |buffer| {
         ctx.vkd.destroyFramebuffer(ctx.logical_device, buffer, null);
     }

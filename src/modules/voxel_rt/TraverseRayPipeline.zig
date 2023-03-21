@@ -77,6 +77,9 @@ pub fn init(
     image_size: vk.Extent2D,
     staging_buffer: *StagingRamp,
 ) !TraverseRayPipeline {
+    const zone = tracy.ZoneN(@src(), @typeName(TraverseRayPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     // TODO: change based on NVIDIA vs AMD vs Others?
     const work_group_dim = Dispatch2.init(ctx);
 
@@ -453,6 +456,9 @@ pub fn init(
 }
 
 pub fn deinit(self: TraverseRayPipeline, ctx: Context) void {
+    const zone = tracy.ZoneN(@src(), @typeName(TraverseRayPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     // TODO: waitDeviceIdle?
     self.voxel_scene_buffer.deinit(ctx);
 
@@ -475,6 +481,9 @@ pub fn deinit(self: TraverseRayPipeline, ctx: Context) void {
 
 // TODO: mention semaphore lifetime
 pub inline fn dispatch(self: *TraverseRayPipeline, ctx: Context, wait_semaphore: *vk.Semaphore) !*vk.Semaphore {
+    const zone = tracy.ZoneN(@src(), @typeName(TraverseRayPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     try ctx.vkd.resetCommandPool(ctx.logical_device, self.command_pool, .{});
     try self.recordCommandBuffer(ctx);
 
@@ -502,8 +511,8 @@ pub inline fn dispatch(self: *TraverseRayPipeline, ctx: Context, wait_semaphore:
 
 // TODO: static command buffer (only record once)
 pub fn recordCommandBuffer(self: TraverseRayPipeline, ctx: Context) !void {
-    const record_zone = tracy.ZoneN(@src(), "traverse ray compute record");
-    defer record_zone.End();
+    const zone = tracy.ZoneN(@src(), @typeName(TraverseRayPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
 
     const command_begin_info = vk.CommandBufferBeginInfo{
         .flags = .{

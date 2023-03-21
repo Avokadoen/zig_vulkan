@@ -2,6 +2,7 @@ const std = @import("std");
 
 const zgui = @import("zgui");
 const vk = @import("vulkan");
+const tracy = @import("ztracy");
 
 const render = @import("../render.zig");
 const Context = render.Context;
@@ -53,6 +54,9 @@ metrics_state: MetricState,
 benchmark: ?Benchmark = null,
 
 pub fn init(ctx: Context, gui_width: f32, gui_height: f32, state_binding: StateBinding, config: Config) ImguiGui {
+    const zone = tracy.ZoneN(@src(), @typeName(ImguiGui) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     // Color scheme
     const StyleCol = zgui.StyleCol;
     const style = zgui.getStyle();
@@ -84,6 +88,9 @@ pub fn init(ctx: Context, gui_width: f32, gui_height: f32, state_binding: StateB
 
 /// handle window resizing
 pub fn handleRescale(self: ImguiGui, gui_width: f32, gui_height: f32) void {
+    const zone = tracy.ZoneN(@src(), @typeName(ImguiGui) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     _ = self;
 
     zgui.io.setDisplaySize(gui_width, gui_height);
@@ -91,6 +98,9 @@ pub fn handleRescale(self: ImguiGui, gui_width: f32, gui_height: f32) void {
 
 // Starts a new imGui frame and sets up windows and ui elements
 pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metrics: bool, dt: f32) void {
+    const zone = tracy.ZoneN(@src(), @typeName(ImguiGui) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     _ = ctx;
     zgui.newFrame();
 
@@ -174,6 +184,9 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
 }
 
 inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
+    const zone = tracy.ZoneN(@src(), @typeName(ImguiGui) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     if (self.camera_window_active == false) return;
 
     zgui.setNextWindowSize(.{
@@ -209,6 +222,9 @@ inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
 }
 
 inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
+    const zone = tracy.ZoneN(@src(), @typeName(ImguiGui) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     if (self.metrics_window_active == false) return;
 
     zgui.setNextWindowSize(.{
@@ -273,6 +289,9 @@ inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
 }
 
 inline fn drawPostProcessWindowIfEnabled(self: *ImguiGui) void {
+    const zone = tracy.ZoneN(@src(), @typeName(ImguiGui) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     if (self.post_process_window_active == false) return;
 
     zgui.setNextWindowSize(.{
@@ -306,6 +325,9 @@ inline fn drawPostProcessWindowIfEnabled(self: *ImguiGui) void {
 }
 
 inline fn drawPostSunWindowIfEnabled(self: *ImguiGui) void {
+    const zone = tracy.ZoneN(@src(), @typeName(ImguiGui) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     if (self.sun_window_active == false) return;
 
     zgui.setNextWindowSize(.{

@@ -1,6 +1,8 @@
 const za = @import("zalgebra");
 const math = @import("std").math;
 
+const tracy = @import("ztracy");
+
 pub const Config = struct {
     animate: bool = true,
     animate_speed: f32 = 0.1,
@@ -33,6 +35,9 @@ lerp_color: [3]za.Vec3,
 static_pos_vec: za.Vec3,
 
 pub fn init(config: Config) Sun {
+    const zone = tracy.ZoneN(@src(), @typeName(Sun) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     const slerp_orientations = [_]za.Quat{
         za.Quat.fromEulerAngles(za.Vec3.new(0, 0, 0)),
         za.Quat.fromEulerAngles(za.Vec3.new(0, 10, 120)),
@@ -63,6 +68,9 @@ pub fn init(config: Config) Sun {
 }
 
 pub inline fn update(self: *Sun, delta_time: f32) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Sun) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     if (self.animate == false or self.device_data.enabled == 0) return;
 
     const next_index = (self.slerp_index + 1) % self.slerp_orientations.len;

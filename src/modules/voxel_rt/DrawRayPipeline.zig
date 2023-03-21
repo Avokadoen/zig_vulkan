@@ -60,6 +60,9 @@ pub fn init(
     target_image_info: ImageInfo,
     draw_ray_descriptor_info: [2]vk.DescriptorBufferInfo,
 ) !DrawRayPipeline {
+    const zone = tracy.ZoneN(@src(), @typeName(DrawRayPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     // TODO: change based on NVIDIA vs AMD vs Others?
     const work_group_dim = blk: {
         const device_properties = ctx.getPhysicalDeviceProperties();
@@ -288,8 +291,8 @@ pub fn init(
 }
 
 pub fn deinit(self: DrawRayPipeline, ctx: Context) void {
-    const draw_zone = tracy.ZoneN(@src(), "draw ray compute deinit");
-    defer draw_zone.End();
+    const zone = tracy.ZoneN(@src(), @typeName(DrawRayPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
     // TODO: waitDeviceIdle?
 
     ctx.vkd.freeCommandBuffers(
@@ -310,8 +313,8 @@ pub fn deinit(self: DrawRayPipeline, ctx: Context) void {
 }
 
 pub inline fn dispatch(self: *DrawRayPipeline, ctx: Context, wait_semaphore: *vk.Semaphore) !*vk.Semaphore {
-    const draw_zone = tracy.ZoneN(@src(), "draw ray compute dispatch");
-    defer draw_zone.End();
+    const zone = tracy.ZoneN(@src(), @typeName(DrawRayPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
 
     try ctx.vkd.resetCommandPool(ctx.logical_device, self.command_pool, .{});
     try self.recordCommandBuffer(ctx);
@@ -340,8 +343,8 @@ pub inline fn dispatch(self: *DrawRayPipeline, ctx: Context, wait_semaphore: *vk
 
 // TODO: static command buffer (only record once)
 pub fn recordCommandBuffer(self: DrawRayPipeline, ctx: Context) !void {
-    const record_zone = tracy.ZoneN(@src(), "draw ray compute record");
-    defer record_zone.End();
+    const zone = tracy.ZoneN(@src(), @typeName(DrawRayPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
 
     const command_begin_info = vk.CommandBufferBeginInfo{
         .flags = .{

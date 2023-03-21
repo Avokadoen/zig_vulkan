@@ -51,6 +51,9 @@ work_group_dim: Dispatch2,
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
 pub fn init(allocator: Allocator, ctx: Context, image_size: vk.Extent2D) !EmitRayPipeline {
+    const zone = tracy.ZoneN(@src(), @typeName(EmitRayPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     const work_group_dim = Dispatch2.init(ctx);
 
     // TODO: grab a dedicated compute queue if available https://github.com/Avokadoen/zig_vulkan/issues/163
@@ -269,6 +272,8 @@ pub fn init(allocator: Allocator, ctx: Context, image_size: vk.Extent2D) !EmitRa
 }
 
 pub fn deinit(self: EmitRayPipeline, ctx: Context) void {
+    const zone = tracy.ZoneN(@src(), @typeName(EmitRayPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
     // TODO: waitDeviceIdle?
 
     ctx.vkd.freeCommandBuffers(
@@ -292,6 +297,9 @@ pub fn deinit(self: EmitRayPipeline, ctx: Context) void {
 
 // TODO: mention semaphore lifetime
 pub inline fn dispatch(self: *EmitRayPipeline, ctx: Context, camera: Camera) !*vk.Semaphore {
+    const zone = tracy.ZoneN(@src(), @typeName(EmitRayPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     try ctx.vkd.resetCommandPool(ctx.logical_device, self.command_pool, .{});
     try self.recordCommandBuffer(ctx, camera);
 
@@ -322,8 +330,8 @@ pub inline fn dispatch(self: *EmitRayPipeline, ctx: Context, camera: Camera) !*v
 
 // TODO: static command buffer (only record once)
 pub fn recordCommandBuffer(self: EmitRayPipeline, ctx: Context, camera: Camera) !void {
-    const record_zone = tracy.ZoneN(@src(), "emit ray compute record");
-    defer record_zone.End();
+    const zone = tracy.ZoneN(@src(), @typeName(EmitRayPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
 
     const command_begin_info = vk.CommandBufferBeginInfo{
         .flags = .{

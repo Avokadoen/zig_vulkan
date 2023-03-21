@@ -96,8 +96,8 @@ init_command_pool: vk.CommandPool, // kept in case of rescale
 vertex_index_buffer: GpuBufferMemory,
 
 pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.Extent2D, grid_state: GridState, camera: *Camera, sun: *Sun, config: Config) !Pipeline {
-    const init_zone = tracy.ZoneN(@src(), "init pipeline");
-    defer init_zone.End();
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
 
     const pool_info = vk.CommandPoolCreateInfo{
         .flags = .{ .transient_bit = true },
@@ -368,6 +368,9 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
 }
 
 pub fn deinit(self: Pipeline, ctx: Context) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     ctx.vkd.queueWaitIdle(ctx.compute_queue) catch {};
     ctx.vkd.queueWaitIdle(ctx.graphics_queue) catch {};
     ctx.vkd.queueWaitIdle(ctx.present_queue) catch {};
@@ -438,8 +441,8 @@ pub const DrawError = error{
 };
 /// draw a new frame, delta time is only used by gui
 pub inline fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
-    const draw_zone = tracy.ZoneN(@src(), "draw");
-    defer draw_zone.End();
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
 
     // const compute_semaphore = try self.compute_pipeline.dispatch(ctx, self.camera.*, self.sun.*);
 
@@ -543,23 +546,33 @@ pub inline fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
 }
 
 pub fn setDenoiseSampleCount(self: *Pipeline, sample_count: i32) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
     self.gfx_pipeline.shader_constants.samples = sample_count;
 }
 
 pub fn setDenoiseDistributionBias(self: *Pipeline, distribution_bias: f32) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
     self.gfx_pipeline.shader_constants.distribution_bias = distribution_bias;
 }
 
 pub fn setDenoiseInverseHueTolerance(self: *Pipeline, inverse_hue_tolerance: f32) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
     self.gfx_pipeline.shader_constants.inverse_hue_tolerance = inverse_hue_tolerance;
 }
 
 pub fn setDenoisePixelMultiplier(self: *Pipeline, pixel_multiplier: f32) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
     self.gfx_pipeline.shader_constants.pixel_multiplier = pixel_multiplier;
 }
 
 /// Transfer grid data to GPU
 pub fn transferGridState(self: *Pipeline, ctx: Context, grid: GridState) !void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
     _ = self;
     _ = ctx;
     _ = grid;
@@ -576,6 +589,8 @@ pub fn transferGridState(self: *Pipeline, ctx: Context, grid: GridState) !void {
 
 /// Transfer material data to GPU
 pub fn transferMaterials(self: *Pipeline, ctx: Context, offset: usize, materials: []const gpu_types.Material) !void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
     _ = self;
     _ = ctx;
     _ = offset;
@@ -592,6 +607,8 @@ pub fn transferMaterials(self: *Pipeline, ctx: Context, offset: usize, materials
 
 /// Transfer albedo data to GPU
 pub fn transferAlbedos(self: *Pipeline, ctx: Context, offset: usize, albedo: []const gpu_types.Albedo) !void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
     _ = self;
     _ = ctx;
     _ = offset;
@@ -608,6 +625,8 @@ pub fn transferAlbedos(self: *Pipeline, ctx: Context, offset: usize, albedo: []c
 
 /// Transfer metal data to GPU
 pub fn transferMetals(self: *Pipeline, ctx: Context, offset: usize, metals: []const gpu_types.Metal) !void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
     _ = self;
     _ = ctx;
     _ = offset;
@@ -624,6 +643,8 @@ pub fn transferMetals(self: *Pipeline, ctx: Context, offset: usize, metals: []co
 
 /// Transfer dielectric data to GPU
 pub fn transferDielectrics(self: *Pipeline, ctx: Context, offset: usize, dielectrics: []const gpu_types.Dielectric) !void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
     _ = self;
     _ = ctx;
     _ = offset;
@@ -640,6 +661,8 @@ pub fn transferDielectrics(self: *Pipeline, ctx: Context, offset: usize, dielect
 
 /// Transfer higher order grid data to GPU
 pub inline fn transferHigherOrderGrid(self: *Pipeline, ctx: Context, offset: usize, higher_order_grid: []const u8) !void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
     _ = self;
     _ = ctx;
     _ = offset;
@@ -656,6 +679,8 @@ pub inline fn transferHigherOrderGrid(self: *Pipeline, ctx: Context, offset: usi
 
 /// Transfer entry types data to GPU
 pub inline fn transferBrickStatuses(self: *Pipeline, ctx: Context, offset: usize, brick_statuses: []const GridState.BrickStatusMask) !void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
     _ = self;
     _ = ctx;
     _ = offset;
@@ -672,6 +697,8 @@ pub inline fn transferBrickStatuses(self: *Pipeline, ctx: Context, offset: usize
 
 /// Transfer entry indices data to GPU
 pub inline fn transferBrickIndices(self: *Pipeline, ctx: Context, offset: usize, brick_indices: []const GridState.BrickIndex) !void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
     _ = self;
     _ = ctx;
     _ = offset;
@@ -688,6 +715,8 @@ pub inline fn transferBrickIndices(self: *Pipeline, ctx: Context, offset: usize,
 
 /// Transfer bricks data to GPU
 pub fn transferBricks(self: *Pipeline, ctx: Context, offset: usize, bricks: []const GridState.Brick) !void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
     _ = self;
     _ = ctx;
     _ = offset;
@@ -704,6 +733,8 @@ pub fn transferBricks(self: *Pipeline, ctx: Context, offset: usize, bricks: []co
 
 /// Transfer material index data to GPU
 pub inline fn transferMaterialIndices(self: *Pipeline, ctx: Context, offset: usize, material_indices: []const u8) !void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
     _ = self;
     _ = ctx;
     _ = offset;
@@ -722,8 +753,8 @@ pub inline fn transferMaterialIndices(self: *Pipeline, ctx: Context, offset: usi
 /// Used to update the pipeline according to changes in the window spec
 /// This functions should only be called from the main thread (see glfwGetFramebufferSize)
 fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
-    const rescale_zone = tracy.ZoneN(@src(), "rescale pipeline");
-    defer rescale_zone.End();
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
 
     var window_size = ctx.window_ptr.*.getFramebufferSize();
     if (window_size.width == 0 or window_size.height == 0) {
@@ -775,6 +806,9 @@ fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
 
 /// prepare gfx_pipeline + imgui_pipeline command buffer
 fn recordCommandBuffers(self: Pipeline, ctx: Context) !void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     // copy begin info
     for (0..self.gfx_pipeline.command_buffers.len) |i| {
         try self.recordCommandBuffer(ctx, i);
@@ -783,8 +817,8 @@ fn recordCommandBuffers(self: Pipeline, ctx: Context) !void {
 
 // TODO: properly handling of errors
 fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
-    const record_zone = tracy.ZoneN(@src(), "record gfx & imgui commands");
-    defer record_zone.End();
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
 
     const command_buffer = self.gfx_pipeline.command_buffers[index];
     try ctx.vkd.beginCommandBuffer(command_buffer, &command_buffer_info);

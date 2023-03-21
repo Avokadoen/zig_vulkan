@@ -1,6 +1,7 @@
 /// This file contains logic to perform a simple benchmark report to test the renderer
 const std = @import("std");
 const za = @import("zalgebra");
+const tracy = @import("ztracy");
 
 const BrickState = @import("brick/State.zig");
 const Camera = @import("Camera.zig");
@@ -20,6 +21,9 @@ report: Report,
 
 /// You should probably use VoxelRT.createBenchmark ...
 pub fn init(camera: *Camera, brick_state: BrickState, sun_enabled: bool) Benchmark {
+    const zone = tracy.ZoneN(@src(), @typeName(Benchmark) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     const path_point_fraction = Configuration.benchmark_duration / @intToFloat(f32, Configuration.path_points.len);
     const path_orientation_fraction = Configuration.benchmark_duration / @intToFloat(f32, Configuration.path_orientations.len);
 
@@ -44,6 +48,9 @@ pub fn init(camera: *Camera, brick_state: BrickState, sun_enabled: bool) Benchma
 
 /// Update benchmark and camera state, return true if benchmark has completed
 pub fn update(self: *Benchmark, dt: f32) bool {
+    const zone = tracy.ZoneN(@src(), @typeName(Benchmark) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     self.timer += dt;
 
     const path_point_index = @floatToInt(usize, @divFloor(self.timer, self.path_point_fraction));
@@ -74,6 +81,9 @@ pub fn update(self: *Benchmark, dt: f32) bool {
 }
 
 pub fn printReport(self: Benchmark, device_name: []const u8) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Benchmark) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     self.report.print(device_name, self.camera.d_camera, self.sun_enabled);
 }
 
@@ -88,6 +98,9 @@ pub const Report = struct {
     brick_dim: Vec3U,
 
     pub fn init(brick_state: BrickState) Report {
+        const zone = tracy.ZoneN(@src(), @typeName(Report) ++ " " ++ @src().fn_name);
+        defer zone.End();
+
         return Report{
             .min_delta_time = std.math.f32_max,
             .max_delta_time = 0,
@@ -102,10 +115,16 @@ pub const Report = struct {
     }
 
     pub fn average(self: Report) f32 {
+        const zone = tracy.ZoneN(@src(), @typeName(Report) ++ " " ++ @src().fn_name);
+        defer zone.End();
+
         return self.delta_time_sum / @intToFloat(f32, self.delta_time_sum_samples);
     }
 
     pub fn print(self: Report, device_name: []const u8, d_camera: Camera.Device, sun_enabled: bool) void {
+        const zone = tracy.ZoneN(@src(), @typeName(Report) ++ " " ++ @src().fn_name);
+        defer zone.End();
+
         const report_fmt = "{s: <25}: {d:>8.3}\n{s: <25}: {d:>8.3}\n{s: <25}: {d:>8.3}\n";
         const sun_fmt = "{s: <25}: {any}\n";
         const camera_fmt = "Camera state info:\n{s: <30}: (x = {d}, y = {d})\n{s: <30}: {d}\n{s: <30}: {d}\n";

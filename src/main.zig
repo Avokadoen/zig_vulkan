@@ -5,7 +5,7 @@ const ArrayList = std.ArrayList;
 
 const glfw = @import("glfw");
 const za = @import("zalgebra");
-const ztracy = @import("ztracy");
+const tracy = @import("ztracy");
 
 const render = @import("modules/render.zig");
 const consts = render.consts;
@@ -37,9 +37,9 @@ var mouse_delta = za.Vec2.zero();
 var mouse_ignore_frames: u32 = 5;
 
 pub fn main() anyerror!void {
-    ztracy.SetThreadName("main thread");
-    const main_zone = ztracy.ZoneN(@src(), "main");
-    defer main_zone.End();
+    tracy.SetThreadName("main thread");
+    const zone = tracy.ZoneN(@src(), @src().fn_name);
+    defer zone.End();
 
     const stderr = std.io.getStdErr().writer();
 
@@ -201,7 +201,7 @@ pub fn main() anyerror!void {
 
         input.updateCursor() catch {};
 
-        ztracy.FrameMark();
+        tracy.FrameMark();
     }
 }
 

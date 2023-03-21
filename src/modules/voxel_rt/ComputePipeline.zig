@@ -67,8 +67,8 @@ work_group_dim: extern struct {
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
 pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, state_config: StateConfigs) !ComputePipeline {
-    const draw_zone = tracy.ZoneN(@src(), "compute init");
-    defer draw_zone.End();
+    const zone = tracy.ZoneN(@src(), @typeName(ComputePipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
 
     var self: ComputePipeline = undefined;
     self.allocator = allocator;
@@ -378,8 +378,8 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
 }
 
 pub fn deinit(self: ComputePipeline, ctx: Context) void {
-    const draw_zone = tracy.ZoneN(@src(), "compute deinit");
-    defer draw_zone.End();
+    const zone = tracy.ZoneN(@src(), @typeName(ComputePipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
 
     // wait for all fences
     _ = ctx.vkd.waitForFences(
@@ -413,8 +413,8 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
 }
 
 pub inline fn dispatch(self: *ComputePipeline, ctx: Context, camera: Camera, sun: Sun) !vk.Semaphore {
-    const draw_zone = tracy.ZoneN(@src(), "compute dispatch");
-    defer draw_zone.End();
+    const zone = tracy.ZoneN(@src(), @typeName(ComputePipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
 
     {
         const wait_compute_zone = tracy.ZoneN(@src(), "idle wait compute");
@@ -464,8 +464,8 @@ pub inline fn dispatch(self: *ComputePipeline, ctx: Context, camera: Camera, sun
 }
 
 pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, camera: Camera, sun: Sun) !void {
-    const draw_zone = tracy.ZoneN(@src(), "compute record");
-    defer draw_zone.End();
+    const zone = tracy.ZoneN(@src(), @typeName(ComputePipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
 
     const command_begin_info = vk.CommandBufferBeginInfo{
         .flags = .{

@@ -1,5 +1,6 @@
 const std = @import("std");
 const za = @import("zalgebra");
+const tracy = @import("ztracy");
 const Vec3 = @Vector(3, f32);
 
 pub const Config = struct {
@@ -34,6 +35,9 @@ vertical_fov: f32,
 d_camera: Device,
 
 pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Config) Camera {
+    const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     const aspect_ratio = @intToFloat(f32, image_width) / @intToFloat(f32, image_height);
 
     const a: comptime_float = std.math.pi * (1.0 / 180.0);
@@ -78,30 +82,48 @@ pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Conf
 
 /// set camera movement speed to sprint
 pub fn activateSprint(self: *Camera) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     self.movement_speed = self.normal_speed * self.sprint_speed;
 }
 
 /// set camera movement speed to normal speed
 pub fn disableSprint(self: *Camera) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     self.movement_speed = self.normal_speed;
 }
 
 pub fn setOrigin(self: *Camera, origin: Vec3) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     self.d_camera.origin = origin;
     self.propogatePitchChange();
 }
 
 pub fn disableInput(self: *Camera) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     self.user_input_diabled = true;
 }
 
 pub fn enableInput(self: *Camera) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     self.user_input_diabled = false;
 }
 
 /// camera should always be reset after being used
 /// programtically to avoid invalid camera state
 pub fn reset(self: *Camera) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     self.enableInput();
     self.yaw = za.Quat.identity();
     self.pitch = za.Quat.identity();
@@ -110,6 +132,9 @@ pub fn reset(self: *Camera) void {
 
 /// Move camera
 pub fn translate(self: *Camera, delta_time: f32, by: za.Vec3) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     if (self.user_input_diabled) return;
 
     const norm = by.norm();
@@ -122,6 +147,9 @@ pub fn translate(self: *Camera, delta_time: f32, by: za.Vec3) void {
 }
 
 pub fn turnPitch(self: *Camera, angle: f32) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     if (self.user_input_diabled) return;
 
     // Axis angle to quaternion: https://www.euclideanspace.com/maths/geometry/rotations/conversions/angleToQuaternion/index.htm
@@ -141,6 +169,9 @@ pub fn turnPitch(self: *Camera, angle: f32) void {
 }
 
 pub fn turnYaw(self: *Camera, angle: f32) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     if (self.user_input_diabled) return;
 
     const h_angle = angle * self.turn_rate;
@@ -151,20 +182,32 @@ pub fn turnYaw(self: *Camera, angle: f32) void {
 }
 
 pub inline fn orientation(self: Camera) za.Quat {
+    const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     return self.yaw.mul(self.pitch).norm();
 }
 
 /// Get byte size of Camera's GPU data
 pub inline fn getGpuSize() u64 {
+    const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     return @sizeOf(Device);
 }
 
 inline fn forwardDir(self: Camera) za.Vec3 {
+    const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     return self.orientation().rotateVec(za.Vec3.new(0, 0, 1));
 }
 
 // used to update values that depend on camera orientation
 pub inline fn propogatePitchChange(self: *Camera) void {
+    const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     const forward = self.forwardDir();
     const right = za.Vec3.up().cross(forward).norm();
     const up = forward.cross(right).norm();
@@ -175,6 +218,9 @@ pub inline fn propogatePitchChange(self: *Camera) void {
 }
 
 inline fn lowerLeftCorner(self: Camera) Vec3 {
+    const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     const @"0.5" = @splat(3, @as(f32, 0.5));
     return self.d_camera.origin - self.d_camera.horizontal * @"0.5" - self.d_camera.vertical * @"0.5" - self.forwardDir().data;
 }

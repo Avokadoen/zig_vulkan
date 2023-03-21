@@ -60,6 +60,9 @@ pub fn init(
     image_memory_capacity: vk.DeviceSize,
     image_memory_cursor: *vk.DeviceSize,
 ) !ImguiPipeline {
+    const zone = tracy.ZoneN(@src(), @typeName(ImguiPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     // initialize zgui
     zgui.init(allocator);
     errdefer zgui.deinit();
@@ -463,6 +466,9 @@ pub fn init(
 }
 
 pub fn deinit(self: ImguiPipeline, ctx: Context) void {
+    const zone = tracy.ZoneN(@src(), @typeName(ImguiPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
     zgui.plot.deinit();
     zgui.deinit();
 
@@ -486,8 +492,8 @@ pub fn recordCommandBuffer(
     buffer_offset: vk.DeviceSize,
     vertex_index_buffer: GpuBufferMemory,
 ) !void {
-    const record_zone = tracy.ZoneN(@src(), "imgui commands");
-    defer record_zone.End();
+    const zone = tracy.ZoneN(@src(), @typeName(ImguiPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
 
     ctx.vkd.cmdBindDescriptorSets(
         command_buffer,
@@ -572,8 +578,8 @@ pub fn updateBuffers(
     ctx: Context,
     vertex_index_buffer: *GpuBufferMemory,
 ) !void {
-    const update_buffers_zone = tracy.ZoneN(@src(), "imgui: vertex & index update");
-    defer update_buffers_zone.End();
+    const zone = tracy.ZoneN(@src(), @typeName(ImguiPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
 
     const draw_data = zgui.getDrawData();
     if (draw_data.valid == false) {
