@@ -221,54 +221,13 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     };
     const render_complete_fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
 
-    // const MinSize = struct {
-    //     fn storage(ctx1: Context, size: u64) u64 {
-    //         const storage_size = ctx1.physical_device_limits.min_storage_buffer_offset_alignment;
-    //         return storage_size * (std.math.divCeil(vk.DeviceSize, size, storage_size) catch unreachable);
-    //     }
-
-    //     fn uniform(ctx1: Context, size: u64) u64 {
-    //         const uniform_size = ctx1.physical_device_limits.min_uniform_buffer_offset_alignment;
-    //         return uniform_size * (std.math.divCeil(vk.DeviceSize, size, uniform_size) catch unreachable);
-    //     }
-    // };
-
-    // var compute_pipeline = blk: {
-    //     const uniform_sizes = [_]u64{
-    //         // use storage min size for last uniform entry
-    //         MinSize.storage(ctx, @sizeOf(GridState.Device)),
-    //     };
-    //     const storage_sizes = [_]u64{
-    //         MinSize.storage(ctx, @sizeOf(gpu_types.Material) * config.material_buffer),
-    //         MinSize.storage(ctx, @sizeOf(gpu_types.Albedo) * config.albedo_buffer),
-    //         MinSize.storage(ctx, @sizeOf(gpu_types.Metal) * config.metal_buffer),
-    //         MinSize.storage(ctx, @sizeOf(gpu_types.Dielectric) * config.dielectric_buffer),
-    //         MinSize.storage(ctx, @sizeOf(u8) * grid_state.higher_order_grid.len),
-    //         MinSize.storage(ctx, @sizeOf(GridState.BrickStatusMask) * grid_state.brick_statuses.len),
-    //         MinSize.storage(ctx, @sizeOf(GridState.BrickIndex) * grid_state.brick_indices.len),
-    //         MinSize.storage(ctx, @sizeOf(GridState.Brick) * grid_state.bricks.len),
-    //         MinSize.storage(ctx, @sizeOf(u8) * grid_state.material_indices.len),
-    //     };
-    //     const state_configs = ComputePipeline.StateConfigs{ .uniform_sizes = uniform_sizes[0..], .storage_sizes = storage_sizes[0..] };
-
-    //     break :blk try ComputePipeline.init(
-    //         allocator,
-    //         ctx,
-    //         target_image_info,
-    //         state_configs,
-    //     );
-    // };
-    // errdefer compute_pipeline.deinit(ctx);
-
-    // try compute_pipeline.recordCommandBuffer(ctx, camera.*, sun.*);
-
     var staging_buffers = try StagingRamp.init(ctx, allocator, config.staging_buffers);
     errdefer staging_buffers.deinit(ctx, allocator);
 
     const emit_ray_pipeline = try EmitRayPipeline.init(allocator, ctx, internal_render_resolution);
     errdefer emit_ray_pipeline.deinit(ctx);
 
-    const traverse_ray_pipeline = try TraverseRayPipeline.init(
+    var traverse_ray_pipeline = try TraverseRayPipeline.init(
         allocator,
         ctx,
         &emit_ray_pipeline.ray_buffer,
@@ -289,7 +248,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         ctx,
         &emit_ray_pipeline.ray_buffer,
         target_image_info,
-        traverse_ray_pipeline.out_ray_buffer_infos,
+        traverse_ray_pipeline.outRayBufferInfos(),
     );
     errdefer draw_ray_pipeline.deinit(ctx);
 
@@ -329,6 +288,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .grid_state = grid_state,
         .sun_ptr = sun,
         .gfx_pipeline_shader_constants = gfx_pipeline.shader_constants,
+        .brick_grid_state = traverse_ray_pipeline.brick_grid_state,
     };
     const gui = ImguiGui.init(
         ctx,
@@ -567,6 +527,19 @@ pub fn setDenoisePixelMultiplier(self: *Pipeline, pixel_multiplier: f32) void {
     const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
     self.gfx_pipeline.shader_constants.pixel_multiplier = pixel_multiplier;
+}
+
+/// Flush the current traverse_ray_pipeline brick grid state to the GPU
+pub fn transferCurrentBrickGridState(self: *Pipeline, ctx: Context) !void {
+    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
+    try self.staging_buffers.transferToBuffer(
+        ctx,
+        &self.traverse_ray_pipeline.voxel_scene_buffer,
+        self.traverse_ray_pipeline.brick_grid_state_buffer_offset,
+        TraverseRayPipeline.BrickGridState,
+        &[1]TraverseRayPipeline.BrickGridState{self.traverse_ray_pipeline.brick_grid_state.*},
+    );
 }
 
 /// Transfer grid data to GPU

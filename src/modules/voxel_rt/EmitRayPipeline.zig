@@ -31,6 +31,7 @@ pipeline: vk.Pipeline,
 
 command_pool: vk.CommandPool,
 command_buffer: vk.CommandBuffer,
+queue_family_index: u32,
 queue: vk.Queue,
 complete_semaphore: vk.Semaphore,
 
@@ -57,7 +58,8 @@ pub fn init(allocator: Allocator, ctx: Context, image_size: vk.Extent2D) !EmitRa
     const work_group_dim = Dispatch2.init(ctx);
 
     // TODO: grab a dedicated compute queue if available https://github.com/Avokadoen/zig_vulkan/issues/163
-    const queue = ctx.vkd.getDeviceQueue(ctx.logical_device, ctx.queue_indices.compute, @intCast(u32, 0));
+    const queue_family_index = ctx.queue_indices.compute;
+    const queue = ctx.vkd.getDeviceQueue(ctx.logical_device, queue_family_index, @intCast(u32, 0));
 
     // TODO: allocate according to need
     var ray_buffer = try GpuBufferMemory.init(
@@ -260,6 +262,7 @@ pub fn init(allocator: Allocator, ctx: Context, image_size: vk.Extent2D) !EmitRa
         .pipeline = pipeline,
         .command_pool = command_pool,
         .command_buffer = command_buffer,
+        .queue_family_index = queue_family_index,
         .queue = queue,
         .complete_semaphore = complete_semaphore,
         .target_descriptor_layout = target_descriptor_layout,
@@ -364,13 +367,33 @@ pub fn recordCommandBuffer(self: EmitRayPipeline, ctx: Context, camera: Camera) 
         undefined,
     );
 
-    // put ray cursor at 0
     ctx.vkd.cmdFillBuffer(
         self.command_buffer,
         self.ray_buffer.buffer,
         RayBufferCursor.buffer_offset,
         pow2Align(@sizeOf(RayBufferCursor), 4),
         0,
+    );
+    const buffer_memory_barrier = vk.BufferMemoryBarrier{
+        .src_access_mask = .{ .transfer_write_bit = true },
+        .dst_access_mask = .{ .shader_read_bit = true },
+        .src_queue_family_index = self.queue_family_index,
+        .dst_queue_family_index = self.queue_family_index,
+        .buffer = self.ray_buffer.buffer,
+        .offset = RayBufferCursor.buffer_offset,
+        .size = pow2Align(@sizeOf(RayBufferCursor), 4),
+    };
+    ctx.vkd.cmdPipelineBarrier(
+        self.command_buffer,
+        .{ .transfer_bit = true },
+        .{ .compute_shader_bit = true },
+        .{},
+        0,
+        undefined,
+        1,
+        @ptrCast([*]const vk.BufferMemoryBarrier, &buffer_memory_barrier),
+        0,
+        undefined,
     );
 
     const x_dispatch = @ceil(@intToFloat(f32, self.image_size.width) / @intToFloat(f32, self.work_group_dim.x));
@@ -381,6 +404,6 @@ pub fn recordCommandBuffer(self: EmitRayPipeline, ctx: Context, camera: Camera) 
 }
 
 // TODO: move to common math/mem file
-pub inline fn pow2Align(alignment: vk.DeviceSize, size: vk.DeviceSize) vk.DeviceSize {
+pub inline fn pow2Align(size: vk.DeviceSize, alignment: vk.DeviceSize) vk.DeviceSize {
     return (size + alignment - 1) & ~(alignment - 1);
 }

@@ -12,8 +12,6 @@ struct Ray {
     vec3 origin;
     float internal_reflection;
     vec3 direction;
-    // TODO: Bitmask instead of single ignore value.
-    //       Refactor needed to make material types 1, 2, 3 instead of 0, 1, 2
     float t_value;
     vec3 color;
     uint pixel_coord;
@@ -30,6 +28,12 @@ vec3 BackgroundColor(Ray r) {
     return background_color;
 }
 
+struct RayBufferCursor {
+    // how many rays that was written to the buffer in total
+    int max_index;
+    // where the last ray write occured
+    int cursor;
+};
 
 struct HitRecord {
     vec3 point;

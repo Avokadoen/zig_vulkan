@@ -11,9 +11,9 @@ layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z = 1) in;
 
 layout(Rgba8, binding = 0) uniform writeonly image2D img_output;
 
-layout (set = 0, binding = 1) buffer RayBufferCursor
+layout (set = 0, binding = 1) buffer CursorBuffer
 {
-    int ray_cursor;
+    RayBufferCursor cursor;
 };
 layout (set = 0, binding = 2) readonly buffer RayBuffer {
     Ray rays[];
@@ -24,11 +24,11 @@ shared int warp_start_index;
 void main() {
     if (gl_LocalInvocationIndex == 0) {
         const int work_size = int(gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z);
-        warp_start_index = work_size * atomicAdd(ray_cursor, -1);
+        warp_start_index = work_size * atomicAdd(cursor.cursor, -1);
     }
     barrier();
     const int ray_index = warp_start_index + int(gl_LocalInvocationIndex);
-    if (ray_index < 0) return;
+    if (ray_index < 0 || ray_index > cursor.max_index) return;
 
     const Ray ray = rays[ray_index];
     const ivec2 pixel_coord = ivec2(

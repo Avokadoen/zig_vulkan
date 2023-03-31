@@ -22,9 +22,8 @@ layout (push_constant) uniform PushConstants {
     int max_bounce;
 } push_constant;
 
-layout (set = 0, binding = 0) buffer RayBufferCursor
-{
-    int ray_cursor;
+layout (set = 0, binding = 0) buffer CursorBuffer {
+    RayBufferCursor cursor;
 };
 layout (set = 0, binding = 1) writeonly buffer RayBuffer {
     Ray rays[];
@@ -33,12 +32,24 @@ layout (set = 0, binding = 1) writeonly buffer RayBuffer {
 shared uint warp_start_index;
 
 void main() {
-    const uvec2 pixel_coord = uvec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y);
-    if (pixel_coord.x >= push_constant.image_width || pixel_coord.y >= push_constant.image_height) {
-        // don't emit ray for discarded pixels
+    const uint pixel_count = push_constant.image_width * push_constant.image_height;
+    if (gl_GlobalInvocationID.x >= pixel_count) {
         return;
     }
 
+    if (gl_LocalInvocationIndex == 0) {
+        const uint work_size = gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z;
+        warp_start_index = work_size * atomicAdd(cursor.cursor, 1);
+    }
+    barrier();
+    
+    const uint ray_index = warp_start_index + gl_LocalInvocationIndex;
+    if (ray_index >= pixel_count) {
+        return;
+    }
+    atomicMax(cursor.max_index, int(ray_index));
+
+    const uvec2 pixel_coord = uvec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y);
     const float x = float(pixel_coord.x);
     const float y = float(pixel_coord.y);
     // TODO: proper random (blue noise)
@@ -48,20 +59,14 @@ void main() {
     const float noise_y = hash12(vec2(x, y + sample_i) * 0.2 * float(sample_i > 0));
     const float v = (y + noise_y) / float(push_constant.image_height - 1);
     
-    if (gl_LocalInvocationIndex == 0) {
-        const uint work_size = gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z;
-        warp_start_index = work_size * atomicAdd(ray_cursor, 1);
-    }
-    barrier();
-    
-    const uint ray_index = warp_start_index + gl_LocalInvocationIndex;
     const vec3 ray_dir = fma(push_constant.horizontal, vec3(u), push_constant.lower_left_corner) + fma(vec3(v), push_constant.vertical, -push_constant.origin);
     const uint pixel = pixel_coord.x << 16 | pixel_coord.y;
+
     rays[ray_index] = Ray(
-        push_constant.origin, // positions
+        push_constant.origin, // origin
         1,                    // internal_reflection
         ray_dir,              // direction
-        IGNORE_MAT_NONE,      // ignore material
+        0,                    // t value
         vec3(0),              // color
         pixel                 // pixel coord
     );

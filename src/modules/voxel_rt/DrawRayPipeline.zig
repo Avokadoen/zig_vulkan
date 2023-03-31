@@ -402,8 +402,3 @@ pub fn recordCommandBuffer(self: DrawRayPipeline, ctx: Context) !void {
     ctx.vkd.cmdDispatch(self.command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
     try ctx.vkd.endCommandBuffer(self.command_buffer);
 }
-
-// TODO: move to common math/mem file
-pub inline fn pow2Align(alignment: vk.DeviceSize, size: vk.DeviceSize) vk.DeviceSize {
-    return (size + alignment - 1) & ~(alignment - 1);
-}

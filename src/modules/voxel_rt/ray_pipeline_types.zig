@@ -3,7 +3,10 @@ const render = @import("../render.zig");
 const Context = render.Context;
 
 pub const RayBufferCursor = extern struct {
-    count: c_int,
+    /// how many rays that was written to the buffer in total
+    total_written: c_int,
+    /// where the last ray write occured
+    cursor: c_int,
 
     pub const buffer_offset = 0;
 };
@@ -13,7 +16,7 @@ pub const Ray = extern struct {
     origin: [3]f32,
     internal_reflection: f32,
     direction: [3]f32,
-    material_ignore: c_uint,
+    t_value: f32,
     color: [3]f32,
     pixel_coord: c_uint,
 };

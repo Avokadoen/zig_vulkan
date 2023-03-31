@@ -19,7 +19,8 @@ const RayBufferCursor = ray_types.RayBufferCursor;
 const Ray = ray_types.Ray;
 const Dispatch2 = ray_types.Dispatch2;
 
-const BrickGridState = extern struct {
+// TODO: move types
+pub const BrickGridState = extern struct {
     /// how many voxels in each axis
     voxel_dim: [3]f32,
     padding0: f32,
@@ -31,9 +32,19 @@ const BrickGridState = extern struct {
     min_point: [3]f32,
     scale: f32,
 };
-const Brick = packed struct {
+pub const Brick = packed struct {
     solid_mask: u512,
 };
+
+// TODO: convert to a struct ...
+pub const RayBufferInfo = enum(u32) {
+    in_ray_cursor,
+    in_ray_buffer,
+    out_ray_cursor,
+    out_ray_buffer,
+};
+const ray_buffer_info_count = @typeInfo(RayBufferInfo).Enum.fields.len;
+
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
 /// compute shader that draws to a target texture
@@ -46,10 +57,11 @@ pipeline: vk.Pipeline,
 
 command_pool: vk.CommandPool,
 command_buffer: vk.CommandBuffer,
+queue_family_index: u32,
 queue: vk.Queue,
 complete_semaphore: vk.Semaphore,
 
-out_ray_buffer_infos: [2]vk.DescriptorBufferInfo,
+ray_buffer_infos: [ray_buffer_info_count]vk.DescriptorBufferInfo,
 
 target_descriptor_layout: vk.DescriptorSetLayout,
 target_descriptor_pool: vk.DescriptorPool,
@@ -58,7 +70,8 @@ target_descriptor_set: vk.DescriptorSet,
 image_size: vk.Extent2D,
 ray_buffer: *const GpuBufferMemory,
 
-brick_grid_state: BrickGridState,
+brick_grid_state_buffer_offset: vk.DeviceSize,
+brick_grid_state: *BrickGridState,
 voxel_scene_buffer: GpuBufferMemory,
 
 work_group_dim: Dispatch2,
@@ -84,7 +97,8 @@ pub fn init(
     const work_group_dim = Dispatch2.init(ctx);
 
     // TODO: grab a dedicated compute queue if available https://github.com/Avokadoen/zig_vulkan/issues/163
-    const queue = ctx.vkd.getDeviceQueue(ctx.logical_device, ctx.queue_indices.compute, @intCast(u32, 0));
+    const queue_family_index = ctx.queue_indices.compute;
+    const queue = ctx.vkd.getDeviceQueue(ctx.logical_device, queue_family_index, @intCast(u32, 0));
 
     const command_pool = blk: {
         const pool_info = vk.CommandPoolCreateInfo{
@@ -107,32 +121,56 @@ pub fn init(
     errdefer voxel_scene_buffer.deinit(ctx);
     try voxel_scene_buffer.fill(ctx, command_pool, 0, voxel_scene_buffer.size, 0);
 
-    const brick_grid_state = BrickGridState{
-        .voxel_dim = [_]f32{8} ** 3,
-        .padding0 = 0,
-        .dim = [_]f32{ 64, 64, 64 },
-        .padding1 = 0,
-        .min_point = [_]f32{-1} ** 3,
-        .scale = 1,
+    const brick_grid_state_buffer_offset: vk.DeviceSize = 0;
+    const brick_grid_state: *BrickGridState = blk: {
+        var state = try allocator.create(BrickGridState);
+        state.* = BrickGridState{
+            .voxel_dim = [_]f32{8} ** 3,
+            .padding0 = 0,
+            .dim = [_]f32{ 32, 32, 32 },
+            .padding1 = 0,
+            .min_point = [_]f32{-1} ** 3,
+            .scale = 2,
+        };
+
+        break :blk state;
     };
-    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, 0, BrickGridState, &.{brick_grid_state});
+    errdefer allocator.destroy(brick_grid_state);
+
+    try staging_buffer.transferToBuffer(
+        ctx,
+        &voxel_scene_buffer,
+        brick_grid_state_buffer_offset,
+        BrickGridState,
+        &[1]BrickGridState{brick_grid_state.*},
+    );
+    const total_bricks = @floatToInt(vk.DeviceSize, brick_grid_state.dim[0] * brick_grid_state.dim[1] * brick_grid_state.dim[2]);
+    std.debug.assert(total_bricks * @sizeOf(Brick) < voxel_scene_buffer.size);
 
     const brick_buffer_offset = pow2Align(
         @sizeOf(BrickGridState),
         ctx.physical_device_limits.min_storage_buffer_offset_alignment,
     );
-    const test_brick = Brick{
-        .solid_mask = 12321,
+    const test_brick_none = Brick{
+        .solid_mask = @as(u512, 0),
+    };
+    const test_brick_one = Brick{
+        .solid_mask = @as(u512, 1),
+    };
+    _ = test_brick_one;
+    const test_brick_all = Brick{
+        .solid_mask = ~@as(u512, 0),
     };
     try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, brick_buffer_offset, Brick, &.{
-        test_brick,
-        test_brick,
-        test_brick,
-        test_brick,
-        test_brick,
-        test_brick,
-        test_brick,
-        test_brick,
+        test_brick_none,
+        test_brick_all,
+        // test_brick_one,
+        // test_brick_one,
+        // test_brick_one,
+        // test_brick_one,
+        // test_brick_one,
+        // test_brick_all,
+        // test_brick_one,
     });
 
     const target_descriptor_layout = blk: {
@@ -247,40 +285,43 @@ pub fn init(
         try ctx.vkd.allocateDescriptorSets(ctx.logical_device, &descriptor_set_alloc_info, @ptrCast([*]vk.DescriptorSet, &target_descriptor_set));
     }
 
-    var out_ray_buffer_infos: [2]vk.DescriptorBufferInfo = undefined;
+    var ray_buffer_infos: [ray_buffer_info_count]vk.DescriptorBufferInfo = undefined;
     {
-        const in_ray_buffer_cursor_buffer_info = vk.DescriptorBufferInfo{
+        var in_ray_buffer_cursor = &ray_buffer_infos[@enumToInt(RayBufferInfo.in_ray_cursor)];
+        in_ray_buffer_cursor.* = vk.DescriptorBufferInfo{
             .buffer = ray_buffer.buffer,
             .offset = RayBufferCursor.buffer_offset,
             .range = @sizeOf(RayBufferCursor),
         };
-        const in_ray_buffer_buffer_info = vk.DescriptorBufferInfo{
+
+        var in_ray_buffer = &ray_buffer_infos[@enumToInt(RayBufferInfo.in_ray_buffer)];
+        in_ray_buffer.* = vk.DescriptorBufferInfo{
             .buffer = ray_buffer.buffer,
             .offset = pow2Align(
-                in_ray_buffer_cursor_buffer_info.offset + in_ray_buffer_cursor_buffer_info.range,
+                in_ray_buffer_cursor.offset + in_ray_buffer_cursor.range,
                 ctx.physical_device_limits.min_storage_buffer_offset_alignment,
             ),
             .range = image_size.width * image_size.height * @sizeOf(Ray),
         };
 
-        const out_ray_buffer_cursor_buffer_info = vk.DescriptorBufferInfo{
+        var out_ray_buffer_cursor = &ray_buffer_infos[@enumToInt(RayBufferInfo.out_ray_cursor)];
+        out_ray_buffer_cursor.* = vk.DescriptorBufferInfo{
             .buffer = ray_buffer.buffer,
             .offset = pow2Align(
-                in_ray_buffer_buffer_info.offset + in_ray_buffer_buffer_info.range,
+                in_ray_buffer.offset + in_ray_buffer.range,
                 ctx.physical_device_limits.min_storage_buffer_offset_alignment,
             ),
             .range = @sizeOf(RayBufferCursor),
         };
-        out_ray_buffer_infos = [_]vk.DescriptorBufferInfo{
-            out_ray_buffer_cursor_buffer_info,
-            .{
-                .buffer = ray_buffer.buffer,
-                .offset = pow2Align(
-                    out_ray_buffer_cursor_buffer_info.offset + out_ray_buffer_cursor_buffer_info.range,
-                    ctx.physical_device_limits.min_storage_buffer_offset_alignment,
-                ),
-                .range = image_size.width * image_size.height * @sizeOf(Ray),
-            },
+
+        var out_ray_buffer = &ray_buffer_infos[@enumToInt(RayBufferInfo.out_ray_buffer)];
+        out_ray_buffer.* = vk.DescriptorBufferInfo{
+            .buffer = ray_buffer.buffer,
+            .offset = pow2Align(
+                out_ray_buffer_cursor.offset + out_ray_buffer_cursor.range,
+                ctx.physical_device_limits.min_storage_buffer_offset_alignment,
+            ),
+            .range = image_size.width * image_size.height * @sizeOf(Ray),
         };
 
         const brick_grid_state_infos = vk.DescriptorBufferInfo{
@@ -288,7 +329,6 @@ pub fn init(
             .offset = 0,
             .range = @sizeOf(BrickGridState),
         };
-        const total_bricks = brick_grid_state.dim[0] * brick_grid_state.dim[1] * brick_grid_state.dim[2];
         const brick_buffer_infos = vk.DescriptorBufferInfo{
             .buffer = voxel_scene_buffer.buffer,
             .offset = brick_buffer_offset,
@@ -298,42 +338,42 @@ pub fn init(
         const write_descriptor_set = [_]vk.WriteDescriptorSet{
             .{
                 .dst_set = target_descriptor_set,
-                .dst_binding = 0,
+                .dst_binding = @enumToInt(RayBufferInfo.in_ray_cursor),
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &in_ray_buffer_cursor_buffer_info),
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, in_ray_buffer_cursor),
                 .p_texel_buffer_view = undefined,
             },
             .{
                 .dst_set = target_descriptor_set,
-                .dst_binding = 1,
+                .dst_binding = @enumToInt(RayBufferInfo.in_ray_buffer),
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &in_ray_buffer_buffer_info),
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, in_ray_buffer),
                 .p_texel_buffer_view = undefined,
             },
             .{
                 .dst_set = target_descriptor_set,
-                .dst_binding = 2,
+                .dst_binding = @enumToInt(RayBufferInfo.out_ray_cursor),
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &out_ray_buffer_infos[0]),
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, out_ray_buffer_cursor),
                 .p_texel_buffer_view = undefined,
             },
             .{
                 .dst_set = target_descriptor_set,
-                .dst_binding = 3,
+                .dst_binding = @enumToInt(RayBufferInfo.out_ray_buffer),
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &out_ray_buffer_infos[1]),
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, out_ray_buffer),
                 .p_texel_buffer_view = undefined,
             },
             .{
@@ -441,14 +481,16 @@ pub fn init(
         .pipeline = pipeline,
         .command_pool = command_pool,
         .command_buffer = command_buffer,
+        .queue_family_index = queue_family_index,
         .queue = queue,
         .complete_semaphore = complete_semaphore,
-        .out_ray_buffer_infos = out_ray_buffer_infos,
+        .ray_buffer_infos = ray_buffer_infos,
         .target_descriptor_layout = target_descriptor_layout,
         .target_descriptor_pool = target_descriptor_pool,
         .target_descriptor_set = target_descriptor_set,
         .image_size = image_size,
         .ray_buffer = ray_buffer,
+        .brick_grid_state_buffer_offset = brick_grid_state_buffer_offset,
         .brick_grid_state = brick_grid_state,
         .voxel_scene_buffer = voxel_scene_buffer,
         .work_group_dim = work_group_dim,
@@ -458,6 +500,8 @@ pub fn init(
 pub fn deinit(self: TraverseRayPipeline, ctx: Context) void {
     const zone = tracy.ZoneN(@src(), @typeName(TraverseRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
+
+    self.allocator.destroy(self.brick_grid_state);
 
     // TODO: waitDeviceIdle?
     self.voxel_scene_buffer.deinit(ctx);
@@ -477,6 +521,13 @@ pub fn deinit(self: TraverseRayPipeline, ctx: Context) void {
 
     ctx.destroyPipelineLayout(self.pipeline_layout);
     ctx.destroyPipeline(self.pipeline);
+}
+
+pub inline fn outRayBufferInfos(self: TraverseRayPipeline) [2]vk.DescriptorBufferInfo {
+    return [2]vk.DescriptorBufferInfo{
+        self.ray_buffer_infos[@enumToInt(RayBufferInfo.out_ray_cursor)],
+        self.ray_buffer_infos[@enumToInt(RayBufferInfo.out_ray_buffer)],
+    };
 }
 
 // TODO: mention semaphore lifetime
@@ -535,13 +586,37 @@ pub fn recordCommandBuffer(self: TraverseRayPipeline, ctx: Context) !void {
         undefined,
     );
 
+    // TODO: if we perform this fill in the emit stage then we do not need duplicate synchronization
+    //       we should also replace semaphores with proper memory barriers.
+    //       Actually, we should use the transfer queue to do all of these fill buffers during the initial queue
     // put output ray cursor at 0
     ctx.vkd.cmdFillBuffer(
         self.command_buffer,
         self.ray_buffer.buffer,
-        self.out_ray_buffer_infos[0].offset,
-        pow2Align(@sizeOf(RayBufferCursor), 4),
+        self.ray_buffer_infos[@enumToInt(RayBufferInfo.out_ray_cursor)].offset,
+        self.ray_buffer_infos[@enumToInt(RayBufferInfo.out_ray_cursor)].range,
         0,
+    );
+    const buffer_memory_barrier = vk.BufferMemoryBarrier{
+        .src_access_mask = .{ .transfer_write_bit = true },
+        .dst_access_mask = .{ .shader_read_bit = true },
+        .src_queue_family_index = self.queue_family_index,
+        .dst_queue_family_index = self.queue_family_index,
+        .buffer = self.ray_buffer.buffer,
+        .offset = self.ray_buffer_infos[@enumToInt(RayBufferInfo.out_ray_cursor)].offset,
+        .size = self.ray_buffer_infos[@enumToInt(RayBufferInfo.out_ray_cursor)].range,
+    };
+    ctx.vkd.cmdPipelineBarrier(
+        self.command_buffer,
+        .{ .transfer_bit = true },
+        .{ .compute_shader_bit = true },
+        .{},
+        0,
+        undefined,
+        1,
+        @ptrCast([*]const vk.BufferMemoryBarrier, &buffer_memory_barrier),
+        0,
+        undefined,
     );
 
     const x_dispatch = @ceil(@intToFloat(f32, self.image_size.width) / @intToFloat(f32, self.work_group_dim.x));

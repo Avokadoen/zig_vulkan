@@ -13,13 +13,15 @@ const BrickState = @import("brick/State.zig");
 const Pipeline = @import("Pipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const Benchmark = @import("Benchmark.zig");
+const TraverseRayPipeline = @import("TraverseRayPipeline.zig");
 
 pub const StateBinding = struct {
     camera_ptr: *Camera,
-    /// used in benchmark report
+    /// used in benchmark report, TODO: remove this field (brick_grid_state is the same)
     grid_state: BrickState,
     sun_ptr: *Sun,
     gfx_pipeline_shader_constants: *GraphicsPipeline.PushConstant,
+    brick_grid_state: *TraverseRayPipeline.BrickGridState,
 };
 
 pub const Config = struct {
@@ -27,6 +29,7 @@ pub const Config = struct {
     metrics_window_active: bool = true,
     post_process_window_active: bool = true,
     sun_window_active: bool = true,
+    grid_settings_window_active: bool = true,
     update_frame_timings: bool = true,
 };
 
@@ -46,6 +49,7 @@ camera_window_active: bool,
 metrics_window_active: bool,
 post_process_window_active: bool,
 sun_window_active: bool,
+grid_settings_window_active: bool,
 
 device_properties: vk.PhysicalDeviceProperties,
 
@@ -76,6 +80,7 @@ pub fn init(ctx: Context, gui_width: f32, gui_height: f32, state_binding: StateB
         .metrics_window_active = config.metrics_window_active,
         .post_process_window_active = config.post_process_window_active,
         .sun_window_active = config.sun_window_active,
+        .grid_settings_window_active = config.grid_settings_window_active,
         .device_properties = ctx.getPhysicalDeviceProperties(),
         .metrics_state = .{
             .update_frame_timings = config.update_frame_timings,
@@ -101,7 +106,6 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
     const zone = tracy.ZoneN(@src(), @typeName(ImguiGui) ++ " " ++ @src().fn_name);
     defer zone.End();
 
-    _ = ctx;
     zgui.newFrame();
 
     const style = zgui.getStyle();
@@ -147,6 +151,9 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
         if (zgui.menuItem("Sun", .{ .selected = self.sun_window_active, .enabled = true })) {
             self.sun_window_active = !self.sun_window_active;
         }
+        if (zgui.menuItem("Grid settings", .{ .selected = self.sun_window_active, .enabled = true })) {
+            self.grid_settings_window_active = !self.grid_settings_window_active;
+        }
     }
     zgui.end();
 
@@ -176,6 +183,7 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
     self.drawMetricsWindowIfEnabled();
     self.drawPostProcessWindowIfEnabled();
     self.drawPostSunWindowIfEnabled();
+    self.drawGridSettingsWindowIfEnabled(ctx, pipeline);
 
     // imgui.igSetNextWindowPos(.{ .x = 650, .y = 20 }, imgui.ImGuiCond_FirstUseEver, .{ .x = 0, .y = 0 });
     // imgui.igShowDemoWindow(null);
@@ -184,10 +192,10 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
 }
 
 inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
+    if (self.camera_window_active == false) return;
+
     const zone = tracy.ZoneN(@src(), @typeName(ImguiGui) ++ " " ++ @src().fn_name);
     defer zone.End();
-
-    if (self.camera_window_active == false) return;
 
     zgui.setNextWindowSize(.{
         .w = 400,
@@ -222,10 +230,10 @@ inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
 }
 
 inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
+    if (self.metrics_window_active == false) return;
+
     const zone = tracy.ZoneN(@src(), @typeName(ImguiGui) ++ " " ++ @src().fn_name);
     defer zone.End();
-
-    if (self.metrics_window_active == false) return;
 
     zgui.setNextWindowSize(.{
         .w = 400,
@@ -289,10 +297,10 @@ inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
 }
 
 inline fn drawPostProcessWindowIfEnabled(self: *ImguiGui) void {
+    if (self.post_process_window_active == false) return;
+
     const zone = tracy.ZoneN(@src(), @typeName(ImguiGui) ++ " " ++ @src().fn_name);
     defer zone.End();
-
-    if (self.post_process_window_active == false) return;
 
     zgui.setNextWindowSize(.{
         .w = 400,
@@ -324,11 +332,47 @@ inline fn drawPostProcessWindowIfEnabled(self: *ImguiGui) void {
     });
 }
 
-inline fn drawPostSunWindowIfEnabled(self: *ImguiGui) void {
+fn drawGridSettingsWindowIfEnabled(self: *ImguiGui, ctx: Context, pipeline: *Pipeline) void {
+    if (self.grid_settings_window_active == false) return;
+
     const zone = tracy.ZoneN(@src(), @typeName(ImguiGui) ++ " " ++ @src().fn_name);
     defer zone.End();
 
+    zgui.setNextWindowSize(.{
+        .w = 400,
+        .h = 500,
+        .cond = .first_use_ever,
+    });
+
+    const grid_open = zgui.begin("Grid settings", .{ .popen = &self.grid_settings_window_active });
+    defer zgui.end();
+    if (grid_open == false) return;
+
+    var change_occured = false;
+    change_occured = change_occured or zgui.dragFloat("scale##grid", .{
+        .v = &self.state_binding.brick_grid_state.scale,
+        .speed = 0.5,
+        .min = 0.1,
+        .max = 1000,
+    });
+    change_occured = change_occured or zgui.dragFloat3("position##grid", .{
+        .v = &self.state_binding.brick_grid_state.min_point,
+        .speed = 0.5,
+        .min = -10000,
+        .max = 10000,
+    });
+
+    if (change_occured) {
+        // transfer brick grid state to GPU. If it fails, then we ignore it.
+        pipeline.transferCurrentBrickGridState(ctx) catch {};
+    }
+}
+
+inline fn drawPostSunWindowIfEnabled(self: *ImguiGui) void {
     if (self.sun_window_active == false) return;
+
+    const zone = tracy.ZoneN(@src(), @typeName(ImguiGui) ++ " " ++ @src().fn_name);
+    defer zone.End();
 
     zgui.setNextWindowSize(.{
         .w = 400,
