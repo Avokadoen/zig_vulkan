@@ -157,20 +157,18 @@ pub fn init(
     const test_brick_one = Brick{
         .solid_mask = @as(u512, 1),
     };
-    _ = test_brick_one;
     const test_brick_all = Brick{
         .solid_mask = ~@as(u512, 0),
     };
     try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, brick_buffer_offset, Brick, &.{
-        test_brick_none,
+        test_brick_one,
         test_brick_all,
-        // test_brick_one,
-        // test_brick_one,
-        // test_brick_one,
-        // test_brick_one,
-        // test_brick_one,
-        // test_brick_all,
-        // test_brick_one,
+        test_brick_none,
+        test_brick_one,
+        test_brick_one,
+        test_brick_one,
+        test_brick_all,
+        test_brick_one,
     });
 
     const target_descriptor_layout = blk: {

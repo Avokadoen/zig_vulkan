@@ -351,7 +351,7 @@ fn drawGridSettingsWindowIfEnabled(self: *ImguiGui, ctx: Context, pipeline: *Pip
     var change_occured = false;
     change_occured = change_occured or zgui.dragFloat("scale##grid", .{
         .v = &self.state_binding.brick_grid_state.scale,
-        .speed = 0.5,
+        .speed = 0.1,
         .min = 0.1,
         .max = 1000,
     });
