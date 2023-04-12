@@ -12,7 +12,7 @@ struct Ray {
     vec3 origin;
     float internal_reflection;
     vec3 direction;
-    float t_value;
+    float padding;
     vec3 color;
     uint pixel_coord;
 };
@@ -37,7 +37,7 @@ struct RayBufferCursor {
 
 struct HitRecord {
     vec3 point;
-    vec3 normal;
-    float t;
-    uint index; 
+    uint normal_6b_and_material_index_26b;
+    vec3 ray_direction;
+    float ray_internal_reflection;
 };
