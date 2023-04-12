@@ -238,12 +238,12 @@ pub fn build(b: *Builder) void {
 
     // link tracy if in debug mode and nothing else is specified
     const enable_tracy = b.option(bool, "tracy", "Enable tracy bindings and communication, default is false") orelse false;
-    var ztracy_package = ztracy.Package.build(b, target, mode, .{ .options = .{ .enable_ztracy = enable_tracy } });
+    var ztracy_package = ztracy.package(b, target, mode, .{ .options = .{ .enable_ztracy = enable_tracy } });
     ztracy_package.link(exe);
     exe.addModule("ztracy", ztracy_package.ztracy);
 
     // link zgui
-    const zgui_pkg = zgui.Package.build(b, target, mode, .{
+    const zgui_pkg = zgui.package(b, target, mode, .{
         .options = .{ .backend = .no_backend },
     });
     zgui_pkg.link(exe);
@@ -252,9 +252,9 @@ pub fn build(b: *Builder) void {
     const asset_move = AssetMoveStep.init(b) catch unreachable;
     exe.step.dependOn(&asset_move.step);
 
-    exe.install();
+    b.installArtifact(exe);
 
-    const run_cmd = exe.run();
+    const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
         run_cmd.addArgs(args);
