@@ -19,23 +19,14 @@ layout (set = 0, binding = 0) buffer InCursorBuffer
 {
     RayBufferCursor in_ray_cursor;
 };
-layout (set = 0, binding = 1) readonly buffer InRayBuffer {
-    Ray in_rays[];
+layout (set = 0, binding = 1) buffer InRayBuffer {
+    Ray rays[];
 };
-
-layout (set = 0, binding = 2) buffer OutBufferCursor
+layout (set = 0, binding = 2) buffer OutCursorBuffer
 {
     RayBufferCursor out_ray_cursor;
 };
-layout (set = 0, binding = 3) writeonly buffer OutRayBuffer {
-    Ray out_rays[];
-};
-
-layout (set = 0, binding = 4) readonly buffer BrickGridState {
-    // how many voxels in each axis
-    vec3 voxel_dim;
-    float padding0;
-
+layout (set = 0, binding = 3) readonly buffer BrickGridState {
     // how many bricks in each axis
     vec3 dim;
     float padding1;
@@ -66,9 +57,9 @@ void main() {
     }
     barrier();
 
-    const int in_ray_index = in_warp_start_index + int(gl_LocalInvocationIndex);
-    if (in_ray_index < 0 || in_ray_index > in_ray_cursor.max_index) return;
-    Ray ray = in_rays[in_ray_index];
+    const int ray_index = in_warp_start_index + int(gl_LocalInvocationIndex);
+    if (ray_index < 0 || ray_index > in_ray_cursor.max_index) return;
+    Ray ray = rays[ray_index];
 
     float t_min = 0.0001;
     float t_max = 1000;
@@ -76,17 +67,13 @@ void main() {
     HitRecord hit;
     if (GridHit(ray, t_min, t_max, hit_v_min, hit)) {
         ray.color = vec3(1);
-        ray.t_value = hit.t;
     }
 
     if (gl_LocalInvocationIndex == 0) {
-        out_warp_start_index = work_size * atomicAdd(out_ray_cursor.cursor, 1);
+        atomicAdd(out_ray_cursor.cursor, 1);
     }
-    barrier();
-
-    const uint out_ray_index = out_warp_start_index + gl_LocalInvocationIndex;
-    out_rays[out_ray_index] = ray;
-    atomicMax(out_ray_cursor.max_index, int(out_ray_index));
+    atomicMax(out_ray_cursor.max_index, int(ray_index));
+    rays[ray_index] = ray;
 }
 
 
