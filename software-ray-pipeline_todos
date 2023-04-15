@@ -10,7 +10,7 @@
         * [x] ray properly traverse grid and sub grid
         * [x] refactor hit record according to TODO in assets\shaders\raytracing\ray_commons.glsl
         * [x] 1 bit set/unset brick buffer
-        * [ ] move out cursor to begining of buffer
+        * [x] move out cursor to begining of buffer
         * [ ] hit data is stored in a buffer for a scatter shader to work with
     * [ ] miss pipeline
     * [ ] scatter pipeline

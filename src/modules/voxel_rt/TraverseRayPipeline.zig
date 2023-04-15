@@ -35,8 +35,8 @@ pub const Brick = packed struct {
 // TODO: convert to a struct ...
 pub const RayBufferInfo = enum(u32) {
     in_ray_cursor,
-    ray_buffer,
     out_ray_cursor,
+    ray_buffer,
 };
 const ray_buffer_info_count = @typeInfo(RayBufferInfo).Enum.fields.len;
 
@@ -161,7 +161,7 @@ pub fn init(
                 },
                 .p_immutable_samplers = null,
             },
-            // in RayBuffer
+            // out RayBufferCursor
             .{
                 .binding = 1,
                 .descriptor_type = .storage_buffer,
@@ -171,7 +171,7 @@ pub fn init(
                 },
                 .p_immutable_samplers = null,
             },
-            // out RayBufferCursor
+            // in RayBuffer
             .{
                 .binding = 2,
                 .descriptor_type = .storage_buffer,
@@ -271,24 +271,24 @@ pub fn init(
             .range = @sizeOf(RayBufferCursor),
         };
 
-        var ray_buffer_info = &ray_buffer_infos[@enumToInt(RayBufferInfo.ray_buffer)];
-        ray_buffer_info.* = vk.DescriptorBufferInfo{
+        var out_ray_buffer_cursor_info = &ray_buffer_infos[@enumToInt(RayBufferInfo.out_ray_cursor)];
+        out_ray_buffer_cursor_info.* = vk.DescriptorBufferInfo{
             .buffer = ray_buffer.buffer,
             .offset = pow2Align(
                 in_ray_buffer_cursor_info.offset + in_ray_buffer_cursor_info.range,
                 ctx.physical_device_limits.min_storage_buffer_offset_alignment,
             ),
-            .range = image_size.width * image_size.height * @sizeOf(Ray),
+            .range = @sizeOf(RayBufferCursor),
         };
 
-        var out_ray_buffer_cursor_info = &ray_buffer_infos[@enumToInt(RayBufferInfo.out_ray_cursor)];
-        out_ray_buffer_cursor_info.* = vk.DescriptorBufferInfo{
+        var ray_buffer_info = &ray_buffer_infos[@enumToInt(RayBufferInfo.ray_buffer)];
+        ray_buffer_info.* = vk.DescriptorBufferInfo{
             .buffer = ray_buffer.buffer,
             .offset = pow2Align(
-                ray_buffer_info.offset + ray_buffer_info.range,
+                out_ray_buffer_cursor_info.offset + out_ray_buffer_cursor_info.range,
                 ctx.physical_device_limits.min_storage_buffer_offset_alignment,
             ),
-            .range = @sizeOf(RayBufferCursor),
+            .range = image_size.width * image_size.height * @sizeOf(Ray),
         };
 
         var brick_grid_state_info = &brick_buffer_infos[@enumToInt(BrickBufferInfo.brick_grid_state)];
@@ -329,22 +329,22 @@ pub fn init(
             },
             .{
                 .dst_set = target_descriptor_set,
-                .dst_binding = @enumToInt(RayBufferInfo.ray_buffer),
-                .dst_array_element = 0,
-                .descriptor_count = 1,
-                .descriptor_type = .storage_buffer,
-                .p_image_info = undefined,
-                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, ray_buffer_info),
-                .p_texel_buffer_view = undefined,
-            },
-            .{
-                .dst_set = target_descriptor_set,
                 .dst_binding = @enumToInt(RayBufferInfo.out_ray_cursor),
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
                 .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, out_ray_buffer_cursor_info),
+                .p_texel_buffer_view = undefined,
+            },
+            .{
+                .dst_set = target_descriptor_set,
+                .dst_binding = @enumToInt(RayBufferInfo.ray_buffer),
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, ray_buffer_info),
                 .p_texel_buffer_view = undefined,
             },
             .{
@@ -529,6 +529,13 @@ pub fn deinit(self: TraverseRayPipeline, ctx: Context) void {
 
     ctx.destroyPipelineLayout(self.pipeline_layout);
     ctx.destroyPipeline(self.pipeline);
+}
+
+pub inline fn inRayBufferInfos(self: TraverseRayPipeline) [2]vk.DescriptorBufferInfo {
+    return [2]vk.DescriptorBufferInfo{
+        self.ray_buffer_infos[@enumToInt(RayBufferInfo.in_ray_cursor)],
+        self.ray_buffer_infos[@enumToInt(RayBufferInfo.ray_buffer)],
+    };
 }
 
 pub inline fn outRayBufferInfos(self: TraverseRayPipeline) [2]vk.DescriptorBufferInfo {

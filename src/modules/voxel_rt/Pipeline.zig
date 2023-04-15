@@ -75,6 +75,7 @@ present_complete_semaphore: vk.Semaphore,
 render_complete_semaphore: vk.Semaphore,
 render_complete_fence: vk.Fence,
 
+ray_buffer: GpuBufferMemory,
 emit_ray_pipeline: EmitRayPipeline,
 traverse_ray_pipeline: TraverseRayPipeline,
 draw_ray_pipeline: DrawRayPipeline,
@@ -224,17 +225,32 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     var staging_buffers = try StagingRamp.init(ctx, allocator, config.staging_buffers);
     errdefer staging_buffers.deinit(ctx, allocator);
 
-    const emit_ray_pipeline = try EmitRayPipeline.init(allocator, ctx, internal_render_resolution);
-    errdefer emit_ray_pipeline.deinit(ctx);
+    // TODO: allocate according to need
+    var ray_buffer = try GpuBufferMemory.init(
+        ctx,
+        @intCast(vk.DeviceSize, 250 * 1024 * 1024), // alloc 250mb
+        .{ .storage_buffer_bit = true, .transfer_dst_bit = true },
+        .{ .device_local_bit = true },
+    );
+    errdefer ray_buffer.deinit(ctx);
 
     var traverse_ray_pipeline = try TraverseRayPipeline.init(
         allocator,
         ctx,
-        &emit_ray_pipeline.ray_buffer,
+        &ray_buffer,
         internal_render_resolution,
         &staging_buffers,
     );
     errdefer traverse_ray_pipeline.deinit(ctx);
+
+    const emit_ray_pipeline = try EmitRayPipeline.init(
+        allocator,
+        ctx,
+        internal_render_resolution,
+        &ray_buffer,
+        traverse_ray_pipeline.inRayBufferInfos(),
+    );
+    errdefer emit_ray_pipeline.deinit(ctx);
 
     const target_image_info = ray_pipeline_types.ImageInfo{
         .width = @intToFloat(f32, internal_render_resolution.width),
@@ -246,7 +262,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     const draw_ray_pipeline = try DrawRayPipeline.init(
         allocator,
         ctx,
-        &emit_ray_pipeline.ray_buffer,
+        &ray_buffer,
         target_image_info,
         traverse_ray_pipeline.outRayBufferInfos(),
     );
@@ -313,10 +329,10 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .present_complete_semaphore = present_complete_semaphore,
         .render_complete_semaphore = render_complete_semaphore,
         .render_complete_fence = render_complete_fence,
+        .ray_buffer = ray_buffer,
         .emit_ray_pipeline = emit_ray_pipeline,
         .traverse_ray_pipeline = traverse_ray_pipeline,
         .draw_ray_pipeline = draw_ray_pipeline,
-        // .compute_pipeline = compute_pipeline,
         .gfx_pipeline = gfx_pipeline,
         .imgui_pipeline = imgui_pipeline,
         .camera = camera,
@@ -338,6 +354,8 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     ctx.vkd.destroySemaphore(ctx.logical_device, self.present_complete_semaphore, null);
     ctx.vkd.destroySemaphore(ctx.logical_device, self.render_complete_semaphore, null);
     ctx.vkd.destroyFence(ctx.logical_device, self.render_complete_fence, null);
+
+    self.ray_buffer.deinit(ctx);
 
     // wait for staging buffer transfer to finish before deinit staging buffer and
     // any potential src buffers

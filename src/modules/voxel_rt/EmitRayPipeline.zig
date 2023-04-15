@@ -41,8 +41,7 @@ target_descriptor_pool: vk.DescriptorPool,
 target_descriptor_set: vk.DescriptorSet,
 
 image_size: vk.Extent2D,
-// TODO: ray_buffer: *const GpuBufferMemory,
-ray_buffer: GpuBufferMemory,
+ray_buffer: *const GpuBufferMemory,
 
 work_group_dim: Dispatch2,
 
@@ -51,7 +50,13 @@ work_group_dim: Dispatch2,
 
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
-pub fn init(allocator: Allocator, ctx: Context, image_size: vk.Extent2D) !EmitRayPipeline {
+pub fn init(
+    allocator: Allocator,
+    ctx: Context,
+    image_size: vk.Extent2D,
+    ray_buffer: *const GpuBufferMemory,
+    draw_ray_descriptor_info: [2]vk.DescriptorBufferInfo,
+) !EmitRayPipeline {
     const zone = tracy.ZoneN(@src(), @typeName(EmitRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
@@ -60,14 +65,6 @@ pub fn init(allocator: Allocator, ctx: Context, image_size: vk.Extent2D) !EmitRa
     // TODO: grab a dedicated compute queue if available https://github.com/Avokadoen/zig_vulkan/issues/163
     const queue_family_index = ctx.queue_indices.compute;
     const queue = ctx.vkd.getDeviceQueue(ctx.logical_device, queue_family_index, @intCast(u32, 0));
-
-    // TODO: allocate according to need
-    var ray_buffer = try GpuBufferMemory.init(
-        ctx,
-        @intCast(vk.DeviceSize, 250 * 1024 * 1024), // alloc 250mb
-        .{ .storage_buffer_bit = true, .transfer_dst_bit = true },
-        .{ .device_local_bit = true },
-    );
 
     const target_descriptor_layout = blk: {
         const layout_bindings = [_]vk.DescriptorSetLayoutBinding{
@@ -130,20 +127,6 @@ pub fn init(allocator: Allocator, ctx: Context, image_size: vk.Extent2D) !EmitRa
     }
 
     {
-        const ray_buffer_cursor_buffer_info = vk.DescriptorBufferInfo{
-            .buffer = ray_buffer.buffer,
-            .offset = RayBufferCursor.buffer_offset,
-            .range = @sizeOf(RayBufferCursor),
-        };
-        const ray_buffer_buffer_info = vk.DescriptorBufferInfo{
-            .buffer = ray_buffer.buffer,
-            .offset = pow2Align(
-                ray_buffer_cursor_buffer_info.offset + ray_buffer_cursor_buffer_info.range,
-                ctx.physical_device_limits.min_storage_buffer_offset_alignment,
-            ),
-            .range = image_size.width * image_size.height * @sizeOf(Ray),
-        };
-
         const write_descriptor_set = [_]vk.WriteDescriptorSet{ .{
             .dst_set = target_descriptor_set,
             .dst_binding = 0,
@@ -151,7 +134,7 @@ pub fn init(allocator: Allocator, ctx: Context, image_size: vk.Extent2D) !EmitRa
             .descriptor_count = 1,
             .descriptor_type = .storage_buffer,
             .p_image_info = undefined,
-            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &ray_buffer_cursor_buffer_info),
+            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &draw_ray_descriptor_info[0]),
             .p_texel_buffer_view = undefined,
         }, .{
             .dst_set = target_descriptor_set,
@@ -160,7 +143,7 @@ pub fn init(allocator: Allocator, ctx: Context, image_size: vk.Extent2D) !EmitRa
             .descriptor_count = 1,
             .descriptor_type = .storage_buffer,
             .p_image_info = undefined,
-            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &ray_buffer_buffer_info),
+            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &draw_ray_descriptor_info[1]),
             .p_texel_buffer_view = undefined,
         } };
 
@@ -286,8 +269,6 @@ pub fn deinit(self: EmitRayPipeline, ctx: Context) void {
         @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
     );
     ctx.vkd.destroyCommandPool(ctx.logical_device, self.command_pool, null);
-
-    self.ray_buffer.deinit(ctx);
 
     ctx.vkd.destroySemaphore(ctx.logical_device, self.complete_semaphore, null);
 

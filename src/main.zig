@@ -123,9 +123,6 @@ pub fn main() anyerror!void {
         grid.insert(@intCast(usize, xyzi.x) + 200, @intCast(usize, xyzi.z) + 50, @intCast(usize, xyzi.y) + 150, xyzi.color_index);
     }
 
-    // generate terrain on CPU
-    try terrain.generateCpu(4, allocator, 420, 4, 20, &grid);
-
     var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, .{
         .internal_resolution_width = internal_render_resolution.x(),
         .internal_resolution_height = internal_render_resolution.y(),
