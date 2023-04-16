@@ -61,7 +61,7 @@ vec3 RandInHemisphere(vec2 co, vec3 normal) {
     else
         return -in_unit_sphere;
 }
-int sample_i = 1;
-vec3 RngSample(vec3 point) {
+
+vec3 RngSample(vec3 point, int sample_i) {
     return fma(point, vec3(100), vec3(sample_i * 6));
 }

@@ -44,23 +44,23 @@ void main() {
     barrier();
     
     const uint ray_index = warp_start_index + gl_LocalInvocationIndex;
-    if (ray_index >= pixel_count) {
+    const uvec2 pixel_coord = uvec2(
+        ray_index % push_constant.image_width, 
+        ray_index / push_constant.image_width
+    );
+    if (pixel_coord.x > push_constant.image_width || pixel_coord.y > push_constant.image_height) {
         return;
     }
     atomicMax(cursor.max_index, int(ray_index));
 
-    const uvec2 pixel_coord = uvec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y);
-    const float x = float(pixel_coord.x);
-    const float y = float(pixel_coord.y);
+    // TODO: random dir when multi samples
     // TODO: proper random (blue noise)
     // TODO: remove division
-    const float noise_x = hash12(vec2(x + sample_i, y) * 0.2 * float(sample_i > 0));
-    const float u = (x + noise_x) / float(push_constant.image_width - 1);
-    const float noise_y = hash12(vec2(x, y + sample_i) * 0.2 * float(sample_i > 0));
-    const float v = (y + noise_y) / float(push_constant.image_height - 1);
+    const float u = float(pixel_coord.x) / float(push_constant.image_width - 1);
+    const float v = float(pixel_coord.y) / float(push_constant.image_height - 1);
     
     const vec3 ray_dir = fma(push_constant.horizontal, vec3(u), push_constant.lower_left_corner) + fma(vec3(v), push_constant.vertical, -push_constant.origin);
-    const uint pixel = pixel_coord.x << 16 | pixel_coord.y;
+    const uint pixel = (pixel_coord.x << 16) | pixel_coord.y;
 
     rays[ray_index] = Ray(
         push_constant.origin, // origin
