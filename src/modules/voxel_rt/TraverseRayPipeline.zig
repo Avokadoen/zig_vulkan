@@ -31,12 +31,19 @@ pub const BrickGridState = extern struct {
 pub const Brick = packed struct {
     solid_mask: u512,
 };
+pub const HitRecord = extern struct {
+    point: [3]f32,
+    normal_4b_and_material_index_28b: c_uint,
+    ray_direction: [3]f32,
+    ray_internal_reflection: f32,
+};
 
 // TODO: convert to a struct ...
 pub const RayBufferInfo = enum(u32) {
     in_ray_cursor,
-    out_ray_cursor,
     ray_buffer,
+    out_ray_cursor,
+    hit_record_buffer,
 };
 const ray_buffer_info_count = @typeInfo(RayBufferInfo).Enum.fields.len;
 
@@ -151,9 +158,8 @@ pub fn init(
 
     const target_descriptor_layout = blk: {
         const layout_bindings = [_]vk.DescriptorSetLayoutBinding{
-            // in RayBufferCursor
             .{
-                .binding = 0,
+                .binding = @enumToInt(RayBufferInfo.in_ray_cursor),
                 .descriptor_type = .storage_buffer,
                 .descriptor_count = 1,
                 .stage_flags = .{
@@ -161,9 +167,8 @@ pub fn init(
                 },
                 .p_immutable_samplers = null,
             },
-            // out RayBufferCursor
             .{
-                .binding = 1,
+                .binding = @enumToInt(RayBufferInfo.ray_buffer),
                 .descriptor_type = .storage_buffer,
                 .descriptor_count = 1,
                 .stage_flags = .{
@@ -171,9 +176,8 @@ pub fn init(
                 },
                 .p_immutable_samplers = null,
             },
-            // in RayBuffer
             .{
-                .binding = 2,
+                .binding = @enumToInt(RayBufferInfo.out_ray_cursor),
                 .descriptor_type = .storage_buffer,
                 .descriptor_count = 1,
                 .stage_flags = .{
@@ -181,9 +185,8 @@ pub fn init(
                 },
                 .p_immutable_samplers = null,
             },
-            // BrickGridState
             .{
-                .binding = 3,
+                .binding = @enumToInt(RayBufferInfo.hit_record_buffer),
                 .descriptor_type = .storage_buffer,
                 .descriptor_count = 1,
                 .stage_flags = .{
@@ -191,9 +194,8 @@ pub fn init(
                 },
                 .p_immutable_samplers = null,
             },
-            // BrickSetBuffer
             .{
-                .binding = 4,
+                .binding = @enumToInt(BrickBufferInfo.brick_grid_state) + ray_buffer_info_count,
                 .descriptor_type = .storage_buffer,
                 .descriptor_count = 1,
                 .stage_flags = .{
@@ -201,9 +203,17 @@ pub fn init(
                 },
                 .p_immutable_samplers = null,
             },
-            // BrickBuffer
             .{
-                .binding = 5,
+                .binding = @enumToInt(BrickBufferInfo.bricks_set) + ray_buffer_info_count,
+                .descriptor_type = .storage_buffer,
+                .descriptor_count = 1,
+                .stage_flags = .{
+                    .compute_bit = true,
+                },
+                .p_immutable_samplers = null,
+            },
+            .{
+                .binding = @enumToInt(BrickBufferInfo.bricks) + ray_buffer_info_count,
                 .descriptor_type = .storage_buffer,
                 .descriptor_count = 1,
                 .stage_flags = .{
@@ -223,6 +233,9 @@ pub fn init(
 
     const target_descriptor_pool = blk: {
         const pool_sizes = [_]vk.DescriptorPoolSize{ .{
+            .type = .storage_buffer,
+            .descriptor_count = 1,
+        }, .{
             .type = .storage_buffer,
             .descriptor_count = 1,
         }, .{
@@ -262,33 +275,40 @@ pub fn init(
     }
 
     var ray_buffer_infos: [ray_buffer_info_count]vk.DescriptorBufferInfo = undefined;
-    var brick_buffer_infos: [ray_buffer_info_count]vk.DescriptorBufferInfo = undefined;
+    var brick_buffer_infos: [brick_buffer_info_count]vk.DescriptorBufferInfo = undefined;
     {
         var in_ray_buffer_cursor_info = &ray_buffer_infos[@enumToInt(RayBufferInfo.in_ray_cursor)];
         in_ray_buffer_cursor_info.* = vk.DescriptorBufferInfo{
             .buffer = ray_buffer.buffer,
-            .offset = RayBufferCursor.buffer_offset,
+            .offset = 0,
             .range = @sizeOf(RayBufferCursor),
         };
-
-        var out_ray_buffer_cursor_info = &ray_buffer_infos[@enumToInt(RayBufferInfo.out_ray_cursor)];
-        out_ray_buffer_cursor_info.* = vk.DescriptorBufferInfo{
+        var ray_buffer_info = &ray_buffer_infos[@enumToInt(RayBufferInfo.ray_buffer)];
+        ray_buffer_info.* = vk.DescriptorBufferInfo{
             .buffer = ray_buffer.buffer,
             .offset = pow2Align(
                 in_ray_buffer_cursor_info.offset + in_ray_buffer_cursor_info.range,
                 ctx.physical_device_limits.min_storage_buffer_offset_alignment,
             ),
+            .range = image_size.width * image_size.height * @sizeOf(Ray),
+        };
+        var out_ray_buffer_cursor_info = &ray_buffer_infos[@enumToInt(RayBufferInfo.out_ray_cursor)];
+        out_ray_buffer_cursor_info.* = vk.DescriptorBufferInfo{
+            .buffer = ray_buffer.buffer,
+            .offset = pow2Align(
+                ray_buffer_info.offset + ray_buffer_info.range,
+                ctx.physical_device_limits.min_storage_buffer_offset_alignment,
+            ),
             .range = @sizeOf(RayBufferCursor),
         };
-
-        var ray_buffer_info = &ray_buffer_infos[@enumToInt(RayBufferInfo.ray_buffer)];
-        ray_buffer_info.* = vk.DescriptorBufferInfo{
+        var hit_record_buffer_info = &ray_buffer_infos[@enumToInt(RayBufferInfo.hit_record_buffer)];
+        hit_record_buffer_info.* = vk.DescriptorBufferInfo{
             .buffer = ray_buffer.buffer,
             .offset = pow2Align(
                 out_ray_buffer_cursor_info.offset + out_ray_buffer_cursor_info.range,
                 ctx.physical_device_limits.min_storage_buffer_offset_alignment,
             ),
-            .range = image_size.width * image_size.height * @sizeOf(Ray),
+            .range = image_size.width * image_size.height * @sizeOf(HitRecord), // TODO: x2, x4, x8? (reflection + reflaction worst case)
         };
 
         var brick_grid_state_info = &brick_buffer_infos[@enumToInt(BrickBufferInfo.brick_grid_state)];
@@ -329,16 +349,6 @@ pub fn init(
             },
             .{
                 .dst_set = target_descriptor_set,
-                .dst_binding = @enumToInt(RayBufferInfo.out_ray_cursor),
-                .dst_array_element = 0,
-                .descriptor_count = 1,
-                .descriptor_type = .storage_buffer,
-                .p_image_info = undefined,
-                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, out_ray_buffer_cursor_info),
-                .p_texel_buffer_view = undefined,
-            },
-            .{
-                .dst_set = target_descriptor_set,
                 .dst_binding = @enumToInt(RayBufferInfo.ray_buffer),
                 .dst_array_element = 0,
                 .descriptor_count = 1,
@@ -349,7 +359,27 @@ pub fn init(
             },
             .{
                 .dst_set = target_descriptor_set,
-                .dst_binding = 3,
+                .dst_binding = @enumToInt(RayBufferInfo.out_ray_cursor),
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, out_ray_buffer_cursor_info),
+                .p_texel_buffer_view = undefined,
+            },
+            .{
+                .dst_set = target_descriptor_set,
+                .dst_binding = @enumToInt(RayBufferInfo.hit_record_buffer),
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, hit_record_buffer_info),
+                .p_texel_buffer_view = undefined,
+            },
+            .{
+                .dst_set = target_descriptor_set,
+                .dst_binding = @enumToInt(BrickBufferInfo.brick_grid_state) + ray_buffer_info_count,
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
@@ -359,7 +389,7 @@ pub fn init(
             },
             .{
                 .dst_set = target_descriptor_set,
-                .dst_binding = 4,
+                .dst_binding = @enumToInt(BrickBufferInfo.bricks_set) + ray_buffer_info_count,
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
@@ -369,7 +399,7 @@ pub fn init(
             },
             .{
                 .dst_set = target_descriptor_set,
-                .dst_binding = 5,
+                .dst_binding = @enumToInt(BrickBufferInfo.bricks) + ray_buffer_info_count,
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,

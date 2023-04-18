@@ -7,8 +7,6 @@ pub const RayBufferCursor = extern struct {
     total_written: c_int,
     /// where the last ray write occured
     cursor: c_int,
-
-    pub const buffer_offset = 0;
 };
 
 // Must be synced with assets\shaders\emit_primary_rays.comp Ray

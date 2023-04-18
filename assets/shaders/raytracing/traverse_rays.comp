@@ -19,14 +19,18 @@ layout (set = 0, binding = 0) buffer InCursorBuffer
 {
     RayBufferCursor in_ray_cursor;
 };
-layout (set = 0, binding = 1) buffer OutCursorBuffer
-{
-    RayBufferCursor out_ray_cursor;
-};
-layout (set = 0, binding = 2) buffer InRayBuffer {
+layout (set = 0, binding = 1) readonly buffer RayBuffer {
     Ray rays[];
 };
-layout (set = 0, binding = 3) readonly buffer BrickGridState {
+
+layout (set = 0, binding = 2) buffer OutCursorBuffer
+{
+    RayBufferCursor out_ray_cursor; // TODO: rename to out_hit_cursor
+};
+layout (set = 0, binding = 3) writeonly buffer HitRecordBuffer {
+    HitRecord hit_record[];
+};
+layout (set = 0, binding = 4) readonly buffer BrickGridState {
     // how many bricks in each axis
     vec3 dim;
     float padding1;
@@ -35,21 +39,21 @@ layout (set = 0, binding = 3) readonly buffer BrickGridState {
     float scale;
 } brick_grid;
 
-layout (set = 0, binding = 4) readonly buffer BrickSetBuffer {
+layout (set = 0, binding = 5) readonly buffer BrickSetBuffer {
     uint brick_set_bits[];
 };
 struct Brick {
     // 512 bit voxel set mask
     uint solid_mask[16];
 };
-layout (set = 0, binding = 5) readonly buffer BrickBuffer {
+layout (set = 0, binding = 6) readonly buffer BrickBuffer {
     Brick bricks[];
 };
 
 
 bool AdvIntersect(vec3 box_min_point, vec3 box_max_point, Ray r, vec3 inv_ray_dir, inout float t_min, inout float t_max);
-bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit);
-bool BrickHit(Ray r, vec3 g_scale, vec3 ray_delta, vec3 ray_delta, float t_min, float t_max, float global_t_value, int brick_index, inout vec3 brick_position, out HitRecord hit);
+bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, inout HitRecord hit);
+bool BrickHit(Ray r, vec3 g_scale, vec3 ray_delta, vec3 ray_delta, float t_min, float t_max, float global_t_value, int brick_index, inout vec3 brick_position, inout HitRecord hit);
 
 shared int in_warp_start_index;
 shared uint out_warp_start_index;
@@ -57,27 +61,37 @@ shared uint out_warp_start_index;
 void main() {
     const uint work_size = gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z;
     if (gl_LocalInvocationIndex == 0) {
-        in_warp_start_index = int(work_size) * atomicAdd(in_ray_cursor.cursor, -1);
+        in_warp_start_index = int(work_size) * (atomicAdd(in_ray_cursor.cursor, -1) - 1);
     }
     barrier();
 
     const int ray_index = in_warp_start_index + int(gl_LocalInvocationIndex);
-    if (ray_index < 0 || ray_index > in_ray_cursor.max_index) return;
-    Ray ray = rays[ray_index];
+    if (ray_index < 0 || ray_index > in_ray_cursor.max_index) {
+        return;
+    }
 
+    Ray ray = rays[ray_index];
     float t_min = 0.0001;
     float t_max = 1000;
     vec3 hit_v_min;
-    HitRecord hit;
+    HitRecord hit = HitRecord(
+        vec3(0),       // point;
+        0,             // normal_4b_and_material_index_28b; 
+        ray.direction, // ray_direction;
+        1,             // ray_internal_reflection;
+        vec3(0),       // color;
+        0              // padding;
+    );
     if (GridHit(ray, t_min, t_max, hit_v_min, hit)) {
-        ray.color = vec3(1);
+
     }
 
     if (gl_LocalInvocationIndex == 0) {
         atomicAdd(out_ray_cursor.cursor, 1);
     }
     atomicMax(out_ray_cursor.max_index, int(ray_index));
-    rays[ray_index] = ray;
+
+    hit_record[ray_index] = hit;
 }
 
 
@@ -126,13 +140,16 @@ bool AdvNormIntersect(vec3 box_min_point, vec3 box_max_point, Ray r, vec3 inv_ra
     
     if (t_mins.x >= t_mins.y && t_mins.x >= t_mins.z) {
         t_min = max(t_min, t_mins.x);
-        normal_bits = (inv_ray_dir.x < 0) ? 2 << 30 : 1 << 30;
+        // either 0b1100 or 0b0100
+        normal_bits = (inv_ray_dir.x < 0) ? 12 << 28 : 4 << 28;
     } else if (t_mins.y >= t_mins.x && t_mins.y >= t_mins.z) {
         t_min = max(t_min, t_mins.y);
-        normal_bits = (inv_ray_dir.y < 0) ? 2 << 28 : 1 << 28;
+        // either 0b1010 or 0b0010
+        normal_bits = (inv_ray_dir.y < 0) ? 10 << 28 : 1 << 28;
     } else {
         t_min = max(t_min, t_mins.z);
-        normal_bits = (inv_ray_dir.z < 0) ? 2 << 26 : 1 << 26;
+        // either 0b1001 or 0b0001
+        normal_bits = (inv_ray_dir.z < 0) ? 9 << 28 : 1 << 28;
     }
     t_max = min(t_max, minComponent(t_maxes));
     
@@ -140,7 +157,7 @@ bool AdvNormIntersect(vec3 box_min_point, vec3 box_max_point, Ray r, vec3 inv_ra
 }
 
 /// Traverses the brick grid and calculates any potential hit with the grid
-bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit) {
+bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, inout HitRecord hit) {
     const vec3 g_scale = vec3(brick_grid.scale);
     const vec3 g_dim = brick_grid.dim;
 
@@ -150,8 +167,7 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
     const vec3 inv_ray_dir = safeInverse(r.direction);
     float grid_t_min = t_min;
     float grid_t_max = t_max;
-    uint normal_bits = 0;
-    if (!AdvNormIntersect(g_min, g_max, r, inv_ray_dir, normal_bits, grid_t_min, grid_t_max)) {
+    if (!AdvNormIntersect(g_min, g_max, r, inv_ray_dir, hit.normal_4b_and_material_index_28b, grid_t_min, grid_t_max)) {
         return false;
     }
     
@@ -162,8 +178,11 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
    	const vec3 ray_delta = abs(inv_ray_dir);
 	const vec3 ray_step = sign(inv_ray_dir);
     
+    vec3 hit_point = RayAt(r, global_t_value);
+    hit.point = hit_point;
+
     // get position in grid space from global position
-    const vec3 fposition = (RayAt(r, global_t_value) - g_min) / g_scale;
+    const vec3 fposition = (hit_point - g_min) / g_scale;
     const vec3 intersection_delta = floor(fposition) - fposition;
     vec3 side_dist = fma(ray_step, intersection_delta, ray_step * 0.5 + 0.5) * ray_delta;
 
@@ -198,7 +217,7 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
     return false;
 }
 
-bool BrickHit(Ray r, vec3 ray_step, vec3 ray_delta, vec3 g_scale, float t_min, float t_max, float global_t_value, int brick_index, inout vec3 brick_position, out HitRecord hit) {
+bool BrickHit(Ray r, vec3 ray_step, vec3 ray_delta, vec3 g_scale, float t_min, float t_max, float global_t_value, int brick_index, inout vec3 brick_position, inout HitRecord hit) {
     vec3 voxel_scale = g_scale * vec3(0.125);
     // optimization: copy solid mask from SSBO to localize the mask memory
     const uint solid_mask[16] = bricks[brick_index].solid_mask;
@@ -207,6 +226,8 @@ bool BrickHit(Ray r, vec3 ray_step, vec3 ray_delta, vec3 g_scale, float t_min, f
     const vec3 fposition = (RayAt(r, global_t_value) - brick_position) / voxel_scale;
     const vec3 intersection_delta = floor(fposition) - fposition;
     vec3 side_dist = fma(ray_step, intersection_delta, ray_step * 0.5 + 0.5) * ray_delta;
+
+    uvec3 normal_axist_bits = uvec3(lessThan(ray_step, vec3(-0.00001))) * uvec3(8) + uvec3(4, 2, 1);
 
     vec3 local_position = floor(fposition + 0.);
     float local_t_min = t_min - global_t_value;
@@ -225,18 +246,29 @@ bool BrickHit(Ray r, vec3 ray_step, vec3 ray_delta, vec3 g_scale, float t_min, f
 
         const bool hit_voxel = ((bitfield_final_entry & (1 << mask_offset)) != 0) && t_value >= local_t_min;
         if (hit_voxel) {
-            hit.point = RayAt(r, global_t_value);
             uint material_index = 0; // TODO
-            hit.normal_6b_and_material_index_26b |= material_index;
+            float internal_reflection = 1; // TODO
+
+            hit.point = RayAt(r, global_t_value);
+            hit.normal_4b_and_material_index_28b |= material_index;
+            hit.ray_direction = r.direction;
+            hit.ray_internal_reflection = internal_reflection;
+            hit.previous_color = vec3(1); // TODO: r.color;
+            
             brick_position = fma(local_position, vec3(voxel_scale), brick_position);
             return true;
         }
 
         // progress position with DDA
-        const vec3 mask = vec3(lessThanEqual(side_dist.xyz, min(side_dist.yzx, side_dist.zxy)));
-        t_value = vec3Reduce(mask * side_dist) * voxel_scale.x;
-        side_dist += mask * ray_delta;
-        local_position += mask * ray_step;
+        const bvec3 mask = lessThanEqual(side_dist.xyz, min(side_dist.yzx, side_dist.zxy));
+        const vec3 fmask = vec3(mask);
+        t_value = vec3Reduce(fmask * side_dist) * voxel_scale.x;
+        side_dist += fmask * ray_delta;
+        local_position += fmask * ray_step;
+
+        const uvec3 normal_bits = normal_axist_bits * uint(mask);
+        hit.normal_4b_and_material_index_28b |= normal_bits.x << 28 | normal_bits.y << 28 | normal_bits.z << 28;
+
     } 
 
     return false;

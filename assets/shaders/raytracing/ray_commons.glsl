@@ -37,7 +37,9 @@ struct RayBufferCursor {
 
 struct HitRecord {
     vec3 point;
-    uint normal_6b_and_material_index_26b;
+    uint normal_4b_and_material_index_28b; 
     vec3 ray_direction;
     float ray_internal_reflection;
+    vec3 previous_color;
+    float padding;
 };

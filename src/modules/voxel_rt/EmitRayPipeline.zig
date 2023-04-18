@@ -351,7 +351,7 @@ pub fn recordCommandBuffer(self: EmitRayPipeline, ctx: Context, camera: Camera) 
     ctx.vkd.cmdFillBuffer(
         self.command_buffer,
         self.ray_buffer.buffer,
-        RayBufferCursor.buffer_offset,
+        0,
         pow2Align(@sizeOf(RayBufferCursor), 4),
         0,
     );
@@ -361,7 +361,7 @@ pub fn recordCommandBuffer(self: EmitRayPipeline, ctx: Context, camera: Camera) 
         .src_queue_family_index = self.queue_family_index,
         .dst_queue_family_index = self.queue_family_index,
         .buffer = self.ray_buffer.buffer,
-        .offset = RayBufferCursor.buffer_offset,
+        .offset = 0,
         .size = pow2Align(@sizeOf(RayBufferCursor), 4),
     };
     ctx.vkd.cmdPipelineBarrier(
