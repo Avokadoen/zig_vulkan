@@ -178,6 +178,10 @@ ZGUI_API void zguiSeparator(void) {
     ImGui::Separator();
 }
 
+ZGUI_API void zguiSeparatorText(const char* label) {
+    ImGui::SeparatorText(label);
+}
+
 ZGUI_API void zguiSameLine(float offset_from_start_x, float spacing) {
     ImGui::SameLine(offset_from_start_x, spacing);
 }
@@ -1435,8 +1439,8 @@ ZGUI_API bool zguiMenuItemPtr(const char* label, const char* shortcut, bool* sel
     return ImGui::MenuItem(label, shortcut, selected, enabled);
 }
 
-ZGUI_API void zguiBeginTooltip(void) {
-    ImGui::BeginTooltip();
+ZGUI_API bool zguiBeginTooltip(void) {
+    return ImGui::BeginTooltip();
 }
 
 ZGUI_API void zguiEndTooltip(void) {

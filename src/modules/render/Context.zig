@@ -45,7 +45,7 @@ window_ptr: *glfw.Window,
 // Caller should make sure to call deinit
 pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Window) !Context {
     const app_name = try std.cstr.addNullByte(allocator, application_name);
-    defer allocator.destroy(app_name.ptr);
+    defer allocator.free(app_name);
 
     const app_info = vk.ApplicationInfo{
         .p_next = null,

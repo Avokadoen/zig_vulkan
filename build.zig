@@ -65,7 +65,7 @@ const ShaderMoveStep = struct {
         self.abs_from[self.abs_len] = new_abs;
     }
 
-    fn make(step: *Step, progress: *std.Progress.Node) anyerror!void {
+    fn make(step: *Step, prog_node: *std.Progress.Node) anyerror!void {
         const self: *ShaderMoveStep = @fieldParentPtr(ShaderMoveStep, "step", step);
 
         try createFolder(self.builder.install_prefix);
@@ -77,8 +77,7 @@ const ShaderMoveStep = struct {
                 break;
             }
         }
-
-        progress.completeOne();
+        prog_node.completeOne();
     }
 
     /// moves a given resource to a given path relative to the output binary
@@ -110,7 +109,7 @@ const AssetMoveStep = struct {
         return self;
     }
 
-    fn make(step: *Step, progress: *std.Progress.Node) anyerror!void {
+    fn make(step: *Step, prog_node: *std.Progress.Node) anyerror!void {
         const self: *AssetMoveStep = @fieldParentPtr(AssetMoveStep, "step", step);
 
         try createFolder(self.builder.install_prefix);
@@ -130,7 +129,7 @@ const AssetMoveStep = struct {
 
         copyDir(self.builder, src_assets_dir, dst_assets_dir);
 
-        progress.completeOne();
+        prog_node.completeOne();
     }
 };
 
@@ -232,12 +231,12 @@ pub fn build(b: *Builder) void {
 
     // link tracy if in debug mode and nothing else is specified
     const enable_tracy = b.option(bool, "tracy", "Enable tracy bindings and communication, default is false") orelse false;
-    var ztracy_package = ztracy.Package.build(b, target, mode, .{ .options = .{ .enable_ztracy = enable_tracy } });
+    var ztracy_package = ztracy.package(b, target, mode, .{ .options = .{ .enable_ztracy = enable_tracy } });
     ztracy_package.link(exe);
     exe.addModule("ztracy", ztracy_package.ztracy);
 
     // link zgui
-    const zgui_pkg = zgui.Package.build(b, target, mode, .{
+    const zgui_pkg = zgui.package(b, target, mode, .{
         .options = .{ .backend = .no_backend },
     });
     zgui_pkg.link(exe);
@@ -246,9 +245,9 @@ pub fn build(b: *Builder) void {
     const asset_move = AssetMoveStep.init(b) catch unreachable;
     exe.step.dependOn(&asset_move.step);
 
-    exe.install();
+    b.installArtifact(exe);
 
-    const run_cmd = exe.run();
+    const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
         run_cmd.addArgs(args);

@@ -112,7 +112,7 @@ pub fn generateCpu(comptime threads_count: usize, allocator: Allocator, seed: u6
         var threads: [threads_count]std.Thread = undefined;
         comptime var i = 0;
         inline while (i < threads_count) : (i += 1) {
-            const thread_name = std.fmt.comptimePrint("terrain thread {d}", .{i});
+            const thread_name = comptime std.fmt.comptimePrint("terrain thread {d}", .{i});
             threads[i] = try std.Thread.spawn(.{}, insert_job_gen_fn, .{ i, thread_name, perlin, voxel_dim, point_mod, ocean_level, grid });
         }
         i = 0;

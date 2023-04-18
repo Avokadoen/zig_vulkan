@@ -1,4 +1,4 @@
-# zgui v0.9.5 - dear imgui bindings
+# zgui v0.9.6 - dear imgui (1.89.4) bindings
 
 Easy to use, hand-crafted API with default arguments, named parameters and Zig style text formatting. For a test application please see [here](https://github.com/michal-z/zig-gamedev/tree/main/samples/gui_test_wgpu).
 
@@ -26,23 +26,21 @@ const zpool = @import("libs/zpool/build.zig");
 
 pub fn build(b: *std.Build) void {
     ...
-    const zgui_pkg = zgui.Package.build(b, target, optimize, .{
+    const optimize = b.standardOptimizeOption(.{});
+    const target = b.standardTargetOptions(.{});
+
+    const zgui_pkg = zgui.package(b, target, optimize, .{
         .options = .{ .backend = .glfw_wgpu },
     });
-
-    exe.addModule("zgui", zgui_pkg.zgui);
 
     zgui_pkg.link(exe);
     
     // Needed for glfw/wgpu rendering backend
-    const zglfw_pkg = zglfw.Package.build(b, target, optimize, .{});
-    const zpool_pkg = zpool.Package.build(b, .{});
-    const zgpu_pkg = zgpu.Package.build(b, .{
+    const zglfw_pkg = zglfw.package(b, target, optimize, .{});
+    const zpool_pkg = zpool.package(b, target, optimize, .{});
+    const zgpu_pkg = zgpu.package(b, target, optimize, .{
         .deps = .{ .zpool = zpool_pkg.zpool, .zglfw = zglfw_pkg.zglfw },
     });
-
-    exe.addModule("zgpu", zgpu_pkg.zgpu);
-    exe.addModule("zglfw", zglfw_pkg.zglfw);
 
     zglfw_pkg.link(exe);
     zgpu_pkg.link(exe);
