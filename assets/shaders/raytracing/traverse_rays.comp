@@ -70,28 +70,21 @@ void main() {
         return;
     }
 
-    Ray ray = rays[ray_index];
-    float t_min = 0.0001;
-    float t_max = 1000;
-    vec3 hit_v_min;
-    HitRecord hit = HitRecord(
-        vec3(0),       // point;
-        0,             // normal_4b_and_material_index_28b; 
-        ray.direction, // ray_direction;
-        1,             // ray_internal_reflection;
-        vec3(0),       // color;
-        0              // padding;
-    );
-    if (GridHit(ray, t_min, t_max, hit_v_min, hit)) {
-
-    }
 
     if (gl_LocalInvocationIndex == 0) {
         atomicAdd(out_ray_cursor.cursor, 1);
     }
     atomicMax(out_ray_cursor.max_index, int(ray_index));
 
-    hit_record[ray_index] = hit;
+    Ray ray = rays[ray_index];
+    float t_min = 0.0001;
+    float t_max = 1000;
+    vec3 hit_v_min;
+    HitRecord hit;
+    if (GridHit(ray, t_min, t_max, hit_v_min, hit)) {
+        hit_record[ray_index] = hit;
+    }
+
 }
 
 
@@ -141,15 +134,15 @@ bool AdvNormIntersect(vec3 box_min_point, vec3 box_max_point, Ray r, vec3 inv_ra
     if (t_mins.x >= t_mins.y && t_mins.x >= t_mins.z) {
         t_min = max(t_min, t_mins.x);
         // either 0b1100 or 0b0100
-        normal_bits = (inv_ray_dir.x < 0) ? 12 << 28 : 4 << 28;
+        normal_bits = ((inv_ray_dir.x < 0) ? 12 : 4) << 28;
     } else if (t_mins.y >= t_mins.x && t_mins.y >= t_mins.z) {
         t_min = max(t_min, t_mins.y);
         // either 0b1010 or 0b0010
-        normal_bits = (inv_ray_dir.y < 0) ? 10 << 28 : 1 << 28;
+        normal_bits = ((inv_ray_dir.y < 0) ? 10 : 2) << 28;
     } else {
         t_min = max(t_min, t_mins.z);
         // either 0b1001 or 0b0001
-        normal_bits = (inv_ray_dir.z < 0) ? 9 << 28 : 1 << 28;
+        normal_bits = ((inv_ray_dir.z < 0) ? 9 : 1) << 28;
     }
     t_max = min(t_max, minComponent(t_maxes));
     
@@ -164,13 +157,15 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, inout HitRecord 
     const vec3 g_min = brick_grid.min_point;
     const vec3 g_max = fma(g_dim, vec3(g_scale), g_min);
 
+    uint hit_normal_bits;
     const vec3 inv_ray_dir = safeInverse(r.direction);
     float grid_t_min = t_min;
     float grid_t_max = t_max;
-    if (!AdvNormIntersect(g_min, g_max, r, inv_ray_dir, hit.normal_4b_and_material_index_28b, grid_t_min, grid_t_max)) {
+    if (!AdvNormIntersect(g_min, g_max, r, inv_ray_dir, hit_normal_bits, grid_t_min, grid_t_max)) {
         return false;
     }
-    
+    hit.normal_4b_and_material_index_28b = hit_normal_bits;
+
     // HACK: workaround for precision issues with t being too low for "penetrating" grid 
     float global_t_value = grid_t_min + 0.001 * g_scale.x;
 
@@ -227,7 +222,8 @@ bool BrickHit(Ray r, vec3 ray_step, vec3 ray_delta, vec3 g_scale, float t_min, f
     const vec3 intersection_delta = floor(fposition) - fposition;
     vec3 side_dist = fma(ray_step, intersection_delta, ray_step * 0.5 + 0.5) * ray_delta;
 
-    uvec3 normal_axist_bits = uvec3(lessThan(ray_step, vec3(-0.00001))) * uvec3(8) + uvec3(4, 2, 1);
+    // TODO: make this line more readable
+    const uvec3 normal_axis_bits = uvec3(lessThan(ray_step, vec3(-0.00001))) * uvec3(8 << 28) + uvec3(4 << 28, 2 << 28, 1 << 28);
 
     vec3 local_position = floor(fposition + 0.);
     float local_t_min = t_min - global_t_value;
@@ -266,9 +262,8 @@ bool BrickHit(Ray r, vec3 ray_step, vec3 ray_delta, vec3 g_scale, float t_min, f
         side_dist += fmask * ray_delta;
         local_position += fmask * ray_step;
 
-        const uvec3 normal_bits = normal_axist_bits * uint(mask);
-        hit.normal_4b_and_material_index_28b |= normal_bits.x << 28 | normal_bits.y << 28 | normal_bits.z << 28;
-
+        // overwrite all bits with normal bits, material index is not defined yet.
+        hit.normal_4b_and_material_index_28b = normal_axis_bits.x * uint(mask.x) + normal_axis_bits.y * uint(mask.y) + normal_axis_bits.z * uint(mask.z);
     } 
 
     return false;
