@@ -571,7 +571,7 @@ pub inline fn inRayBufferInfos(self: TraverseRayPipeline) [2]vk.DescriptorBuffer
 pub inline fn outRayBufferInfos(self: TraverseRayPipeline) [2]vk.DescriptorBufferInfo {
     return [2]vk.DescriptorBufferInfo{
         self.ray_buffer_infos[@enumToInt(RayBufferInfo.out_ray_cursor)],
-        self.ray_buffer_infos[@enumToInt(RayBufferInfo.ray_buffer)],
+        self.ray_buffer_infos[@enumToInt(RayBufferInfo.hit_record_buffer)],
     };
 }
 
