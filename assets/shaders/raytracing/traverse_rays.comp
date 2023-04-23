@@ -23,14 +23,19 @@ layout (set = 0, binding = 1) readonly buffer RayBuffer {
     Ray rays[];
 };
 
-layout (set = 0, binding = 2) buffer OutCursorBuffer
+layout (set = 0, binding = 2) buffer OutHitCursorBuffer
 {
-    RayBufferCursor out_ray_cursor; // TODO: rename to out_hit_cursor
+    RayBufferCursor out_hit_cursor;
 };
-layout (set = 0, binding = 3) writeonly buffer HitRecordBuffer {
+layout (set = 0, binding = 3) buffer OutMissCursorBuffer
+{
+    RayBufferCursor out_miss_cursor;
+};
+layout (set = 0, binding = 4) writeonly buffer HitRecordBuffer {
     HitRecord hit_record[];
 };
-layout (set = 0, binding = 4) readonly buffer BrickGridState {
+
+layout (set = 0, binding = 5) readonly buffer BrickGridState {
     // how many bricks in each axis
     vec3 dim;
     float padding1;
@@ -38,15 +43,14 @@ layout (set = 0, binding = 4) readonly buffer BrickGridState {
     vec3 min_point;
     float scale;
 } brick_grid;
-
-layout (set = 0, binding = 5) readonly buffer BrickSetBuffer {
+layout (set = 0, binding = 6) readonly buffer BrickSetBuffer {
     uint brick_set_bits[];
 };
 struct Brick {
     // 512 bit voxel set mask
     uint solid_mask[16];
 };
-layout (set = 0, binding = 6) readonly buffer BrickBuffer {
+layout (set = 0, binding = 7) readonly buffer BrickBuffer {
     Brick bricks[];
 };
 
@@ -72,9 +76,9 @@ void main() {
 
 
     if (gl_LocalInvocationIndex == 0) {
-        atomicAdd(out_ray_cursor.cursor, 1);
+        atomicAdd(out_hit_cursor.cursor, 1);
     }
-    atomicMax(out_ray_cursor.max_index, int(ray_index));
+    atomicMax(out_hit_cursor.max_index, int(ray_index));
 
     Ray ray = rays[ray_index];
 
