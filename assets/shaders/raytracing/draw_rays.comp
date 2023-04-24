@@ -22,13 +22,8 @@ layout (set = 0, binding = 2) readonly buffer HitBuffer {
 shared int warp_start_index;
 
 void main() {
-    if (gl_LocalInvocationIndex == 0) {
-        const int work_size = int(gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z);
-        warp_start_index = work_size * atomicAdd(cursor.cursor, -1);
-    }
-    barrier();
-    const int hit_record_index = warp_start_index + int(gl_LocalInvocationIndex);
-    if (hit_record_index < 0 || hit_record_index > cursor.max_index) return;
+    const int hit_record_index = (atomicAdd(cursor.cursor, -1) - 1);
+    if (hit_record_index < 0) return;
 
     const HitRecord hit_record = hit_records[hit_record_index];
     const ivec2 pixel_coord = ivec2(

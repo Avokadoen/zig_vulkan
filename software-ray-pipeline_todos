@@ -12,7 +12,7 @@
         * [x] 1 bit set/unset brick buffer
         * [x] move out cursor to begining of buffer
         * [x] hit data is stored in a buffer for a scatter shader to work with
-        * [ ] loop RayBufferInfo and BrickBufferInfo for descriptor creation
+        * [x] loop RayBufferInfo and BrickBufferInfo for descriptor creation
         * [ ] fix bending cubes made apparent by larger grid scale (probably caused by incorrect t_value?)
     * [ ] miss pipeline
     * [ ] scatter pipeline
@@ -23,6 +23,7 @@
 * [x] only one atomicAdd pr warp, use shared memory to share start index with threads that use thread id + warp offset to grab rays
 * [ ] t_min + t_max limits in gui and camera
 * [ ] shared resources set up
+* [ ] dedicated cursors for each pipelines to ensure race safety
 
 
 

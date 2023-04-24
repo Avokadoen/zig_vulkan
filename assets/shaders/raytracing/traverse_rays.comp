@@ -73,25 +73,27 @@ void main() {
     if (ray_index < 0 || ray_index > in_ray_cursor.max_index) {
         return;
     }
-
-
-    if (gl_LocalInvocationIndex == 0) {
-        atomicAdd(out_hit_cursor.cursor, 1);
-    }
-    atomicMax(out_hit_cursor.max_index, int(ray_index));
-
     Ray ray = rays[ray_index];
 
     // TODO: put hit record in miss, or hit pile (need additional cursor)
     float t_min = 0.0001;
     float t_max = 1000;
     HitRecord hit;
-    if (GridHit(ray, t_min, t_max, hit)) {
-        // TODO: not ray index, but hit index
-        hit_record[ray_index] = hit;
+    const bool did_hit = GridHit(ray, t_min, t_max, hit);
+    
+    barrier(); // TODO: not needed, but might be good for performance by avoiding cache thrashing. Benchmark later!
+
+    int hit_index;
+    if (did_hit) {
+        hit_index = atomicAdd(out_hit_cursor.cursor, 1);
     } else {
-        // TODO: increment miss index
+        // define the hit ray direction, previous color and pixel coord for miss shading
+        hit.ray_direction = ray.direction;
+        hit.previous_color = ray.color;
+        hit.pixel_coord = ray.pixel_coord;
+        hit_index = in_ray_cursor.max_index - (atomicAdd(out_miss_cursor.cursor, 1) + 1);
     }
+    hit_record[hit_index] = hit;
 }
 
 

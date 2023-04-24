@@ -488,15 +488,23 @@ pub fn recordCommandBuffer(self: TraverseRayPipeline, ctx: Context) !void {
         undefined,
     );
 
+    // Assert that our two cursors are located next to eachother to avoid our fill nulling unrelated bytes
+    std.debug.assert(@enumToInt(BufferInfo.out_miss_cursor) - @enumToInt(BufferInfo.out_hit_cursor) == 1);
+
+    // we get distance between offset to account of alignment and padding
+    const fill_range =
+        self.buffer_infos[@enumToInt(BufferInfo.out_miss_cursor)].offset - self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)].offset +
+        self.buffer_infos[@enumToInt(BufferInfo.out_miss_cursor)].range;
+
     // TODO: if we perform this fill in the emit stage then we do not need duplicate synchronization
     //       we should also replace semaphores with proper memory barriers.
     //       Actually, we should use the transfer queue to do all of these fill buffers during the initial queue
-    // put output ray cursor at 0
+    // put cursors at 0
     ctx.vkd.cmdFillBuffer(
         self.command_buffer,
         self.ray_buffer.buffer,
         self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)].offset,
-        self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)].range,
+        fill_range,
         0,
     );
     const buffer_memory_barrier = vk.BufferMemoryBarrier{
@@ -506,7 +514,7 @@ pub fn recordCommandBuffer(self: TraverseRayPipeline, ctx: Context) !void {
         .dst_queue_family_index = self.queue_family_index,
         .buffer = self.ray_buffer.buffer,
         .offset = self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)].offset,
-        .size = self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)].range,
+        .size = fill_range,
     };
     ctx.vkd.cmdPipelineBarrier(
         self.command_buffer,
