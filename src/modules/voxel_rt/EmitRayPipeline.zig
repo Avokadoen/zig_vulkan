@@ -99,13 +99,10 @@ pub fn init(
     errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, target_descriptor_layout, null);
 
     const target_descriptor_pool = blk: {
-        const pool_sizes = [_]vk.DescriptorPoolSize{ .{
+        const pool_sizes = [_]vk.DescriptorPoolSize{.{
             .type = .storage_buffer,
-            .descriptor_count = 1,
-        }, .{
-            .type = .storage_buffer,
-            .descriptor_count = 1,
-        } };
+            .descriptor_count = 2,
+        }};
         const pool_info = vk.DescriptorPoolCreateInfo{
             .flags = .{},
             .max_sets = 1,
@@ -357,7 +354,7 @@ pub fn recordCommandBuffer(self: EmitRayPipeline, ctx: Context, camera: Camera) 
     );
     const buffer_memory_barrier = vk.BufferMemoryBarrier{
         .src_access_mask = .{ .transfer_write_bit = true },
-        .dst_access_mask = .{ .shader_read_bit = true },
+        .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
         .src_queue_family_index = self.queue_family_index,
         .dst_queue_family_index = self.queue_family_index,
         .buffer = self.ray_buffer.buffer,

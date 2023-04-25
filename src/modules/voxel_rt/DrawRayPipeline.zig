@@ -46,6 +46,7 @@ ray_buffer: *const GpuBufferMemory,
 work_group_dim: Dispatch2,
 
 submit_wait_stage: [1]vk.PipelineStageFlags = .{.{ .compute_shader_bit = true }},
+draw_ray_descriptor_info: [2]vk.DescriptorBufferInfo,
 
 // TODO: share descriptors across ray pipelines (use vk descriptor buffers!)
 // TODO: descriptor has a lot of duplicate code with init ...
@@ -121,16 +122,16 @@ pub fn init(
     errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, target_descriptor_layout, null);
 
     const target_descriptor_pool = blk: {
-        const pool_sizes = [_]vk.DescriptorPoolSize{ .{
-            .type = .storage_image,
-            .descriptor_count = 1,
-        }, .{
-            .type = .storage_buffer,
-            .descriptor_count = 1,
-        }, .{
-            .type = .storage_buffer,
-            .descriptor_count = 1,
-        } };
+        const pool_sizes = [_]vk.DescriptorPoolSize{
+            .{
+                .type = .storage_image,
+                .descriptor_count = 1,
+            },
+            .{
+                .type = .storage_buffer,
+                .descriptor_count = 2,
+            },
+        };
         const pool_info = vk.DescriptorPoolCreateInfo{
             .flags = .{},
             .max_sets = 1,
@@ -287,6 +288,7 @@ pub fn init(
         .ray_buffer = ray_buffer,
         .work_group_dim = work_group_dim,
         .target_image_info = target_image_info,
+        .draw_ray_descriptor_info = draw_ray_descriptor_info,
     };
 }
 
@@ -367,6 +369,35 @@ pub fn recordCommandBuffer(self: DrawRayPipeline, ctx: Context) !void {
         undefined,
     );
 
+    // put cursor at 0, but not the max value of the cursor in the emit stage
+    ctx.vkd.cmdFillBuffer(
+        self.command_buffer,
+        self.ray_buffer.buffer,
+        self.draw_ray_descriptor_info[0].offset + @sizeOf(c_int),
+        self.draw_ray_descriptor_info[0].range,
+        0,
+    );
+    const buffer_memory_barrier = vk.BufferMemoryBarrier{
+        .src_access_mask = .{ .transfer_write_bit = true },
+        .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+        .src_queue_family_index = ctx.queue_indices.compute,
+        .dst_queue_family_index = ctx.queue_indices.compute,
+        .buffer = self.ray_buffer.buffer,
+        .offset = self.draw_ray_descriptor_info[0].offset,
+        .size = self.draw_ray_descriptor_info[0].range,
+    };
+    ctx.vkd.cmdPipelineBarrier(
+        self.command_buffer,
+        .{ .transfer_bit = true },
+        .{ .compute_shader_bit = true },
+        .{},
+        0,
+        undefined,
+        1,
+        @ptrCast([*]const vk.BufferMemoryBarrier, &buffer_memory_barrier),
+        0,
+        undefined,
+    );
     const image_barrier = vk.ImageMemoryBarrier{
         .src_access_mask = .{ .shader_read_bit = true },
         .dst_access_mask = .{ .shader_write_bit = true },

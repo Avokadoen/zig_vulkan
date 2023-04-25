@@ -22,12 +22,6 @@ vec3 RayAt(Ray r, float t) {
     return fma(vec3(t), r.direction, r.origin);
 }
 
-vec3 BackgroundColor(Ray r) {
-    float t = 0.5 * (r.direction.y + 1.0);
-    vec3 background_color = fma(vec3(1.0 - t), vec3(1.0), t * vec3(0.5, 0.7, 1.0));
-    return background_color;
-}
-
 struct RayBufferCursor {
     // how many rays that was written to the buffer in total
     int max_index;
@@ -35,6 +29,7 @@ struct RayBufferCursor {
     int cursor;
 };
 
+// must be kept in sync with TraverseRayPipeline.HitRecord
 struct HitRecord {
     vec3 point;
     uint normal_4b_and_material_index_28b;

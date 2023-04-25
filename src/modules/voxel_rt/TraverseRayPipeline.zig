@@ -31,11 +31,15 @@ pub const BrickGridState = extern struct {
 pub const Brick = packed struct {
     solid_mask: u512,
 };
+
+// must be kept in sync with ray_commons.HitRecord
 pub const HitRecord = extern struct {
     point: [3]f32,
     normal_4b_and_material_index_28b: c_uint,
     ray_direction: [3]f32,
     ray_internal_reflection: f32,
+    previous_color: [3]f32,
+    pixel_coord: c_uint,
 };
 
 // TODO: convert to a struct ...
@@ -183,21 +187,15 @@ pub fn init(
     errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, target_descriptor_layout, null);
 
     const target_descriptor_pool = blk: {
-        const pool_sizes = comptime pool_size_blk: {
-            var sizes: [buffer_info_count]vk.DescriptorPoolSize = undefined;
-            inline for (&sizes, 0..buffer_info_count) |*size, _| {
-                size.* = .{
-                    .type = .storage_buffer,
-                    .descriptor_count = 1,
-                };
-            }
-            break :pool_size_blk sizes;
+        const pool_sizes = vk.DescriptorPoolSize{
+            .type = .storage_buffer,
+            .descriptor_count = buffer_info_count,
         };
         const pool_info = vk.DescriptorPoolCreateInfo{
             .flags = .{},
             .max_sets = 1,
-            .pool_size_count = pool_sizes.len,
-            .p_pool_sizes = &pool_sizes,
+            .pool_size_count = 1,
+            .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, &pool_sizes),
         };
         break :blk try ctx.vkd.createDescriptorPool(ctx.logical_device, &pool_info, null);
     };
@@ -418,16 +416,24 @@ pub fn deinit(self: TraverseRayPipeline, ctx: Context) void {
     ctx.destroyPipeline(self.pipeline);
 }
 
-pub inline fn inRayBufferInfos(self: TraverseRayPipeline) [2]vk.DescriptorBufferInfo {
+pub inline fn emitPipelineDescriptorInfo(self: TraverseRayPipeline) [2]vk.DescriptorBufferInfo {
     return [2]vk.DescriptorBufferInfo{
         self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)],
         self.buffer_infos[@enumToInt(BufferInfo.ray_buffer)],
     };
 }
 
-pub inline fn outRayBufferInfos(self: TraverseRayPipeline) [2]vk.DescriptorBufferInfo {
+pub inline fn drawPipelineDescriptorInfo(self: TraverseRayPipeline) [2]vk.DescriptorBufferInfo {
     return [2]vk.DescriptorBufferInfo{
-        self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)],
+        self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)],
+        self.buffer_infos[@enumToInt(BufferInfo.hit_record_buffer)],
+    };
+}
+
+pub inline fn missPipelineDescriptorInfo(self: TraverseRayPipeline) [3]vk.DescriptorBufferInfo {
+    return [3]vk.DescriptorBufferInfo{
+        self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)],
+        self.buffer_infos[@enumToInt(BufferInfo.out_miss_cursor)],
         self.buffer_infos[@enumToInt(BufferInfo.hit_record_buffer)],
     };
 }
@@ -509,7 +515,7 @@ pub fn recordCommandBuffer(self: TraverseRayPipeline, ctx: Context) !void {
     );
     const buffer_memory_barrier = vk.BufferMemoryBarrier{
         .src_access_mask = .{ .transfer_write_bit = true },
-        .dst_access_mask = .{ .shader_read_bit = true },
+        .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
         .src_queue_family_index = self.queue_family_index,
         .dst_queue_family_index = self.queue_family_index,
         .buffer = self.ray_buffer.buffer,

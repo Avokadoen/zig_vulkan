@@ -10,7 +10,6 @@
 
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z = 1) in;
 
-// TODO: only need image width, height (and potentially image offset width and height)!
 layout (push_constant) uniform PushConstants {
     vec3 horizontal;
     uint image_width;
@@ -32,11 +31,6 @@ layout (set = 0, binding = 1) writeonly buffer RayBuffer {
 shared uint warp_start_index;
 
 void main() {
-    const uint pixel_count = push_constant.image_width * push_constant.image_height;
-    if (gl_GlobalInvocationID.x >= pixel_count) {
-        return;
-    }
-
     if (gl_LocalInvocationIndex == 0) {
         const uint work_size = gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z;
         warp_start_index = work_size * atomicAdd(cursor.cursor, 1);
@@ -48,10 +42,9 @@ void main() {
         ray_index % push_constant.image_width, 
         ray_index / push_constant.image_width
     );
-    if (pixel_coord.x > push_constant.image_width || pixel_coord.y > push_constant.image_height) {
+    if (pixel_coord.y > push_constant.image_height) {
         return;
     }
-    atomicMax(cursor.max_index, int(ray_index));
 
     // TODO: random dir when multi samples
     // TODO: proper random (blue noise)
@@ -62,6 +55,7 @@ void main() {
     const vec3 ray_dir = fma(push_constant.horizontal, vec3(u), push_constant.lower_left_corner) + fma(vec3(v), push_constant.vertical, -push_constant.origin);
     const uint pixel = (pixel_coord.x << 16) | pixel_coord.y;
 
+    atomicMax(cursor.max_index, int(ray_index));
     rays[ray_index] = Ray(
         push_constant.origin, // origin
         1,                    // internal_reflection

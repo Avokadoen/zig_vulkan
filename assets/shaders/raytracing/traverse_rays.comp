@@ -91,9 +91,9 @@ void main() {
         hit.ray_direction = ray.direction;
         hit.previous_color = ray.color;
         hit.pixel_coord = ray.pixel_coord;
-        hit_index = in_ray_cursor.max_index - (atomicAdd(out_miss_cursor.cursor, 1) + 1);
+        hit_index = in_ray_cursor.max_index - atomicAdd(out_miss_cursor.cursor, 1);
     }
-    hit_record[hit_index] = hit;
+    hit_record[ray_index] = hit;
 }
 
 

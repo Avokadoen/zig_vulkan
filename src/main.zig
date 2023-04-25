@@ -47,8 +47,7 @@ pub fn main() anyerror!void {
     var alloc = if (consts.enable_validation_layers) std.heap.GeneralPurposeAllocator(.{}){} else std.heap.c_allocator;
     defer {
         if (consts.enable_validation_layers) {
-            const leak = alloc.deinit();
-            if (leak) {
+            if (alloc.deinit() == .leak) {
                 stderr.print("leak detected in gpa!", .{}) catch unreachable;
             }
         }

@@ -248,7 +248,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         ctx,
         internal_render_resolution,
         &ray_buffer,
-        traverse_ray_pipeline.inRayBufferInfos(),
+        traverse_ray_pipeline.emitPipelineDescriptorInfo(),
     );
     errdefer emit_ray_pipeline.deinit(ctx);
 
@@ -264,7 +264,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         ctx,
         &ray_buffer,
         target_image_info,
-        traverse_ray_pipeline.outRayBufferInfos(),
+        traverse_ray_pipeline.drawPipelineDescriptorInfo(),
     );
     errdefer draw_ray_pipeline.deinit(ctx);
 
