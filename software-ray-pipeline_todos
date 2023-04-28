@@ -1,6 +1,8 @@
 * [ ] share logic between pipelines for descriptors
 * [ ] common data structure with ray buffer and different buffer regions
 * [ ] integrate tracy!
+    * [ ] basic cpu integration as the rest of codebase
+    * [ ] gpu using vulkan queries?
 * [ ] only use one submit call
     * [ ] replace semaphores with pipeline barrier
 * [ ] static command buffers + handle of window rescale + changin rt settings (rerecord on demand)
@@ -17,7 +19,7 @@
     * [ ] miss pipeline
     * [ ] scatter pipeline
         * [ ] ability to tie hit record
-    * [ ] draw ray pipeline
+    * [x] draw ray pipeline
         * [x] resolve RC (flickering) and bottom of image missing output
         * [x] draw misses as well as hits ~~(requires another cursor) (just add some push constant)~~
 * [ ] potentially use a single command buffer? (only record it in individual buffers)

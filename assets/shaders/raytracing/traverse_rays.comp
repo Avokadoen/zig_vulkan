@@ -83,17 +83,22 @@ void main() {
     
     barrier(); // TODO: not needed, but might be good for performance by avoiding cache thrashing. Benchmark later!
 
-    int hit_index;
+    int hit_record_index;
     if (did_hit) {
-        hit_index = atomicAdd(out_hit_cursor.cursor, 1);
+        hit_record_index = atomicAdd(out_hit_cursor.cursor, 1);
+        atomicMax(out_hit_cursor.max_index, hit_record_index);
     } else {
         // define the hit ray direction, previous color and pixel coord for miss shading
         hit.ray_direction = ray.direction;
         hit.previous_color = ray.color;
         hit.pixel_coord = ray.pixel_coord;
-        hit_index = in_ray_cursor.max_index - atomicAdd(out_miss_cursor.cursor, 1);
+        
+        const int miss_index = atomicAdd(out_miss_cursor.cursor, 1);
+        atomicMax(out_miss_cursor.max_index, miss_index);
+
+        hit_record_index = in_ray_cursor.max_index - miss_index;
     }
-    hit_record[ray_index] = hit;
+    hit_record[hit_record_index] = hit;
 }
 
 

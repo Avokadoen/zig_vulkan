@@ -1,0 +1,42 @@
+#version 450
+
+#extension GL_EXT_debug_printf : disable
+// debugPrintfEXT("hello world %f", 1.0);
+
+// This extension is strictly not required for vulkan 1.2 target, but is used to silence validator...
+#extension GL_GOOGLE_include_directive : enable
+#include "ray_commons.glsl"
+
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z = 1) in;
+
+layout (set = 0, binding = 0) readonly buffer OutHitCursorBuffer
+{
+    RayBufferCursor out_hit_cursor;
+};
+layout (set = 0, binding = 1) buffer OutMissCursorBuffer
+{
+    RayBufferCursor out_miss_cursor;
+};
+layout (set = 0, binding = 2) buffer HitBuffer {
+    HitRecord hit_records[];
+};
+
+void main() {
+    const int miss_cursor = atomicAdd(out_miss_cursor.cursor, -1);
+    if (miss_cursor < 0) {
+        return;
+    }
+
+    const int miss_record_index = out_hit_cursor.max_index + miss_cursor;
+    if (miss_record_index < 0) {
+        return;
+    };
+
+    HitRecord miss_record = hit_records[miss_record_index];
+
+    // calculate some sky color in the event of a miss
+    float t = 0.5 * (miss_record.ray_direction.y + 1.0);
+    miss_record.previous_color += fma(vec3(1.0 - t), vec3(1.0), t * vec3(0.5, 0.7, 1.0));
+    
+    hit_records[miss_record_index] = miss_record;
+}

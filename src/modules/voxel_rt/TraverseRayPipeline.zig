@@ -432,7 +432,7 @@ pub inline fn drawPipelineDescriptorInfo(self: TraverseRayPipeline) [2]vk.Descri
 
 pub inline fn missPipelineDescriptorInfo(self: TraverseRayPipeline) [3]vk.DescriptorBufferInfo {
     return [3]vk.DescriptorBufferInfo{
-        self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)],
+        self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)],
         self.buffer_infos[@enumToInt(BufferInfo.out_miss_cursor)],
         self.buffer_infos[@enumToInt(BufferInfo.hit_record_buffer)],
     };
