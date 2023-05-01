@@ -3,8 +3,6 @@
 * [ ] integrate tracy!
     * [ ] basic cpu integration as the rest of codebase
     * [ ] gpu using vulkan queries?
-* [ ] only use one submit call
-    * [ ] replace semaphores with pipeline barrier
 * [ ] static command buffers + handle of window rescale + changin rt settings (rerecord on demand)
 * [ ] implement all steps/stages
     * [x] emit
@@ -15,8 +13,9 @@
         * [x] move out cursor to begining of buffer
         * [x] hit data is stored in a buffer for a scatter shader to work with
         * [x] loop RayBufferInfo and BrickBufferInfo for descriptor creation
+        * [ ] Brick buffer should be index to actual brick data stored in separate buffer 
         * [ ] fix bending cubes made apparent by larger grid scale (probably caused by incorrect t_value?)
-    * [ ] miss pipeline
+    * [x] miss pipeline
     * [ ] scatter pipeline
         * [ ] ability to tie hit record
     * [x] draw ray pipeline
@@ -29,7 +28,16 @@
 * [ ] dedicated cursors for each pipelines to ensure race safety
 * [ ] rename draw_rays stage to draw
 * [ ] proccess rays independent of image_size: vk.Extent2D
-
+* [ ] Tone mapping with exposure step: https://bruop.github.io/exposure/
+* [ ] figure out sensible way of dealing with shadow rays
+* [ ] Gpu memory should be handled outside of pipelines (Ray and brick memory)
+    * [ ] have GlobalBufferInfo + (Stage)BufferInfo with mappings from global to stage info
+    * [ ] move DescriptorBufferInfo stuff out of the pipelines and deal what that in one module in the code for easier readability 
+* [ ] Merge common data points of Ray and Hit Record into separate buffer to save memory bandwith. Potentail race condtions must also be considered!
+* [ ] Map one stage to one queue
+* [ ] Define stage number for each pipeline in a central location
+* [ ] ~~Only do one vkQueueSubmit per bounce (submit all stages at once)~~ Since we plan different queue between each stage we cant do this :(
+* [ ] Replace timeline semaphore syncing with normal memory barriers!
 
 
 

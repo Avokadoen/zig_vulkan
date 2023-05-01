@@ -1,0 +1,121 @@
+#version 450
+
+#extension GL_EXT_debug_printf : disable
+// debugPrintfEXT("hello world %f", 1.0);
+
+// This extension is strictly not required for vulkan 1.2 target, but is used to silence validator...
+#extension GL_GOOGLE_include_directive : enable
+#include "ray_commons.glsl"
+
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z = 1) in;
+
+layout (set = 0, binding = 0) buffer InHitCursorBuffer {
+    RayBufferCursor out_cursor;
+};
+layout (set = 0, binding = 1) writeonly buffer InHitRecordBuffer {
+    HitRecord out_hit_records[];
+};
+layout (set = 0, binding = 2) readonly buffer OutHitRecordBuffer {
+    HitRecord in_hit_records[];
+};
+
+void main() {
+    // get the index for ray and hit, max_index is copied over from out_cursor by pipeline
+    const int index = atomicAdd(out_cursor.cursor, 1);
+    if (index > out_cursor.max_index) {
+        return;
+    }
+
+    HitRecord hit_record = in_hit_records[index];
+
+    const uint material_index = bitfieldExtract(hit_record.normal_4b_and_material_index_28b, 0, 28);
+    const vec3 hit_normal = vec3(-bitfieldExtract(hit_record.normal_4b_and_material_index_28b, 31, 1)) * vec3(
+        bitfieldExtract(hit_record.normal_4b_and_material_index_28b, 28, 1),
+        bitfieldExtract(hit_record.normal_4b_and_material_index_28b, 29, 1),
+        bitfieldExtract(hit_record.normal_4b_and_material_index_28b, 30, 1)
+    );
+    
+    // TODO: actual material
+    const vec3 material_albedo = vec3(1);
+    // TODO actually scatter ray based on material_index and a scatter function (we also have hit_record.ray_direction)
+    const vec3 scatter_dir = hit_normal;
+
+    // update record
+    hit_record.previous_color = material_albedo;
+    hit_record.previous_ray_direction = scatter_dir; 
+
+    out_hit_records[index] = hit_record;
+}
+
+
+// bool scatterLambertian(Material material, Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scattered) {
+//     // TODO: better random hemisphere
+//     vec3 scatter_dir = normalize(hit.normal + RandVec3(hit.point.xy + hit.point.z, -0.4, 0.4));
+//     scattered = CreateRay(hit.point, scatter_dir, IGNORE_MAT_NONE);
+
+//     attenuation = AlbedoColor(material);
+//     return true;
+// }
+
+// bool scatterMetal(Material material, Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scattered) {
+//     vec3 reflected = reflect(r_in.direction, hit.normal);
+//     float fuzz = metal[material.type_index].fuzz;
+//     scattered = CreateRay(hit.point, reflected + RandVec3(hit.point.xy + hit.point.z, -fuzz, fuzz), IGNORE_MAT_NONE);
+//     attenuation = AlbedoColor(material);
+//     return (dot(scattered.direction, hit.normal) > 0);
+// }
+
+// // Source: Ray tracing gems 2 page 107 (one of Bec's methods)
+// /// defined the refraction direction if a refraction is needed based on n1, n2 and the angle between
+// /// r_in and the normal
+// /// This means that refrac_dir only gets defined if function returns true
+// /// @param:
+// ///     - n1: internal reflection of impact material
+// ///     - n2: internal reflection of current material medium
+// ///     - ray_dir: the traveling ray direction
+// ///     - normal: normal vector of the impact surface
+// ///     - refrac_dir: poternial calculated penetration vector of r_in
+// /// @return: bool that is true if refraction is calculated
+// bool transmissionDirection(float n1, float n2, vec3 ray_dir, vec3 normal, out vec3 refrac_dir) {
+//     const float eta = n1 / n2;
+//     const float c1 = -dot(ray_dir, normal);
+//     const float w = eta * c1;
+//     const float c2m = (w - eta) * (w + eta);
+//     if (c2m < -1.0) {
+//         return false;
+//     }
+//     refrac_dir = fma(vec3(eta), ray_dir, (w - sqrt(1.0 + c2m)) * normal);
+//     return true;
+// }
+
+// bool scatterDielectric(Material material, Ray r_in, vec3 hit_c_min, HitRecord hit, out vec3 attenuation, out Ray scattered) {
+//     attenuation = AlbedoColor(material);
+
+//     const float ir = dielectric[material.type_index].internal_reflection;
+
+//     // TODO: better noise (blue :))
+//     // TODO: add property to glass: roughness (0 should be no noise/rng)
+//     const vec3 normal = normalize(hit.normal + RandVec3(hit.point.xy + hit.point.z, -0.05, 0.05));
+//     vec3 direction;
+//     const bool should_refract = transmissionDirection(ir, r_in.internal_reflection, r_in.direction, normal, direction);
+//     if (should_refract && Rand(hit.point) > 0.5) {
+//         scattered = CreateRay(hit.point, direction, IGNORE_MAT_NONE);
+//         // TODO: we can remove this if we find the correct t_min for GridHit in calculate raycolor
+//         // HACK: move scattered ray out of current cube explicitly
+//         {
+//             float t_max = 9999.0;
+//             hit.t = 0;
+//             const vec3 inv_ray_dir = 1 / r_in.direction;
+//             AdvIntersect(hit_c_min - vec3(0.001), hit_c_min + vec3(0.126), scattered, inv_ray_dir, hit.t, t_max);
+//             scattered = CreateRay(RayAt(scattered, t_max), scattered.direction, IGNORE_MAT_NONE);
+//         }
+//         // ray is traveling through non air medium
+//         scattered.internal_reflection = ir;
+//     } else {
+//         direction = reflect(r_in.direction, normal);
+//         scattered = CreateRay(hit.point, direction, IGNORE_MAT_NONE);
+//     }
+
+//     return true;
+// }
+

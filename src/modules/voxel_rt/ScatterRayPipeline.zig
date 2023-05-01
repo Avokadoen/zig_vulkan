@@ -22,25 +22,25 @@ const ImageInfo = ray_types.ImageInfo;
 
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
-/// compute shader that draws to a target texture
-const DrawRayPipeline = @This();
+/// compute shader spawning scattered rays based on hit records
+const ScatterRayPipeline = @This();
 
 allocator: Allocator,
 
 pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
 
-// info about the target image
-target_image_info: ImageInfo,
 target_descriptor_layout: vk.DescriptorSetLayout,
 target_descriptor_pool: vk.DescriptorPool,
 target_descriptor_set: vk.DescriptorSet,
 
+image_size: vk.Extent2D,
+buffer_infos: [3]vk.DescriptorBufferInfo,
 ray_buffer: *const GpuBufferMemory,
 
 work_group_dim: Dispatch2,
 
-draw_ray_descriptor_info: [2]vk.DescriptorBufferInfo,
+submit_wait_stage: [1]vk.PipelineStageFlags = .{.{ .compute_shader_bit = true }},
 
 // TODO: share descriptors across ray pipelines (use vk descriptor buffers!)
 // TODO: descriptor has a lot of duplicate code with init ...
@@ -52,47 +52,28 @@ pub fn init(
     allocator: Allocator,
     ctx: Context,
     ray_buffer: *const GpuBufferMemory,
-    target_image_info: ImageInfo,
-    draw_ray_descriptor_info: [2]vk.DescriptorBufferInfo,
-) !DrawRayPipeline {
-    const zone = tracy.ZoneN(@src(), @typeName(DrawRayPipeline) ++ " " ++ @src().fn_name);
+    image_size: vk.Extent2D,
+    scatter_ray_descriptor_info: [3]vk.DescriptorBufferInfo,
+) !ScatterRayPipeline {
+    const zone = tracy.ZoneN(@src(), @typeName(ScatterRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
+    // TODO: change based on NVIDIA vs AMD vs Others?
     const work_group_dim = Dispatch2.init(ctx);
 
     const target_descriptor_layout = blk: {
-        const layout_bindings = [_]vk.DescriptorSetLayoutBinding{
-            // Render image
-            .{
-                .binding = 0,
-                .descriptor_type = .storage_image,
-                .descriptor_count = 1,
-                .stage_flags = .{
-                    .compute_bit = true,
-                },
-                .p_immutable_samplers = null,
-            },
-            // RayBufferCursor
-            .{
-                .binding = 1,
+        comptime var layout_bindings: [scatter_ray_descriptor_info.len]vk.DescriptorSetLayoutBinding = undefined;
+        inline for (&layout_bindings, 0..) |*binding, index| {
+            binding.* = vk.DescriptorSetLayoutBinding{
+                .binding = index,
                 .descriptor_type = .storage_buffer,
                 .descriptor_count = 1,
                 .stage_flags = .{
                     .compute_bit = true,
                 },
                 .p_immutable_samplers = null,
-            },
-            // RayBuffer
-            .{
-                .binding = 2,
-                .descriptor_type = .storage_buffer,
-                .descriptor_count = 1,
-                .stage_flags = .{
-                    .compute_bit = true,
-                },
-                .p_immutable_samplers = null,
-            },
-        };
+            };
+        }
         const layout_info = vk.DescriptorSetLayoutCreateInfo{
             .flags = .{},
             .binding_count = layout_bindings.len,
@@ -103,16 +84,10 @@ pub fn init(
     errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, target_descriptor_layout, null);
 
     const target_descriptor_pool = blk: {
-        const pool_sizes = [_]vk.DescriptorPoolSize{
-            .{
-                .type = .storage_image,
-                .descriptor_count = 1,
-            },
-            .{
-                .type = .storage_buffer,
-                .descriptor_count = 2,
-            },
-        };
+        const pool_sizes = [_]vk.DescriptorPoolSize{.{
+            .type = .storage_image,
+            .descriptor_count = scatter_ray_descriptor_info.len,
+        }};
         const pool_info = vk.DescriptorPoolCreateInfo{
             .flags = .{},
             .max_sets = 1,
@@ -134,40 +109,19 @@ pub fn init(
     }
 
     {
-        const image_info = vk.DescriptorImageInfo{
-            .sampler = target_image_info.sampler,
-            .image_view = target_image_info.image_view,
-            .image_layout = .general,
-        };
-
-        const write_descriptor_set = [_]vk.WriteDescriptorSet{ .{
-            .dst_set = target_descriptor_set,
-            .dst_binding = 0,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .storage_image,
-            .p_image_info = @ptrCast([*]const vk.DescriptorImageInfo, &image_info),
-            .p_buffer_info = undefined,
-            .p_texel_buffer_view = undefined,
-        }, .{
-            .dst_set = target_descriptor_set,
-            .dst_binding = 1,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .storage_buffer,
-            .p_image_info = undefined,
-            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &draw_ray_descriptor_info[0]),
-            .p_texel_buffer_view = undefined,
-        }, .{
-            .dst_set = target_descriptor_set,
-            .dst_binding = 2,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .storage_buffer,
-            .p_image_info = undefined,
-            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &draw_ray_descriptor_info[1]),
-            .p_texel_buffer_view = undefined,
-        } };
+        var write_descriptor_set: [scatter_ray_descriptor_info.len]vk.WriteDescriptorSet = undefined;
+        for (&write_descriptor_set, 0..) |*write_desc, index| {
+            write_desc.* = .{
+                .dst_set = target_descriptor_set,
+                .dst_binding = @intCast(u32, index),
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &scatter_ray_descriptor_info[index]),
+                .p_texel_buffer_view = undefined,
+            };
+        }
 
         ctx.vkd.updateDescriptorSets(
             ctx.logical_device,
@@ -206,8 +160,8 @@ pub fn init(
         };
         const module_create_info = vk.ShaderModuleCreateInfo{
             .flags = .{},
-            .p_code = @ptrCast([*]const u32, &shaders.draw_rays_spv),
-            .code_size = shaders.draw_rays_spv.len,
+            .p_code = @ptrCast([*]const u32, &shaders.scatter_rays_spv),
+            .code_size = shaders.scatter_rays_spv.len,
         };
         const module = try ctx.vkd.createShaderModule(ctx.logical_device, &module_create_info, null);
 
@@ -220,7 +174,6 @@ pub fn init(
         };
         defer ctx.destroyShaderModule(stage.module);
 
-        // TOOD: read on defer_compile_bit_nv
         const pipeline_info = vk.ComputePipelineCreateInfo{
             .flags = .{},
             .stage = stage,
@@ -232,22 +185,22 @@ pub fn init(
     };
     errdefer ctx.destroyPipeline(pipeline);
 
-    return DrawRayPipeline{
+    return ScatterRayPipeline{
         .allocator = allocator,
         .pipeline_layout = pipeline_layout,
         .pipeline = pipeline,
         .target_descriptor_layout = target_descriptor_layout,
         .target_descriptor_pool = target_descriptor_pool,
         .target_descriptor_set = target_descriptor_set,
+        .image_size = image_size,
+        .buffer_infos = scatter_ray_descriptor_info,
         .ray_buffer = ray_buffer,
         .work_group_dim = work_group_dim,
-        .target_image_info = target_image_info,
-        .draw_ray_descriptor_info = draw_ray_descriptor_info,
     };
 }
 
-pub fn deinit(self: DrawRayPipeline, ctx: Context) void {
-    const zone = tracy.ZoneN(@src(), @typeName(DrawRayPipeline) ++ " " ++ @src().fn_name);
+pub fn deinit(self: ScatterRayPipeline, ctx: Context) void {
+    const zone = tracy.ZoneN(@src(), @typeName(ScatterRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
     ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
@@ -258,14 +211,14 @@ pub fn deinit(self: DrawRayPipeline, ctx: Context) void {
 }
 
 // TODO: static command buffer (only record once)
-pub fn appendPipelineCommands(self: DrawRayPipeline, ctx: Context, command_buffer: vk.CommandBuffer) void {
-    const zone = tracy.ZoneN(@src(), @typeName(DrawRayPipeline) ++ " " ++ @src().fn_name);
+pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_buffer: vk.CommandBuffer) void {
+    const zone = tracy.ZoneN(@src(), @typeName(ScatterRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
     if (render.consts.enable_validation_layers) {
         const label_info = vk.DebugUtilsLabelEXT{
-            .p_label_name = @typeName(DrawRayPipeline) ++ " " ++ @src().fn_name,
-            .color = [_]f32{ 0.5, 0.3, 0.3, 0.5 },
+            .p_label_name = @typeName(ScatterRayPipeline) ++ " " ++ @src().fn_name,
+            .color = [_]f32{ 0.2, 0.8, 0.2, 0.5 },
         };
         ctx.vkd.cmdBeginDebugUtilsLabelEXT(command_buffer, &label_info);
     }
@@ -301,7 +254,6 @@ pub fn appendPipelineCommands(self: DrawRayPipeline, ctx: Context, command_buffe
 
     ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
 
-    // bind target texture
     ctx.vkd.cmdBindDescriptorSets(
         command_buffer,
         .compute,
@@ -313,12 +265,12 @@ pub fn appendPipelineCommands(self: DrawRayPipeline, ctx: Context, command_buffe
         undefined,
     );
 
-    // put cursor at 0, but not the max value of the cursor in the emit stage
+    // reset the in ray cursor to 0
     ctx.vkd.cmdFillBuffer(
         command_buffer,
         self.ray_buffer.buffer,
-        self.draw_ray_descriptor_info[0].offset + @sizeOf(c_int),
-        self.draw_ray_descriptor_info[0].range,
+        self.buffer_infos[0].offset + @offsetOf(RayBufferCursor, "cursor"),
+        @sizeOf(c_int),
         0,
     );
     const buffer_memory_barrier = vk.BufferMemoryBarrier{
@@ -327,8 +279,8 @@ pub fn appendPipelineCommands(self: DrawRayPipeline, ctx: Context, command_buffe
         .src_queue_family_index = ctx.queue_indices.compute,
         .dst_queue_family_index = ctx.queue_indices.compute,
         .buffer = self.ray_buffer.buffer,
-        .offset = self.draw_ray_descriptor_info[0].offset,
-        .size = self.draw_ray_descriptor_info[0].range,
+        .offset = self.buffer_infos[0].offset,
+        .size = self.buffer_infos[0].range,
     };
     ctx.vkd.cmdPipelineBarrier(
         command_buffer,
@@ -342,37 +294,9 @@ pub fn appendPipelineCommands(self: DrawRayPipeline, ctx: Context, command_buffe
         0,
         undefined,
     );
-    const image_barrier = vk.ImageMemoryBarrier{
-        .src_access_mask = .{ .shader_read_bit = true },
-        .dst_access_mask = .{ .shader_write_bit = true },
-        .old_layout = .shader_read_only_optimal,
-        .new_layout = .general,
-        .src_queue_family_index = ctx.queue_indices.graphics,
-        .dst_queue_family_index = ctx.queue_indices.compute,
-        .image = self.target_image_info.image,
-        .subresource_range = .{
-            .aspect_mask = .{ .color_bit = true },
-            .base_mip_level = 0,
-            .level_count = 1,
-            .base_array_layer = 0,
-            .layer_count = 1,
-        },
-    };
-    ctx.vkd.cmdPipelineBarrier(
-        command_buffer,
-        .{ .fragment_shader_bit = true },
-        .{ .compute_shader_bit = true },
-        .{},
-        0,
-        undefined,
-        0,
-        undefined,
-        1,
-        @ptrCast([*]const vk.ImageMemoryBarrier, &image_barrier),
-    );
 
-    const x_dispatch = @ceil(self.target_image_info.width / @intToFloat(f32, self.work_group_dim.x));
-    const y_dispatch = @ceil(self.target_image_info.height / @intToFloat(f32, self.work_group_dim.y));
+    const x_dispatch = @ceil(@intToFloat(f32, self.image_size.width) / @intToFloat(f32, self.work_group_dim.x));
+    const y_dispatch = @ceil(@intToFloat(f32, self.image_size.height) / @intToFloat(f32, self.work_group_dim.y));
 
     ctx.vkd.cmdDispatch(command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
 }

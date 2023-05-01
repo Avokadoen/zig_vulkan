@@ -127,7 +127,7 @@ pub fn main() anyerror!void {
         .internal_resolution_height = internal_render_resolution.y(),
         .camera = .{
             .samples_per_pixel = 2,
-            .max_bounce = 2,
+            .max_bounce = 0,
         },
         .sun = .{
             .enabled = true,

@@ -29,12 +29,6 @@ allocator: Allocator,
 pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
 
-command_pool: vk.CommandPool,
-command_buffer: vk.CommandBuffer,
-queue_family_index: u32,
-queue: vk.Queue,
-complete_semaphore: vk.Semaphore,
-
 // info about the target image
 target_descriptor_layout: vk.DescriptorSetLayout,
 target_descriptor_pool: vk.DescriptorPool,
@@ -61,10 +55,6 @@ pub fn init(
     defer zone.End();
 
     const work_group_dim = Dispatch2.init(ctx);
-
-    // TODO: grab a dedicated compute queue if available https://github.com/Avokadoen/zig_vulkan/issues/163
-    const queue_family_index = ctx.queue_indices.compute;
-    const queue = ctx.vkd.getDeviceQueue(ctx.logical_device, queue_family_index, @intCast(u32, 0));
 
     const target_descriptor_layout = blk: {
         const layout_bindings = [_]vk.DescriptorSetLayoutBinding{
@@ -213,38 +203,10 @@ pub fn init(
     };
     errdefer ctx.destroyPipeline(pipeline);
 
-    const command_pool = blk: {
-        const pool_info = vk.CommandPoolCreateInfo{
-            .flags = .{},
-            .queue_family_index = ctx.queue_indices.compute,
-        };
-        break :blk try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
-    };
-    errdefer ctx.vkd.destroyCommandPool(ctx.logical_device, command_pool, null);
-
-    const command_buffer = try render.pipeline.createCmdBuffer(ctx, command_pool);
-    errdefer ctx.vkd.freeCommandBuffers(
-        ctx.logical_device,
-        command_pool,
-        @intCast(u32, 1),
-        @ptrCast([*]const vk.CommandBuffer, &command_buffer),
-    );
-
-    const complete_semaphore = blk: {
-        const semaphore_info = vk.SemaphoreCreateInfo{ .flags = .{} };
-        break :blk try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
-    };
-    errdefer ctx.vkd.destroySemaphore(ctx.logical_device, complete_semaphore, null);
-
     return EmitRayPipeline{
         .allocator = allocator,
         .pipeline_layout = pipeline_layout,
         .pipeline = pipeline,
-        .command_pool = command_pool,
-        .command_buffer = command_buffer,
-        .queue_family_index = queue_family_index,
-        .queue = queue,
-        .complete_semaphore = complete_semaphore,
         .target_descriptor_layout = target_descriptor_layout,
         .target_descriptor_pool = target_descriptor_pool,
         .target_descriptor_set = target_descriptor_set,
@@ -257,17 +219,6 @@ pub fn init(
 pub fn deinit(self: EmitRayPipeline, ctx: Context) void {
     const zone = tracy.ZoneN(@src(), @typeName(EmitRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
-    // TODO: waitDeviceIdle?
-
-    ctx.vkd.freeCommandBuffers(
-        ctx.logical_device,
-        self.command_pool,
-        @intCast(u32, 1),
-        @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
-    );
-    ctx.vkd.destroyCommandPool(ctx.logical_device, self.command_pool, null);
-
-    ctx.vkd.destroySemaphore(ctx.logical_device, self.complete_semaphore, null);
 
     ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
     ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.target_descriptor_pool, null);
@@ -276,56 +227,29 @@ pub fn deinit(self: EmitRayPipeline, ctx: Context) void {
     ctx.destroyPipeline(self.pipeline);
 }
 
-// TODO: mention semaphore lifetime
-pub inline fn dispatch(self: *EmitRayPipeline, ctx: Context, camera: Camera) !*vk.Semaphore {
+// TODO: static command buffer (only record once)
+pub fn appendPipelineCommands(self: EmitRayPipeline, ctx: Context, camera: Camera, command_buffer: vk.CommandBuffer) void {
     const zone = tracy.ZoneN(@src(), @typeName(EmitRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
-    try ctx.vkd.resetCommandPool(ctx.logical_device, self.command_pool, .{});
-    try self.recordCommandBuffer(ctx, camera);
-
-    {
-        @setRuntimeSafety(false);
-        var semo_null_ptr: [*c]const vk.Semaphore = null;
-        var wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
-        const compute_submit_info = vk.SubmitInfo{
-            .wait_semaphore_count = 0,
-            .p_wait_semaphores = semo_null_ptr,
-            .p_wait_dst_stage_mask = wait_null_ptr,
-            .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
-            .signal_semaphore_count = 1,
-            .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.complete_semaphore),
+    if (render.consts.enable_validation_layers) {
+        const label_info = vk.DebugUtilsLabelEXT{
+            .p_label_name = @typeName(EmitRayPipeline) ++ " " ++ @src().fn_name,
+            .color = [_]f32{ 0.3, 0.3, 0.6, 0.5 },
         };
-        // TODO: only do one submit for all ray pipelines!
-        try ctx.vkd.queueSubmit(
-            self.queue,
-            1,
-            @ptrCast([*]const vk.SubmitInfo, &compute_submit_info),
-            .null_handle,
-        );
+        ctx.vkd.cmdBeginDebugUtilsLabelEXT(command_buffer, &label_info);
+    }
+    defer {
+        if (render.consts.enable_validation_layers) {
+            ctx.vkd.cmdEndDebugUtilsLabelEXT(command_buffer);
+        }
     }
 
-    return &self.complete_semaphore;
-}
-
-// TODO: static command buffer (only record once)
-pub fn recordCommandBuffer(self: EmitRayPipeline, ctx: Context, camera: Camera) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(EmitRayPipeline) ++ " " ++ @src().fn_name);
-    defer zone.End();
-
-    const command_begin_info = vk.CommandBufferBeginInfo{
-        .flags = .{
-            .one_time_submit_bit = true,
-        },
-        .p_inheritance_info = null,
-    };
-    try ctx.vkd.beginCommandBuffer(self.command_buffer, &command_begin_info);
-    ctx.vkd.cmdBindPipeline(self.command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
+    ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
 
     // push camera data as a push constant
     ctx.vkd.cmdPushConstants(
-        self.command_buffer,
+        command_buffer,
         self.pipeline_layout,
         .{ .compute_bit = true },
         0,
@@ -335,7 +259,7 @@ pub fn recordCommandBuffer(self: EmitRayPipeline, ctx: Context, camera: Camera) 
 
     // bind target texture
     ctx.vkd.cmdBindDescriptorSets(
-        self.command_buffer,
+        command_buffer,
         .compute,
         self.pipeline_layout,
         0,
@@ -346,7 +270,7 @@ pub fn recordCommandBuffer(self: EmitRayPipeline, ctx: Context, camera: Camera) 
     );
 
     ctx.vkd.cmdFillBuffer(
-        self.command_buffer,
+        command_buffer,
         self.ray_buffer.buffer,
         0,
         pow2Align(@sizeOf(RayBufferCursor), 4),
@@ -355,14 +279,14 @@ pub fn recordCommandBuffer(self: EmitRayPipeline, ctx: Context, camera: Camera) 
     const buffer_memory_barrier = vk.BufferMemoryBarrier{
         .src_access_mask = .{ .transfer_write_bit = true },
         .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-        .src_queue_family_index = self.queue_family_index,
-        .dst_queue_family_index = self.queue_family_index,
+        .src_queue_family_index = ctx.queue_indices.compute,
+        .dst_queue_family_index = ctx.queue_indices.compute,
         .buffer = self.ray_buffer.buffer,
         .offset = 0,
         .size = pow2Align(@sizeOf(RayBufferCursor), 4),
     };
     ctx.vkd.cmdPipelineBarrier(
-        self.command_buffer,
+        command_buffer,
         .{ .transfer_bit = true },
         .{ .compute_shader_bit = true },
         .{},
@@ -377,8 +301,7 @@ pub fn recordCommandBuffer(self: EmitRayPipeline, ctx: Context, camera: Camera) 
     const x_dispatch = @ceil(@intToFloat(f32, self.image_size.width) / @intToFloat(f32, self.work_group_dim.x));
     const y_dispatch = @ceil(@intToFloat(f32, self.image_size.height) / @intToFloat(f32, self.work_group_dim.y));
 
-    ctx.vkd.cmdDispatch(self.command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
-    try ctx.vkd.endCommandBuffer(self.command_buffer);
+    ctx.vkd.cmdDispatch(command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
 }
 
 // TODO: move to common math/mem file

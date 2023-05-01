@@ -54,7 +54,7 @@ pub fn loadShaderStage(
 }
 
 /// create a command buffers with sizeof buffer_count, caller must deinit returned list
-pub fn createCmdBuffers(allocator: Allocator, ctx: Context, command_pool: vk.CommandPool, buffer_count: usize, prev_buffer: ?[]vk.CommandBuffer) ![]vk.CommandBuffer {
+pub fn allocCreateCmdBuffers(allocator: Allocator, ctx: Context, command_pool: vk.CommandPool, buffer_count: usize, prev_buffer: ?[]vk.CommandBuffer) ![]vk.CommandBuffer {
     var command_buffers = prev_buffer orelse try allocator.alloc(vk.CommandBuffer, buffer_count);
     const alloc_info = vk.CommandBufferAllocateInfo{
         .command_pool = command_pool,
@@ -65,6 +65,15 @@ pub fn createCmdBuffers(allocator: Allocator, ctx: Context, command_pool: vk.Com
     command_buffers.len = buffer_count;
 
     return command_buffers;
+}
+
+pub fn createCmdBuffers(ctx: Context, command_pool: vk.CommandPool, command_buffers: []vk.CommandBuffer) !void {
+    const alloc_info = vk.CommandBufferAllocateInfo{
+        .command_pool = command_pool,
+        .level = vk.CommandBufferLevel.primary,
+        .command_buffer_count = @intCast(u32, command_buffers.len),
+    };
+    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &alloc_info, command_buffers.ptr);
 }
 
 /// create a command buffers with sizeof buffer_count, caller must destroy returned buffer with allocator

@@ -4,7 +4,7 @@ const Context = render.Context;
 
 pub const RayBufferCursor = extern struct {
     /// how many rays that was written to the buffer in total
-    total_written: c_int,
+    max_index: c_int,
     /// where the last ray write occured
     cursor: c_int,
 };
@@ -12,11 +12,8 @@ pub const RayBufferCursor = extern struct {
 // Must be synced with assets\shaders\emit_primary_rays.comp Ray
 pub const Ray = extern struct {
     origin: [3]f32,
-    internal_reflection: f32,
-    direction: [3]f32,
     t_value: f32,
-    color: [3]f32,
-    pixel_coord: c_uint,
+    direction: [3]f32,
 };
 
 pub const Dispatch2 = struct {

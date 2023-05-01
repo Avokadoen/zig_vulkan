@@ -8,13 +8,11 @@ const uint IGNORE_MAT_METAL = MAT_METAL;
 const uint IGNORE_MAT_DIELECTRIC = MAT_DIELECTRIC;
 const uint IGNORE_MAT_NONE = 3;
 
+// must be kept in sync with TraverseRayPipeline.Ray
 struct Ray {
     vec3 origin;
-    float internal_reflection;
+    float t_value;
     vec3 direction;
-    float padding;
-    vec3 color;
-    uint pixel_coord;
 };
 
 vec3 RayAt(Ray r, float t) {
@@ -33,8 +31,10 @@ struct RayBufferCursor {
 struct HitRecord {
     vec3 point;
     uint normal_4b_and_material_index_28b;
-    vec3 ray_direction;
-    float ray_internal_reflection;
+    vec3 previous_ray_direction;
+    float previous_ray_internal_reflection;
     vec3 previous_color;
     uint pixel_coord;
+    vec3 padding;
+    float t_value;
 };

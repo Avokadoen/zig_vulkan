@@ -19,6 +19,18 @@ layout (set = 0, binding = 2) readonly buffer HitBuffer {
     HitRecord hit_records[];
 };
 
+// TOOD: https://bruop.github.io/exposure/
+// source: https://www.shadertoy.com/view/WdjSW3
+vec3 Tonemap_ACES(vec3 x) {
+    // Narkowicz 2015, "ACES Filmic Tone Mapping Curve"
+    const vec3 a = vec3(2.51);
+    const vec3 b = vec3(0.03);
+    const vec3 c = vec3(2.43);
+    const vec3 d = vec3(0.59);
+    const vec3 e = vec3(0.14);
+    return (x * (a * x + b)) / (x * (c * x + d) + e);
+}
+
 shared uint warp_start_index;
 
 void main() {
@@ -40,3 +52,4 @@ void main() {
     );
     imageStore(img_output, pixel_coord, vec4(hit_record.previous_color, 1.0));
 }
+

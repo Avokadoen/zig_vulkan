@@ -30,11 +30,6 @@ allocator: Allocator,
 pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
 
-command_pool: vk.CommandPool,
-command_buffer: vk.CommandBuffer,
-queue: vk.Queue,
-complete_semaphore: vk.Semaphore,
-
 target_descriptor_layout: vk.DescriptorSetLayout,
 target_descriptor_pool: vk.DescriptorPool,
 target_descriptor_set: vk.DescriptorSet,
@@ -63,53 +58,21 @@ pub fn init(
     defer zone.End();
 
     // TODO: change based on NVIDIA vs AMD vs Others?
-    const work_group_dim = blk: {
-        const device_properties = ctx.getPhysicalDeviceProperties();
-        const dim_size = device_properties.limits.max_compute_work_group_invocations;
-        const uniform_dim = @floatToInt(u32, @floor(@sqrt(@intToFloat(f64, dim_size))));
-        break :blk .{
-            .x = uniform_dim,
-            .y = uniform_dim / 2,
-        };
-    };
-
-    // TODO: grab a dedicated compute queue if available https://github.com/Avokadoen/zig_vulkan/issues/163
-    // TODO: queue should be submitted by init caller
-    const queue = ctx.vkd.getDeviceQueue(ctx.logical_device, ctx.queue_indices.compute, @intCast(u32, 0));
+    const work_group_dim = Dispatch2.init(ctx);
 
     const target_descriptor_layout = blk: {
-        const layout_bindings = [_]vk.DescriptorSetLayoutBinding{
-            // InRayCursorBuffer
-            .{
-                .binding = 0,
+        comptime var layout_bindings: [miss_ray_descriptor_info.len]vk.DescriptorSetLayoutBinding = undefined;
+        inline for (&layout_bindings, 0..) |*binding, index| {
+            binding.* = vk.DescriptorSetLayoutBinding{
+                .binding = index,
                 .descriptor_type = .storage_buffer,
                 .descriptor_count = 1,
                 .stage_flags = .{
                     .compute_bit = true,
                 },
                 .p_immutable_samplers = null,
-            },
-            // MissCursorBuffer
-            .{
-                .binding = 1,
-                .descriptor_type = .storage_buffer,
-                .descriptor_count = 1,
-                .stage_flags = .{
-                    .compute_bit = true,
-                },
-                .p_immutable_samplers = null,
-            },
-            // HitBuffer
-            .{
-                .binding = 2,
-                .descriptor_type = .storage_buffer,
-                .descriptor_count = 1,
-                .stage_flags = .{
-                    .compute_bit = true,
-                },
-                .p_immutable_samplers = null,
-            },
-        };
+            };
+        }
         const layout_info = vk.DescriptorSetLayoutCreateInfo{
             .flags = .{},
             .binding_count = layout_bindings.len,
@@ -145,34 +108,19 @@ pub fn init(
     }
 
     {
-        const write_descriptor_set = [_]vk.WriteDescriptorSet{ .{
-            .dst_set = target_descriptor_set,
-            .dst_binding = 0,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .storage_buffer,
-            .p_image_info = undefined,
-            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &miss_ray_descriptor_info[0]),
-            .p_texel_buffer_view = undefined,
-        }, .{
-            .dst_set = target_descriptor_set,
-            .dst_binding = 1,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .storage_buffer,
-            .p_image_info = undefined,
-            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &miss_ray_descriptor_info[1]),
-            .p_texel_buffer_view = undefined,
-        }, .{
-            .dst_set = target_descriptor_set,
-            .dst_binding = 2,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .storage_buffer,
-            .p_image_info = undefined,
-            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &miss_ray_descriptor_info[2]),
-            .p_texel_buffer_view = undefined,
-        } };
+        var write_descriptor_set: [miss_ray_descriptor_info.len]vk.WriteDescriptorSet = undefined;
+        for (&write_descriptor_set, 0..) |*write_desc, index| {
+            write_desc.* = .{
+                .dst_set = target_descriptor_set,
+                .dst_binding = @intCast(u32, index),
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &miss_ray_descriptor_info[index]),
+                .p_texel_buffer_view = undefined,
+            };
+        }
 
         ctx.vkd.updateDescriptorSets(
             ctx.logical_device,
@@ -236,37 +184,10 @@ pub fn init(
     };
     errdefer ctx.destroyPipeline(pipeline);
 
-    const command_pool = blk: {
-        const pool_info = vk.CommandPoolCreateInfo{
-            .flags = .{},
-            .queue_family_index = ctx.queue_indices.compute,
-        };
-        break :blk try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
-    };
-    errdefer ctx.vkd.destroyCommandPool(ctx.logical_device, command_pool, null);
-
-    const command_buffer = try render.pipeline.createCmdBuffer(ctx, command_pool);
-    errdefer ctx.vkd.freeCommandBuffers(
-        ctx.logical_device,
-        command_pool,
-        @intCast(u32, 1),
-        @ptrCast([*]const vk.CommandBuffer, &command_buffer),
-    );
-
-    const complete_semaphore = blk: {
-        const semaphore_info = vk.SemaphoreCreateInfo{ .flags = .{} };
-        break :blk try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
-    };
-    errdefer ctx.vkd.destroySemaphore(ctx.logical_device, complete_semaphore, null);
-
     return MissRayPipeline{
         .allocator = allocator,
         .pipeline_layout = pipeline_layout,
         .pipeline = pipeline,
-        .command_pool = command_pool,
-        .command_buffer = command_buffer,
-        .queue = queue,
-        .complete_semaphore = complete_semaphore,
         .target_descriptor_layout = target_descriptor_layout,
         .target_descriptor_pool = target_descriptor_pool,
         .target_descriptor_set = target_descriptor_set,
@@ -280,16 +201,6 @@ pub fn deinit(self: MissRayPipeline, ctx: Context) void {
     const zone = tracy.ZoneN(@src(), @typeName(MissRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
-    ctx.vkd.freeCommandBuffers(
-        ctx.logical_device,
-        self.command_pool,
-        @intCast(u32, 1),
-        @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
-    );
-    ctx.vkd.destroyCommandPool(ctx.logical_device, self.command_pool, null);
-
-    ctx.vkd.destroySemaphore(ctx.logical_device, self.complete_semaphore, null);
-
     ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
     ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.target_descriptor_pool, null);
 
@@ -297,51 +208,52 @@ pub fn deinit(self: MissRayPipeline, ctx: Context) void {
     ctx.destroyPipeline(self.pipeline);
 }
 
-pub inline fn dispatch(self: *MissRayPipeline, ctx: Context, wait_semaphore: *vk.Semaphore) !*vk.Semaphore {
+// TODO: static command buffer (only record once)
+pub fn appendPipelineCommands(self: MissRayPipeline, ctx: Context, command_buffer: vk.CommandBuffer) void {
     const zone = tracy.ZoneN(@src(), @typeName(MissRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
-    try ctx.vkd.resetCommandPool(ctx.logical_device, self.command_pool, .{});
-    try self.recordCommandBuffer(ctx);
-
-    {
-        const compute_submit_info = vk.SubmitInfo{
-            .wait_semaphore_count = 1,
-            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, wait_semaphore),
-            .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &self.submit_wait_stage),
-            .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
-            .signal_semaphore_count = 1,
-            .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.complete_semaphore),
+    if (render.consts.enable_validation_layers) {
+        const label_info = vk.DebugUtilsLabelEXT{
+            .p_label_name = @typeName(MissRayPipeline) ++ " " ++ @src().fn_name,
+            .color = [_]f32{ 0.2, 0.2, 0.4, 0.5 },
         };
-        // TODO: only do one submit for all ray pipelines!
-        try ctx.vkd.queueSubmit(
-            self.queue,
-            1,
-            @ptrCast([*]const vk.SubmitInfo, &compute_submit_info),
-            .null_handle,
-        );
+        ctx.vkd.cmdBeginDebugUtilsLabelEXT(command_buffer, &label_info);
+    }
+    defer {
+        if (render.consts.enable_validation_layers) {
+            ctx.vkd.cmdEndDebugUtilsLabelEXT(command_buffer);
+        }
     }
 
-    return &self.complete_semaphore;
-}
-
-// TODO: static command buffer (only record once)
-pub fn recordCommandBuffer(self: MissRayPipeline, ctx: Context) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(MissRayPipeline) ++ " " ++ @src().fn_name);
-    defer zone.End();
-
-    const command_begin_info = vk.CommandBufferBeginInfo{
-        .flags = .{
-            .one_time_submit_bit = true,
-        },
-        .p_inheritance_info = null,
+    // TODO: specify read only vs write only buffer elements (maybe actually loop buffer infos ?)
+    const ray_buffer_memory_barrier = vk.BufferMemoryBarrier{
+        .src_access_mask = .{ .shader_write_bit = true },
+        .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+        .src_queue_family_index = ctx.queue_indices.compute,
+        .dst_queue_family_index = ctx.queue_indices.compute,
+        .buffer = self.ray_buffer.buffer,
+        .offset = 0,
+        .size = vk.WHOLE_SIZE,
     };
-    try ctx.vkd.beginCommandBuffer(self.command_buffer, &command_begin_info);
-    ctx.vkd.cmdBindPipeline(self.command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
+    const mem_barriers = [_]vk.BufferMemoryBarrier{ray_buffer_memory_barrier};
+    ctx.vkd.cmdPipelineBarrier(
+        command_buffer,
+        .{ .compute_shader_bit = true },
+        .{ .compute_shader_bit = true },
+        .{},
+        0,
+        undefined,
+        mem_barriers.len,
+        &mem_barriers,
+        0,
+        undefined,
+    );
+
+    ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
 
     ctx.vkd.cmdBindDescriptorSets(
-        self.command_buffer,
+        command_buffer,
         .compute,
         self.pipeline_layout,
         0,
@@ -354,6 +266,5 @@ pub fn recordCommandBuffer(self: MissRayPipeline, ctx: Context) !void {
     const x_dispatch = @ceil(@intToFloat(f32, self.image_size.width) / @intToFloat(f32, self.work_group_dim.x));
     const y_dispatch = @ceil(@intToFloat(f32, self.image_size.height) / @intToFloat(f32, self.work_group_dim.y));
 
-    ctx.vkd.cmdDispatch(self.command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
-    try ctx.vkd.endCommandBuffer(self.command_buffer);
+    ctx.vkd.cmdDispatch(command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
 }

@@ -19,10 +19,10 @@ const ray_pipeline_types = @import("ray_pipeline_types.zig");
 // TODO: move pipelines to ./internal/render/
 const EmitRayPipeline = @import("EmitRayPipeline.zig");
 const TraverseRayPipeline = @import("TraverseRayPipeline.zig");
+const ScatterRayPipeline = @import("ScatterRayPipeline.zig");
 const MissRayPipeline = @import("MissRayPipeline.zig");
 const DrawRayPipeline = @import("DrawRayPipeline.zig");
 
-const ComputePipeline = @import("ComputePipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const ImguiPipeline = @import("ImguiPipeline.zig");
 const StagingRamp = render.StagingRamp;
@@ -76,13 +76,17 @@ present_complete_semaphore: vk.Semaphore,
 render_complete_semaphore: vk.Semaphore,
 render_complete_fence: vk.Fence,
 
+ray_command_pool: vk.CommandPool,
+// TODO: this should be an array
+ray_command_buffers: vk.CommandBuffer,
 ray_buffer: GpuBufferMemory,
 emit_ray_pipeline: EmitRayPipeline,
 traverse_ray_pipeline: TraverseRayPipeline,
+scatter_ray_pipeline: ScatterRayPipeline,
 miss_ray_pipeline: MissRayPipeline,
 draw_ray_pipeline: DrawRayPipeline,
+ray_pipeline_complete_semaphore: vk.Semaphore,
 
-// compute_pipeline: ComputePipeline,
 // TODO: rename pipeline
 gfx_pipeline: GraphicsPipeline,
 imgui_pipeline: ImguiPipeline,
@@ -155,6 +159,8 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     try ctx.vkd.bindImageMemory(ctx.logical_device, compute_image, image_memory, 0);
     var image_memory_size = memory_requirements.size;
 
+    // Transition from undefined -> general -> shader_read_only_optimal. This is to silence validation layers (compared to undefined to read only which would be invalid)
+    // The image will be transitioned back to general when we render with a compute job, and then to shader_read_only_optimal as it is sampled in a fragment shader.
     try Texture.transitionImageLayout(ctx, init_command_pool, compute_image, .undefined, .general);
     try Texture.transitionImageLayout(ctx, init_command_pool, compute_image, .general, .shader_read_only_optimal);
 
@@ -216,6 +222,8 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     errdefer ctx.vkd.destroySemaphore(ctx.logical_device, present_complete_semaphore, null);
     const render_complete_semaphore = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
     errdefer ctx.vkd.destroySemaphore(ctx.logical_device, render_complete_semaphore, null);
+    const ray_pipeline_complete_semaphore = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
+    errdefer ctx.vkd.destroySemaphore(ctx.logical_device, ray_pipeline_complete_semaphore, null);
 
     const fence_info = vk.FenceCreateInfo{
         .flags = .{
@@ -227,11 +235,28 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     var staging_buffers = try StagingRamp.init(ctx, allocator, config.staging_buffers);
     errdefer staging_buffers.deinit(ctx, allocator);
 
+    const ray_command_pool = blk: {
+        const ray_pool_info = vk.CommandPoolCreateInfo{
+            .flags = .{},
+            .queue_family_index = ctx.queue_indices.compute,
+        };
+        break :blk try ctx.vkd.createCommandPool(ctx.logical_device, &ray_pool_info, null);
+    };
+    errdefer ctx.vkd.destroyCommandPool(ctx.logical_device, ray_command_pool, null);
+
+    const ray_command_buffers = try render.pipeline.createCmdBuffer(ctx, ray_command_pool);
+    errdefer ctx.vkd.freeCommandBuffers(
+        ctx.logical_device,
+        ray_command_pool,
+        @intCast(u32, 1),
+        @ptrCast([*]const vk.CommandBuffer, &ray_command_buffers),
+    );
+
     // TODO: allocate according to need
     var ray_buffer = try GpuBufferMemory.init(
         ctx,
         @intCast(vk.DeviceSize, 250 * 1024 * 1024), // alloc 250mb
-        .{ .storage_buffer_bit = true, .transfer_dst_bit = true },
+        .{ .storage_buffer_bit = true, .transfer_dst_bit = true, .transfer_src_bit = true },
         .{ .device_local_bit = true },
     );
     errdefer ray_buffer.deinit(ctx);
@@ -241,6 +266,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         ctx,
         &ray_buffer,
         internal_render_resolution,
+        init_command_pool,
         &staging_buffers,
     );
     errdefer traverse_ray_pipeline.deinit(ctx);
@@ -253,6 +279,15 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         traverse_ray_pipeline.emitPipelineDescriptorInfo(),
     );
     errdefer emit_ray_pipeline.deinit(ctx);
+
+    const scatter_ray_pipeline = try ScatterRayPipeline.init(
+        allocator,
+        ctx,
+        &ray_buffer,
+        internal_render_resolution,
+        traverse_ray_pipeline.scatterPipelineDescriptorInfo(),
+    );
+    errdefer scatter_ray_pipeline.deinit(ctx);
 
     const miss_ray_pipeline = try MissRayPipeline.init(
         allocator,
@@ -340,11 +375,15 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .present_complete_semaphore = present_complete_semaphore,
         .render_complete_semaphore = render_complete_semaphore,
         .render_complete_fence = render_complete_fence,
+        .ray_command_pool = ray_command_pool,
+        .ray_command_buffers = ray_command_buffers,
         .ray_buffer = ray_buffer,
         .emit_ray_pipeline = emit_ray_pipeline,
         .traverse_ray_pipeline = traverse_ray_pipeline,
+        .scatter_ray_pipeline = scatter_ray_pipeline,
         .miss_ray_pipeline = miss_ray_pipeline,
         .draw_ray_pipeline = draw_ray_pipeline,
+        .ray_pipeline_complete_semaphore = ray_pipeline_complete_semaphore,
         .gfx_pipeline = gfx_pipeline,
         .imgui_pipeline = imgui_pipeline,
         .camera = camera,
@@ -365,19 +404,29 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
 
     ctx.vkd.destroySemaphore(ctx.logical_device, self.present_complete_semaphore, null);
     ctx.vkd.destroySemaphore(ctx.logical_device, self.render_complete_semaphore, null);
+    ctx.vkd.destroySemaphore(ctx.logical_device, self.ray_pipeline_complete_semaphore, null);
     ctx.vkd.destroyFence(ctx.logical_device, self.render_complete_fence, null);
-
-    self.ray_buffer.deinit(ctx);
 
     // wait for staging buffer transfer to finish before deinit staging buffer and
     // any potential src buffers
     self.staging_buffers.waitIdle(ctx) catch {};
     self.staging_buffers.deinit(ctx, self.allocator);
 
-    self.emit_ray_pipeline.deinit(ctx);
-    self.traverse_ray_pipeline.deinit(ctx);
-    self.miss_ray_pipeline.deinit(ctx);
     self.draw_ray_pipeline.deinit(ctx);
+    self.miss_ray_pipeline.deinit(ctx);
+    self.scatter_ray_pipeline.deinit(ctx);
+    self.traverse_ray_pipeline.deinit(ctx);
+    self.emit_ray_pipeline.deinit(ctx);
+
+    self.ray_buffer.deinit(ctx);
+
+    ctx.vkd.freeCommandBuffers(
+        ctx.logical_device,
+        self.ray_command_pool,
+        @intCast(u32, 1),
+        @ptrCast([*]const vk.CommandBuffer, &self.ray_command_buffers),
+    );
+    ctx.vkd.destroyCommandPool(ctx.logical_device, self.ray_command_pool, null);
 
     self.imgui_pipeline.deinit(ctx);
     self.gfx_pipeline.deinit(self.allocator, ctx);
@@ -431,7 +480,7 @@ pub const DrawError = error{
     OutOfRegions,
 };
 /// draw a new frame, delta time is only used by gui
-pub inline fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
+pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
     const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
@@ -476,10 +525,65 @@ pub inline fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
         try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence));
     }
 
-    const emit_ray_semaphore = try self.emit_ray_pipeline.dispatch(ctx, self.camera.*);
-    const traverse_ray_semaphore = try self.traverse_ray_pipeline.dispatch(ctx, emit_ray_semaphore);
-    const miss_ray_semaphore = try self.miss_ray_pipeline.dispatch(ctx, traverse_ray_semaphore);
-    const draw_ray_semaphore = try self.draw_ray_pipeline.dispatch(ctx, miss_ray_semaphore);
+    // The pipeline has the following stages:
+    //
+    //         emit
+    //           |
+    //           v
+    //       traverse<--\
+    //           |       |
+    //           x       |
+    //          / \      |
+    //         v   v     |
+    //       miss  hit   |
+    //        |      x---|
+    //        \     / \_ _ _ _(Depending on if we are done performing bounces)
+    //         \   /
+    //           v
+    //          draw
+    //
+    //
+    const ray_tracing_pipeline_complete_semaphore = blk: {
+        // const max_bounces = @intCast(u32, self.camera.d_camera.max_bounce);
+
+        try ctx.vkd.resetCommandPool(ctx.logical_device, self.ray_command_pool, .{});
+
+        const command_begin_info = vk.CommandBufferBeginInfo{
+            .flags = .{
+                .one_time_submit_bit = true,
+            },
+            .p_inheritance_info = null,
+        };
+        try ctx.vkd.beginCommandBuffer(self.ray_command_buffers, &command_begin_info);
+
+        // TODO: pipeline barrier expressed here between the appends:
+        self.emit_ray_pipeline.appendPipelineCommands(ctx, self.camera.*, self.ray_command_buffers);
+        self.traverse_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+        self.miss_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+        self.scatter_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+        self.draw_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+
+        try ctx.vkd.endCommandBuffer(self.ray_command_buffers);
+
+        {
+            @setRuntimeSafety(false);
+            var semo_null_ptr: [*c]const vk.Semaphore = null;
+            var wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
+            // perform the compute ray tracing, draw to target texture
+            const submit_info = vk.SubmitInfo{
+                .wait_semaphore_count = 0,
+                .p_wait_semaphores = semo_null_ptr,
+                .p_wait_dst_stage_mask = wait_null_ptr,
+                .command_buffer_count = 1,
+                .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.ray_command_buffers),
+                .signal_semaphore_count = 1,
+                .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.ray_pipeline_complete_semaphore),
+            };
+            try ctx.vkd.queueSubmit(ctx.compute_queue, 1, @ptrCast([*]const vk.SubmitInfo, &submit_info), .null_handle);
+        }
+
+        break :blk self.ray_pipeline_complete_semaphore;
+    };
 
     self.gui.newFrame(ctx, self, image_index == 0, dt);
     try self.imgui_pipeline.updateBuffers(ctx, &self.vertex_index_buffer);
@@ -493,7 +597,7 @@ pub inline fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
         .{ .color_attachment_output_bit = true },
     };
     const wait_semaphores = [stage_masks.len]vk.Semaphore{
-        draw_ray_semaphore.*,
+        ray_tracing_pipeline_complete_semaphore,
         self.present_complete_semaphore,
     };
     const render_submit_info = vk.SubmitInfo{
@@ -512,6 +616,20 @@ pub inline fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
         @ptrCast([*]const vk.SubmitInfo, &render_submit_info),
         self.render_complete_fence,
     );
+
+    // on windows there is a potential deadlock with queuePresentKHR combined with stalled queues that are waiting for
+    // timeline semaphores, so we must flush the whole RT pipeline before continuing
+    // relevant issue: https://github.com/KhronosGroup/Vulkan-Samples/issues/588
+    if (@import("builtin").os.tag == .windows) {
+        const windows_wait_render_zone = tracy.ZoneN(@src(), "windows render wait complete");
+        defer windows_wait_render_zone.End();
+
+        try ctx.vkd.deviceWaitIdle(ctx.logical_device);
+
+        // wait for current RT pipeline to complete
+        // _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
+        // try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence));
+    }
 
     const present_info = vk.PresentInfoKHR{
         .wait_semaphore_count = 1,

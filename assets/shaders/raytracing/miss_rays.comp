@@ -35,7 +35,7 @@ void main() {
     HitRecord miss_record = hit_records[miss_record_index];
 
     // calculate some sky color in the event of a miss
-    float t = 0.5 * (miss_record.ray_direction.y + 1.0);
+    float t = 0.5 * (miss_record.previous_ray_direction.y + 1.0);
     miss_record.previous_color += fma(vec3(1.0 - t), vec3(1.0), t * vec3(0.5, 0.7, 1.0));
     
     hit_records[miss_record_index] = miss_record;

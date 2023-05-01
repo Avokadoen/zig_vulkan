@@ -17,22 +17,21 @@ const float faccuracy = 0.000001;
 
 layout (set = 0, binding = 0) buffer InCursorBuffer
 {
-    RayBufferCursor in_ray_cursor;
+    RayBufferCursor in_hit_cursor;
 };
-layout (set = 0, binding = 1) readonly buffer RayBuffer {
-    Ray rays[];
-};
-
-layout (set = 0, binding = 2) buffer OutHitCursorBuffer
+layout (set = 0, binding = 1) buffer OutHitCursorBuffer
 {
     RayBufferCursor out_hit_cursor;
 };
-layout (set = 0, binding = 3) buffer OutMissCursorBuffer
+layout (set = 0, binding = 2) buffer OutMissCursorBuffer
 {
     RayBufferCursor out_miss_cursor;
 };
-layout (set = 0, binding = 4) writeonly buffer HitRecordBuffer {
-    HitRecord hit_record[];
+layout (set = 0, binding = 3) readonly buffer InHitRecordBuffer {
+    HitRecord in_hit_records[];
+};
+layout (set = 0, binding = 4) writeonly buffer OutHitRecordBuffer {
+    HitRecord out_hit_records[];
 };
 
 layout (set = 0, binding = 5) readonly buffer BrickGridState {
@@ -65,21 +64,26 @@ shared uint out_warp_start_index;
 void main() {
     const uint work_size = gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z;
     if (gl_LocalInvocationIndex == 0) {
-        in_warp_start_index = int(work_size) * (atomicAdd(in_ray_cursor.cursor, -1) - 1);
+        in_warp_start_index = int(work_size) * (atomicAdd(in_hit_cursor.cursor, -1) - 1);
     }
     barrier();
 
     const int ray_index = in_warp_start_index + int(gl_LocalInvocationIndex);
-    if (ray_index < 0 || ray_index > in_ray_cursor.max_index) {
+    if (ray_index < 0 || ray_index > in_hit_cursor.max_index) {
         return;
     }
-    Ray ray = rays[ray_index];
+    HitRecord hit_record = in_hit_records[ray_index];
+
+    Ray ray = Ray(
+        hit_record.point,                              // origin
+        hit_record.t_value,                            // t_value
+        hit_record.previous_ray_direction             // direction
+    );
 
     // TODO: put hit record in miss, or hit pile (need additional cursor)
     float t_min = 0.0001;
     float t_max = 1000;
-    HitRecord hit;
-    const bool did_hit = GridHit(ray, t_min, t_max, hit);
+    const bool did_hit = GridHit(ray, t_min, t_max, hit_record);
     
     barrier(); // TODO: not needed, but might be good for performance by avoiding cache thrashing. Benchmark later!
 
@@ -89,16 +93,13 @@ void main() {
         atomicMax(out_hit_cursor.max_index, hit_record_index);
     } else {
         // define the hit ray direction, previous color and pixel coord for miss shading
-        hit.ray_direction = ray.direction;
-        hit.previous_color = ray.color;
-        hit.pixel_coord = ray.pixel_coord;
-        
         const int miss_index = atomicAdd(out_miss_cursor.cursor, 1);
         atomicMax(out_miss_cursor.max_index, miss_index);
 
-        hit_record_index = in_ray_cursor.max_index - miss_index;
+        hit_record_index = in_hit_cursor.max_index - miss_index;
     }
-    hit_record[hit_record_index] = hit;
+
+    out_hit_records[hit_record_index] = hit_record;
 }
 
 
@@ -188,7 +189,6 @@ bool GridHit(Ray r, float t_min, float t_max, inout HitRecord hit) {
 	const vec3 ray_step = sign(inv_ray_dir);
     
     vec3 hit_point = RayAt(r, global_t_value);
-    hit.point = hit_point;
 
     // get position in grid space from global position
     const vec3 fposition = (hit_point - g_min) / g_scale;
@@ -256,18 +256,12 @@ bool BrickHit(Ray r, vec3 ray_step, vec3 ray_delta, vec3 g_scale, float t_min, f
 
         const bool hit_voxel = ((bitfield_final_entry & (1 << mask_offset)) != 0) && t_value >= local_t_min;
         if (hit_voxel) {
-            vec3 color = r.color + vec3(1); // TODO
-            uint material_index = 0; // TODO
-            float internal_reflection = 1; // TODO
-            
-            hit = HitRecord(
-                RayAt(r, global_t_value),   // point;
-                material_index,             // normal_4b_and_material_index_28b; 
-                r.direction,                // ray_direction;
-                internal_reflection,        // ray_internal_reflection;
-                vec3(1),                    // previous_color;
-                r.pixel_coord               // pixel_coord;
-            );
+            const uint material_index = 0; // TODO
+            const float intersect_t = global_t_value - 0.01 * voxel_scale.x;
+
+            hit.point = RayAt(r, intersect_t);
+            hit.normal_4b_and_material_index_28b = normal_bits | material_index;
+            hit.t_value = intersect_t;
             
             return true;
         }

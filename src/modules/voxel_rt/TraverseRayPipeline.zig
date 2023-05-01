@@ -36,20 +36,22 @@ pub const Brick = packed struct {
 pub const HitRecord = extern struct {
     point: [3]f32,
     normal_4b_and_material_index_28b: c_uint,
-    ray_direction: [3]f32,
-    ray_internal_reflection: f32,
+    previous_ray_direction: [3]f32,
+    previous_ray_internal_reflection: f32,
     previous_color: [3]f32,
     pixel_coord: c_uint,
+    padding: [3]f32,
+    t_value: f32,
 };
 
 // TODO: convert to a struct ...
 pub const BufferInfo = enum(u32) {
     // ray buffer info
     in_ray_cursor,
-    ray_buffer,
     out_hit_cursor,
     out_miss_cursor,
-    hit_record_buffer,
+    in_hit_record_buffer,
+    out_hit_record_buffer,
 
     // brick buffer info
     brick_grid_state,
@@ -57,7 +59,7 @@ pub const BufferInfo = enum(u32) {
     bricks,
 };
 const buffer_info_count = @typeInfo(BufferInfo).Enum.fields.len;
-const ray_info_count = @enumToInt(BufferInfo.hit_record_buffer) + 1;
+const ray_info_count = @enumToInt(BufferInfo.out_hit_record_buffer) + 1;
 const brick_info_count = (@enumToInt(BufferInfo.bricks) + 1) - ray_info_count;
 
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
@@ -70,12 +72,6 @@ allocator: Allocator,
 pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
 
-command_pool: vk.CommandPool,
-command_buffer: vk.CommandBuffer,
-queue_family_index: u32,
-queue: vk.Queue,
-complete_semaphore: vk.Semaphore,
-
 buffer_infos: [buffer_info_count]vk.DescriptorBufferInfo,
 
 target_descriptor_layout: vk.DescriptorSetLayout,
@@ -83,14 +79,13 @@ target_descriptor_pool: vk.DescriptorPool,
 target_descriptor_set: vk.DescriptorSet,
 
 image_size: vk.Extent2D,
-ray_buffer: *const GpuBufferMemory,
+ray_hit_buffer: *const GpuBufferMemory,
 
 brick_grid_state_buffer_offset: vk.DeviceSize,
 brick_grid_state: *BrickGridState,
 voxel_scene_buffer: GpuBufferMemory,
 
 work_group_dim: Dispatch2,
-submit_wait_stage: [1]vk.PipelineStageFlags = .{.{ .compute_shader_bit = true }},
 
 // TODO: descriptor has a lot of duplicate code with init ...
 // TODO: refactor descriptor sets to share logic between ray pipelines
@@ -101,8 +96,9 @@ submit_wait_stage: [1]vk.PipelineStageFlags = .{.{ .compute_shader_bit = true }}
 pub fn init(
     allocator: Allocator,
     ctx: Context,
-    ray_buffer: *const GpuBufferMemory,
+    ray_hit_buffer: *const GpuBufferMemory,
     image_size: vk.Extent2D,
+    init_command_pool: vk.CommandPool,
     staging_buffer: *StagingRamp,
 ) !TraverseRayPipeline {
     const zone = tracy.ZoneN(@src(), @typeName(TraverseRayPipeline) ++ " " ++ @src().fn_name);
@@ -110,19 +106,6 @@ pub fn init(
 
     // TODO: change based on NVIDIA vs AMD vs Others?
     const work_group_dim = Dispatch2.init(ctx);
-
-    // TODO: grab a dedicated compute queue if available https://github.com/Avokadoen/zig_vulkan/issues/163
-    const queue_family_index = ctx.queue_indices.compute;
-    const queue = ctx.vkd.getDeviceQueue(ctx.logical_device, queue_family_index, @intCast(u32, 0));
-
-    const command_pool = blk: {
-        const pool_info = vk.CommandPoolCreateInfo{
-            .flags = .{},
-            .queue_family_index = ctx.queue_indices.compute,
-        };
-        break :blk try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
-    };
-    errdefer ctx.vkd.destroyCommandPool(ctx.logical_device, command_pool, null);
 
     var voxel_scene_buffer = try GpuBufferMemory.init(
         ctx,
@@ -134,7 +117,7 @@ pub fn init(
         .{ .device_local_bit = true },
     );
     errdefer voxel_scene_buffer.deinit(ctx);
-    try voxel_scene_buffer.fill(ctx, command_pool, 0, voxel_scene_buffer.size, 0);
+    try voxel_scene_buffer.fill(ctx, init_command_pool, 0, voxel_scene_buffer.size, 0);
 
     const brick_grid_state_buffer_offset: vk.DeviceSize = 0;
     const brick_grid_state: *BrickGridState = blk: {
@@ -215,17 +198,18 @@ pub fn init(
         var infos: [buffer_info_count]vk.DescriptorBufferInfo = undefined;
 
         // TODO: when we convert this from enum to a struct we can bake some of the info into the struct.
+        const hit_record_buffer_size = image_size.width * image_size.height * @sizeOf(HitRecord);
         const ranges = [buffer_info_count]vk.DeviceSize{
             // in_ray_cursor
             @sizeOf(RayBufferCursor),
-            // ray_buffer
-            image_size.width * image_size.height * @sizeOf(Ray),
             // out_hit_cursor
             @sizeOf(RayBufferCursor),
             // out_miss_cursor
             @sizeOf(RayBufferCursor),
-            // hit_record_buffer
-            image_size.width * image_size.height * @sizeOf(HitRecord), // TODO: x2, x4, x8? (reflection + reflaction worst case)
+            // in hit_record_buffer
+            hit_record_buffer_size, // TODO: x2, x4, x8? (reflection + reflaction worst case)
+            // out hit_record_buffer
+            hit_record_buffer_size, // TODO: x2, x4, x8? (reflection + reflaction worst case)
             // brick_grid_state
             @sizeOf(BrickGridState),
             // bricks_set
@@ -236,7 +220,7 @@ pub fn init(
 
         for (&infos, ranges, 0..buffer_info_count) |*info, range, info_index| {
             info.* = vk.DescriptorBufferInfo{
-                .buffer = if (info_index < ray_info_count) ray_buffer.buffer else voxel_scene_buffer.buffer,
+                .buffer = if (info_index < ray_info_count) ray_hit_buffer.buffer else voxel_scene_buffer.buffer,
                 // calculate offset by looking at previous info if there is any
                 .offset = if (info_index == 0 or info_index == ray_info_count) 0 else pow2Align(
                     infos[info_index - 1].offset + infos[info_index - 1].range,
@@ -245,6 +229,8 @@ pub fn init(
                 .range = range,
             };
         }
+
+        // TODO: assert we are within the allocated sized of 250mb
 
         const write_descriptor_set = write_blk: {
             var writes: [buffer_info_count]vk.WriteDescriptorSet = undefined;
@@ -328,20 +314,6 @@ pub fn init(
     };
     errdefer ctx.destroyPipeline(pipeline);
 
-    const command_buffer = try render.pipeline.createCmdBuffer(ctx, command_pool);
-    errdefer ctx.vkd.freeCommandBuffers(
-        ctx.logical_device,
-        command_pool,
-        @intCast(u32, 1),
-        @ptrCast([*]const vk.CommandBuffer, &command_buffer),
-    );
-
-    const complete_semaphore = blk: {
-        const semaphore_info = vk.SemaphoreCreateInfo{ .flags = .{} };
-        break :blk try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
-    };
-    errdefer ctx.vkd.destroySemaphore(ctx.logical_device, complete_semaphore, null);
-
     const test_brick_none = Brick{
         .solid_mask = @as(u512, 0),
     };
@@ -372,17 +344,12 @@ pub fn init(
         .allocator = allocator,
         .pipeline_layout = pipeline_layout,
         .pipeline = pipeline,
-        .command_pool = command_pool,
-        .command_buffer = command_buffer,
-        .queue_family_index = queue_family_index,
-        .queue = queue,
-        .complete_semaphore = complete_semaphore,
         .buffer_infos = buffer_infos,
         .target_descriptor_layout = target_descriptor_layout,
         .target_descriptor_pool = target_descriptor_pool,
         .target_descriptor_set = target_descriptor_set,
         .image_size = image_size,
-        .ray_buffer = ray_buffer,
+        .ray_hit_buffer = ray_hit_buffer,
         .brick_grid_state_buffer_offset = brick_grid_state_buffer_offset,
         .brick_grid_state = brick_grid_state,
         .voxel_scene_buffer = voxel_scene_buffer,
@@ -396,18 +363,7 @@ pub fn deinit(self: TraverseRayPipeline, ctx: Context) void {
 
     self.allocator.destroy(self.brick_grid_state);
 
-    // TODO: waitDeviceIdle?
     self.voxel_scene_buffer.deinit(ctx);
-
-    ctx.vkd.freeCommandBuffers(
-        ctx.logical_device,
-        self.command_pool,
-        @intCast(u32, 1),
-        @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
-    );
-    ctx.vkd.destroyCommandPool(ctx.logical_device, self.command_pool, null);
-
-    ctx.vkd.destroySemaphore(ctx.logical_device, self.complete_semaphore, null);
 
     ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
     ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.target_descriptor_pool, null);
@@ -419,14 +375,15 @@ pub fn deinit(self: TraverseRayPipeline, ctx: Context) void {
 pub inline fn emitPipelineDescriptorInfo(self: TraverseRayPipeline) [2]vk.DescriptorBufferInfo {
     return [2]vk.DescriptorBufferInfo{
         self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)],
-        self.buffer_infos[@enumToInt(BufferInfo.ray_buffer)],
+        self.buffer_infos[@enumToInt(BufferInfo.in_hit_record_buffer)],
     };
 }
 
 pub inline fn drawPipelineDescriptorInfo(self: TraverseRayPipeline) [2]vk.DescriptorBufferInfo {
     return [2]vk.DescriptorBufferInfo{
+        // TODO: this will not work on bounces
         self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)],
-        self.buffer_infos[@enumToInt(BufferInfo.hit_record_buffer)],
+        self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
     };
 }
 
@@ -434,57 +391,75 @@ pub inline fn missPipelineDescriptorInfo(self: TraverseRayPipeline) [3]vk.Descri
     return [3]vk.DescriptorBufferInfo{
         self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)],
         self.buffer_infos[@enumToInt(BufferInfo.out_miss_cursor)],
-        self.buffer_infos[@enumToInt(BufferInfo.hit_record_buffer)],
+        self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
     };
 }
 
-// TODO: mention semaphore lifetime
-pub inline fn dispatch(self: *TraverseRayPipeline, ctx: Context, wait_semaphore: *vk.Semaphore) !*vk.Semaphore {
+pub inline fn scatterPipelineDescriptorInfo(self: TraverseRayPipeline) [3]vk.DescriptorBufferInfo {
+    // TODO: another descriptor info where we use in_hit_record_buffer in case of bounce
+    return [3]vk.DescriptorBufferInfo{
+        self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)],
+        self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
+        self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
+    };
+}
+
+pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, command_buffer: vk.CommandBuffer) void {
     const zone = tracy.ZoneN(@src(), @typeName(TraverseRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
-    try ctx.vkd.resetCommandPool(ctx.logical_device, self.command_pool, .{});
-    try self.recordCommandBuffer(ctx);
-
-    {
-        const compute_submit_info = vk.SubmitInfo{
-            .wait_semaphore_count = 1,
-            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, wait_semaphore),
-            .p_wait_dst_stage_mask = @ptrCast([*]const vk.PipelineStageFlags, &self.submit_wait_stage),
-            .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
-            .signal_semaphore_count = 1,
-            .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.complete_semaphore),
+    if (render.consts.enable_validation_layers) {
+        const label_info = vk.DebugUtilsLabelEXT{
+            .p_label_name = @typeName(TraverseRayPipeline) ++ " " ++ @src().fn_name,
+            .color = [_]f32{ 0.4, 0.2, 0.2, 0.5 },
         };
-        // TODO: only do one submit for all ray pipelines!
-        try ctx.vkd.queueSubmit(
-            self.queue,
-            1,
-            @ptrCast([*]const vk.SubmitInfo, &compute_submit_info),
-            .null_handle,
-        );
+        ctx.vkd.cmdBeginDebugUtilsLabelEXT(command_buffer, &label_info);
+    }
+    defer {
+        if (render.consts.enable_validation_layers) {
+            ctx.vkd.cmdEndDebugUtilsLabelEXT(command_buffer);
+        }
     }
 
-    return &self.complete_semaphore;
-}
-
-// TODO: static command buffer (only record once)
-pub fn recordCommandBuffer(self: TraverseRayPipeline, ctx: Context) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(TraverseRayPipeline) ++ " " ++ @src().fn_name);
-    defer zone.End();
-
-    const command_begin_info = vk.CommandBufferBeginInfo{
-        .flags = .{
-            .one_time_submit_bit = true,
-        },
-        .p_inheritance_info = null,
+    // TODO: specify read only vs write only buffer elements (maybe actually loop buffer infos ?)
+    const ray_buffer_memory_barrier = vk.BufferMemoryBarrier{
+        .src_access_mask = .{ .shader_write_bit = true },
+        .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+        .src_queue_family_index = ctx.queue_indices.compute,
+        .dst_queue_family_index = ctx.queue_indices.compute,
+        .buffer = self.ray_hit_buffer.buffer,
+        .offset = 0,
+        .size = vk.WHOLE_SIZE,
     };
-    try ctx.vkd.beginCommandBuffer(self.command_buffer, &command_begin_info);
-    ctx.vkd.cmdBindPipeline(self.command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
+    // TODO: specify read only vs write only buffer elements (maybe actually loop buffer infos ?)
+    const brick_buffer_memory_barrier = vk.BufferMemoryBarrier{
+        .src_access_mask = .{ .shader_write_bit = true },
+        .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+        .src_queue_family_index = ctx.queue_indices.compute,
+        .dst_queue_family_index = ctx.queue_indices.compute,
+        .buffer = self.ray_hit_buffer.buffer,
+        .offset = 0,
+        .size = vk.WHOLE_SIZE,
+    };
+    const mem_barriers = [_]vk.BufferMemoryBarrier{ ray_buffer_memory_barrier, brick_buffer_memory_barrier };
+    ctx.vkd.cmdPipelineBarrier(
+        command_buffer,
+        .{ .compute_shader_bit = true },
+        .{ .compute_shader_bit = true },
+        .{},
+        0,
+        undefined,
+        mem_barriers.len,
+        &mem_barriers,
+        0,
+        undefined,
+    );
+
+    ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
 
     // bind target texture
     ctx.vkd.cmdBindDescriptorSets(
-        self.command_buffer,
+        command_buffer,
         .compute,
         self.pipeline_layout,
         0,
@@ -507,8 +482,8 @@ pub fn recordCommandBuffer(self: TraverseRayPipeline, ctx: Context) !void {
     //       Actually, we should use the transfer queue to do all of these fill buffers during the initial queue
     // put cursors at 0
     ctx.vkd.cmdFillBuffer(
-        self.command_buffer,
-        self.ray_buffer.buffer,
+        command_buffer,
+        self.ray_hit_buffer.buffer,
         self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)].offset,
         fill_range,
         0,
@@ -516,14 +491,14 @@ pub fn recordCommandBuffer(self: TraverseRayPipeline, ctx: Context) !void {
     const buffer_memory_barrier = vk.BufferMemoryBarrier{
         .src_access_mask = .{ .transfer_write_bit = true },
         .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-        .src_queue_family_index = self.queue_family_index,
-        .dst_queue_family_index = self.queue_family_index,
-        .buffer = self.ray_buffer.buffer,
+        .src_queue_family_index = ctx.queue_indices.compute,
+        .dst_queue_family_index = ctx.queue_indices.compute,
+        .buffer = self.ray_hit_buffer.buffer,
         .offset = self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)].offset,
         .size = fill_range,
     };
     ctx.vkd.cmdPipelineBarrier(
-        self.command_buffer,
+        command_buffer,
         .{ .transfer_bit = true },
         .{ .compute_shader_bit = true },
         .{},
@@ -538,8 +513,7 @@ pub fn recordCommandBuffer(self: TraverseRayPipeline, ctx: Context) !void {
     const x_dispatch = @ceil(@intToFloat(f32, self.image_size.width) / @intToFloat(f32, self.work_group_dim.x));
     const y_dispatch = @ceil(@intToFloat(f32, self.image_size.height) / @intToFloat(f32, self.work_group_dim.y));
 
-    ctx.vkd.cmdDispatch(self.command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
-    try ctx.vkd.endCommandBuffer(self.command_buffer);
+    ctx.vkd.cmdDispatch(command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
 }
 
 // TODO: move to common math/mem file

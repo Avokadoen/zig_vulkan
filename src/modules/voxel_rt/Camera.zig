@@ -7,7 +7,7 @@ pub const Config = struct {
     viewport_height: f32 = 2,
     origin: Vec3 = za.Vec3.zero().data,
     samples_per_pixel: i32 = 2,
-    max_bounce: i32 = 2,
+    max_bounce: i32 = 0,
     turn_rate: f32 = 0.1,
     normal_speed: f32 = 1,
     sprint_speed: f32 = 2,
@@ -75,7 +75,7 @@ pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Conf
             .lower_left_corner = lower_left_corner,
             .origin = config.origin,
             .samples_per_pixel = config.samples_per_pixel,
-            .max_bounce = config.max_bounce + 1, // + 1 so that max bounce of 0 means only primary ray for the user of API ...
+            .max_bounce = config.max_bounce,
         },
     };
 }

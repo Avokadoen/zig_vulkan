@@ -228,6 +228,7 @@ pub fn build(b: *Builder) void {
         shader_comp.add("emit_primary_rays_spv", "assets/shaders/raytracing/emit_primary_rays.comp", .{});
         shader_comp.add("traverse_rays_spv", "assets/shaders/raytracing/traverse_rays.comp", .{});
         shader_comp.add("miss_rays_spv", "assets/shaders/raytracing/miss_rays.comp", .{});
+        shader_comp.add("scatter_rays_spv", "assets/shaders/raytracing/scatter_rays.comp", .{});
         // TODO: scatter step(s): calculate new scatter ray + shadow ray + potential reflect + refract ray
         // TODO: order ray step: change sort based if last loop or not i.e writing ray to image or doing more scatter + traversal
         shader_comp.add("draw_rays_spv", "assets/shaders/raytracing/draw_rays.comp", .{});

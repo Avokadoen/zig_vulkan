@@ -47,25 +47,25 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     const higher_dim_z = @intToFloat(f64, dim_z) * 0.25;
     const higher_order_grid = try allocator.alloc(u8, @floatToInt(usize, @ceil(higher_dim_x * higher_dim_y * higher_dim_z)));
     errdefer allocator.free(higher_order_grid);
-    std.mem.set(u8, higher_order_grid, 0);
+    @memset(higher_order_grid, 0);
 
     // each mask has 32 entries
     const brick_statuses = try allocator.alloc(State.BrickStatusMask, (std.math.divCeil(u32, brick_count, 32) catch unreachable));
     errdefer allocator.free(brick_statuses);
-    std.mem.set(State.BrickStatusMask, brick_statuses, .{ .bits = 0 });
+    @memset(brick_statuses, .{ .bits = 0 });
 
     const brick_indices = try allocator.alloc(State.BrickIndex, brick_count);
     errdefer allocator.free(brick_indices);
-    std.mem.set(State.BrickIndex, brick_indices, 0);
+    @memset(brick_indices, 0);
 
     const brick_alloc = config.brick_alloc orelse brick_count;
     const bricks = try allocator.alloc(State.Brick, brick_alloc);
     errdefer allocator.free(bricks);
-    std.mem.set(State.Brick, bricks, .{ .solid_mask = 0, .index_type = .voxel_start_index, .index = 0 });
+    @memset(bricks, .{ .solid_mask = 0, .index_type = .voxel_start_index, .index = 0 });
 
     const material_indices = try allocator.alloc(u8, bricks.len * math.min(512, config.material_indices_per_brick));
     errdefer allocator.free(material_indices);
-    std.mem.set(u8, material_indices, 0);
+    @memset(material_indices, 0);
 
     const min_point_base_t = blk: {
         const min_point = config.min_point;
@@ -96,17 +96,17 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 
     var brick_statuses_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
     errdefer allocator.free(brick_statuses_deltas);
-    std.mem.set(State.DeviceDataDelta, brick_statuses_deltas, State.DeviceDataDelta.init());
+    @memset(brick_statuses_deltas, State.DeviceDataDelta.init());
 
     var brick_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
     errdefer allocator.free(brick_indices_deltas);
-    std.mem.set(State.DeviceDataDelta, brick_indices_deltas, State.DeviceDataDelta.init());
+    @memset(brick_indices_deltas, State.DeviceDataDelta.init());
 
     const bricks_delta = State.DeviceDataDelta.init();
 
     var material_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
     errdefer allocator.free(material_indices_deltas);
-    std.mem.set(State.DeviceDataDelta, material_indices_deltas, State.DeviceDataDelta.init());
+    @memset(material_indices_deltas, State.DeviceDataDelta.init());
 
     const work_segment_size = try std.math.divCeil(u32, dim_x, @intCast(u32, config.workers_count));
 

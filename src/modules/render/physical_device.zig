@@ -208,7 +208,10 @@ pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
     const device_features = vk.PhysicalDeviceFeatures{};
     const validation_layer_info = try validation_layer.Info.init(allocator, ctx.vkb);
 
+    const features = vk.PhysicalDeviceVulkan12Features{};
+
     const create_info = vk.DeviceCreateInfo{
+        .p_next = @ptrCast(*const anyopaque, &features),
         .flags = .{},
         .queue_create_info_count = @intCast(u32, queue_create_infos.len),
         .p_queue_create_infos = queue_create_infos.ptr,
