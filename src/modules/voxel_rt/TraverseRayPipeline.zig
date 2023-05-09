@@ -395,12 +395,20 @@ pub inline fn missPipelineDescriptorInfo(self: TraverseRayPipeline) [3]vk.Descri
     };
 }
 
-pub inline fn scatterPipelineDescriptorInfo(self: TraverseRayPipeline) [3]vk.DescriptorBufferInfo {
-    // TODO: another descriptor info where we use in_hit_record_buffer in case of bounce
-    return [3]vk.DescriptorBufferInfo{
-        self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)],
-        self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
-        self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
+pub inline fn scatterPipelineDescriptorInfo(self: TraverseRayPipeline) [2][4]vk.DescriptorBufferInfo {
+    return [2][4]vk.DescriptorBufferInfo{
+        .{
+            self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)],
+            self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
+            self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)],
+            self.buffer_infos[@enumToInt(BufferInfo.in_hit_record_buffer)],
+        },
+        .{
+            self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)],
+            self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
+            self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)],
+            self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
+        },
     };
 }
 

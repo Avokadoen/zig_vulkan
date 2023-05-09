@@ -10,19 +10,22 @@
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z = 1) in;
 
 layout (set = 0, binding = 0) buffer InHitCursorBuffer {
-    RayBufferCursor out_cursor;
+    RayBufferCursor in_cursor;
 };
 layout (set = 0, binding = 1) writeonly buffer InHitRecordBuffer {
     HitRecord out_hit_records[];
 };
-layout (set = 0, binding = 2) readonly buffer OutHitRecordBuffer {
+layout (set = 0, binding = 2) buffer OutHitCursorBuffer {
+    RayBufferCursor out_cursor;
+};
+layout (set = 0, binding = 3) readonly buffer OutHitRecordBuffer {
     HitRecord in_hit_records[];
 };
 
 void main() {
     // get the index for ray and hit, max_index is copied over from out_cursor by pipeline
-    const int index = atomicAdd(out_cursor.cursor, 1);
-    if (index > out_cursor.max_index) {
+    const int index = atomicAdd(in_cursor.cursor, 1);
+    if (index > in_cursor.max_index) {
         return;
     }
 
@@ -43,6 +46,9 @@ void main() {
     // update record
     hit_record.previous_color = material_albedo;
     hit_record.previous_ray_direction = scatter_dir; 
+
+    // store the biggest scatter index
+    atomicMax(out_cursor.max_index, index);
 
     out_hit_records[index] = hit_record;
 }

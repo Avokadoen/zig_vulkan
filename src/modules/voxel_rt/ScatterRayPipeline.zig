@@ -22,6 +22,12 @@ const ImageInfo = ray_types.ImageInfo;
 
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
+pub const NextStage = enum {
+    traverse,
+    draw,
+};
+const next_stages = @as(comptime_int, @enumToInt(NextStage.draw)) + 1;
+
 /// compute shader spawning scattered rays based on hit records
 const ScatterRayPipeline = @This();
 
@@ -30,12 +36,14 @@ allocator: Allocator,
 pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
 
-target_descriptor_layout: vk.DescriptorSetLayout,
+target_descriptor_layout: [next_stages]vk.DescriptorSetLayout,
 target_descriptor_pool: vk.DescriptorPool,
-target_descriptor_set: vk.DescriptorSet,
+target_descriptor_set: [next_stages]vk.DescriptorSet,
 
 image_size: vk.Extent2D,
-buffer_infos: [3]vk.DescriptorBufferInfo,
+
+buffer_infos: [next_stages][4]vk.DescriptorBufferInfo,
+
 ray_buffer: *const GpuBufferMemory,
 
 work_group_dim: Dispatch2,
@@ -53,7 +61,7 @@ pub fn init(
     ctx: Context,
     ray_buffer: *const GpuBufferMemory,
     image_size: vk.Extent2D,
-    scatter_ray_descriptor_info: [3]vk.DescriptorBufferInfo,
+    scatter_ray_descriptor_info: [next_stages][4]vk.DescriptorBufferInfo,
 ) !ScatterRayPipeline {
     const zone = tracy.ZoneN(@src(), @typeName(ScatterRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
@@ -62,7 +70,10 @@ pub fn init(
     const work_group_dim = Dispatch2.init(ctx);
 
     const target_descriptor_layout = blk: {
-        comptime var layout_bindings: [scatter_ray_descriptor_info.len]vk.DescriptorSetLayoutBinding = undefined;
+        var descriptor_layout: [next_stages]vk.DescriptorSetLayout = undefined;
+        comptime std.debug.assert(next_stages == 2);
+
+        comptime var layout_bindings: [4]vk.DescriptorSetLayoutBinding = undefined;
         inline for (&layout_bindings, 0..) |*binding, index| {
             binding.* = vk.DescriptorSetLayoutBinding{
                 .binding = index,
@@ -79,18 +90,28 @@ pub fn init(
             .binding_count = layout_bindings.len,
             .p_bindings = &layout_bindings,
         };
-        break :blk try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
+        descriptor_layout[0] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
+        errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, descriptor_layout[0], null);
+
+        descriptor_layout[1] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
+        errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, descriptor_layout[1], null);
+
+        break :blk descriptor_layout;
     };
-    errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, target_descriptor_layout, null);
+    errdefer {
+        for (target_descriptor_layout) |layout| {
+            ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, layout, null);
+        }
+    }
 
     const target_descriptor_pool = blk: {
         const pool_sizes = [_]vk.DescriptorPoolSize{.{
-            .type = .storage_image,
-            .descriptor_count = scatter_ray_descriptor_info.len,
+            .type = .storage_buffer,
+            .descriptor_count = 8,
         }};
         const pool_info = vk.DescriptorPoolCreateInfo{
             .flags = .{},
-            .max_sets = 1,
+            .max_sets = next_stages,
             .pool_size_count = pool_sizes.len,
             .p_pool_sizes = &pool_sizes,
         };
@@ -98,27 +119,40 @@ pub fn init(
     };
     errdefer ctx.vkd.destroyDescriptorPool(ctx.logical_device, target_descriptor_pool, null);
 
-    var target_descriptor_set: vk.DescriptorSet = undefined;
+    var target_descriptor_set: [next_stages]vk.DescriptorSet = undefined;
     {
         const descriptor_set_alloc_info = vk.DescriptorSetAllocateInfo{
             .descriptor_pool = target_descriptor_pool,
-            .descriptor_set_count = 1,
-            .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &target_descriptor_layout),
+            .descriptor_set_count = target_descriptor_set.len,
+            .p_set_layouts = &target_descriptor_layout,
         };
-        try ctx.vkd.allocateDescriptorSets(ctx.logical_device, &descriptor_set_alloc_info, @ptrCast([*]vk.DescriptorSet, &target_descriptor_set));
+        try ctx.vkd.allocateDescriptorSets(ctx.logical_device, &descriptor_set_alloc_info, &target_descriptor_set);
     }
 
     {
-        var write_descriptor_set: [scatter_ray_descriptor_info.len]vk.WriteDescriptorSet = undefined;
-        for (&write_descriptor_set, 0..) |*write_desc, index| {
-            write_desc.* = .{
-                .dst_set = target_descriptor_set,
-                .dst_binding = @intCast(u32, index),
+        var write_descriptor_set: [8]vk.WriteDescriptorSet = undefined;
+        for (&scatter_ray_descriptor_info[@enumToInt(NextStage.traverse)], 0.., 0..) |*traverse_desc_info, index, binding| {
+            write_descriptor_set[index] = .{
+                .dst_set = target_descriptor_set[@enumToInt(NextStage.traverse)],
+                .dst_binding = @intCast(u32, binding),
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &scatter_ray_descriptor_info[index]),
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, traverse_desc_info),
+                .p_texel_buffer_view = undefined,
+            };
+        }
+
+        for (&scatter_ray_descriptor_info[@enumToInt(NextStage.draw)], 4.., 0..) |*draw_desc_info, index, binding| {
+            write_descriptor_set[index] = .{
+                .dst_set = target_descriptor_set[@enumToInt(NextStage.draw)],
+                .dst_binding = @intCast(u32, binding),
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, draw_desc_info),
                 .p_texel_buffer_view = undefined,
             };
         }
@@ -135,8 +169,8 @@ pub fn init(
     const pipeline_layout = blk: {
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
-            .set_layout_count = 1,
-            .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &target_descriptor_layout),
+            .set_layout_count = target_descriptor_layout.len,
+            .p_set_layouts = &target_descriptor_layout,
             .push_constant_range_count = 0,
             .p_push_constant_ranges = undefined,
         };
@@ -203,15 +237,16 @@ pub fn deinit(self: ScatterRayPipeline, ctx: Context) void {
     const zone = tracy.ZoneN(@src(), @typeName(ScatterRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
-    ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
+    for (self.target_descriptor_layout) |layout| {
+        ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, layout, null);
+    }
     ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.target_descriptor_pool, null);
 
     ctx.destroyPipelineLayout(self.pipeline_layout);
     ctx.destroyPipeline(self.pipeline);
 }
 
-// TODO: static command buffer (only record once)
-pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_buffer: vk.CommandBuffer) void {
+pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_buffer: vk.CommandBuffer, comptime next_stage: NextStage) void {
     const zone = tracy.ZoneN(@src(), @typeName(ScatterRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
@@ -260,16 +295,16 @@ pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_bu
         self.pipeline_layout,
         0,
         1,
-        @ptrCast([*]const vk.DescriptorSet, &self.target_descriptor_set),
+        @ptrCast([*]const vk.DescriptorSet, &self.target_descriptor_set[@enumToInt(next_stage)]),
         0,
         undefined,
     );
 
-    // reset the in ray cursor to 0
+    // reset the cursor to 0
     ctx.vkd.cmdFillBuffer(
         command_buffer,
         self.ray_buffer.buffer,
-        self.buffer_infos[0].offset + @offsetOf(RayBufferCursor, "cursor"),
+        self.buffer_infos[@enumToInt(next_stage)][0].offset + @offsetOf(RayBufferCursor, "cursor"),
         @sizeOf(c_int),
         0,
     );
@@ -279,8 +314,8 @@ pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_bu
         .src_queue_family_index = ctx.queue_indices.compute,
         .dst_queue_family_index = ctx.queue_indices.compute,
         .buffer = self.ray_buffer.buffer,
-        .offset = self.buffer_infos[0].offset,
-        .size = self.buffer_infos[0].range,
+        .offset = self.buffer_infos[@enumToInt(next_stage)][0].offset,
+        .size = self.buffer_infos[@enumToInt(next_stage)][0].range,
     };
     ctx.vkd.cmdPipelineBarrier(
         command_buffer,

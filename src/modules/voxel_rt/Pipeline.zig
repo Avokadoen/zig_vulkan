@@ -560,7 +560,7 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
         self.emit_ray_pipeline.appendPipelineCommands(ctx, self.camera.*, self.ray_command_buffers);
         self.traverse_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
         self.miss_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
-        self.scatter_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+        self.scatter_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers, .draw);
         self.draw_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
 
         try ctx.vkd.endCommandBuffer(self.ray_command_buffers);
