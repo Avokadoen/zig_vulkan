@@ -21,10 +21,13 @@ layout (push_constant) uniform PushConstants {
     int max_bounce;
 } push_constant;
 
-layout (set = 0, binding = 0) buffer CursorBuffer {
-    RayBufferCursor cursor;
+layout (set = 0, binding = 0) buffer EmitCursorBuffer {
+    RayBufferCursor emit_cursor;
 };
-layout (set = 0, binding = 1) writeonly buffer HitRecordBuffer {
+layout (set = 0, binding = 1) buffer DrawCursorBuffer {
+    RayBufferCursor draw_cursor;
+};
+layout (set = 0, binding = 2) writeonly buffer HitRecordBuffer {
     HitRecord initial_records[];
 };
 
@@ -33,7 +36,7 @@ shared uint warp_start_index;
 void main() {
     if (gl_LocalInvocationIndex == 0) {
         const uint work_size = gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z;
-        warp_start_index = work_size * atomicAdd(cursor.cursor, 1);
+        warp_start_index = work_size * atomicAdd(emit_cursor.cursor, 1);
     }
     barrier();
     
@@ -55,7 +58,9 @@ void main() {
     const vec3 ray_dir = fma(push_constant.horizontal, vec3(u), push_constant.lower_left_corner) + fma(vec3(v), push_constant.vertical, -push_constant.origin);
     const uint pixel = (pixel_coord.x << 16) | pixel_coord.y;
 
-    atomicMax(cursor.max_index, int(ray_index));
+    atomicMax(emit_cursor.max_index, int(ray_index));
+    atomicMax(draw_cursor.max_index, int(ray_index));
+
     initial_records[ray_index] = HitRecord(
         push_constant.origin,   // point
         0,                      // normal_4b_and_material_index_28b

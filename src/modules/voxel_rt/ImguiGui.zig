@@ -208,7 +208,7 @@ inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
 
     _ = zgui.sliderInt("max bounces", .{
         .v = &self.state_binding.camera_ptr.d_camera.max_bounce,
-        .min = 1,
+        .min = 0,
         .max = 32,
     });
     imguiToolTip("how many times a ray is allowed to bounce before terminating", .{});

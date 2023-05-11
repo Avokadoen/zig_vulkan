@@ -544,7 +544,7 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
     //
     //
     const ray_tracing_pipeline_complete_semaphore = blk: {
-        // const max_bounces = @intCast(u32, self.camera.d_camera.max_bounce);
+        const max_bounces = @intCast(u32, self.camera.d_camera.max_bounce);
 
         try ctx.vkd.resetCommandPool(ctx.logical_device, self.ray_command_pool, .{});
 
@@ -558,9 +558,13 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
 
         // TODO: pipeline barrier expressed here between the appends:
         self.emit_ray_pipeline.appendPipelineCommands(ctx, self.camera.*, self.ray_command_buffers);
-        self.traverse_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
-        self.miss_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
-        self.scatter_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers, .draw);
+        for (0..max_bounces + 1) |bounce| {
+            self.traverse_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+            self.miss_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+
+            const next_stage: ScatterRayPipeline.NextStage = if (bounce == max_bounces) .draw else .traverse;
+            self.scatter_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers, next_stage);
+        }
         self.draw_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
 
         try ctx.vkd.endCommandBuffer(self.ray_command_buffers);

@@ -39,12 +39,12 @@ void main() {
     );
     
     // TODO: actual material
-    const vec3 material_albedo = vec3(1);
+    const vec3 material_albedo = vec3(0.3);
     // TODO actually scatter ray based on material_index and a scatter function (we also have hit_record.ray_direction)
     const vec3 scatter_dir = hit_normal;
 
     // update record
-    hit_record.previous_color = material_albedo;
+    hit_record.previous_color += material_albedo;
     hit_record.previous_ray_direction = scatter_dir; 
 
     // store the biggest scatter index

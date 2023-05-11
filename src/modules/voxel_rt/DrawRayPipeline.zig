@@ -376,3 +376,8 @@ pub fn appendPipelineCommands(self: DrawRayPipeline, ctx: Context, command_buffe
 
     ctx.vkd.cmdDispatch(command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
 }
+
+// TODO: move to common math/mem file
+pub inline fn pow2Align(size: vk.DeviceSize, alignment: vk.DeviceSize) vk.DeviceSize {
+    return (size + alignment - 1) & ~(alignment - 1);
+}

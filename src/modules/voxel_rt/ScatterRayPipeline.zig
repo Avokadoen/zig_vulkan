@@ -53,6 +53,7 @@ submit_wait_stage: [1]vk.PipelineStageFlags = .{.{ .compute_shader_bit = true }}
 // TODO: share descriptors across ray pipelines (use vk descriptor buffers!)
 // TODO: descriptor has a lot of duplicate code with init ...
 // TODO: correctness if init fail, clean up resources created with errdefer
+// TODO: make init code more robust to change in descriptor count (remove hard-coded values in init impl)
 
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
@@ -246,7 +247,7 @@ pub fn deinit(self: ScatterRayPipeline, ctx: Context) void {
     ctx.destroyPipeline(self.pipeline);
 }
 
-pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_buffer: vk.CommandBuffer, comptime next_stage: NextStage) void {
+pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_buffer: vk.CommandBuffer, next_stage: NextStage) void {
     const zone = tracy.ZoneN(@src(), @typeName(ScatterRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
@@ -308,27 +309,56 @@ pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_bu
         @sizeOf(c_int),
         0,
     );
-    const buffer_memory_barrier = vk.BufferMemoryBarrier{
-        .src_access_mask = .{ .transfer_write_bit = true },
-        .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-        .src_queue_family_index = ctx.queue_indices.compute,
-        .dst_queue_family_index = ctx.queue_indices.compute,
-        .buffer = self.ray_buffer.buffer,
-        .offset = self.buffer_infos[@enumToInt(next_stage)][0].offset,
-        .size = self.buffer_infos[@enumToInt(next_stage)][0].range,
+
+    var buffer_memory_barriers = [2]vk.BufferMemoryBarrier{
+        .{
+            .src_access_mask = .{ .transfer_write_bit = true },
+            .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+            .src_queue_family_index = ctx.queue_indices.compute,
+            .dst_queue_family_index = ctx.queue_indices.compute,
+            .buffer = self.ray_buffer.buffer,
+            .offset = self.buffer_infos[@enumToInt(next_stage)][0].offset,
+            .size = self.buffer_infos[@enumToInt(next_stage)][0].range,
+        },
+        undefined,
     };
-    ctx.vkd.cmdPipelineBarrier(
+
+    var barrier_len: u32 = 1;
+    if (next_stage == .traverse) {
+        // if next stage is traverse then the scatter stage will completly define the output cursor
+        ctx.vkd.cmdFillBuffer(
+            command_buffer,
+            self.ray_buffer.buffer,
+            self.buffer_infos[@enumToInt(next_stage)][2].offset,
+            @sizeOf(RayBufferCursor),
+            0,
+        );
+        barrier_len += 1;
+        buffer_memory_barriers[1] = vk.BufferMemoryBarrier{
+            .src_access_mask = .{ .transfer_write_bit = true },
+            .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+            .src_queue_family_index = ctx.queue_indices.compute,
+            .dst_queue_family_index = ctx.queue_indices.compute,
+            .buffer = self.ray_buffer.buffer,
+            .offset = self.buffer_infos[@enumToInt(next_stage)][2].offset,
+            .size = self.buffer_infos[@enumToInt(next_stage)][2].range,
+        };
+    }
+
+    const buffer_memory_barrier =
+        ctx.vkd.cmdPipelineBarrier(
         command_buffer,
         .{ .transfer_bit = true },
         .{ .compute_shader_bit = true },
         .{},
         0,
         undefined,
-        1,
-        @ptrCast([*]const vk.BufferMemoryBarrier, &buffer_memory_barrier),
+        barrier_len,
+        &buffer_memory_barriers,
         0,
         undefined,
     );
+    _ = buffer_memory_barrier;
 
     const x_dispatch = @ceil(@intToFloat(f32, self.image_size.width) / @intToFloat(f32, self.work_group_dim.x));
     const y_dispatch = @ceil(@intToFloat(f32, self.image_size.height) / @intToFloat(f32, self.work_group_dim.y));

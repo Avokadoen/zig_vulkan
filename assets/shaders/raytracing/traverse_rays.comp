@@ -27,14 +27,18 @@ layout (set = 0, binding = 2) buffer OutMissCursorBuffer
 {
     RayBufferCursor out_miss_cursor;
 };
-layout (set = 0, binding = 3) readonly buffer InHitRecordBuffer {
+layout (set = 0, binding = 3) buffer DoNotUseCursorBuffer
+{
+    RayBufferCursor do_not_use;
+};
+layout (set = 0, binding = 4) readonly buffer InHitRecordBuffer {
     HitRecord in_hit_records[];
 };
-layout (set = 0, binding = 4) writeonly buffer OutHitRecordBuffer {
+layout (set = 0, binding = 5) writeonly buffer OutHitRecordBuffer {
     HitRecord out_hit_records[];
 };
 
-layout (set = 0, binding = 5) readonly buffer BrickGridState {
+layout (set = 0, binding = 6) readonly buffer BrickGridState {
     // how many bricks in each axis
     vec3 dim;
     float padding1;
@@ -42,14 +46,14 @@ layout (set = 0, binding = 5) readonly buffer BrickGridState {
     vec3 min_point;
     float scale;
 } brick_grid;
-layout (set = 0, binding = 6) readonly buffer BrickSetBuffer {
+layout (set = 0, binding = 7) readonly buffer BrickSetBuffer {
     uint brick_set_bits[];
 };
 struct Brick {
     // 512 bit voxel set mask
     uint solid_mask[16];
 };
-layout (set = 0, binding = 7) readonly buffer BrickBuffer {
+layout (set = 0, binding = 8) readonly buffer BrickBuffer {
     Brick bricks[];
 };
 
@@ -64,7 +68,7 @@ shared uint out_warp_start_index;
 void main() {
     const uint work_size = gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z;
     if (gl_LocalInvocationIndex == 0) {
-        in_warp_start_index = int(work_size) * (atomicAdd(in_hit_cursor.cursor, -1) - 1);
+        in_warp_start_index = int(work_size) * atomicAdd(in_hit_cursor.cursor, 1);
     }
     barrier();
 

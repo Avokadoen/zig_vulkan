@@ -49,7 +49,7 @@ pub fn init(
     ctx: Context,
     image_size: vk.Extent2D,
     ray_buffer: *const GpuBufferMemory,
-    draw_ray_descriptor_info: [2]vk.DescriptorBufferInfo,
+    draw_ray_descriptor_info: [3]vk.DescriptorBufferInfo,
 ) !EmitRayPipeline {
     const zone = tracy.ZoneN(@src(), @typeName(EmitRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
@@ -57,28 +57,18 @@ pub fn init(
     const work_group_dim = Dispatch2.init(ctx);
 
     const target_descriptor_layout = blk: {
-        const layout_bindings = [_]vk.DescriptorSetLayoutBinding{
-            // RayBufferCursor
-            .{
-                .binding = 0,
+        comptime var layout_bindings: [draw_ray_descriptor_info.len]vk.DescriptorSetLayoutBinding = undefined;
+        inline for (&layout_bindings, 0..) |*binding, index| {
+            binding.* = vk.DescriptorSetLayoutBinding{
+                .binding = index,
                 .descriptor_type = .storage_buffer,
                 .descriptor_count = 1,
                 .stage_flags = .{
                     .compute_bit = true,
                 },
                 .p_immutable_samplers = null,
-            },
-            // RayBuffer
-            .{
-                .binding = 1,
-                .descriptor_type = .storage_buffer,
-                .descriptor_count = 1,
-                .stage_flags = .{
-                    .compute_bit = true,
-                },
-                .p_immutable_samplers = null,
-            },
-        };
+            };
+        }
         const layout_info = vk.DescriptorSetLayoutCreateInfo{
             .flags = .{},
             .binding_count = layout_bindings.len,
@@ -91,7 +81,7 @@ pub fn init(
     const target_descriptor_pool = blk: {
         const pool_sizes = [_]vk.DescriptorPoolSize{.{
             .type = .storage_buffer,
-            .descriptor_count = 2,
+            .descriptor_count = draw_ray_descriptor_info.len,
         }};
         const pool_info = vk.DescriptorPoolCreateInfo{
             .flags = .{},
@@ -114,25 +104,19 @@ pub fn init(
     }
 
     {
-        const write_descriptor_set = [_]vk.WriteDescriptorSet{ .{
-            .dst_set = target_descriptor_set,
-            .dst_binding = 0,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .storage_buffer,
-            .p_image_info = undefined,
-            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &draw_ray_descriptor_info[0]),
-            .p_texel_buffer_view = undefined,
-        }, .{
-            .dst_set = target_descriptor_set,
-            .dst_binding = 1,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .storage_buffer,
-            .p_image_info = undefined,
-            .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &draw_ray_descriptor_info[1]),
-            .p_texel_buffer_view = undefined,
-        } };
+        var write_descriptor_set: [draw_ray_descriptor_info.len]vk.WriteDescriptorSet = undefined;
+        for (&write_descriptor_set, 0..) |*write_desc, index| {
+            write_desc.* = .{
+                .dst_set = target_descriptor_set,
+                .dst_binding = @intCast(u32, index),
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &draw_ray_descriptor_info[index]),
+                .p_texel_buffer_view = undefined,
+            };
+        }
 
         ctx.vkd.updateDescriptorSets(
             ctx.logical_device,
@@ -273,7 +257,7 @@ pub fn appendPipelineCommands(self: EmitRayPipeline, ctx: Context, camera: Camer
         command_buffer,
         self.ray_buffer.buffer,
         0,
-        pow2Align(@sizeOf(RayBufferCursor), 4),
+        @sizeOf(RayBufferCursor) * 4,
         0,
     );
     const buffer_memory_barrier = vk.BufferMemoryBarrier{

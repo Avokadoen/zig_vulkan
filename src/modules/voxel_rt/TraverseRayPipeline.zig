@@ -47,9 +47,12 @@ pub const HitRecord = extern struct {
 // TODO: convert to a struct ...
 pub const BufferInfo = enum(u32) {
     // ray buffer info
+    // if a cursor is removed, or added we must update emit manually
     in_ray_cursor,
     out_hit_cursor,
     out_miss_cursor,
+    draw_cursor, // TODO: not used by traverse, but to make it easier to add this we will just add it to traverse shader for now
+
     in_hit_record_buffer,
     out_hit_record_buffer,
 
@@ -206,6 +209,8 @@ pub fn init(
             @sizeOf(RayBufferCursor),
             // out_miss_cursor
             @sizeOf(RayBufferCursor),
+            // draw_cursor
+            @sizeOf(RayBufferCursor),
             // in hit_record_buffer
             hit_record_buffer_size, // TODO: x2, x4, x8? (reflection + reflaction worst case)
             // out hit_record_buffer
@@ -317,8 +322,12 @@ pub fn init(
     const test_brick_none = Brick{
         .solid_mask = @as(u512, 0),
     };
+    _ = test_brick_none;
     const test_brick_one = Brick{
         .solid_mask = @as(u512, 1),
+    };
+    const test_brick_row = Brick{
+        .solid_mask = @as(u512, 0b01111111),
     };
     const test_brick_all = Brick{
         .solid_mask = ~@as(u512, 0),
@@ -326,7 +335,7 @@ pub fn init(
     try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@enumToInt(BufferInfo.bricks)].offset, Brick, &.{
         test_brick_one,
         test_brick_all,
-        test_brick_none,
+        test_brick_row,
         test_brick_one,
         test_brick_one,
         test_brick_one,
@@ -372,17 +381,17 @@ pub fn deinit(self: TraverseRayPipeline, ctx: Context) void {
     ctx.destroyPipeline(self.pipeline);
 }
 
-pub inline fn emitPipelineDescriptorInfo(self: TraverseRayPipeline) [2]vk.DescriptorBufferInfo {
-    return [2]vk.DescriptorBufferInfo{
+pub inline fn emitPipelineDescriptorInfo(self: TraverseRayPipeline) [3]vk.DescriptorBufferInfo {
+    return [3]vk.DescriptorBufferInfo{
         self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)],
+        self.buffer_infos[@enumToInt(BufferInfo.draw_cursor)],
         self.buffer_infos[@enumToInt(BufferInfo.in_hit_record_buffer)],
     };
 }
 
 pub inline fn drawPipelineDescriptorInfo(self: TraverseRayPipeline) [2]vk.DescriptorBufferInfo {
     return [2]vk.DescriptorBufferInfo{
-        // TODO: this will not work on bounces
-        self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)],
+        self.buffer_infos[@enumToInt(BufferInfo.draw_cursor)],
         self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
     };
 }
@@ -397,12 +406,14 @@ pub inline fn missPipelineDescriptorInfo(self: TraverseRayPipeline) [3]vk.Descri
 
 pub inline fn scatterPipelineDescriptorInfo(self: TraverseRayPipeline) [2][4]vk.DescriptorBufferInfo {
     return [2][4]vk.DescriptorBufferInfo{
+        // traverse
         .{
             self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)],
-            self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
-            self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)],
             self.buffer_infos[@enumToInt(BufferInfo.in_hit_record_buffer)],
+            self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)],
+            self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
         },
+        // draw
         .{
             self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)],
             self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
@@ -449,7 +460,7 @@ pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, command_b
         .offset = 0,
         .size = vk.WHOLE_SIZE,
     };
-    const mem_barriers = [_]vk.BufferMemoryBarrier{ ray_buffer_memory_barrier, brick_buffer_memory_barrier };
+    const frame_mem_barriers = [_]vk.BufferMemoryBarrier{ ray_buffer_memory_barrier, brick_buffer_memory_barrier };
     ctx.vkd.cmdPipelineBarrier(
         command_buffer,
         .{ .compute_shader_bit = true },
@@ -457,8 +468,8 @@ pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, command_b
         .{},
         0,
         undefined,
-        mem_barriers.len,
-        &mem_barriers,
+        frame_mem_barriers.len,
+        &frame_mem_barriers,
         0,
         undefined,
     );
@@ -496,7 +507,7 @@ pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, command_b
         fill_range,
         0,
     );
-    const buffer_memory_barrier = vk.BufferMemoryBarrier{
+    const reset_out_cursor_memory_barrier = vk.BufferMemoryBarrier{
         .src_access_mask = .{ .transfer_write_bit = true },
         .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
         .src_queue_family_index = ctx.queue_indices.compute,
@@ -505,6 +516,25 @@ pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, command_b
         .offset = self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)].offset,
         .size = fill_range,
     };
+
+    ctx.vkd.cmdFillBuffer(
+        command_buffer,
+        self.ray_hit_buffer.buffer,
+        self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)].offset + @offsetOf(RayBufferCursor, "cursor"),
+        @sizeOf(c_int),
+        0,
+    );
+    const reset_inn_cursor_memory_barrier = vk.BufferMemoryBarrier{
+        .src_access_mask = .{ .transfer_write_bit = true },
+        .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+        .src_queue_family_index = ctx.queue_indices.compute,
+        .dst_queue_family_index = ctx.queue_indices.compute,
+        .buffer = self.ray_hit_buffer.buffer,
+        .offset = self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)].offset + @offsetOf(RayBufferCursor, "cursor"),
+        .size = @sizeOf(c_int),
+    };
+    const mem_barriers = [_]vk.BufferMemoryBarrier{ reset_out_cursor_memory_barrier, reset_inn_cursor_memory_barrier };
+
     ctx.vkd.cmdPipelineBarrier(
         command_buffer,
         .{ .transfer_bit = true },
@@ -512,8 +542,8 @@ pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, command_b
         .{},
         0,
         undefined,
-        1,
-        @ptrCast([*]const vk.BufferMemoryBarrier, &buffer_memory_barrier),
+        mem_barriers.len,
+        &mem_barriers,
         0,
         undefined,
     );
