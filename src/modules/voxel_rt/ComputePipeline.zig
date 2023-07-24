@@ -77,7 +77,7 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
     self.work_group_dim = blk: {
         const device_properties = ctx.getPhysicalDeviceProperties();
         const dim_size = device_properties.limits.max_compute_work_group_invocations;
-        const uniform_dim = @floatToInt(u32, @floor(@sqrt(@intToFloat(f64, dim_size))));
+        const uniform_dim = @as(u32, @intFromFloat(@floor(@sqrt(@as(f64, @floatFromInt(dim_size))))));
         break :blk .{
             .x = uniform_dim,
             .y = uniform_dim / 2,
@@ -85,7 +85,7 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
     };
 
     // TODO: grab a dedicated compute queue if available https://github.com/Avokadoen/zig_vulkan/issues/163
-    self.queue = ctx.vkd.getDeviceQueue(ctx.logical_device, ctx.queue_indices.compute, @intCast(u32, 0));
+    self.queue = ctx.vkd.getDeviceQueue(ctx.logical_device, ctx.queue_indices.compute, @as(u32, @intCast(0)));
 
     self.uniform_offsets = try allocator.alloc(vk.DeviceSize, state_config.uniform_sizes.len);
     errdefer allocator.free(self.uniform_offsets);
@@ -103,7 +103,7 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
     }
     self.buffers = try GpuBufferMemory.init(
         ctx,
-        @intCast(vk.DeviceSize, buffer_size),
+        @as(vk.DeviceSize, @intCast(buffer_size)),
         .{ .storage_buffer_bit = true, .uniform_buffer_bit = true, .transfer_dst_bit = true },
         .{ .device_local_bit = true },
     );
@@ -124,7 +124,7 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
         };
         for (layout_bindings[1 .. 1 + state_config.uniform_sizes.len], 1..) |*layout_binding, i| {
             layout_binding.* = vk.DescriptorSetLayoutBinding{
-                .binding = @intCast(u32, i),
+                .binding = @as(u32, @intCast(i)),
                 .descriptor_type = .uniform_buffer,
                 .descriptor_count = 1,
                 .stage_flags = .{
@@ -136,7 +136,7 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
         const index_offset = 1 + state_config.uniform_sizes.len;
         for (layout_bindings[index_offset .. index_offset + state_config.storage_sizes.len], index_offset..) |*layout_binding, i| {
             layout_binding.* = vk.DescriptorSetLayoutBinding{
-                .binding = @intCast(u32, i),
+                .binding = @as(u32, @intCast(i)),
                 .descriptor_type = .storage_buffer,
                 .descriptor_count = 1,
                 .stage_flags = .{
@@ -148,8 +148,8 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
 
         const layout_info = vk.DescriptorSetLayoutCreateInfo{
             .flags = .{},
-            .binding_count = @intCast(u32, layout_bindings.len),
-            .p_bindings = @ptrCast([*]const vk.DescriptorSetLayoutBinding, layout_bindings.ptr),
+            .binding_count = @as(u32, @intCast(layout_bindings.len)),
+            .p_bindings = @as([*]const vk.DescriptorSetLayoutBinding, @ptrCast(layout_bindings.ptr)),
         };
         break :blk try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
     };
@@ -178,8 +178,8 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
         const pool_info = vk.DescriptorPoolCreateInfo{
             .flags = .{},
             .max_sets = 1,
-            .pool_size_count = @intCast(u32, pool_sizes.len),
-            .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, pool_sizes.ptr),
+            .pool_size_count = @as(u32, @intCast(pool_sizes.len)),
+            .p_pool_sizes = @as([*]const vk.DescriptorPoolSize, @ptrCast(pool_sizes.ptr)),
         };
         break :blk try ctx.vkd.createDescriptorPool(ctx.logical_device, &pool_info, null);
     };
@@ -189,9 +189,9 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
         const descriptor_set_alloc_info = vk.DescriptorSetAllocateInfo{
             .descriptor_pool = self.target_descriptor_pool,
             .descriptor_set_count = 1,
-            .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &self.target_descriptor_layout),
+            .p_set_layouts = @as([*]const vk.DescriptorSetLayout, @ptrCast(&self.target_descriptor_layout)),
         };
-        try ctx.vkd.allocateDescriptorSets(ctx.logical_device, &descriptor_set_alloc_info, @ptrCast([*]vk.DescriptorSet, &self.target_descriptor_set));
+        try ctx.vkd.allocateDescriptorSets(ctx.logical_device, &descriptor_set_alloc_info, @as([*]vk.DescriptorSet, @ptrCast(&self.target_descriptor_set)));
     }
 
     {
@@ -211,7 +211,7 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
             .dst_array_element = 0,
             .descriptor_count = 1,
             .descriptor_type = .storage_image,
-            .p_image_info = @ptrCast([*]const vk.DescriptorImageInfo, &image_info),
+            .p_image_info = @as([*]const vk.DescriptorImageInfo, @ptrCast(&image_info)),
             .p_buffer_info = undefined,
             .p_texel_buffer_view = undefined,
         };
@@ -224,12 +224,12 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
             };
             write_descriptor_sets[i + 1] = vk.WriteDescriptorSet{
                 .dst_set = self.target_descriptor_set,
-                .dst_binding = @intCast(u32, i + 1),
+                .dst_binding = @as(u32, @intCast(i + 1)),
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .uniform_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &buffer_infos[i]),
+                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&buffer_infos[i])),
                 .p_texel_buffer_view = undefined,
             };
         }
@@ -245,19 +245,19 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
             };
             write_descriptor_sets[index] = vk.WriteDescriptorSet{
                 .dst_set = self.target_descriptor_set,
-                .dst_binding = @intCast(u32, index),
+                .dst_binding = @as(u32, @intCast(index)),
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &buffer_infos[index - 1]),
+                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&buffer_infos[index - 1])),
                 .p_texel_buffer_view = undefined,
             };
         }
 
         ctx.vkd.updateDescriptorSets(
             ctx.logical_device,
-            @intCast(u32, write_descriptor_sets.len),
+            @as(u32, @intCast(write_descriptor_sets.len)),
             write_descriptor_sets.ptr,
             0,
             undefined,
@@ -273,7 +273,7 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
             .set_layout_count = 1,
-            .p_set_layouts = @ptrCast([*]vk.DescriptorSetLayout, &self.target_descriptor_layout),
+            .p_set_layouts = @as([*]vk.DescriptorSetLayout, @ptrCast(&self.target_descriptor_layout)),
             .push_constant_range_count = push_constant_ranges.len,
             .p_push_constant_ranges = &push_constant_ranges,
         };
@@ -294,11 +294,11 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
             .map_entry_count = spec_map.len,
             .p_map_entries = &spec_map,
             .data_size = @sizeOf(SpecType),
-            .p_data = @ptrCast(*const anyopaque, &self.work_group_dim),
+            .p_data = @as(*const anyopaque, @ptrCast(&self.work_group_dim)),
         };
         const module_create_info = vk.ShaderModuleCreateInfo{
             .flags = .{},
-            .p_code = @ptrCast([*]const u32, &shaders.brick_raytracer_comp_spv),
+            .p_code = @as([*]const u32, @ptrCast(&shaders.brick_raytracer_comp_spv)),
             .code_size = shaders.brick_raytracer_comp_spv.len,
         };
         const module = try ctx.vkd.createShaderModule(ctx.logical_device, &module_create_info, null);
@@ -308,7 +308,7 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
             .stage = .{ .compute_bit = true },
             .module = module,
             .p_name = "main",
-            .p_specialization_info = @ptrCast(?*const vk.SpecializationInfo, &specialization),
+            .p_specialization_info = @as(?*const vk.SpecializationInfo, @ptrCast(&specialization)),
         };
         defer ctx.destroyShaderModule(stage.module);
 
@@ -336,8 +336,8 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
         ctx.vkd.freeCommandBuffers(
             ctx.logical_device,
             self.command_pool,
-            @intCast(u32, 1),
-            @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
+            @as(u32, @intCast(1)),
+            @as([*]const vk.CommandBuffer, @ptrCast(&self.command_buffer)),
         );
         ctx.vkd.destroyCommandPool(ctx.logical_device, self.command_pool, null);
     }
@@ -385,7 +385,7 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
     _ = ctx.vkd.waitForFences(
         ctx.logical_device,
         1,
-        @ptrCast([*]const vk.Fence, &self.complete_fence),
+        @as([*]const vk.Fence, @ptrCast(&self.complete_fence)),
         vk.TRUE,
         std.math.maxInt(u64),
     ) catch |err| std.debug.print("failed to wait for gfx fence, err: {any}", .{err});
@@ -393,8 +393,8 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
     ctx.vkd.freeCommandBuffers(
         ctx.logical_device,
         self.command_pool,
-        @intCast(u32, 1),
-        @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
+        @as(u32, @intCast(1)),
+        @as([*]const vk.CommandBuffer, @ptrCast(&self.command_buffer)),
     );
     ctx.vkd.destroyCommandPool(ctx.logical_device, self.command_pool, null);
 
@@ -424,14 +424,14 @@ pub inline fn dispatch(self: *ComputePipeline, ctx: Context, camera: Camera, sun
         _ = try ctx.vkd.waitForFences(
             ctx.logical_device,
             1,
-            @ptrCast([*]const vk.Fence, &self.complete_fence),
+            @as([*]const vk.Fence, @ptrCast(&self.complete_fence)),
             vk.TRUE,
             std.math.maxInt(u64),
         );
         try ctx.vkd.resetFences(
             ctx.logical_device,
             1,
-            @ptrCast([*]const vk.Fence, &self.complete_fence),
+            @as([*]const vk.Fence, @ptrCast(&self.complete_fence)),
         );
     }
 
@@ -448,14 +448,14 @@ pub inline fn dispatch(self: *ComputePipeline, ctx: Context, camera: Camera, sun
             .p_wait_semaphores = semo_null_ptr,
             .p_wait_dst_stage_mask = wait_null_ptr,
             .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
+            .p_command_buffers = @as([*]const vk.CommandBuffer, @ptrCast(&self.command_buffer)),
             .signal_semaphore_count = 1,
-            .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.complete_semaphore),
+            .p_signal_semaphores = @as([*]const vk.Semaphore, @ptrCast(&self.complete_semaphore)),
         };
         try ctx.vkd.queueSubmit(
             self.queue,
             1,
-            @ptrCast([*]const vk.SubmitInfo, &compute_submit_info),
+            @as([*]const vk.SubmitInfo, @ptrCast(&compute_submit_info)),
             self.complete_fence,
         );
     }
@@ -522,7 +522,7 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, camera: Camera, 
         0,
         undefined,
         1,
-        @ptrCast([*]const vk.ImageMemoryBarrier, &image_barrier),
+        @as([*]const vk.ImageMemoryBarrier, @ptrCast(&image_barrier)),
     );
 
     // bind target texture
@@ -532,13 +532,13 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, camera: Camera, 
         self.pipeline_layout,
         0,
         1,
-        @ptrCast([*]const vk.DescriptorSet, &self.target_descriptor_set),
+        @as([*]const vk.DescriptorSet, @ptrCast(&self.target_descriptor_set)),
         0,
         undefined,
     );
-    const x_dispatch = @ceil(self.target_image_info.width / @intToFloat(f32, self.work_group_dim.x));
-    const y_dispatch = @ceil(self.target_image_info.height / @intToFloat(f32, self.work_group_dim.y));
+    const x_dispatch = @ceil(self.target_image_info.width / @as(f32, @floatFromInt(self.work_group_dim.x)));
+    const y_dispatch = @ceil(self.target_image_info.height / @as(f32, @floatFromInt(self.work_group_dim.y)));
 
-    ctx.vkd.cmdDispatch(self.command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
+    ctx.vkd.cmdDispatch(self.command_buffer, @as(u32, @intFromFloat(x_dispatch)), @as(u32, @intFromFloat(y_dispatch)), 1);
     try ctx.vkd.endCommandBuffer(self.command_buffer);
 }

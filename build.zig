@@ -8,12 +8,114 @@ const Step = std.build.Step;
 const ArrayList = std.ArrayList;
 
 const vkgen = @import("deps/vulkan-zig/generator/index.zig");
-const glfw = @import("deps/mach-glfw/build.zig");
 const stbi = @import("deps/stb_image/build.zig");
 const ztracy = @import("deps/ztracy/build.zig");
 const zgui = @import("deps/zgui/build.zig");
 
 // TODO: this file could use a refactor pass or atleast some comments to make it more readable
+
+pub fn build(b: *Builder) void {
+    const target = b.standardTargetOptions(.{});
+    const mode = b.standardOptimizeOption(.{});
+
+    var exe = b.addExecutable(.{
+        .name = "zig_vulkan",
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = mode,
+    });
+    exe.linkLibC();
+
+    // link glfw
+    glfwLink(b, exe);
+
+    exe.addModule("zalgebra", b.createModule(.{
+        .source_file = .{ .path = "deps/zalgebra/src/main.zig" },
+    }));
+
+    stbi.linkStep(b, exe);
+
+    const vk_xml_path = b.option([]const u8, "vulkan-registry", "Override to the Vulkan registry") orelse thisDir() ++ "/deps/vk.xml";
+    const gen = vkgen.VkGenerateStep.create(b, vk_xml_path);
+    // Add the generated file as package to the final executable
+    exe.addModule("vulkan", gen.getModule());
+
+    // TODO: -O (optimize), -I (includes)
+    //  !always have -g as last entry! (see glslc_len definition)
+    const include_shader_debug = b.option(bool, "shader-debug-info", "include shader debug info, default is false") orelse false;
+    const glslc_flags = [_][]const u8{ "glslc", "--target-env=vulkan1.2", "-g" };
+    const glslc_len = if (include_shader_debug) glslc_flags.len else glslc_flags.len - 1;
+    const shader_comp = vkgen.ShaderCompileStep.create(
+        b,
+        glslc_flags[0..glslc_len],
+        "-o",
+    );
+    const shader_move_step = ShaderMoveStep.init(b, shader_comp) catch unreachable;
+
+    {
+        shader_comp.add("image_vert_spv", "assets/shaders/image.vert", .{});
+        shader_comp.add("image_frag_spv", "assets/shaders/image.frag", .{});
+        shader_comp.add("ui_vert_spv", "assets/shaders/ui.vert", .{});
+        shader_comp.add("ui_frag_spv", "assets/shaders/ui.frag", .{});
+
+        // TODO: actually implement this! :)
+        shader_comp.add("height_map_gen_comp_spv", "assets/shaders/height_map_gen.comp", .{});
+
+        shader_comp.add("emit_primary_rays_spv", "assets/shaders/raytracing/emit_primary_rays.comp", .{});
+        shader_comp.add("traverse_rays_spv", "assets/shaders/raytracing/traverse_rays.comp", .{});
+        shader_comp.add("miss_rays_spv", "assets/shaders/raytracing/miss_rays.comp", .{});
+        shader_comp.add("scatter_rays_spv", "assets/shaders/raytracing/scatter_rays.comp", .{});
+        // TODO: scatter step(s): calculate new scatter ray + shadow ray + potential reflect + refract ray
+        // TODO: order ray step: change sort based if last loop or not i.e writing ray to image or doing more scatter + traversal
+        shader_comp.add("draw_rays_spv", "assets/shaders/raytracing/draw_rays.comp", .{});
+    }
+
+    exe.step.dependOn(&shader_move_step.step);
+    shader_move_step.step.dependOn(&shader_comp.step);
+    exe.addModule("shaders", shader_comp.getModule());
+
+    // link tracy if in debug mode and nothing else is specified
+    const enable_tracy = b.option(bool, "tracy", "Enable tracy bindings and communication, default is false") orelse false;
+    var ztracy_package = ztracy.package(b, target, mode, .{ .options = .{ .enable_ztracy = enable_tracy } });
+    ztracy_package.link(exe);
+    exe.addModule("ztracy", ztracy_package.ztracy);
+
+    // link zgui
+    const zgui_pkg = zgui.package(b, target, mode, .{
+        .options = .{ .backend = .no_backend },
+    });
+    zgui_pkg.link(exe);
+    exe.addModule("zgui", zgui_pkg.zgui);
+
+    const asset_move = AssetMoveStep.init(b) catch unreachable;
+    exe.step.dependOn(&asset_move.step);
+
+    b.installArtifact(exe);
+
+    const run_cmd = b.addRunArtifact(exe);
+    run_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
+
+    const run_step = b.step("run", "Run the app");
+    run_step.dependOn(&run_cmd.step);
+
+    const tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/test.zig" },
+        .optimize = mode,
+    });
+
+    // link glfw in tests
+    glfwLink(b, tests);
+
+    tests.addModule("zalgebra", b.createModule(.{
+        .source_file = .{ .path = "deps/zalgebra/src/main.zig" },
+    }));
+
+    const test_step = b.step("test", "Run tests");
+    test_step.dependOn(&tests.step);
+}
 
 const MoveDirError = error{NotFound};
 
@@ -141,7 +243,7 @@ fn copyDir(b: *Builder, src_dir: fs.IterableDir, dst_parent_dir: fs.Dir) void {
     defer walker.deinit();
     while (walker.next() catch unreachable) |asset| {
         switch (asset.kind) {
-            Kind.Directory => {
+            Kind.directory => {
                 var src_child_dir = src_dir.dir.openIterableDir(asset.path, .{
                     .access_sub_paths = true,
                 }) catch unreachable;
@@ -154,7 +256,7 @@ fn copyDir(b: *Builder, src_dir: fs.IterableDir, dst_parent_dir: fs.Dir) void {
                 var dst_child_dir = dst_parent_dir.openDir(asset.path, .{}) catch unreachable;
                 defer dst_child_dir.close();
             },
-            Kind.File => {
+            Kind.file => {
                 if (std.mem.eql(u8, asset.path[0..7], "shaders")) {
                     continue; // skip shader folder which will be compiled by glslc before being moved
                 }
@@ -176,110 +278,31 @@ inline fn createFolder(path: []const u8) std.os.MakeDirError!void {
     }
 }
 
-pub fn build(b: *Builder) void {
-    const target = b.standardTargetOptions(.{});
-    const mode = b.standardOptimizeOption(.{});
-
-    var exe = b.addExecutable(.{
-        .name = "zig_vulkan",
-        .root_source_file = .{ .path = "src/main.zig" },
-        .target = target,
-        .optimize = mode,
-    });
-    exe.linkLibC();
-
-    // compile and link with glfw statically
-    const glfw_module = glfw.module(b);
-    exe.addModule("glfw", glfw_module);
-    glfw.link(b, exe, .{}) catch @panic("failed to link glfw");
-
-    exe.addModule("zalgebra", b.createModule(.{
-        .source_file = .{ .path = "deps/zalgebra/src/main.zig" },
-    }));
-
-    stbi.linkStep(b, exe);
-
-    const vk_xml_path = b.option([]const u8, "vulkan-registry", "Override to the Vulkan registry") orelse thisDir() ++ "/deps/vk.xml";
-    const gen = vkgen.VkGenerateStep.create(b, vk_xml_path);
-    // Add the generated file as package to the final executable
-    exe.addModule("vulkan", gen.getModule());
-
-    // TODO: -O (optimize), -I (includes)
-    //  !always have -g as last entry! (see glslc_len definition)
-    const include_shader_debug = b.option(bool, "shader-debug-info", "include shader debug info, default is false") orelse false;
-    const glslc_flags = [_][]const u8{ "glslc", "--target-env=vulkan1.2", "-g" };
-    const glslc_len = if (include_shader_debug) glslc_flags.len else glslc_flags.len - 1;
-    const shader_comp = vkgen.ShaderCompileStep.create(
-        b,
-        glslc_flags[0..glslc_len],
-        "-o",
-    );
-    const shader_move_step = ShaderMoveStep.init(b, shader_comp) catch unreachable;
-
-    {
-        shader_comp.add("image_vert_spv", "assets/shaders/image.vert", .{});
-        shader_comp.add("image_frag_spv", "assets/shaders/image.frag", .{});
-        shader_comp.add("ui_vert_spv", "assets/shaders/ui.vert", .{});
-        shader_comp.add("ui_frag_spv", "assets/shaders/ui.frag", .{});
-
-        // TODO: actually implement this! :)
-        shader_comp.add("height_map_gen_comp_spv", "assets/shaders/height_map_gen.comp", .{});
-
-        shader_comp.add("emit_primary_rays_spv", "assets/shaders/raytracing/emit_primary_rays.comp", .{});
-        shader_comp.add("traverse_rays_spv", "assets/shaders/raytracing/traverse_rays.comp", .{});
-        shader_comp.add("miss_rays_spv", "assets/shaders/raytracing/miss_rays.comp", .{});
-        shader_comp.add("scatter_rays_spv", "assets/shaders/raytracing/scatter_rays.comp", .{});
-        // TODO: scatter step(s): calculate new scatter ray + shadow ray + potential reflect + refract ray
-        // TODO: order ray step: change sort based if last loop or not i.e writing ray to image or doing more scatter + traversal
-        shader_comp.add("draw_rays_spv", "assets/shaders/raytracing/draw_rays.comp", .{});
-    }
-
-    exe.step.dependOn(&shader_move_step.step);
-    shader_move_step.step.dependOn(&shader_comp.step);
-    exe.addModule("shaders", shader_comp.getModule());
-
-    // link tracy if in debug mode and nothing else is specified
-    const enable_tracy = b.option(bool, "tracy", "Enable tracy bindings and communication, default is false") orelse false;
-    var ztracy_package = ztracy.package(b, target, mode, .{ .options = .{ .enable_ztracy = enable_tracy } });
-    ztracy_package.link(exe);
-    exe.addModule("ztracy", ztracy_package.ztracy);
-
-    // link zgui
-    const zgui_pkg = zgui.package(b, target, mode, .{
-        .options = .{ .backend = .no_backend },
-    });
-    zgui_pkg.link(exe);
-    exe.addModule("zgui", zgui_pkg.zgui);
-
-    const asset_move = AssetMoveStep.init(b) catch unreachable;
-    exe.step.dependOn(&asset_move.step);
-
-    b.installArtifact(exe);
-
-    const run_cmd = b.addRunArtifact(exe);
-    run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
-
-    const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_cmd.step);
-
-    const tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/test.zig" },
-        .optimize = mode,
-    });
-
-    tests.addModule("glfw", glfw_module);
-    glfw.link(b, tests, .{}) catch @panic("failed to link glfw");
-    tests.addModule("zalgebra", b.createModule(.{
-        .source_file = .{ .path = "deps/zalgebra/src/main.zig" },
-    }));
-
-    const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&tests.step);
-}
-
 inline fn thisDir() []const u8 {
     return comptime std.fs.path.dirname(@src().file) orelse ".";
+}
+
+fn glfwLink(b: *std.Build, step: *std.build.CompileStep) void {
+    const glfw_dep = b.dependency("mach_glfw", .{
+        .target = step.target,
+        .optimize = step.optimize,
+    });
+    step.linkLibrary(glfw_dep.artifact("mach-glfw"));
+    step.addModule("glfw", glfw_dep.module("mach-glfw"));
+
+    // TODO(build-system): Zig package manager currently can't handle transitive deps like this, so we need to use
+    // these explicitly here:
+    @import("glfw").addPaths(step);
+    step.linkLibrary(b.dependency("vulkan_headers", .{
+        .target = step.target,
+        .optimize = step.optimize,
+    }).artifact("vulkan-headers"));
+    step.linkLibrary(b.dependency("x11_headers", .{
+        .target = step.target,
+        .optimize = step.optimize,
+    }).artifact("x11-headers"));
+    step.linkLibrary(b.dependency("wayland_headers", .{
+        .target = step.target,
+        .optimize = step.optimize,
+    }).artifact("wayland-headers"));
 }

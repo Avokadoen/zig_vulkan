@@ -81,9 +81,9 @@ pub fn init(
             .image_type = .@"2d",
             .format = .r8g8b8a8_unorm,
             .extent = .{
-                .width = @intCast(u32, width),
-                .height = @intCast(u32, height),
-                .depth = @intCast(u32, 1),
+                .width = @as(u32, @intCast(width)),
+                .height = @as(u32, @intCast(height)),
+                .depth = @as(u32, @intCast(1)),
             },
             .mip_levels = 1,
             .array_layers = 1,
@@ -151,10 +151,10 @@ pub fn init(
         .undefined,
         .shader_read_only_optimal,
         font_image,
-        @intCast(u32, width),
-        @intCast(u32, height),
+        @as(u32, @intCast(width)),
+        @as(u32, @intCast(height)),
         u32,
-        pixels[0..@intCast(usize, width * height)],
+        pixels[0..@as(usize, @intCast(width * height))],
     );
 
     const sampler = blk: {
@@ -187,9 +187,9 @@ pub fn init(
         }};
         const descriptor_pool_info = vk.DescriptorPoolCreateInfo{
             .flags = .{},
-            .max_sets = @intCast(u32, swapchain_image_count),
+            .max_sets = @as(u32, @intCast(swapchain_image_count)),
             .pool_size_count = pool_sizes.len,
-            .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, &pool_sizes),
+            .p_pool_sizes = @as([*]const vk.DescriptorPoolSize, @ptrCast(&pool_sizes)),
         };
         break :blk try ctx.vkd.createDescriptorPool(ctx.logical_device, &descriptor_pool_info, null);
     };
@@ -208,7 +208,7 @@ pub fn init(
         const set_layout_info = vk.DescriptorSetLayoutCreateInfo{
             .flags = .{},
             .binding_count = set_layout_bindings.len,
-            .p_bindings = @ptrCast([*]const vk.DescriptorSetLayoutBinding, &set_layout_bindings),
+            .p_bindings = @as([*]const vk.DescriptorSetLayoutBinding, @ptrCast(&set_layout_bindings)),
         };
         break :blk try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &set_layout_info, null);
     };
@@ -218,13 +218,13 @@ pub fn init(
         const alloc_info = vk.DescriptorSetAllocateInfo{
             .descriptor_pool = descriptor_pool,
             .descriptor_set_count = 1,
-            .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &descriptor_set_layout),
+            .p_set_layouts = @as([*]const vk.DescriptorSetLayout, @ptrCast(&descriptor_set_layout)),
         };
         var descriptor_set_tmp: vk.DescriptorSet = undefined;
         try ctx.vkd.allocateDescriptorSets(
             ctx.logical_device,
             &alloc_info,
-            @ptrCast([*]vk.DescriptorSet, &descriptor_set_tmp),
+            @as([*]vk.DescriptorSet, @ptrCast(&descriptor_set_tmp)),
         );
         break :blk descriptor_set_tmp;
     };
@@ -241,14 +241,14 @@ pub fn init(
             .dst_array_element = 0,
             .descriptor_count = 1,
             .descriptor_type = .combined_image_sampler,
-            .p_image_info = @ptrCast([*]const vk.DescriptorImageInfo, &descriptor_info),
+            .p_image_info = @as([*]const vk.DescriptorImageInfo, @ptrCast(&descriptor_info)),
             .p_buffer_info = undefined,
             .p_texel_buffer_view = undefined,
         }};
         ctx.vkd.updateDescriptorSets(
             ctx.logical_device,
             write_descriptor_sets.len,
-            @ptrCast([*]const vk.WriteDescriptorSet, &write_descriptor_sets),
+            @as([*]const vk.WriteDescriptorSet, @ptrCast(&write_descriptor_sets)),
             0,
             undefined,
         );
@@ -273,9 +273,9 @@ pub fn init(
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
             .set_layout_count = 1,
-            .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &descriptor_set_layout),
+            .p_set_layouts = @as([*]const vk.DescriptorSetLayout, @ptrCast(&descriptor_set_layout)),
             .push_constant_range_count = 1,
-            .p_push_constant_ranges = @ptrCast([*]const vk.PushConstantRange, &push_constant_range),
+            .p_push_constant_ranges = @as([*]const vk.PushConstantRange, @ptrCast(&push_constant_range)),
         };
         break :blk try ctx.vkd.createPipelineLayout(ctx.logical_device, &pipeline_layout_info, null);
     };
@@ -319,7 +319,7 @@ pub fn init(
         .logic_op_enable = vk.FALSE,
         .logic_op = .clear,
         .attachment_count = 1,
-        .p_attachments = @ptrCast([*]const vk.PipelineColorBlendAttachmentState, &blend_mode),
+        .p_attachments = @as([*]const vk.PipelineColorBlendAttachmentState, @ptrCast(&blend_mode)),
         .blend_constants = [4]f32{ 0, 0, 0, 0 },
     };
     // TODO: deviation from guide. Validate that still valid!
@@ -354,7 +354,7 @@ pub fn init(
     const vert = blk: {
         const create_info = vk.ShaderModuleCreateInfo{
             .flags = .{},
-            .p_code = @ptrCast([*]const u32, &shaders.ui_vert_spv),
+            .p_code = @as([*]const u32, @ptrCast(&shaders.ui_vert_spv)),
             .code_size = shaders.ui_vert_spv.len,
         };
         const module = try ctx.vkd.createShaderModule(ctx.logical_device, &create_info, null);
@@ -372,7 +372,7 @@ pub fn init(
     const frag = blk: {
         const create_info = vk.ShaderModuleCreateInfo{
             .flags = .{},
-            .p_code = @ptrCast([*]const u32, &shaders.ui_frag_spv),
+            .p_code = @as([*]const u32, @ptrCast(&shaders.ui_frag_spv)),
             .code_size = shaders.ui_frag_spv.len,
         };
         const module = try ctx.vkd.createShaderModule(ctx.logical_device, &create_info, null);
@@ -441,9 +441,9 @@ pub fn init(
         ctx.logical_device,
         pipeline_cache,
         1,
-        @ptrCast([*]const vk.GraphicsPipelineCreateInfo, &pipeline_create_info),
+        @as([*]const vk.GraphicsPipelineCreateInfo, @ptrCast(&pipeline_create_info)),
         null,
-        @ptrCast([*]vk.Pipeline, &pipeline),
+        @as([*]vk.Pipeline, @ptrCast(&pipeline)),
     );
     errdefer ctx.vkd.destroyPipeline(ctx.logical_device, pipeline, null);
 
@@ -501,7 +501,7 @@ pub fn recordCommandBuffer(
         self.pipeline_layout,
         0,
         1,
-        @ptrCast([*]const vk.DescriptorSet, &self.descriptor_set),
+        @as([*]const vk.DescriptorSet, @ptrCast(&self.descriptor_set)),
         0,
         undefined,
     );
@@ -516,7 +516,7 @@ pub fn recordCommandBuffer(
         .min_depth = 0,
         .max_depth = 1,
     };
-    ctx.vkd.cmdSetViewport(command_buffer, 0, 1, @ptrCast([*]const vk.Viewport, &viewport));
+    ctx.vkd.cmdSetViewport(command_buffer, 0, 1, @as([*]const vk.Viewport, @ptrCast(&viewport)));
 
     // UI scale and translate via push constants
     const push_constant = PushConstant{
@@ -536,38 +536,38 @@ pub fn recordCommandBuffer(
             command_buffer,
             0,
             1,
-            @ptrCast([*]const vk.Buffer, &vertex_index_buffer.buffer),
+            @as([*]const vk.Buffer, @ptrCast(&vertex_index_buffer.buffer)),
             &vertex_offsets,
         );
         ctx.vkd.cmdBindIndexBuffer(command_buffer, vertex_index_buffer.buffer, buffer_offset + self.vertex_size, .uint16);
 
-        for (im_draw_data.cmd_lists[0..@intCast(usize, im_draw_data.cmd_lists_count)]) |command_list| {
+        for (im_draw_data.cmd_lists[0..@as(usize, @intCast(im_draw_data.cmd_lists_count))]) |command_list| {
             const command_buffer_length = command_list.getCmdBufferLength();
             const command_buffer_data = command_list.getCmdBufferData();
 
-            for (command_buffer_data[0..@intCast(usize, command_buffer_length)]) |draw_command| {
+            for (command_buffer_data[0..@as(usize, @intCast(command_buffer_length))]) |draw_command| {
                 const scissor_rect = vk.Rect2D{
                     .offset = .{
-                        .x = std.math.max(@floatToInt(i32, draw_command.clip_rect[0]), 0),
-                        .y = std.math.max(@floatToInt(i32, draw_command.clip_rect[1]), 0),
+                        .x = @max(@as(i32, @intFromFloat(draw_command.clip_rect[0])), 0),
+                        .y = @max(@as(i32, @intFromFloat(draw_command.clip_rect[1])), 0),
                     },
                     .extent = .{
-                        .width = @floatToInt(u32, draw_command.clip_rect[2] - draw_command.clip_rect[0]),
-                        .height = @floatToInt(u32, draw_command.clip_rect[3] - draw_command.clip_rect[1]),
+                        .width = @as(u32, @intFromFloat(draw_command.clip_rect[2] - draw_command.clip_rect[0])),
+                        .height = @as(u32, @intFromFloat(draw_command.clip_rect[3] - draw_command.clip_rect[1])),
                     },
                 };
-                ctx.vkd.cmdSetScissor(command_buffer, 0, 1, @ptrCast([*]const vk.Rect2D, &scissor_rect));
+                ctx.vkd.cmdSetScissor(command_buffer, 0, 1, @as([*]const vk.Rect2D, @ptrCast(&scissor_rect)));
                 ctx.vkd.cmdDrawIndexed(
                     command_buffer,
                     draw_command.elem_count,
                     1,
-                    @intCast(u32, index_offset),
-                    @intCast(i32, vertex_offset),
+                    @as(u32, @intCast(index_offset)),
+                    @as(i32, @intCast(vertex_offset)),
                     0,
                 );
                 index_offset += draw_command.elem_count;
             }
-            vertex_offset += @intCast(c_uint, command_list.getVertexBufferLength());
+            vertex_offset += @as(c_uint, @intCast(command_list.getVertexBufferLength()));
         }
     }
 }
@@ -586,8 +586,8 @@ pub fn updateBuffers(
         return;
     }
 
-    self.vertex_size = @intCast(vk.DeviceSize, draw_data.total_vtx_count * @sizeOf(zgui.DrawVert));
-    const index_size = @intCast(vk.DeviceSize, draw_data.total_idx_count * @sizeOf(zgui.DrawIdx));
+    self.vertex_size = @as(vk.DeviceSize, @intCast(draw_data.total_vtx_count * @sizeOf(zgui.DrawVert)));
+    const index_size = @as(vk.DeviceSize, @intCast(draw_data.total_idx_count * @sizeOf(zgui.DrawIdx)));
     self.vertex_buffer_len = draw_data.total_vtx_count;
     self.index_buffer_len = draw_data.total_idx_count;
     if (index_size == 0 or self.vertex_size == 0) return; // nothing to draw
@@ -596,23 +596,23 @@ pub fn updateBuffers(
     try vertex_index_buffer.map(ctx, self.vertex_index_buffer_offset, self.vertex_size + index_size);
     defer vertex_index_buffer.unmap(ctx);
 
-    var vertex_dest = @ptrCast([*]zgui.DrawVert, @alignCast(@alignOf(zgui.DrawVert), vertex_index_buffer.mapped) orelse unreachable);
+    var raw_vertex_pointer = vertex_index_buffer.mapped orelse @panic("device pointer was null");
+    var vertex_dest = @as([*]zgui.DrawVert, @ptrCast(@alignCast(raw_vertex_pointer)));
     var vertex_offset: usize = 0;
 
     // map index_dest to be the buffer memory + vertex byte offset
-    var index_dest = @ptrCast(
+    const index_address = @intFromPtr(vertex_index_buffer.mapped) + @as(usize, @intCast(self.vertex_size));
+    var index_raw_ptr = @as(?*anyopaque, @ptrFromInt(index_address)) orelse @panic("device pointer was null");
+    var index_dest = @as(
         [*]zgui.DrawIdx,
-        @alignCast(
-            @alignOf(zgui.DrawIdx),
-            @intToPtr(?*anyopaque, @ptrToInt(vertex_index_buffer.mapped) + @intCast(usize, self.vertex_size)),
-        ) orelse unreachable,
+        @ptrCast(@alignCast(index_raw_ptr)),
     );
     var index_offset: usize = 0;
 
-    for (draw_data.cmd_lists[0..@intCast(usize, draw_data.cmd_lists_count)]) |command_list| {
+    for (draw_data.cmd_lists[0..@as(usize, @intCast(draw_data.cmd_lists_count))]) |command_list| {
         // transfer vertex data
         {
-            const vertex_buffer_length = @intCast(usize, command_list.getVertexBufferLength());
+            const vertex_buffer_length = @as(usize, @intCast(command_list.getVertexBufferLength()));
             const vertex_buffer_data = command_list.getVertexBufferData()[0..vertex_buffer_length];
             std.mem.copy(
                 zgui.DrawVert,
@@ -624,7 +624,7 @@ pub fn updateBuffers(
 
         // transfer index data
         {
-            const index_buffer_length = @intCast(usize, command_list.getIndexBufferLength());
+            const index_buffer_length = @as(usize, @intCast(command_list.getIndexBufferLength()));
             const index_buffer_data = command_list.getIndexBufferData()[0..index_buffer_length];
             std.mem.copy(
                 zgui.DrawIdx,

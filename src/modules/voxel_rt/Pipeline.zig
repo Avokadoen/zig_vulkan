@@ -135,7 +135,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
             .tiling = .optimal,
             .usage = .{ .sampled_bit = true, .storage_bit = true },
             .sharing_mode = .exclusive,
-            .queue_family_index_count = @intCast(u32, indices_len),
+            .queue_family_index_count = @as(u32, @intCast(indices_len)),
             .p_queue_family_indices = &indices,
             .initial_layout = .undefined,
         };
@@ -248,14 +248,14 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     errdefer ctx.vkd.freeCommandBuffers(
         ctx.logical_device,
         ray_command_pool,
-        @intCast(u32, 1),
-        @ptrCast([*]const vk.CommandBuffer, &ray_command_buffers),
+        @as(u32, @intCast(1)),
+        @as([*]const vk.CommandBuffer, @ptrCast(&ray_command_buffers)),
     );
 
     // TODO: allocate according to need
     var ray_buffer = try GpuBufferMemory.init(
         ctx,
-        @intCast(vk.DeviceSize, 250 * 1024 * 1024), // alloc 250mb
+        @as(vk.DeviceSize, @intCast(250 * 1024 * 1024)), // alloc 250mb
         .{ .storage_buffer_bit = true, .transfer_dst_bit = true, .transfer_src_bit = true },
         .{ .device_local_bit = true },
     );
@@ -299,8 +299,8 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     errdefer miss_ray_pipeline.deinit(ctx);
 
     const target_image_info = ray_pipeline_types.ImageInfo{
-        .width = @intToFloat(f32, internal_render_resolution.width),
-        .height = @intToFloat(f32, internal_render_resolution.height),
+        .width = @as(f32, @floatFromInt(internal_render_resolution.width)),
+        .height = @as(f32, @floatFromInt(internal_render_resolution.height)),
         .image = compute_image,
         .sampler = sampler,
         .image_view = compute_image_view,
@@ -354,8 +354,8 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     };
     const gui = ImguiGui.init(
         ctx,
-        @intToFloat(f32, swapchain.extent.width),
-        @intToFloat(f32, swapchain.extent.height),
+        @as(f32, @floatFromInt(swapchain.extent.width)),
+        @as(f32, @floatFromInt(swapchain.extent.height)),
         state_binding,
         .{},
     );
@@ -423,8 +423,8 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     ctx.vkd.freeCommandBuffers(
         ctx.logical_device,
         self.ray_command_pool,
-        @intCast(u32, 1),
-        @ptrCast([*]const vk.CommandBuffer, &self.ray_command_buffers),
+        @as(u32, @intCast(1)),
+        @as([*]const vk.CommandBuffer, @ptrCast(&self.ray_command_buffers)),
     );
     ctx.vkd.destroyCommandPool(ctx.logical_device, self.ray_command_pool, null);
 
@@ -521,8 +521,8 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
         defer wait_render_zone.End();
 
         // wait for previous texture draw before updating buffers and command buffers
-        _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
-        try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence));
+        _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @as([*]const vk.Fence, @ptrCast(&self.render_complete_fence)), vk.TRUE, std.math.maxInt(u64));
+        try ctx.vkd.resetFences(ctx.logical_device, 1, @as([*]const vk.Fence, @ptrCast(&self.render_complete_fence)));
     }
 
     // The pipeline has the following stages:
@@ -544,7 +544,7 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
     //
     //
     const ray_tracing_pipeline_complete_semaphore = blk: {
-        const max_bounces = @intCast(u32, self.camera.d_camera.max_bounce);
+        const max_bounces = @as(u32, @intCast(self.camera.d_camera.max_bounce));
 
         try ctx.vkd.resetCommandPool(ctx.logical_device, self.ray_command_pool, .{});
 
@@ -579,11 +579,11 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
                 .p_wait_semaphores = semo_null_ptr,
                 .p_wait_dst_stage_mask = wait_null_ptr,
                 .command_buffer_count = 1,
-                .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.ray_command_buffers),
+                .p_command_buffers = @as([*]const vk.CommandBuffer, @ptrCast(&self.ray_command_buffers)),
                 .signal_semaphore_count = 1,
-                .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.ray_pipeline_complete_semaphore),
+                .p_signal_semaphores = @as([*]const vk.Semaphore, @ptrCast(&self.ray_pipeline_complete_semaphore)),
             };
-            try ctx.vkd.queueSubmit(ctx.compute_queue, 1, @ptrCast([*]const vk.SubmitInfo, &submit_info), .null_handle);
+            try ctx.vkd.queueSubmit(ctx.compute_queue, 1, @as([*]const vk.SubmitInfo, @ptrCast(&submit_info)), .null_handle);
         }
 
         break :blk self.ray_pipeline_complete_semaphore;
@@ -609,15 +609,15 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
         .p_wait_semaphores = &wait_semaphores,
         .p_wait_dst_stage_mask = &stage_masks,
         .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.gfx_pipeline.command_buffers[image_index]),
+        .p_command_buffers = @as([*]const vk.CommandBuffer, @ptrCast(&self.gfx_pipeline.command_buffers[image_index])),
         .signal_semaphore_count = 1,
-        .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &self.render_complete_semaphore),
+        .p_signal_semaphores = @as([*]const vk.Semaphore, @ptrCast(&self.render_complete_semaphore)),
     };
 
     try ctx.vkd.queueSubmit(
         ctx.graphics_queue,
         1,
-        @ptrCast([*]const vk.SubmitInfo, &render_submit_info),
+        @as([*]const vk.SubmitInfo, @ptrCast(&render_submit_info)),
         self.render_complete_fence,
     );
 
@@ -637,10 +637,10 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
 
     const present_info = vk.PresentInfoKHR{
         .wait_semaphore_count = 1,
-        .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &self.render_complete_semaphore),
+        .p_wait_semaphores = @as([*]const vk.Semaphore, @ptrCast(&self.render_complete_semaphore)),
         .swapchain_count = 1,
-        .p_swapchains = @ptrCast([*]const vk.SwapchainKHR, &self.swapchain.swapchain),
-        .p_image_indices = @ptrCast([*]const u32, &image_index),
+        .p_swapchains = @as([*]const vk.SwapchainKHR, @ptrCast(&self.swapchain.swapchain)),
+        .p_image_indices = @as([*]const u32, @ptrCast(&image_index)),
         .p_results = null,
     };
 
@@ -928,7 +928,7 @@ fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
         self.allocator.free(self.gfx_pipeline.framebuffers);
     }
 
-    self.gui.handleRescale(@intToFloat(f32, window_size.width), @intToFloat(f32, window_size.height));
+    self.gui.handleRescale(@as(f32, @floatFromInt(window_size.width)), @as(f32, @floatFromInt(window_size.height)));
 }
 
 /// prepare gfx_pipeline + imgui_pipeline command buffer
@@ -977,7 +977,7 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
         0,
         undefined,
         1,
-        @ptrCast([*]const vk.ImageMemoryBarrier, &image_barrier),
+        @as([*]const vk.ImageMemoryBarrier, @ptrCast(&image_barrier)),
     );
 
     const render_pass_begin_info = vk.RenderPassBeginInfo{
@@ -996,8 +996,8 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
         const viewport = vk.Viewport{
             .x = 0,
             .y = 0,
-            .width = @intToFloat(f32, self.swapchain.extent.width),
-            .height = @intToFloat(f32, self.swapchain.extent.height),
+            .width = @as(f32, @floatFromInt(self.swapchain.extent.width)),
+            .height = @as(f32, @floatFromInt(self.swapchain.extent.height)),
             .min_depth = 0,
             .max_depth = 1,
         };
@@ -1005,7 +1005,7 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
             command_buffer,
             0,
             1,
-            @ptrCast([*]const vk.Viewport, &viewport),
+            @as([*]const vk.Viewport, @ptrCast(&viewport)),
         );
     }
 
@@ -1017,7 +1017,7 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
             },
             .extent = self.swapchain.extent,
         };
-        ctx.vkd.cmdSetScissor(command_buffer, 0, 1, @ptrCast([*]const vk.Rect2D, &scissor));
+        ctx.vkd.cmdSetScissor(command_buffer, 0, 1, @as([*]const vk.Rect2D, @ptrCast(&scissor)));
     }
 
     ctx.vkd.cmdPushConstants(
@@ -1035,7 +1035,7 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
         self.gfx_pipeline.pipeline_layout,
         0,
         1,
-        @ptrCast([*]const vk.DescriptorSet, &self.gfx_pipeline.descriptor_set),
+        @as([*]const vk.DescriptorSet, @ptrCast(&self.gfx_pipeline.descriptor_set)),
         0,
         undefined,
     );
@@ -1044,7 +1044,7 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
         command_buffer,
         0,
         1,
-        @ptrCast([*]const vk.Buffer, &self.vertex_index_buffer.buffer),
+        @as([*]const vk.Buffer, @ptrCast(&self.vertex_index_buffer.buffer)),
         &vertex_zero_offset,
     );
     ctx.vkd.cmdBindIndexBuffer(command_buffer, self.vertex_index_buffer.buffer, GraphicsPipeline.vertex_size, .uint16);

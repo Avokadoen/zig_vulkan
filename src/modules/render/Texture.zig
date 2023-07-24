@@ -56,7 +56,7 @@ pub fn init(ctx: Context, command_pool: vk.CommandPool, layout: vk.ImageLayout, 
             .tiling = .optimal,
             .usage = config.usage,
             .sharing_mode = .exclusive, // TODO: concurrent if (queue_family_indices.len > 1)
-            .queue_family_index_count = @intCast(u32, config.queue_family_indices.len),
+            .queue_family_index_count = @as(u32, @intCast(config.queue_family_indices.len)),
             .p_queue_family_indices = config.queue_family_indices.ptr,
             .initial_layout = .undefined,
         };
@@ -77,7 +77,7 @@ pub fn init(ctx: Context, command_pool: vk.CommandPool, layout: vk.ImageLayout, 
     try ctx.vkd.bindImageMemory(ctx.logical_device, image, image_memory, 0);
 
     // TODO: set size according to image format
-    const image_size: vk.DeviceSize = @intCast(vk.DeviceSize, config.width * config.height * @sizeOf(f32));
+    const image_size: vk.DeviceSize = @as(vk.DeviceSize, @intCast(config.width * config.height * @sizeOf(f32)));
 
     // transfer texture data to gpu
     if (config.data) |data| {
@@ -200,7 +200,7 @@ pub fn copyToHost(self: Texture, command_pool: vk.CommandPool, ctx: Context, com
                 .depth = 1,
             },
         };
-        ctx.vkd.cmdCopyImageToBuffer(command_buffer, self.image, .transfer_src_optimal, staging_buffer.buffer, 1, @ptrCast([*]const vk.BufferImageCopy, &region));
+        ctx.vkd.cmdCopyImageToBuffer(command_buffer, self.image, .transfer_src_optimal, staging_buffer.buffer, 1, @as([*]const vk.BufferImageCopy, @ptrCast(&region)));
     }
     try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, command_buffer);
     try transitionImageLayout(ctx, command_pool, self.image, .transfer_src_optimal, self.layout);
@@ -364,7 +364,7 @@ pub inline fn transitionImageLayout(ctx: Context, command_pool: vk.CommandPool, 
             .layer_count = 1,
         },
     };
-    ctx.vkd.cmdPipelineBarrier(commmand_buffer, transition.src_stage, transition.dst_stage, vk.DependencyFlags{}, 0, undefined, 0, undefined, 1, @ptrCast([*]const vk.ImageMemoryBarrier, &barrier));
+    ctx.vkd.cmdPipelineBarrier(commmand_buffer, transition.src_stage, transition.dst_stage, vk.DependencyFlags{}, 0, undefined, 0, undefined, 1, @as([*]const vk.ImageMemoryBarrier, @ptrCast(&barrier)));
     try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, commmand_buffer);
 }
 
@@ -394,7 +394,7 @@ pub inline fn copyBufferToImage(ctx: Context, command_pool: vk.CommandPool, imag
                 .depth = 1,
             },
         };
-        ctx.vkd.cmdCopyBufferToImage(command_buffer, buffer, image, .transfer_dst_optimal, 1, @ptrCast([*]const vk.BufferImageCopy, &region));
+        ctx.vkd.cmdCopyBufferToImage(command_buffer, buffer, image, .transfer_dst_optimal, 1, @as([*]const vk.BufferImageCopy, @ptrCast(&region)));
     }
     try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, command_buffer);
 }

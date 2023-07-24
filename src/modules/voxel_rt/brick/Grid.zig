@@ -42,10 +42,10 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 
     const brick_count = dim_x * dim_y * dim_z;
 
-    const higher_dim_x = @intToFloat(f64, dim_x) * 0.25;
-    const higher_dim_y = @intToFloat(f64, dim_y) * 0.25;
-    const higher_dim_z = @intToFloat(f64, dim_z) * 0.25;
-    const higher_order_grid = try allocator.alloc(u8, @floatToInt(usize, @ceil(higher_dim_x * higher_dim_y * higher_dim_z)));
+    const higher_dim_x = @as(f64, @floatFromInt(dim_x)) * 0.25;
+    const higher_dim_y = @as(f64, @floatFromInt(dim_y)) * 0.25;
+    const higher_dim_z = @as(f64, @floatFromInt(dim_z)) * 0.25;
+    const higher_order_grid = try allocator.alloc(u8, @as(usize, @intFromFloat(@ceil(higher_dim_x * higher_dim_y * higher_dim_z))));
     errdefer allocator.free(higher_order_grid);
     @memset(higher_order_grid, 0);
 
@@ -63,7 +63,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     errdefer allocator.free(bricks);
     @memset(bricks, .{ .solid_mask = 0, .index_type = .voxel_start_index, .index = 0 });
 
-    const material_indices = try allocator.alloc(u8, bricks.len * math.min(512, config.material_indices_per_brick));
+    const material_indices = try allocator.alloc(u8, bricks.len * @min(512, config.material_indices_per_brick));
     errdefer allocator.free(material_indices);
     @memset(material_indices, 0);
 
@@ -77,9 +77,9 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     };
     const max_point_scale = blk: {
         var result = [4]f32{
-            min_point_base_t[0] + @intToFloat(f32, dim_x) * config.scale,
-            min_point_base_t[1] + @intToFloat(f32, dim_y) * config.scale,
-            min_point_base_t[2] + @intToFloat(f32, dim_z) * config.scale,
+            min_point_base_t[0] + @as(f32, @floatFromInt(dim_x)) * config.scale,
+            min_point_base_t[1] + @as(f32, @floatFromInt(dim_y)) * config.scale,
+            min_point_base_t[2] + @as(f32, @floatFromInt(dim_z)) * config.scale,
             config.scale,
         };
         break :blk result;
@@ -108,7 +108,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     errdefer allocator.free(material_indices_deltas);
     @memset(material_indices_deltas, State.DeviceDataDelta.init());
 
-    const work_segment_size = try std.math.divCeil(u32, dim_x, @intCast(u32, config.workers_count));
+    const work_segment_size = try std.math.divCeil(u32, dim_x, @as(u32, @intCast(config.workers_count)));
 
     state.* = .{
         .higher_order_grid_delta = higher_order_grid_delta,
@@ -131,9 +131,9 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
             .dim_x = dim_x,
             .dim_y = dim_y,
             .dim_z = dim_z,
-            .higher_dim_x = @floatToInt(u32, higher_dim_x),
-            .higher_dim_y = @floatToInt(u32, higher_dim_y),
-            .higher_dim_z = @floatToInt(u32, higher_dim_z),
+            .higher_dim_x = @as(u32, @intFromFloat(higher_dim_x)),
+            .higher_dim_y = @as(u32, @intFromFloat(higher_dim_y)),
+            .higher_dim_z = @as(u32, @intFromFloat(higher_dim_z)),
             .min_point_base_t = min_point_base_t,
             .max_point_scale = max_point_scale,
         },

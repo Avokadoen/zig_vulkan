@@ -107,19 +107,19 @@ pub fn main() anyerror!void {
         const albedo_index = i + terrain.color_data.len;
         albedo_color[albedo_index] = .{
             .color = za.Vec4.new(
-                @intToFloat(f32, rgba.r) / 255,
-                @intToFloat(f32, rgba.g) / 255,
-                @intToFloat(f32, rgba.b) / 255,
-                @intToFloat(f32, rgba.a) / 255,
+                @as(f32, @floatFromInt(rgba.r)) / 255,
+                @as(f32, @floatFromInt(rgba.g)) / 255,
+                @as(f32, @floatFromInt(rgba.b)) / 255,
+                @as(f32, @floatFromInt(rgba.a)) / 255,
             ).data,
         };
         const material_index = i + terrain.material_data.len;
-        materials[material_index] = .{ .type = .metal, .type_index = 0, .albedo_index = @intCast(u8, albedo_index) };
+        materials[material_index] = .{ .type = .metal, .type_index = 0, .albedo_index = @as(u8, @intCast(albedo_index)) };
     }
 
     // Test what we are loading
     for (model.xyzi_chunks[0]) |xyzi| {
-        grid.insert(@intCast(usize, xyzi.x) + 200, @intCast(usize, xyzi.z) + 50, @intCast(usize, xyzi.y) + 150, xyzi.color_index);
+        grid.insert(@as(usize, @intCast(xyzi.x)) + 200, @as(usize, @intCast(xyzi.z)) + 50, @as(usize, @intCast(xyzi.y)) + 150, xyzi.color_index);
     }
 
     var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, .{
@@ -161,9 +161,9 @@ pub fn main() anyerror!void {
     // Loop until the user closes the window
     while (!window.shouldClose()) {
         const current_frame = std.time.milliTimestamp();
-        delta_time = @intToFloat(f64, current_frame - prev_frame) / @as(f64, std.time.ms_per_s);
+        delta_time = @as(f64, @floatFromInt(current_frame - prev_frame)) / @as(f64, std.time.ms_per_s);
         // f32 variant of delta_time
-        const dt = @floatCast(f32, delta_time);
+        const dt = @as(f32, @floatCast(delta_time));
 
         if (call_translate > 0) {
             if (activate_sprint) {
@@ -306,8 +306,8 @@ fn gameCursorPosInputFn(event: Input.CursorPosEvent) void {
     if (mouse_ignore_frames == 0) {
         // let prev_event be defined before processing Input
         if (State.prev_event) |p_event| {
-            mouse_delta.data[0] += @floatCast(f32, event.x - p_event.x);
-            mouse_delta.data[1] += @floatCast(f32, event.y - p_event.y);
+            mouse_delta.data[0] += @as(f32, @floatCast(event.x - p_event.x));
+            mouse_delta.data[1] += @as(f32, @floatCast(event.y - p_event.y));
         }
         call_yaw = call_yaw or mouse_delta.x() < -0.00001 or mouse_delta.x() > 0.00001;
         call_pitch = call_pitch or mouse_delta.y() < -0.00001 or mouse_delta.y() > 0.00001;

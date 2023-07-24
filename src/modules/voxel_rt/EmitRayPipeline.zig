@@ -98,9 +98,9 @@ pub fn init(
         const descriptor_set_alloc_info = vk.DescriptorSetAllocateInfo{
             .descriptor_pool = target_descriptor_pool,
             .descriptor_set_count = 1,
-            .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &target_descriptor_layout),
+            .p_set_layouts = @as([*]const vk.DescriptorSetLayout, @ptrCast(&target_descriptor_layout)),
         };
-        try ctx.vkd.allocateDescriptorSets(ctx.logical_device, &descriptor_set_alloc_info, @ptrCast([*]vk.DescriptorSet, &target_descriptor_set));
+        try ctx.vkd.allocateDescriptorSets(ctx.logical_device, &descriptor_set_alloc_info, @as([*]vk.DescriptorSet, @ptrCast(&target_descriptor_set)));
     }
 
     {
@@ -108,12 +108,12 @@ pub fn init(
         for (&write_descriptor_set, 0..) |*write_desc, index| {
             write_desc.* = .{
                 .dst_set = target_descriptor_set,
-                .dst_binding = @intCast(u32, index),
+                .dst_binding = @as(u32, @intCast(index)),
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, &draw_ray_descriptor_info[index]),
+                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&draw_ray_descriptor_info[index])),
                 .p_texel_buffer_view = undefined,
             };
         }
@@ -137,7 +137,7 @@ pub fn init(
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
             .set_layout_count = 1,
-            .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &target_descriptor_layout),
+            .p_set_layouts = @as([*]const vk.DescriptorSetLayout, @ptrCast(&target_descriptor_layout)),
             .push_constant_range_count = push_constant_ranges.len,
             .p_push_constant_ranges = &push_constant_ranges,
         };
@@ -157,11 +157,11 @@ pub fn init(
             .map_entry_count = spec_map.len,
             .p_map_entries = &spec_map,
             .data_size = @sizeOf(Dispatch2),
-            .p_data = @ptrCast(*const anyopaque, &work_group_dim),
+            .p_data = @as(*const anyopaque, @ptrCast(&work_group_dim)),
         };
         const module_create_info = vk.ShaderModuleCreateInfo{
             .flags = .{},
-            .p_code = @ptrCast([*]const u32, &shaders.emit_primary_rays_spv),
+            .p_code = @as([*]const u32, @ptrCast(&shaders.emit_primary_rays_spv)),
             .code_size = shaders.emit_primary_rays_spv.len,
         };
         const module = try ctx.vkd.createShaderModule(ctx.logical_device, &module_create_info, null);
@@ -171,7 +171,7 @@ pub fn init(
             .stage = .{ .compute_bit = true },
             .module = module,
             .p_name = "main",
-            .p_specialization_info = @ptrCast(?*const vk.SpecializationInfo, &specialization),
+            .p_specialization_info = @as(?*const vk.SpecializationInfo, @ptrCast(&specialization)),
         };
         defer ctx.destroyShaderModule(stage.module);
 
@@ -248,7 +248,7 @@ pub fn appendPipelineCommands(self: EmitRayPipeline, ctx: Context, camera: Camer
         self.pipeline_layout,
         0,
         1,
-        @ptrCast([*]const vk.DescriptorSet, &self.target_descriptor_set),
+        @as([*]const vk.DescriptorSet, @ptrCast(&self.target_descriptor_set)),
         0,
         undefined,
     );
@@ -277,15 +277,15 @@ pub fn appendPipelineCommands(self: EmitRayPipeline, ctx: Context, camera: Camer
         0,
         undefined,
         1,
-        @ptrCast([*]const vk.BufferMemoryBarrier, &buffer_memory_barrier),
+        @as([*]const vk.BufferMemoryBarrier, @ptrCast(&buffer_memory_barrier)),
         0,
         undefined,
     );
 
-    const x_dispatch = @ceil(@intToFloat(f32, self.image_size.width) / @intToFloat(f32, self.work_group_dim.x));
-    const y_dispatch = @ceil(@intToFloat(f32, self.image_size.height) / @intToFloat(f32, self.work_group_dim.y));
+    const x_dispatch = @ceil(@as(f32, @floatFromInt(self.image_size.width)) / @as(f32, @floatFromInt(self.work_group_dim.x)));
+    const y_dispatch = @ceil(@as(f32, @floatFromInt(self.image_size.height)) / @as(f32, @floatFromInt(self.work_group_dim.y)));
 
-    ctx.vkd.cmdDispatch(command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
+    ctx.vkd.cmdDispatch(command_buffer, @as(u32, @intFromFloat(x_dispatch)), @as(u32, @intFromFloat(y_dispatch)), 1);
 }
 
 // TODO: move to common math/mem file

@@ -27,7 +27,7 @@ pub fn PerlinNoiseGenerator(comptime point_count: u32) type {
                     var perm: [point_count]PermInt = undefined;
                     // TODO: replace for with while to avoid casting in loop
                     for (&perm, 0..) |*p, i| {
-                        p.* = @intCast(PermInt, i);
+                        p.* = @as(PermInt, @intCast(i));
                     }
 
                     {
@@ -70,11 +70,11 @@ pub fn PerlinNoiseGenerator(comptime point_count: u32) type {
             }
 
             const and_value = point_count - 1;
-            const i = @floatToInt(usize, 4 * point[0]) & and_value;
-            const j = @floatToInt(usize, 4 * point[2]) & and_value;
-            const k = @floatToInt(usize, 4 * point[1]) & and_value;
+            const i = @as(usize, @intFromFloat(4 * point[0])) & and_value;
+            const j = @as(usize, @intFromFloat(4 * point[2])) & and_value;
+            const k = @as(usize, @intFromFloat(4 * point[1])) & and_value;
 
-            return self.rand_float[@intCast(usize, self.perm_x[i] ^ self.perm_y[j] ^ self.perm_z[k])];
+            return self.rand_float[@as(usize, @intCast(self.perm_x[i] ^ self.perm_y[j] ^ self.perm_z[k]))];
         }
 
         pub fn smoothNoise(self: Perlin, comptime PointType: type, point: [3]PointType) NoiseFloat {
@@ -90,9 +90,9 @@ pub fn PerlinNoiseGenerator(comptime point_count: u32) type {
             {
                 const and_value = point_count - 1;
 
-                const i = @floatToInt(usize, @floor(point[0]));
-                const j = @floatToInt(usize, @floor(point[1]));
-                const k = @floatToInt(usize, @floor(point[2]));
+                const i = @as(usize, @intFromFloat(@floor(point[0])));
+                const j = @as(usize, @intFromFloat(@floor(point[1])));
+                const k = @as(usize, @intFromFloat(@floor(point[2])));
                 var di: usize = 0;
                 while (di < 2) : (di += 1) {
                     var dj: usize = 0;
@@ -100,11 +100,11 @@ pub fn PerlinNoiseGenerator(comptime point_count: u32) type {
                         var dk: usize = 0;
                         while (dk < 2) : (dk += 1) {
                             c[di][dj][dk] = self.rand_float[
-                                @intCast(
+                                @as(
                                     usize,
-                                    self.perm_x[(i + di) & and_value] ^
+                                    @intCast(self.perm_x[(i + di) & and_value] ^
                                         self.perm_y[(j + dj) & and_value] ^
-                                        self.perm_z[(k + dk) & and_value],
+                                        self.perm_z[(k + dk) & and_value]),
                                 )
                             ];
                         }
@@ -130,13 +130,13 @@ pub fn PerlinNoiseGenerator(comptime point_count: u32) type {
             {
                 var i: usize = 0;
                 while (i < 2) : (i += 1) {
-                    const fi = @intToFloat(NoiseFloat, i);
+                    const fi = @as(NoiseFloat, @floatFromInt(i));
                     var j: usize = 0;
                     while (j < 2) : (j += 1) {
-                        const fj = @intToFloat(NoiseFloat, j);
+                        const fj = @as(NoiseFloat, @floatFromInt(j));
                         var k: usize = 0;
                         while (k < 2) : (k += 1) {
-                            const fk = @intToFloat(NoiseFloat, k);
+                            const fk = @as(NoiseFloat, @floatFromInt(k));
                             accum += (fi * u + (1 - fi) * (1 - u)) *
                                 (fj * v + (1 - fj) * (1 - v)) *
                                 (fk * w + (1 - fk) * (1 - w)) * c[i][j][k];

@@ -24,7 +24,7 @@ fn InfoType() type {
 
                 return Self{
                     .enabled_layer_count = validation_layers.len,
-                    .enabled_layer_names = @ptrCast([*]const [*:0]const u8, &validation_layers),
+                    .enabled_layer_names = @as([*]const [*:0]const u8, @ptrCast(&validation_layers)),
                 };
             }
         };
@@ -65,7 +65,7 @@ fn isLayersPresent(allocator: Allocator, vkb: dispatch.Base, target_layers: []co
         inner: for (available_layers.items) |available_layer| {
             const layer_name = available_layer.layer_name;
             // if target_layer and available_layer is the same
-            if (std.cstr.cmp(target_layer, @ptrCast([*:0]const u8, &layer_name)) == 0) {
+            if (std.mem.orderZ(u8, target_layer, @as([*:0]const u8, @ptrCast(&layer_name))) == .eq) {
                 break :inner;
             }
         } else return false; // if our loop never break, then a requested layer is missing

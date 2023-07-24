@@ -5,7 +5,7 @@ const Allocator = std.mem.Allocator;
 const IndexMapContext = struct {
     pub fn hash(self: IndexMapContext, key: usize) u64 {
         _ = self;
-        return @intCast(u64, key);
+        return @as(u64, @intCast(key));
     }
     pub fn eql(self: IndexMapContext, a: usize, b: usize) bool {
         _ = self;
@@ -115,7 +115,7 @@ pub fn init(allocator: Allocator, start_index: u32, material_indices_len: usize,
 
     var index = IndexMap.init(allocator);
     errdefer index.deinit();
-    try index.ensureUnusedCapacity(@intCast(u32, brick_count));
+    try index.ensureUnusedCapacity(@as(u32, @intCast(brick_count)));
 
     return BucketStorage{
         .allocator = allocator,
@@ -151,8 +151,8 @@ pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_count: usi
                 const oc_index = try self.buckets[i].appendOccupied(bucket);
 
                 try self.index.put(brick_index, Index{
-                    .bucket_index = @intCast(u6, i),
-                    .element_index = @intCast(u26, oc_index),
+                    .bucket_index = @as(u6, @intCast(i)),
+                    .element_index = @as(u26, @intCast(oc_index)),
                 });
 
                 // copy material indices to new bucket
@@ -168,8 +168,8 @@ pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_count: usi
                 const oc_index = try bucket.appendOccupied(take);
 
                 try self.index.put(brick_index, Index{
-                    .bucket_index = @intCast(u6, i),
-                    .element_index = @intCast(u26, oc_index),
+                    .bucket_index = @as(u6, @intCast(i)),
+                    .element_index = @as(u26, @intCast(oc_index)),
                 });
 
                 return take;

@@ -27,7 +27,7 @@ pub const Image = struct {
             .width = width,
             .height = height,
             .channels = 4,
-            .data = try allocator.alloc(Pixel, @intCast(usize, width * height)),
+            .data = try allocator.alloc(Pixel, @as(usize, @intCast(width * height))),
             .loaded_from_file = false,
         };
     }
@@ -45,7 +45,7 @@ pub const Image = struct {
         var width: i32 = undefined;
         var height: i32 = undefined;
         var channels: i32 = undefined;
-        const char_ptr = c.stbi_load(use_path.ptr, &width, &height, &channels, @enumToInt(desired_channels));
+        const char_ptr = c.stbi_load(use_path.ptr, &width, &height, &channels, @intFromEnum(desired_channels));
         if (char_ptr == null) {
             return error.FailedToLoadImage; // Only error scenario here is failed to open file descriptor
         }
@@ -60,9 +60,9 @@ pub const Image = struct {
             return error.PtrNotAligned; // failed to align char pointer as a pixel pointer
         }
 
-        const pixel_ptr = @ptrCast([*]Pixel, aligned_char_ptr);
+        const pixel_ptr = @as([*]Pixel, @ptrCast(aligned_char_ptr));
 
-        const pixel_count = @intCast(usize, width * height);
+        const pixel_count = @as(usize, @intCast(width * height));
         return Image{
             .allocator = allocator,
             .width = width,

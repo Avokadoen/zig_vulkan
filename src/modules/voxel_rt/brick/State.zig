@@ -38,8 +38,8 @@ pub const DeviceDataDelta = struct {
         defer self.mutex.unlock();
 
         self.state = .active;
-        self.from = std.math.min(self.from, delta_index);
-        self.to = std.math.max(self.to, delta_index + 1);
+        self.from = @min(self.from, delta_index);
+        self.to = @max(self.to, delta_index + 1);
     }
 
     /// register a delta range
@@ -48,8 +48,8 @@ pub const DeviceDataDelta = struct {
         defer self.mutex.unlock();
 
         self.state = .active;
-        self.from = std.math.min(self.from, from);
-        self.to = std.math.max(self.to, to + 1);
+        self.from = @min(self.from, from);
+        self.to = @max(self.to, to + 1);
     }
 };
 
@@ -96,14 +96,14 @@ pub const BrickStatusMask = extern struct {
     pub fn write(self: *BrickStatusMask, state: Status, at: u5) void {
         // zero out bits
         self.bits &= ~(@as(u32, 0b1) << at);
-        self.bits |= @intCast(u32, @enumToInt(state)) << at;
+        self.bits |= @as(u32, @intCast(@intFromEnum(state))) << at;
     }
 
     pub fn read(self: BrickStatusMask, at: u5) Status {
         var bits = self.bits;
         bits &= @as(u32, 0b1) << at;
         bits = bits >> at;
-        return @intToEnum(Status, @intCast(u2, bits));
+        return @as(Status, @enumFromInt(@as(u2, @intCast(bits))));
     }
 };
 

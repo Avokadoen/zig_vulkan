@@ -92,7 +92,7 @@ pub fn init(
     _ = window.setMouseButtonCallback(mouseBtnCallback);
     _ = window.setCursorPosCallback(cursorPosCallback);
     _ = window.setScrollCallback(scrollCallback);
-    window.setUserPointer(@ptrCast(?*anyopaque, window_context));
+    window.setUserPointer(@as(?*anyopaque, @ptrCast(window_context)));
 
     const imgui_context = try linkImguiCodes();
 
@@ -159,7 +159,7 @@ fn keyCallback(window: glfw.Window, key: Key, scan_code: i32, action: Action, mo
     _ = scan_code;
 
     var owned_mods = mods;
-    var parsed_mods = @ptrCast(*Mods, &owned_mods);
+    var parsed_mods = @as(*Mods, @ptrCast(&owned_mods));
     const event = KeyEvent{
         .key = key,
         .action = action,
@@ -187,13 +187,13 @@ fn charCallback(window: glfw.Window, codepoint: u21) void {
         const len = std.unicode.utf8Encode(codepoint, buffer[0..]) catch return;
         const cstr = buffer[0 .. len + 1];
         cstr[len] = 0; // null terminator
-        zgui.io.addInputCharactersUTF8(@ptrCast([*:0]const u8, cstr.ptr));
+        zgui.io.addInputCharactersUTF8(@as([*:0]const u8, @ptrCast(cstr.ptr)));
     }
 }
 
 fn mouseBtnCallback(window: glfw.Window, button: MouseButton, action: Action, mods: Mods) void {
     var owned_mods = mods;
-    var parsed_mods = @ptrCast(*Mods, &owned_mods);
+    var parsed_mods = @as(*Mods, @ptrCast(&owned_mods));
     const event = MouseButtonEvent{
         .button = button,
         .action = action,
@@ -229,7 +229,7 @@ fn cursorPosCallback(window: glfw.Window, x_pos: f64, y_pos: f64) void {
     context.cursor_pos_handle_fn(event);
 
     if (context.imgui_want_input) {
-        zgui.io.addMousePositionEvent(@floatCast(f32, x_pos), @floatCast(f32, y_pos));
+        zgui.io.addMousePositionEvent(@as(f32, @floatCast(x_pos)), @as(f32, @floatCast(y_pos)));
     }
 }
 
@@ -237,7 +237,7 @@ fn scrollCallback(window: glfw.Window, xoffset: f64, yoffset: f64) void {
     const context = if (window.getUserPointer(WindowContext)) |some| some else return;
 
     if (context.imgui_want_input) {
-        zgui.io.addMouseWheelEvent(@floatCast(f32, xoffset), @floatCast(f32, yoffset));
+        zgui.io.addMouseWheelEvent(@as(f32, @floatCast(xoffset)), @as(f32, @floatCast(yoffset)));
     }
 }
 

@@ -24,8 +24,8 @@ pub fn init(camera: *Camera, brick_state: BrickState, sun_enabled: bool) Benchma
     const zone = tracy.ZoneN(@src(), @typeName(Benchmark) ++ " " ++ @src().fn_name);
     defer zone.End();
 
-    const path_point_fraction = Configuration.benchmark_duration / @intToFloat(f32, Configuration.path_points.len);
-    const path_orientation_fraction = Configuration.benchmark_duration / @intToFloat(f32, Configuration.path_orientations.len);
+    const path_point_fraction = Configuration.benchmark_duration / @as(f32, @floatFromInt(Configuration.path_points.len));
+    const path_orientation_fraction = Configuration.benchmark_duration / @as(f32, @floatFromInt(Configuration.path_orientations.len));
 
     // initialize camera state
     camera.disableInput();
@@ -53,7 +53,7 @@ pub fn update(self: *Benchmark, dt: f32) bool {
 
     self.timer += dt;
 
-    const path_point_index = @floatToInt(usize, @divFloor(self.timer, self.path_point_fraction));
+    const path_point_index = @as(usize, @intFromFloat(@divFloor(self.timer, self.path_point_fraction)));
     if (path_point_index < Configuration.path_points.len - 1) {
         const path_point_lerp_pos = @rem(self.timer, self.path_point_fraction) / self.path_point_fraction;
         const left = Configuration.path_points[path_point_index];
@@ -61,7 +61,7 @@ pub fn update(self: *Benchmark, dt: f32) bool {
         self.camera.d_camera.origin = left.lerp(right, path_point_lerp_pos).data;
     }
 
-    const path_orientation_index = @floatToInt(usize, @divFloor(self.timer, self.path_orientation_fraction));
+    const path_orientation_index = @as(usize, @intFromFloat(@divFloor(self.timer, self.path_orientation_fraction)));
     if (path_orientation_index < Configuration.path_orientations.len - 1) {
         const path_orientation_lerp_pos = @rem(self.timer, self.path_orientation_fraction) / self.path_orientation_fraction;
         const left = Configuration.path_orientations[path_orientation_index];
@@ -72,8 +72,8 @@ pub fn update(self: *Benchmark, dt: f32) bool {
 
     self.camera.propogatePitchChange();
 
-    self.report.min_delta_time = std.math.min(self.report.min_delta_time, dt);
-    self.report.max_delta_time = std.math.max(self.report.max_delta_time, dt);
+    self.report.min_delta_time = @min(self.report.min_delta_time, dt);
+    self.report.max_delta_time = @max(self.report.max_delta_time, dt);
     self.report.delta_time_sum += dt;
     self.report.delta_time_sum_samples += 1;
 
@@ -102,7 +102,7 @@ pub const Report = struct {
         defer zone.End();
 
         return Report{
-            .min_delta_time = std.math.f32_max,
+            .min_delta_time = std.math.floatMax(f32),
             .max_delta_time = 0,
             .delta_time_sum = 0,
             .delta_time_sum_samples = 0,
@@ -118,7 +118,7 @@ pub const Report = struct {
         const zone = tracy.ZoneN(@src(), @typeName(Report) ++ " " ++ @src().fn_name);
         defer zone.End();
 
-        return self.delta_time_sum / @intToFloat(f32, self.delta_time_sum_samples);
+        return self.delta_time_sum / @as(f32, @floatFromInt(self.delta_time_sum_samples));
     }
 
     pub fn print(self: Report, device_name: []const u8, d_camera: Camera.Device, sun_enabled: bool) void {

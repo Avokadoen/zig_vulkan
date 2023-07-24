@@ -38,7 +38,7 @@ pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Conf
     const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
     defer zone.End();
 
-    const aspect_ratio = @intToFloat(f32, image_width) / @intToFloat(f32, image_height);
+    const aspect_ratio = @as(f32, @floatFromInt(image_width)) / @as(f32, @floatFromInt(image_height));
 
     const a: comptime_float = std.math.pi * (1.0 / 180.0);
     const viewport_height = blk: {
@@ -221,7 +221,7 @@ inline fn lowerLeftCorner(self: Camera) Vec3 {
     const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
     defer zone.End();
 
-    const @"0.5" = @splat(3, @as(f32, 0.5));
+    const @"0.5": @Vector(3, f32) = @splat(@as(f32, 0.5));
     return self.d_camera.origin - self.d_camera.horizontal * @"0.5" - self.d_camera.vertical * @"0.5" - self.forwardDir().data;
 }
 

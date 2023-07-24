@@ -62,8 +62,8 @@ pub const BufferInfo = enum(u32) {
     bricks,
 };
 const buffer_info_count = @typeInfo(BufferInfo).Enum.fields.len;
-const ray_info_count = @enumToInt(BufferInfo.out_hit_record_buffer) + 1;
-const brick_info_count = (@enumToInt(BufferInfo.bricks) + 1) - ray_info_count;
+const ray_info_count = @intFromEnum(BufferInfo.out_hit_record_buffer) + 1;
+const brick_info_count = (@intFromEnum(BufferInfo.bricks) + 1) - ray_info_count;
 
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
@@ -112,7 +112,7 @@ pub fn init(
 
     var voxel_scene_buffer = try GpuBufferMemory.init(
         ctx,
-        @intCast(vk.DeviceSize, 250 * 1024 * 1024), // alloc 250mb
+        @as(vk.DeviceSize, @intCast(250 * 1024 * 1024)), // alloc 250mb
         .{
             .storage_buffer_bit = true,
             .transfer_dst_bit = true,
@@ -143,7 +143,7 @@ pub fn init(
         BrickGridState,
         &[1]BrickGridState{brick_grid_state.*},
     );
-    const total_bricks = @floatToInt(vk.DeviceSize, brick_grid_state.dim[0] * brick_grid_state.dim[1] * brick_grid_state.dim[2]);
+    const total_bricks = @as(vk.DeviceSize, @intFromFloat(brick_grid_state.dim[0] * brick_grid_state.dim[1] * brick_grid_state.dim[2]));
     std.debug.assert(total_bricks * @sizeOf(Brick) < voxel_scene_buffer.size);
 
     const target_descriptor_layout = blk: {
@@ -181,7 +181,7 @@ pub fn init(
             .flags = .{},
             .max_sets = 1,
             .pool_size_count = 1,
-            .p_pool_sizes = @ptrCast([*]const vk.DescriptorPoolSize, &pool_sizes),
+            .p_pool_sizes = @as([*]const vk.DescriptorPoolSize, @ptrCast(&pool_sizes)),
         };
         break :blk try ctx.vkd.createDescriptorPool(ctx.logical_device, &pool_info, null);
     };
@@ -192,9 +192,9 @@ pub fn init(
         const descriptor_set_alloc_info = vk.DescriptorSetAllocateInfo{
             .descriptor_pool = target_descriptor_pool,
             .descriptor_set_count = 1,
-            .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &target_descriptor_layout),
+            .p_set_layouts = @as([*]const vk.DescriptorSetLayout, @ptrCast(&target_descriptor_layout)),
         };
-        try ctx.vkd.allocateDescriptorSets(ctx.logical_device, &descriptor_set_alloc_info, @ptrCast([*]vk.DescriptorSet, &target_descriptor_set));
+        try ctx.vkd.allocateDescriptorSets(ctx.logical_device, &descriptor_set_alloc_info, @as([*]vk.DescriptorSet, @ptrCast(&target_descriptor_set)));
     }
 
     var buffer_infos: [buffer_info_count]vk.DescriptorBufferInfo = blk: {
@@ -242,12 +242,12 @@ pub fn init(
             for (&writes, &infos, 0..buffer_info_count) |*write, *info, buffer_info_index| {
                 write.* = vk.WriteDescriptorSet{
                     .dst_set = target_descriptor_set,
-                    .dst_binding = @intCast(u32, buffer_info_index),
+                    .dst_binding = @as(u32, @intCast(buffer_info_index)),
                     .dst_array_element = 0,
                     .descriptor_count = 1,
                     .descriptor_type = .storage_buffer,
                     .p_image_info = undefined,
-                    .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, info),
+                    .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(info)),
                     .p_texel_buffer_view = undefined,
                 };
             }
@@ -269,7 +269,7 @@ pub fn init(
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
             .set_layout_count = 1,
-            .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &target_descriptor_layout),
+            .p_set_layouts = @as([*]const vk.DescriptorSetLayout, @ptrCast(&target_descriptor_layout)),
             .push_constant_range_count = 0,
             .p_push_constant_ranges = null,
         };
@@ -289,11 +289,11 @@ pub fn init(
             .map_entry_count = spec_map.len,
             .p_map_entries = &spec_map,
             .data_size = @sizeOf(Dispatch2),
-            .p_data = @ptrCast(*const anyopaque, &work_group_dim),
+            .p_data = @as(*const anyopaque, @ptrCast(&work_group_dim)),
         };
         const module_create_info = vk.ShaderModuleCreateInfo{
             .flags = .{},
-            .p_code = @ptrCast([*]const u32, &shaders.traverse_rays_spv),
+            .p_code = @as([*]const u32, @ptrCast(&shaders.traverse_rays_spv)),
             .code_size = shaders.traverse_rays_spv.len,
         };
         const module = try ctx.vkd.createShaderModule(ctx.logical_device, &module_create_info, null);
@@ -303,7 +303,7 @@ pub fn init(
             .stage = .{ .compute_bit = true },
             .module = module,
             .p_name = "main",
-            .p_specialization_info = @ptrCast(?*const vk.SpecializationInfo, &specialization),
+            .p_specialization_info = @as(?*const vk.SpecializationInfo, @ptrCast(&specialization)),
         };
         defer ctx.destroyShaderModule(stage.module);
 
@@ -332,7 +332,7 @@ pub fn init(
     const test_brick_all = Brick{
         .solid_mask = ~@as(u512, 0),
     };
-    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@enumToInt(BufferInfo.bricks)].offset, Brick, &.{
+    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@intFromEnum(BufferInfo.bricks)].offset, Brick, &.{
         test_brick_one,
         test_brick_all,
         test_brick_row,
@@ -342,7 +342,7 @@ pub fn init(
         test_brick_all,
         test_brick_one,
     });
-    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@enumToInt(BufferInfo.bricks_set)].offset, u8, &.{
+    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@intFromEnum(BufferInfo.bricks_set)].offset, u8, &.{
         1 << 7 | 1 << 6 | 0 << 5 | 1 << 4 | 1 << 3 | 1 << 2 | 1 << 1 | 1 << 0,
         0,
         0,
@@ -383,24 +383,24 @@ pub fn deinit(self: TraverseRayPipeline, ctx: Context) void {
 
 pub inline fn emitPipelineDescriptorInfo(self: TraverseRayPipeline) [3]vk.DescriptorBufferInfo {
     return [3]vk.DescriptorBufferInfo{
-        self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)],
-        self.buffer_infos[@enumToInt(BufferInfo.draw_cursor)],
-        self.buffer_infos[@enumToInt(BufferInfo.in_hit_record_buffer)],
+        self.buffer_infos[@intFromEnum(BufferInfo.in_ray_cursor)],
+        self.buffer_infos[@intFromEnum(BufferInfo.draw_cursor)],
+        self.buffer_infos[@intFromEnum(BufferInfo.in_hit_record_buffer)],
     };
 }
 
 pub inline fn drawPipelineDescriptorInfo(self: TraverseRayPipeline) [2]vk.DescriptorBufferInfo {
     return [2]vk.DescriptorBufferInfo{
-        self.buffer_infos[@enumToInt(BufferInfo.draw_cursor)],
-        self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
+        self.buffer_infos[@intFromEnum(BufferInfo.draw_cursor)],
+        self.buffer_infos[@intFromEnum(BufferInfo.out_hit_record_buffer)],
     };
 }
 
 pub inline fn missPipelineDescriptorInfo(self: TraverseRayPipeline) [3]vk.DescriptorBufferInfo {
     return [3]vk.DescriptorBufferInfo{
-        self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)],
-        self.buffer_infos[@enumToInt(BufferInfo.out_miss_cursor)],
-        self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
+        self.buffer_infos[@intFromEnum(BufferInfo.out_hit_cursor)],
+        self.buffer_infos[@intFromEnum(BufferInfo.out_miss_cursor)],
+        self.buffer_infos[@intFromEnum(BufferInfo.out_hit_record_buffer)],
     };
 }
 
@@ -408,17 +408,17 @@ pub inline fn scatterPipelineDescriptorInfo(self: TraverseRayPipeline) [2][4]vk.
     return [2][4]vk.DescriptorBufferInfo{
         // traverse
         .{
-            self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)],
-            self.buffer_infos[@enumToInt(BufferInfo.in_hit_record_buffer)],
-            self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)],
-            self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
+            self.buffer_infos[@intFromEnum(BufferInfo.out_hit_cursor)],
+            self.buffer_infos[@intFromEnum(BufferInfo.in_hit_record_buffer)],
+            self.buffer_infos[@intFromEnum(BufferInfo.in_ray_cursor)],
+            self.buffer_infos[@intFromEnum(BufferInfo.out_hit_record_buffer)],
         },
         // draw
         .{
-            self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)],
-            self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
-            self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)],
-            self.buffer_infos[@enumToInt(BufferInfo.out_hit_record_buffer)],
+            self.buffer_infos[@intFromEnum(BufferInfo.out_hit_cursor)],
+            self.buffer_infos[@intFromEnum(BufferInfo.out_hit_record_buffer)],
+            self.buffer_infos[@intFromEnum(BufferInfo.out_hit_cursor)],
+            self.buffer_infos[@intFromEnum(BufferInfo.out_hit_record_buffer)],
         },
     };
 }
@@ -483,18 +483,18 @@ pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, command_b
         self.pipeline_layout,
         0,
         1,
-        @ptrCast([*]const vk.DescriptorSet, &self.target_descriptor_set),
+        @as([*]const vk.DescriptorSet, @ptrCast(&self.target_descriptor_set)),
         0,
         undefined,
     );
 
     // Assert that our two cursors are located next to eachother to avoid our fill nulling unrelated bytes
-    std.debug.assert(@enumToInt(BufferInfo.out_miss_cursor) - @enumToInt(BufferInfo.out_hit_cursor) == 1);
+    std.debug.assert(@intFromEnum(BufferInfo.out_miss_cursor) - @intFromEnum(BufferInfo.out_hit_cursor) == 1);
 
     // we get distance between offset to account of alignment and padding
     const fill_range =
-        self.buffer_infos[@enumToInt(BufferInfo.out_miss_cursor)].offset - self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)].offset +
-        self.buffer_infos[@enumToInt(BufferInfo.out_miss_cursor)].range;
+        self.buffer_infos[@intFromEnum(BufferInfo.out_miss_cursor)].offset - self.buffer_infos[@intFromEnum(BufferInfo.out_hit_cursor)].offset +
+        self.buffer_infos[@intFromEnum(BufferInfo.out_miss_cursor)].range;
 
     // TODO: if we perform this fill in the emit stage then we do not need duplicate synchronization
     //       we should also replace semaphores with proper memory barriers.
@@ -503,7 +503,7 @@ pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, command_b
     ctx.vkd.cmdFillBuffer(
         command_buffer,
         self.ray_hit_buffer.buffer,
-        self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)].offset,
+        self.buffer_infos[@intFromEnum(BufferInfo.out_hit_cursor)].offset,
         fill_range,
         0,
     );
@@ -513,14 +513,14 @@ pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, command_b
         .src_queue_family_index = ctx.queue_indices.compute,
         .dst_queue_family_index = ctx.queue_indices.compute,
         .buffer = self.ray_hit_buffer.buffer,
-        .offset = self.buffer_infos[@enumToInt(BufferInfo.out_hit_cursor)].offset,
+        .offset = self.buffer_infos[@intFromEnum(BufferInfo.out_hit_cursor)].offset,
         .size = fill_range,
     };
 
     ctx.vkd.cmdFillBuffer(
         command_buffer,
         self.ray_hit_buffer.buffer,
-        self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)].offset + @offsetOf(RayBufferCursor, "cursor"),
+        self.buffer_infos[@intFromEnum(BufferInfo.in_ray_cursor)].offset + @offsetOf(RayBufferCursor, "cursor"),
         @sizeOf(c_int),
         0,
     );
@@ -530,7 +530,7 @@ pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, command_b
         .src_queue_family_index = ctx.queue_indices.compute,
         .dst_queue_family_index = ctx.queue_indices.compute,
         .buffer = self.ray_hit_buffer.buffer,
-        .offset = self.buffer_infos[@enumToInt(BufferInfo.in_ray_cursor)].offset + @offsetOf(RayBufferCursor, "cursor"),
+        .offset = self.buffer_infos[@intFromEnum(BufferInfo.in_ray_cursor)].offset + @offsetOf(RayBufferCursor, "cursor"),
         .size = @sizeOf(c_int),
     };
     const mem_barriers = [_]vk.BufferMemoryBarrier{ reset_out_cursor_memory_barrier, reset_inn_cursor_memory_barrier };
@@ -548,10 +548,10 @@ pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, command_b
         undefined,
     );
 
-    const x_dispatch = @ceil(@intToFloat(f32, self.image_size.width) / @intToFloat(f32, self.work_group_dim.x));
-    const y_dispatch = @ceil(@intToFloat(f32, self.image_size.height) / @intToFloat(f32, self.work_group_dim.y));
+    const x_dispatch = @ceil(@as(f32, @floatFromInt(self.image_size.width)) / @as(f32, @floatFromInt(self.work_group_dim.x)));
+    const y_dispatch = @ceil(@as(f32, @floatFromInt(self.image_size.height)) / @as(f32, @floatFromInt(self.work_group_dim.y)));
 
-    ctx.vkd.cmdDispatch(command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
+    ctx.vkd.cmdDispatch(command_buffer, @as(u32, @intFromFloat(x_dispatch)), @as(u32, @intFromFloat(y_dispatch)), 1);
 }
 
 // TODO: move to common math/mem file

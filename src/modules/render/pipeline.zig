@@ -39,7 +39,7 @@ pub fn loadShaderStage(
 ) !vk.PipelineShaderStageCreateInfo {
     const create_info = vk.ShaderModuleCreateInfo{
         .flags = .{},
-        .p_code = @ptrCast([*]const u32, &shader_code),
+        .p_code = @as([*]const u32, @ptrCast(&shader_code)),
         .code_size = shader_code.len,
     };
     const module = try ctx.vkd.createShaderModule(ctx.logical_device, &create_info, null);
@@ -59,7 +59,7 @@ pub fn allocCreateCmdBuffers(allocator: Allocator, ctx: Context, command_pool: v
     const alloc_info = vk.CommandBufferAllocateInfo{
         .command_pool = command_pool,
         .level = vk.CommandBufferLevel.primary,
-        .command_buffer_count = @intCast(u32, buffer_count),
+        .command_buffer_count = @as(u32, @intCast(buffer_count)),
     };
     try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &alloc_info, command_buffers.ptr);
     command_buffers.len = buffer_count;
@@ -71,7 +71,7 @@ pub fn createCmdBuffers(ctx: Context, command_pool: vk.CommandPool, command_buff
     const alloc_info = vk.CommandBufferAllocateInfo{
         .command_pool = command_pool,
         .level = vk.CommandBufferLevel.primary,
-        .command_buffer_count = @intCast(u32, command_buffers.len),
+        .command_buffer_count = @as(u32, @intCast(command_buffers.len)),
     };
     try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &alloc_info, command_buffers.ptr);
 }
@@ -81,10 +81,10 @@ pub fn createCmdBuffer(ctx: Context, command_pool: vk.CommandPool) !vk.CommandBu
     const alloc_info = vk.CommandBufferAllocateInfo{
         .command_pool = command_pool,
         .level = vk.CommandBufferLevel.primary,
-        .command_buffer_count = @intCast(u32, 1),
+        .command_buffer_count = @as(u32, @intCast(1)),
     };
     var command_buffer: vk.CommandBuffer = undefined;
-    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &alloc_info, @ptrCast([*]vk.CommandBuffer, &command_buffer));
+    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &alloc_info, @as([*]vk.CommandBuffer, @ptrCast(&command_buffer)));
 
     return command_buffer;
 }

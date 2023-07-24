@@ -22,7 +22,7 @@ pub const ViewportScissor = struct {
         const height = extent.height;
         return .{
             .viewport = [1]vk.Viewport{
-                .{ .x = 0, .y = 0, .width = @intToFloat(f32, width), .height = @intToFloat(f32, height), .min_depth = 0.0, .max_depth = 1.0 },
+                .{ .x = 0, .y = 0, .width = @as(f32, @floatFromInt(width)), .height = @as(f32, @floatFromInt(height)), .min_depth = 0.0, .max_depth = 1.0 },
             },
             .scissor = [1]vk.Rect2D{
                 .{ .offset = .{
@@ -57,7 +57,7 @@ pub const Data = struct {
             const extent = try support_details.constructSwapChainExtent(ctx.window_ptr.*);
 
             const max_images = if (support_details.capabilities.max_image_count == 0) std.math.maxInt(u32) else support_details.capabilities.max_image_count;
-            const image_count = std.math.min(support_details.capabilities.min_image_count + 1, max_images);
+            const image_count = @min(support_details.capabilities.min_image_count + 1, max_images);
 
             const Config = struct {
                 sharing_mode: vk.SharingMode,
@@ -70,14 +70,14 @@ pub const Data = struct {
                     break :blk2 Config{
                         .sharing_mode = .concurrent, // TODO: read up on ownership in this context
                         .index_count = indices_arr.len,
-                        .p_indices = @ptrCast([*]const u32, &indices_arr[0..indices_arr.len]),
+                        .p_indices = @as([*]const u32, @ptrCast(&indices_arr[0..indices_arr.len])),
                     };
                 } else {
                     const indices_arr = [_]u32{ ctx.queue_indices.graphics, ctx.queue_indices.present };
                     break :blk2 Config{
                         .sharing_mode = .exclusive,
                         .index_count = 1,
-                        .p_indices = @ptrCast([*]const u32, &indices_arr[0..1]),
+                        .p_indices = @as([*]const u32, @ptrCast(&indices_arr[0..1])),
                     };
                 }
             };
@@ -251,7 +251,7 @@ pub const SupportDetails = struct {
         } else {
             var window_size = blk: {
                 const size = window.getFramebufferSize();
-                break :blk vk.Extent2D{ .width = @intCast(u32, size.width), .height = @intCast(u32, size.height) };
+                break :blk vk.Extent2D{ .width = @as(u32, @intCast(size.width)), .height = @as(u32, @intCast(size.height)) };
             };
 
             const clamp = std.math.clamp;

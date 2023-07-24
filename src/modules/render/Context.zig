@@ -44,7 +44,7 @@ window_ptr: *glfw.Window,
 
 // Caller should make sure to call deinit
 pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Window) !Context {
-    const app_name = try std.cstr.addNullByte(allocator, application_name);
+    const app_name = try allocator.dupeZ(u8, application_name);
     defer allocator.free(app_name);
 
     const app_info = vk.ApplicationInfo{
@@ -86,9 +86,9 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
     self.allocator = allocator;
 
     // load base dispatch wrapper
-    const vk_proc = @ptrCast(
+    const vk_proc = @as(
         *const fn (instance: vk.Instance, procname: [*:0]const u8) callconv(.C) vk.PfnVoidFunction,
-        &glfw.getInstanceProcAddress,
+        @ptrCast(&glfw.getInstanceProcAddress),
     );
     self.vkb = try dispatch.Base.load(vk_proc);
     if (!(try vk_utils.isInstanceExtensionsPresent(allocator, self.vkb, extensions.items))) {
@@ -111,7 +111,7 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
     const features: ?*const vk.ValidationFeaturesEXT = blk: {
         if (consts.enable_validation_layers) {
             break :blk &vk.ValidationFeaturesEXT{
-                .p_next = @ptrCast(?*const anyopaque, debug_create_info),
+                .p_next = @as(?*const anyopaque, @ptrCast(debug_create_info)),
                 .enabled_validation_feature_count = debug_features.len,
                 .p_enabled_validation_features = &debug_features,
                 .disabled_validation_feature_count = 0,
@@ -123,13 +123,13 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
 
     self.instance = blk: {
         const instance_info = vk.InstanceCreateInfo{
-            .p_next = @ptrCast(?*const anyopaque, features),
+            .p_next = @as(?*const anyopaque, @ptrCast(features)),
             .flags = .{},
             .p_application_info = &app_info,
             .enabled_layer_count = validation_layer_info.enabled_layer_count,
             .pp_enabled_layer_names = validation_layer_info.enabled_layer_names,
-            .enabled_extension_count = @intCast(u32, extensions.items.len),
-            .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, extensions.items.ptr),
+            .enabled_extension_count = @as(u32, @intCast(extensions.items.len)),
+            .pp_enabled_extension_names = @as([*]const [*:0]const u8, @ptrCast(extensions.items.ptr)),
         };
         break :blk try self.vkb.createInstance(&instance_info, null);
     };
@@ -137,7 +137,7 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
     self.vki = try dispatch.Instance.load(self.instance, vk_proc);
     errdefer self.vki.destroyInstance(self.instance, null);
 
-    const result = @intToEnum(vk.Result, glfw.createWindowSurface(self.instance, window.*, null, &self.surface));
+    const result = @as(vk.Result, @enumFromInt(glfw.createWindowSurface(self.instance, window.*, null, &self.surface)));
     if (result != .success) {
         return error.FailedToCreateSurface;
     }
@@ -201,7 +201,7 @@ pub inline fn createGraphicsPipeline(self: Context, create_info: vk.GraphicsPipe
         create_info,
     };
     var pipeline: vk.Pipeline = undefined;
-    const result = try self.vkd.createGraphicsPipelines(self.logical_device, .null_handle, create_infos.len, @ptrCast([*]const vk.GraphicsPipelineCreateInfo, &create_infos), null, @ptrCast([*]vk.Pipeline, &pipeline));
+    const result = try self.vkd.createGraphicsPipelines(self.logical_device, .null_handle, create_infos.len, @as([*]const vk.GraphicsPipelineCreateInfo, @ptrCast(&create_infos)), null, @as([*]vk.Pipeline, @ptrCast(&pipeline)));
     if (result != vk.Result.success) {
         // TODO: not panic?
         std.debug.panic("failed to initialize pipeline!", .{});
@@ -216,7 +216,7 @@ pub fn createComputePipeline(self: Context, create_info: vk.ComputePipelineCreat
     const create_infos = [_]vk.ComputePipelineCreateInfo{
         create_info,
     };
-    const result = try self.vkd.createComputePipelines(self.logical_device, .null_handle, create_infos.len, @ptrCast([*]const vk.ComputePipelineCreateInfo, &create_infos), null, @ptrCast([*]vk.Pipeline, &pipeline));
+    const result = try self.vkd.createComputePipelines(self.logical_device, .null_handle, create_infos.len, @as([*]const vk.ComputePipelineCreateInfo, @ptrCast(&create_infos)), null, @as([*]vk.Pipeline, @ptrCast(&pipeline)));
     if (result != vk.Result.success) {
         // TODO: not panic?
         std.debug.panic("failed to initialize pipeline!", .{});
@@ -293,7 +293,7 @@ pub fn createRenderPass(self: Context, format: vk.Format) !vk.RenderPass {
         .subpass_count = subpass.len,
         .p_subpasses = &subpass,
         .dependency_count = 1,
-        .p_dependencies = @ptrCast([*]const vk.SubpassDependency, &subpass_dependency),
+        .p_dependencies = @as([*]const vk.SubpassDependency, @ptrCast(&subpass_dependency)),
     };
     return try self.vkd.createRenderPass(self.logical_device, &render_pass_info, null);
 }

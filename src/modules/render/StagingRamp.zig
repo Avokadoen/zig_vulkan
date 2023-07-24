@@ -124,7 +124,7 @@ pub fn waitIdle(self: StagingRamp, ctx: Context) !void {
     }
     _ = try ctx.vkd.waitForFences(
         ctx.logical_device,
-        @intCast(u32, self.wait_all_fences.len),
+        @as(u32, @intCast(self.wait_all_fences.len)),
         self.wait_all_fences.ptr,
         vk.TRUE,
         std.math.maxInt(u64),
@@ -166,7 +166,7 @@ inline fn getIdleRamp(self: *StagingRamp, ctx: Context, size: vk.DeviceSize) !us
     _ = try ctx.vkd.waitForFences(
         ctx.logical_device,
         1,
-        @ptrCast([*]const vk.Fence, &self.staging_buffers[index].fence),
+        @as([*]const vk.Fence, @ptrCast(&self.staging_buffers[index].fence)),
         vk.TRUE,
         std.math.maxInt(u64),
     );
@@ -195,10 +195,10 @@ const BufferImageCopy = struct {
 const BufferCopyMapContext = struct {
     pub fn hash(self: BufferCopyMapContext, key: vk.Buffer) u32 {
         _ = self;
-        const v: u64 = @enumToInt(key);
+        const v: u64 = @intFromEnum(key);
         const left_value = (v >> 32) / 4;
         const right_value = ((v << 32) >> 32) / 2;
-        return @intCast(u32, left_value + right_value);
+        return @as(u32, @intCast(left_value + right_value));
     }
 
     pub fn eql(self: BufferCopyMapContext, a: vk.Buffer, b: vk.Buffer, i: usize) bool {
@@ -245,8 +245,8 @@ const StagingBuffer = struct {
         errdefer ctx.vkd.freeCommandBuffers(
             ctx.logical_device,
             command_pool,
-            @intCast(u32, 1),
-            @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            @as(u32, @intCast(1)),
+            @as([*]const vk.CommandBuffer, @ptrCast(&command_buffer)),
         );
 
         const fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
@@ -279,7 +279,8 @@ const StagingBuffer = struct {
         try self.device_buffer_memory.map(ctx, self.buffer_cursor, data_size);
         defer self.device_buffer_memory.unmap(ctx);
 
-        var dest_location = @ptrCast([*]T, @alignCast(@alignOf(T), self.device_buffer_memory.mapped) orelse unreachable);
+        var raw_ptr = self.device_buffer_memory.mapped orelse @panic("device pointer was null");
+        var dest_location: [*]T = @ptrCast(@alignCast(raw_ptr));
         std.mem.copy(T, dest_location[0..data.len], data);
 
         const region = vk.BufferImageCopy{
@@ -330,7 +331,8 @@ const StagingBuffer = struct {
         //       This is because we get runtime errors from using T and data directly.
         //       It *SEEMS* like alignment error is a zig bug, but might as well be an application bug.
         //       If the bug is an application bug, then we need to find a way to fix it instead of disabling safety ...
-        var dest_location = @ptrCast([*]u8, @alignCast(@alignOf(u8), self.device_buffer_memory.mapped) orelse unreachable);
+        var raw_device_ptr = self.device_buffer_memory.mapped orelse @panic("device pointer was null");
+        var dest_location = @as([*]u8, @ptrCast(@alignCast(raw_device_ptr)));
         {
             // runtime safety is turned off for performance
             const byte_data = std.mem.sliceAsBytes(data);
@@ -371,12 +373,12 @@ const StagingBuffer = struct {
         _ = try ctx.vkd.waitForFences(
             ctx.logical_device,
             1,
-            @ptrCast([*]const vk.Fence, &self.fence),
+            @as([*]const vk.Fence, @ptrCast(&self.fence)),
             vk.TRUE,
             std.math.maxInt(u64),
         );
         // lock ramp
-        try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.fence));
+        try ctx.vkd.resetFences(ctx.logical_device, 1, @as([*]const vk.Fence, @ptrCast(&self.fence)));
 
         try self.device_buffer_memory.map(ctx, 0, self.buffer_cursor);
         try self.device_buffer_memory.flush(ctx, 0, self.buffer_cursor);
@@ -428,7 +430,7 @@ const StagingBuffer = struct {
                         0,
                         undefined,
                         1,
-                        @ptrCast([*]const vk.ImageMemoryBarrier, &transfer_barrier),
+                        @as([*]const vk.ImageMemoryBarrier, @ptrCast(&transfer_barrier)),
                     );
                 }
 
@@ -438,7 +440,7 @@ const StagingBuffer = struct {
                     copy.image,
                     .transfer_dst_optimal,
                     1,
-                    @ptrCast([*]const vk.BufferImageCopy, &copy.region),
+                    @as([*]const vk.BufferImageCopy, @ptrCast(&copy.region)),
                 );
 
                 {
@@ -471,7 +473,7 @@ const StagingBuffer = struct {
                         0,
                         undefined,
                         1,
-                        @ptrCast([*]const vk.ImageMemoryBarrier, &read_only_barrier),
+                        @as([*]const vk.ImageMemoryBarrier, @ptrCast(&read_only_barrier)),
                     );
                 }
             }
@@ -488,11 +490,11 @@ const StagingBuffer = struct {
                 .p_wait_semaphores = semo_null_ptr,
                 .p_wait_dst_stage_mask = wait_null_ptr,
                 .command_buffer_count = 1,
-                .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
+                .p_command_buffers = @as([*]const vk.CommandBuffer, @ptrCast(&self.command_buffer)),
                 .signal_semaphore_count = 0,
                 .p_signal_semaphores = semo_null_ptr,
             };
-            try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @ptrCast([*]const vk.SubmitInfo, &submit_info), self.fence);
+            try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @as([*]const vk.SubmitInfo, @ptrCast(&submit_info)), self.fence);
         }
 
         self.buffer_copy.clearRetainingCapacity();
@@ -504,8 +506,8 @@ const StagingBuffer = struct {
         ctx.vkd.freeCommandBuffers(
             ctx.logical_device,
             self.command_pool,
-            @intCast(u32, 1),
-            @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
+            @as(u32, @intCast(1)),
+            @as([*]const vk.CommandBuffer, @ptrCast(&self.command_buffer)),
         );
         ctx.vkd.destroyCommandPool(ctx.logical_device, self.command_pool, null);
         self.device_buffer_memory.deinit(ctx);

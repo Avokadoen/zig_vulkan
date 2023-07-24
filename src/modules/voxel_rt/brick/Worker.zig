@@ -59,7 +59,7 @@ pub fn init(id: usize, worker_count: usize, grid: *State, allocator: Allocator, 
     const bucket_storage = blk: {
         var brick_count = std.math.divFloor(usize, grid.bricks.len, worker_count) catch unreachable; // assert(worker_count != 0)
         var material_count = std.math.divFloor(usize, grid.material_indices.len, worker_count) catch unreachable;
-        const start_index = @intCast(u32, material_count * id);
+        const start_index = @as(u32, @intCast(material_count * id));
         if (id == worker_count - 1) {
             brick_count += std.math.rem(usize, grid.bricks.len, worker_count) catch unreachable;
             material_count += std.math.rem(usize, grid.material_indices.len, worker_count) catch unreachable;
@@ -143,7 +143,7 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
 
     const grid_index = gridAt(self.grid.*.device_state, insert_job.x, actual_y, insert_job.z);
     const brick_status_index = grid_index / 32;
-    const brick_status_offset = @intCast(u5, (grid_index % 32));
+    const brick_status_offset = @as(u5, @intCast((grid_index % 32)));
     const brick_status = self.grid.brick_statuses[brick_status_index].read(brick_status_offset);
     const brick_index = blk: {
         if (brick_status == .loaded) {
@@ -175,7 +175,7 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
             std.debug.panic("at {d} {d} {d} no more buckets", .{ insert_job.x, insert_job.y, insert_job.z });
         };
         // set the brick's material index
-        brick.index = @intCast(u31, bucket.start_index);
+        brick.index = @as(u31, @intCast(bucket.start_index));
 
         // move all color data
         const bits_before = countBits(brick.solid_mask, nth_bit);
@@ -224,23 +224,23 @@ inline fn voxelAt(x: usize, y: usize, z: usize) u9 {
     const brick_x: usize = @rem(x, 8);
     const brick_y: usize = @rem(y, 8);
     const brick_z: usize = @rem(z, 8);
-    return @intCast(u9, brick_x + 8 * (brick_z + 8 * brick_y));
+    return @as(u9, @intCast(brick_x + 8 * (brick_z + 8 * brick_y)));
 }
 
 /// get grid index from global index coordinates
 inline fn gridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize {
-    const grid_x: u32 = @intCast(u32, x / 8);
-    const grid_y: u32 = @intCast(u32, y / 8);
-    const grid_z: u32 = @intCast(u32, z / 8);
-    return @intCast(usize, grid_x + device_state.dim_x * (grid_z + device_state.dim_z * grid_y));
+    const grid_x: u32 = @as(u32, @intCast(x / 8));
+    const grid_y: u32 = @as(u32, @intCast(y / 8));
+    const grid_z: u32 = @as(u32, @intCast(z / 8));
+    return @as(usize, @intCast(grid_x + device_state.dim_x * (grid_z + device_state.dim_z * grid_y)));
 }
 
 /// get higher grid index from global index coordinates
 inline fn higherGridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize {
-    const higher_grid_x: u32 = @intCast(u32, x / (8 * 4));
-    const higher_grid_y: u32 = @intCast(u32, y / (8 * 4));
-    const higher_grid_z: u32 = @intCast(u32, z / (8 * 4));
-    return @intCast(usize, higher_grid_x + device_state.higher_dim_x * (higher_grid_z + device_state.higher_dim_z * higher_grid_y));
+    const higher_grid_x: u32 = @as(u32, @intCast(x / (8 * 4)));
+    const higher_grid_y: u32 = @as(u32, @intCast(y / (8 * 4)));
+    const higher_grid_z: u32 = @as(u32, @intCast(z / (8 * 4)));
+    return @as(usize, @intCast(higher_grid_x + device_state.higher_dim_x * (higher_grid_z + device_state.higher_dim_z * higher_grid_y)));
 }
 
 /// count the set bits of a u512, up to range_to (exclusive)
@@ -252,5 +252,5 @@ inline fn countBits(bits: u512, range_to: u32) u32 {
         count += bit & 1;
         bit = bit >> 1;
     }
-    return @intCast(u32, count);
+    return @as(u32, @intCast(count));
 }

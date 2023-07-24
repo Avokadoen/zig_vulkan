@@ -1,9 +1,6 @@
 [submodule "deps/vulkan-zig"]
 	path = deps/vulkan-zig
 	url = https://github.com/Snektron/vulkan-zig.git
-[submodule "deps/mach-glfw"]
-	path = deps/mach-glfw
-	url = https://github.com/hexops/mach-glfw.git
 [submodule "deps/zalgebra"]
 	path = deps/zalgebra
 	url = https://github.com/kooparse/zalgebra.git

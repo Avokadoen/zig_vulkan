@@ -81,7 +81,7 @@ pub fn parseBuffer(comptime strict: bool, allocator: Allocator, buffer: []const 
         .index = 0,
     });
 
-    const num_models = @intCast(usize, vox.pack_chunk.num_models);
+    const num_models = @as(usize, @intCast(vox.pack_chunk.num_models));
     // allocate voxel data according to pack information
     vox.size_chunks = try allocator.alloc(Chunk.Size, num_models);
     vox.xyzi_chunks = try allocator.alloc([]Chunk.XyziElement, num_models);
@@ -129,7 +129,7 @@ pub fn parseBuffer(comptime strict: bool, allocator: Allocator, buffer: []const 
 
             const voxel_count = parseI32(buffer[pos..]);
             pos += 4;
-            const xyzis = try allocator.alloc(Chunk.XyziElement, @intCast(usize, voxel_count));
+            const xyzis = try allocator.alloc(Chunk.XyziElement, @as(usize, @intCast(voxel_count)));
             {
                 var i: usize = 0;
                 while (i < voxel_count) : (i += 1) {
@@ -190,7 +190,7 @@ pub fn parseBuffer(comptime strict: bool, allocator: Allocator, buffer: []const 
     }
 
     if (rgba_set == false) {
-        const default = @ptrCast(*const [256]Chunk.RgbaElement, &default_rgba);
+        const default = @as(*const [256]Chunk.RgbaElement, @ptrCast(&default_rgba));
         std.mem.copy(Chunk.RgbaElement, vox.rgba_chunk[0..], default[0..]);
     }
 
@@ -198,7 +198,7 @@ pub fn parseBuffer(comptime strict: bool, allocator: Allocator, buffer: []const 
 }
 
 inline fn parseI32(buffer: []const u8) i32 {
-    return @ptrCast(*const i32, @alignCast(4, &buffer[0])).*;
+    return @as(*const i32, @ptrCast(@alignCast(&buffer[0]))).*;
 }
 
 /// Parse a buffer into a chunk, buffer *has* to start with the first character in the id

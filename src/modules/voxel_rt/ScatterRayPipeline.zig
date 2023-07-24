@@ -26,7 +26,7 @@ pub const NextStage = enum {
     traverse,
     draw,
 };
-const next_stages = @as(comptime_int, @enumToInt(NextStage.draw)) + 1;
+const next_stages = @as(comptime_int, @intFromEnum(NextStage.draw)) + 1;
 
 /// compute shader spawning scattered rays based on hit records
 const ScatterRayPipeline = @This();
@@ -132,28 +132,28 @@ pub fn init(
 
     {
         var write_descriptor_set: [8]vk.WriteDescriptorSet = undefined;
-        for (&scatter_ray_descriptor_info[@enumToInt(NextStage.traverse)], 0.., 0..) |*traverse_desc_info, index, binding| {
+        for (&scatter_ray_descriptor_info[@intFromEnum(NextStage.traverse)], 0.., 0..) |*traverse_desc_info, index, binding| {
             write_descriptor_set[index] = .{
-                .dst_set = target_descriptor_set[@enumToInt(NextStage.traverse)],
-                .dst_binding = @intCast(u32, binding),
+                .dst_set = target_descriptor_set[@intFromEnum(NextStage.traverse)],
+                .dst_binding = @as(u32, @intCast(binding)),
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, traverse_desc_info),
+                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(traverse_desc_info)),
                 .p_texel_buffer_view = undefined,
             };
         }
 
-        for (&scatter_ray_descriptor_info[@enumToInt(NextStage.draw)], 4.., 0..) |*draw_desc_info, index, binding| {
+        for (&scatter_ray_descriptor_info[@intFromEnum(NextStage.draw)], 4.., 0..) |*draw_desc_info, index, binding| {
             write_descriptor_set[index] = .{
-                .dst_set = target_descriptor_set[@enumToInt(NextStage.draw)],
-                .dst_binding = @intCast(u32, binding),
+                .dst_set = target_descriptor_set[@intFromEnum(NextStage.draw)],
+                .dst_binding = @as(u32, @intCast(binding)),
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @ptrCast([*]const vk.DescriptorBufferInfo, draw_desc_info),
+                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(draw_desc_info)),
                 .p_texel_buffer_view = undefined,
             };
         }
@@ -191,11 +191,11 @@ pub fn init(
             .map_entry_count = spec_map.len,
             .p_map_entries = &spec_map,
             .data_size = @sizeOf(Dispatch2),
-            .p_data = @ptrCast(*const anyopaque, &work_group_dim),
+            .p_data = @as(*const anyopaque, @ptrCast(&work_group_dim)),
         };
         const module_create_info = vk.ShaderModuleCreateInfo{
             .flags = .{},
-            .p_code = @ptrCast([*]const u32, &shaders.scatter_rays_spv),
+            .p_code = @as([*]const u32, @ptrCast(&shaders.scatter_rays_spv)),
             .code_size = shaders.scatter_rays_spv.len,
         };
         const module = try ctx.vkd.createShaderModule(ctx.logical_device, &module_create_info, null);
@@ -205,7 +205,7 @@ pub fn init(
             .stage = .{ .compute_bit = true },
             .module = module,
             .p_name = "main",
-            .p_specialization_info = @ptrCast(?*const vk.SpecializationInfo, &specialization),
+            .p_specialization_info = @as(?*const vk.SpecializationInfo, @ptrCast(&specialization)),
         };
         defer ctx.destroyShaderModule(stage.module);
 
@@ -296,7 +296,7 @@ pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_bu
         self.pipeline_layout,
         0,
         1,
-        @ptrCast([*]const vk.DescriptorSet, &self.target_descriptor_set[@enumToInt(next_stage)]),
+        @as([*]const vk.DescriptorSet, @ptrCast(&self.target_descriptor_set[@intFromEnum(next_stage)])),
         0,
         undefined,
     );
@@ -305,7 +305,7 @@ pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_bu
     ctx.vkd.cmdFillBuffer(
         command_buffer,
         self.ray_buffer.buffer,
-        self.buffer_infos[@enumToInt(next_stage)][0].offset + @offsetOf(RayBufferCursor, "cursor"),
+        self.buffer_infos[@intFromEnum(next_stage)][0].offset + @offsetOf(RayBufferCursor, "cursor"),
         @sizeOf(c_int),
         0,
     );
@@ -317,8 +317,8 @@ pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_bu
             .src_queue_family_index = ctx.queue_indices.compute,
             .dst_queue_family_index = ctx.queue_indices.compute,
             .buffer = self.ray_buffer.buffer,
-            .offset = self.buffer_infos[@enumToInt(next_stage)][0].offset,
-            .size = self.buffer_infos[@enumToInt(next_stage)][0].range,
+            .offset = self.buffer_infos[@intFromEnum(next_stage)][0].offset,
+            .size = self.buffer_infos[@intFromEnum(next_stage)][0].range,
         },
         undefined,
     };
@@ -329,7 +329,7 @@ pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_bu
         ctx.vkd.cmdFillBuffer(
             command_buffer,
             self.ray_buffer.buffer,
-            self.buffer_infos[@enumToInt(next_stage)][2].offset,
+            self.buffer_infos[@intFromEnum(next_stage)][2].offset,
             @sizeOf(RayBufferCursor),
             0,
         );
@@ -340,8 +340,8 @@ pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_bu
             .src_queue_family_index = ctx.queue_indices.compute,
             .dst_queue_family_index = ctx.queue_indices.compute,
             .buffer = self.ray_buffer.buffer,
-            .offset = self.buffer_infos[@enumToInt(next_stage)][2].offset,
-            .size = self.buffer_infos[@enumToInt(next_stage)][2].range,
+            .offset = self.buffer_infos[@intFromEnum(next_stage)][2].offset,
+            .size = self.buffer_infos[@intFromEnum(next_stage)][2].range,
         };
     }
 
@@ -360,8 +360,8 @@ pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_bu
     );
     _ = buffer_memory_barrier;
 
-    const x_dispatch = @ceil(@intToFloat(f32, self.image_size.width) / @intToFloat(f32, self.work_group_dim.x));
-    const y_dispatch = @ceil(@intToFloat(f32, self.image_size.height) / @intToFloat(f32, self.work_group_dim.y));
+    const x_dispatch = @ceil(@as(f32, @floatFromInt(self.image_size.width)) / @as(f32, @floatFromInt(self.work_group_dim.x)));
+    const y_dispatch = @ceil(@as(f32, @floatFromInt(self.image_size.height)) / @as(f32, @floatFromInt(self.work_group_dim.y)));
 
-    ctx.vkd.cmdDispatch(command_buffer, @floatToInt(u32, x_dispatch), @floatToInt(u32, y_dispatch), 1);
+    ctx.vkd.cmdDispatch(command_buffer, @as(u32, @intFromFloat(x_dispatch)), @as(u32, @intFromFloat(y_dispatch)), 1);
 }

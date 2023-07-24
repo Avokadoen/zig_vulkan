@@ -22,7 +22,7 @@ pub const Dispatch2 = struct {
     pub fn init(ctx: Context) Dispatch2 {
         const device_properties = ctx.getPhysicalDeviceProperties();
         const dim_size = device_properties.limits.max_compute_work_group_invocations;
-        const uniform_dim = @floatToInt(u32, @floor(@sqrt(@intToFloat(f64, dim_size))));
+        const uniform_dim = @as(u32, @intFromFloat(@floor(@sqrt(@as(f64, @floatFromInt(dim_size))))));
         return Dispatch2{
             .x = uniform_dim,
             // TODO: change based on NVIDIA vs AMD vs Others?
