@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const glfw = @import("glfw");
+const glfw = @import("mach-glfw");
 
 const tracy = @import("ztracy");
 
@@ -560,6 +560,7 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
         self.emit_ray_pipeline.appendPipelineCommands(ctx, self.camera.*, self.ray_command_buffers);
         for (0..max_bounces + 1) |bounce| {
             self.traverse_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+
             self.miss_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
 
             const next_stage: ScatterRayPipeline.NextStage = if (bounce == max_bounces) .draw else .traverse;
@@ -620,20 +621,6 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
         @as([*]const vk.SubmitInfo, @ptrCast(&render_submit_info)),
         self.render_complete_fence,
     );
-
-    // on windows there is a potential deadlock with queuePresentKHR combined with stalled queues that are waiting for
-    // timeline semaphores, so we must flush the whole RT pipeline before continuing
-    // relevant issue: https://github.com/KhronosGroup/Vulkan-Samples/issues/588
-    if (@import("builtin").os.tag == .windows) {
-        const windows_wait_render_zone = tracy.ZoneN(@src(), "windows render wait complete");
-        defer windows_wait_render_zone.End();
-
-        try ctx.vkd.deviceWaitIdle(ctx.logical_device);
-
-        // wait for current RT pipeline to complete
-        // _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
-        // try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.render_complete_fence));
-    }
 
     const present_info = vk.PresentInfoKHR{
         .wait_semaphore_count = 1,

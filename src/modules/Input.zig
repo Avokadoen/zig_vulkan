@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const glfw = @import("glfw");
+const glfw = @import("mach-glfw");
 const zgui = @import("zgui");
 
 pub const WindowHandle = glfw.Window.Handle;

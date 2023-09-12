@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const glfw = @import("glfw");
+const glfw = @import("mach-glfw");
 const za = @import("zalgebra");
 const tracy = @import("ztracy");
 

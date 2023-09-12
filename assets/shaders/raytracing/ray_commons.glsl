@@ -38,3 +38,12 @@ struct HitRecord {
     vec3 padding;
     float t_value;
 };
+
+const vec3 normal_map[] = vec3[](
+    vec3( 1,  0,  0),
+    vec3( 0,  1,  0),
+    vec3( 0,  0,  1),
+    vec3(-1,  0,  0),
+    vec3( 0, -1,  0),
+    vec3( 0,  0, -1)
+);

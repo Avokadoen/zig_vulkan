@@ -1,6 +1,6 @@
 #version 450
 
-#extension GL_EXT_debug_printf : disable
+#extension GL_EXT_debug_printf : enable
 // debugPrintfEXT("hello world %f", 1.0);
 
 // This extension is strictly not required for vulkan 1.2 target, but is used to silence validator...
@@ -15,18 +15,22 @@ const float infinity = 0.001 / 0;
 const float pi = 3.14159265358; // 3.1415926535897932385
 const float faccuracy = 0.000001;
 
+// TODO: convert to uniform?
 layout (set = 0, binding = 0) buffer InCursorBuffer
 {
     RayBufferCursor in_hit_cursor;
 };
+// TODO: convert to uniform?
 layout (set = 0, binding = 1) buffer OutHitCursorBuffer
 {
     RayBufferCursor out_hit_cursor;
 };
+// TODO: convert to uniform?
 layout (set = 0, binding = 2) buffer OutMissCursorBuffer
 {
     RayBufferCursor out_miss_cursor;
 };
+// TODO: convert to uniform?
 layout (set = 0, binding = 3) buffer DoNotUseCursorBuffer
 {
     RayBufferCursor do_not_use;
@@ -38,11 +42,11 @@ layout (set = 0, binding = 5) writeonly buffer OutHitRecordBuffer {
     HitRecord out_hit_records[];
 };
 
+// TODO: convert to uniform
 layout (set = 0, binding = 6) readonly buffer BrickGridState {
     // how many bricks in each axis
     vec3 dim;
     float padding1;
-
     vec3 min_point;
     float scale;
 } brick_grid;
@@ -79,8 +83,8 @@ void main() {
     HitRecord hit_record = in_hit_records[ray_index];
 
     Ray ray = Ray(
-        hit_record.point,                              // origin
-        hit_record.t_value,                            // t_value
+        hit_record.point,                             // origin
+        hit_record.t_value,                           // t_value
         hit_record.previous_ray_direction             // direction
     );
 
@@ -152,16 +156,13 @@ bool AdvNormIntersect(vec3 box_min_point, vec3 box_max_point, Ray r, vec3 inv_ra
     
     if (t_mins.x >= t_mins.y && t_mins.x >= t_mins.z) {
         t_min = max(t_min, t_mins.x);
-        // either 0b1100 or 0b0100
-        normal_bits = ((inv_ray_dir.x < 0) ? 12 : 4) << 28;
+        normal_bits = ((inv_ray_dir.x < 0) ? 3 : 0) << 28;
     } else if (t_mins.y >= t_mins.x && t_mins.y >= t_mins.z) {
         t_min = max(t_min, t_mins.y);
-        // either 0b1010 or 0b0010
-        normal_bits = ((inv_ray_dir.y < 0) ? 10 : 2) << 28;
+        normal_bits = ((inv_ray_dir.y < 0) ? 4 : 1) << 28;
     } else {
         t_min = max(t_min, t_mins.z);
-        // either 0b1001 or 0b0001
-        normal_bits = ((inv_ray_dir.z < 0) ? 9 : 1) << 28;
+        normal_bits = ((inv_ray_dir.z < 0) ? 5 : 2) << 28;
     }
     t_max = min(t_max, minComponent(t_maxes));
     
@@ -239,8 +240,14 @@ bool BrickHit(Ray r, vec3 ray_step, vec3 ray_delta, vec3 g_scale, float t_min, f
     const vec3 intersection_delta = floor(fposition) - fposition;
     vec3 side_dist = fma(ray_step, intersection_delta, ray_step * 0.5 + 0.5) * ray_delta;
 
-    // TODO: make this line more readable
-    const uvec3 normal_axis_bits = uvec3(lessThan(ray_step, vec3(-0.00001))) * uvec3(8 << 28) + uvec3(4 << 28, 2 << 28, 1 << 28);
+    // TODO: make this line more readable, only calculate once 
+    const uvec3 normal_axis_bits = uvec3(
+        ((ray_step.x < 0) ? 3 : 0) << 28,
+        ((ray_step.y < 0) ? 4 : 1) << 28,
+        ((ray_step.z < 0) ? 5 : 2) << 28
+    );
+
+    // TODO: zero material index
     uint normal_bits = hit.normal_4b_and_material_index_28b;
 
     vec3 local_position = floor(fposition + 0.);
@@ -266,7 +273,7 @@ bool BrickHit(Ray r, vec3 ray_step, vec3 ray_delta, vec3 g_scale, float t_min, f
             hit.point = RayAt(r, intersect_t);
             hit.normal_4b_and_material_index_28b = normal_bits | material_index;
             hit.t_value = intersect_t;
-            
+            debugPrintfEXT("%f", intersect_t);
             return true;
         }
 
@@ -276,7 +283,7 @@ bool BrickHit(Ray r, vec3 ray_step, vec3 ray_delta, vec3 g_scale, float t_min, f
         t_value = vec3Reduce(fmask * side_dist) * voxel_scale.x;
         side_dist += fmask * ray_delta;
         local_position += fmask * ray_step;
-
+        
         // overwrite all bits with normal bits, material index is not defined yet.
         normal_bits = normal_axis_bits.x * uint(mask.x) + normal_axis_bits.y * uint(mask.y) + normal_axis_bits.z * uint(mask.z);
     } 

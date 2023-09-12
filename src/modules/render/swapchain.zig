@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
 const vk = @import("vulkan");
-const glfw = @import("glfw");
+const glfw = @import("mach-glfw");
 
 const dispatch = @import("dispatch.zig");
 const physical_device = @import("physical_device.zig");

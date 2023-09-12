@@ -3,24 +3,24 @@
     .version = "0.1.0",
     .dependencies = .{
         .mach_glfw = .{
-            .url = "https://github.com/hexops/mach-glfw/archive/52a1cc8b86be5973a860373087be49e05e2ec040.tar.gz",
-            .hash = "1220b85a031e70eddbe1125ba5bbf64f590b175ff9fd3333693d56f920f424a1c20a",
+            .url = "https://pkg.machengine.org/mach-glfw/58a16012c33b047b9468cccb53ecd95835456121.tar.gz",
+            .hash = "1220dcf8c006b5bd91bb55c732eac6d95afe16247058f31348e1e2e071dfca7923db",
         },
         .glfw = .{
-            .url = "https://github.com/hexops/glfw/archive/06bd1276fb05c8bc999e104cf21c76788386f263.tar.gz",
-            .hash = "1220c4155e5e573bc39731e6e459cff44fb4a9c5fcf9087b5890a03cc349587d36ab",
+            .url = "https://pkg.machengine.org/glfw/bad964824403ba34c935a90013024957dae795aa.tar.gz",
+            .hash = "1220fe0763e9722d56d3f93f8740e077fccf338d9697f08239d79a1ee27ae5833e62",
         },
         .vulkan_headers = .{
-            .url = "https://github.com/hexops/vulkan-headers/archive/e1b061ff624531e82a7daea5dbd56c07e08bf0be.tar.gz",
-            .hash = "12204967f9d07fda3af6a21d6ab71fb832da2186176c530a7a14aa96043537399e6b",
-        },
-        .wayland_headers = .{
-            .url = "https://github.com/hexops/wayland-headers/archive/7bf46f3d60edab2171643ff85770c392ef62704d.tar.gz",
-            .hash = "1220689912c40c0880b094f748199c490810d4fa4c58ce1ef9058ce97f46ee28496a",
+            .url = "https://pkg.machengine.org/vulkan-headers/0212dd8b71531d0cec8378ce8fb1721a0df7420a.tar.gz",
+            .hash = "1220a8b642edf8ef522e468cfe9a1803507472461b1041be717294ca484d1361afb0",
         },
         .x11_headers = .{
-            .url = "https://github.com/hexops/x11-headers/archive/99af89c7bfdc7db503f3a7003571f8e81bcd09f3.tar.gz",
-            .hash = "1220e6bd3186841c1da38d862d52ba88dec9633d24f409eda27627321937419a0ddb",
+            .url = "https://pkg.machengine.org/x11-headers/991ad9bf599df04aaa5332e536712a8476838ee3.tar.gz",
+            .hash = "12205bd95b9cc9cb08dd6b55f5842d8fae67a12eed01092c54f021060931815f711e",
+        },
+        .wayland_headers = .{
+            .url = "https://pkg.machengine.org/wayland-headers/509275fb6222181a97026c884d411bd013da680b.tar.gz",
+            .hash = "12202cf6230788d948e5ee2afa26d4f6cc4994ae1bf0c1c832535b920717a1174223",
         },
     },
 }

@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const vk = @import("vulkan");
-const glfw = @import("glfw");
+const glfw = @import("mach-glfw");
 const tracy = @import("ztracy");
 
 const shaders = @import("shaders");
