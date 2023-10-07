@@ -20,13 +20,19 @@ vec3 RayAt(Ray r, float t) {
     return fma(vec3(t), r.direction, r.origin);
 }
 
-struct RayBufferCursor {
-    // how many rays that was written to the buffer in total
-    int max_index;
-    // where the last ray write occured
-    int cursor;
+// Must be synced with src\modules\voxel_rt\ray_pipeline_types.zig
+struct HitLimits {
+    // How many hit records were emitted by the emit stage for the current frame
+    uint emitted_hit_count;
+    // How many hit records that are processed by the traverse stage
+    uint in_hit_count;
+    // How many hits was registered during traverse stage
+    uint out_hit_count;
+    // How many misses was registered during traverse stage
+    uint out_miss_count;
 };
 
+// TODO: split in multiple buffers
 // must be kept in sync with TraverseRayPipeline.HitRecord
 struct HitRecord {
     vec3 point;
@@ -35,8 +41,10 @@ struct HitRecord {
     float previous_ray_internal_reflection;
     vec3 previous_color;
     uint pixel_coord;
-    vec3 padding;
     float t_value;
+    bool is_active;
+    uint padding1;
+    uint padding0;
 };
 
 const vec3 normal_map[] = vec3[](

@@ -7,40 +7,39 @@ const tracy = @import("ztracy");
 
 const shaders = @import("shaders");
 
-const render = @import("../render.zig");
+const render = @import("../../render.zig");
 const Context = render.Context;
 const GpuBufferMemory = render.GpuBufferMemory;
 const StagingRamp = render.StagingRamp;
 
-const Camera = @import("Camera.zig");
+const Camera = @import("../Camera.zig");
 
-const ray_types = @import("ray_pipeline_types.zig");
-const RayPipelineLimits = ray_types.RayPipelineLimits;
+const ray_types = @import("../ray_pipeline_types.zig");
+const RayBufferCursor = ray_types.RayBufferCursor;
 const Ray = ray_types.Ray;
 const Dispatch1D = ray_types.Dispatch1D;
 const ImageInfo = ray_types.ImageInfo;
 
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
-/// compute shader that draws to a target texture
-const DrawRayPipeline = @This();
+/// compute shader that calculate miss color
+const BubbleSortPipeline = @This();
 
 allocator: Allocator,
 
 pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
 
-// info about the target image
-target_image_info: ImageInfo,
 target_descriptor_layout: vk.DescriptorSetLayout,
 target_descriptor_pool: vk.DescriptorPool,
 target_descriptor_set: vk.DescriptorSet,
 
+image_size: vk.Extent2D,
 ray_buffer: *const GpuBufferMemory,
 
 work_group_dim: Dispatch1D,
 
-draw_ray_descriptor_info: [2]vk.DescriptorBufferInfo,
+submit_wait_stage: [1]vk.PipelineStageFlags = .{.{ .compute_shader_bit = true }},
 
 // TODO: share descriptors across ray pipelines (use vk descriptor buffers!)
 // TODO: descriptor has a lot of duplicate code with init ...
@@ -51,48 +50,29 @@ draw_ray_descriptor_info: [2]vk.DescriptorBufferInfo,
 pub fn init(
     allocator: Allocator,
     ctx: Context,
+    image_size: vk.Extent2D,
     ray_buffer: *const GpuBufferMemory,
-    target_image_info: ImageInfo,
-    draw_ray_descriptor_info: [2]vk.DescriptorBufferInfo,
-) !DrawRayPipeline {
-    const zone = tracy.ZoneN(@src(), @typeName(DrawRayPipeline) ++ " " ++ @src().fn_name);
+    bubble_descriptor_info: [2]vk.DescriptorBufferInfo,
+) !BubbleSortPipeline {
+    const zone = tracy.ZoneN(@src(), @typeName(BubbleSortPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
+    // TODO: change based on NVIDIA vs AMD vs Others?
     const work_group_dim = Dispatch1D.init(ctx);
 
     const target_descriptor_layout = blk: {
-        const layout_bindings = [_]vk.DescriptorSetLayoutBinding{
-            // Render image
-            .{
-                .binding = 0,
-                .descriptor_type = .storage_image,
-                .descriptor_count = 1,
-                .stage_flags = .{
-                    .compute_bit = true,
-                },
-                .p_immutable_samplers = null,
-            },
-            // RayPipelineLimits
-            .{
-                .binding = 1,
+        comptime var layout_bindings: [bubble_descriptor_info.len]vk.DescriptorSetLayoutBinding = undefined;
+        inline for (&layout_bindings, 0..) |*binding, index| {
+            binding.* = vk.DescriptorSetLayoutBinding{
+                .binding = index,
                 .descriptor_type = .storage_buffer,
                 .descriptor_count = 1,
                 .stage_flags = .{
                     .compute_bit = true,
                 },
                 .p_immutable_samplers = null,
-            },
-            // RayBuffer
-            .{
-                .binding = 2,
-                .descriptor_type = .storage_buffer,
-                .descriptor_count = 1,
-                .stage_flags = .{
-                    .compute_bit = true,
-                },
-                .p_immutable_samplers = null,
-            },
-        };
+            };
+        }
         const layout_info = vk.DescriptorSetLayoutCreateInfo{
             .flags = .{},
             .binding_count = layout_bindings.len,
@@ -103,16 +83,10 @@ pub fn init(
     errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, target_descriptor_layout, null);
 
     const target_descriptor_pool = blk: {
-        const pool_sizes = [_]vk.DescriptorPoolSize{
-            .{
-                .type = .storage_image,
-                .descriptor_count = 1,
-            },
-            .{
-                .type = .storage_buffer,
-                .descriptor_count = 2,
-            },
-        };
+        const pool_sizes = [_]vk.DescriptorPoolSize{.{
+            .type = .storage_image,
+            .descriptor_count = bubble_descriptor_info.len,
+        }};
         const pool_info = vk.DescriptorPoolCreateInfo{
             .flags = .{},
             .max_sets = 1,
@@ -134,40 +108,19 @@ pub fn init(
     }
 
     {
-        const image_info = vk.DescriptorImageInfo{
-            .sampler = target_image_info.sampler,
-            .image_view = target_image_info.image_view,
-            .image_layout = .general,
-        };
-
-        const write_descriptor_set = [_]vk.WriteDescriptorSet{ .{
-            .dst_set = target_descriptor_set,
-            .dst_binding = 0,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .storage_image,
-            .p_image_info = @as([*]const vk.DescriptorImageInfo, @ptrCast(&image_info)),
-            .p_buffer_info = undefined,
-            .p_texel_buffer_view = undefined,
-        }, .{
-            .dst_set = target_descriptor_set,
-            .dst_binding = 1,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .storage_buffer,
-            .p_image_info = undefined,
-            .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&draw_ray_descriptor_info[0])),
-            .p_texel_buffer_view = undefined,
-        }, .{
-            .dst_set = target_descriptor_set,
-            .dst_binding = 2,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .storage_buffer,
-            .p_image_info = undefined,
-            .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&draw_ray_descriptor_info[1])),
-            .p_texel_buffer_view = undefined,
-        } };
+        var write_descriptor_set: [bubble_descriptor_info.len]vk.WriteDescriptorSet = undefined;
+        for (&write_descriptor_set, 0..) |*write_desc, index| {
+            write_desc.* = .{
+                .dst_set = target_descriptor_set,
+                .dst_binding = @as(u32, @intCast(index)),
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&bubble_descriptor_info[index])),
+                .p_texel_buffer_view = undefined,
+            };
+        }
 
         ctx.vkd.updateDescriptorSets(
             ctx.logical_device,
@@ -204,8 +157,8 @@ pub fn init(
         };
         const module_create_info = vk.ShaderModuleCreateInfo{
             .flags = .{},
-            .p_code = @as([*]const u32, @ptrCast(&shaders.draw_rays_spv)),
-            .code_size = shaders.draw_rays_spv.len,
+            .p_code = @as([*]const u32, @ptrCast(&shaders.hit_is_active_bubble_sort)),
+            .code_size = shaders.hit_is_active_bubble_sort.len,
         };
         const module = try ctx.vkd.createShaderModule(ctx.logical_device, &module_create_info, null);
 
@@ -218,7 +171,6 @@ pub fn init(
         };
         defer ctx.destroyShaderModule(stage.module);
 
-        // TOOD: read on defer_compile_bit_nv
         const pipeline_info = vk.ComputePipelineCreateInfo{
             .flags = .{},
             .stage = stage,
@@ -230,22 +182,21 @@ pub fn init(
     };
     errdefer ctx.destroyPipeline(pipeline);
 
-    return DrawRayPipeline{
+    return BubbleSortPipeline{
         .allocator = allocator,
         .pipeline_layout = pipeline_layout,
         .pipeline = pipeline,
         .target_descriptor_layout = target_descriptor_layout,
         .target_descriptor_pool = target_descriptor_pool,
         .target_descriptor_set = target_descriptor_set,
+        .image_size = image_size,
         .ray_buffer = ray_buffer,
         .work_group_dim = work_group_dim,
-        .target_image_info = target_image_info,
-        .draw_ray_descriptor_info = draw_ray_descriptor_info,
     };
 }
 
-pub fn deinit(self: DrawRayPipeline, ctx: Context) void {
-    const zone = tracy.ZoneN(@src(), @typeName(DrawRayPipeline) ++ " " ++ @src().fn_name);
+pub fn deinit(self: BubbleSortPipeline, ctx: Context) void {
+    const zone = tracy.ZoneN(@src(), @typeName(BubbleSortPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
     ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
@@ -256,18 +207,14 @@ pub fn deinit(self: DrawRayPipeline, ctx: Context) void {
 }
 
 // TODO: static command buffer (only record once)
-pub fn appendPipelineCommands(
-    self: DrawRayPipeline,
-    ctx: Context,
-    command_buffer: vk.CommandBuffer,
-) void {
-    const zone = tracy.ZoneN(@src(), @typeName(DrawRayPipeline) ++ " " ++ @src().fn_name);
+pub fn appendPipelineCommands(self: BubbleSortPipeline, ctx: Context, command_buffer: vk.CommandBuffer) void {
+    const zone = tracy.ZoneN(@src(), @typeName(BubbleSortPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
     if (render.consts.enable_validation_layers) {
         const label_info = vk.DebugUtilsLabelEXT{
-            .p_label_name = @typeName(DrawRayPipeline) ++ " " ++ @src().fn_name,
-            .color = [_]f32{ 0.5, 0.3, 0.3, 0.5 },
+            .p_label_name = @typeName(BubbleSortPipeline) ++ " " ++ @src().fn_name,
+            .color = [_]f32{ 0.2, 0.2, 0.4, 0.5 },
         };
         ctx.vkd.cmdBeginDebugUtilsLabelEXT(command_buffer, &label_info);
     }
@@ -278,15 +225,16 @@ pub fn appendPipelineCommands(
     }
 
     // TODO: specify read only vs write only buffer elements (maybe actually loop buffer infos ?)
-    const ray_buffer_memory_barrier = [_]vk.BufferMemoryBarrier{.{
+    const ray_buffer_memory_barrier = vk.BufferMemoryBarrier{
         .src_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-        .dst_access_mask = .{ .shader_read_bit = true },
+        .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
         .src_queue_family_index = ctx.queue_indices.compute,
         .dst_queue_family_index = ctx.queue_indices.compute,
         .buffer = self.ray_buffer.buffer,
         .offset = 0,
         .size = vk.WHOLE_SIZE,
-    }};
+    };
+    const mem_barriers = [_]vk.BufferMemoryBarrier{ray_buffer_memory_barrier};
     ctx.vkd.cmdPipelineBarrier(
         command_buffer,
         .{ .compute_shader_bit = true },
@@ -294,15 +242,14 @@ pub fn appendPipelineCommands(
         .{},
         0,
         undefined,
-        ray_buffer_memory_barrier.len,
-        &ray_buffer_memory_barrier,
+        mem_barriers.len,
+        &mem_barriers,
         0,
         undefined,
     );
 
     ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
 
-    // bind target texture
     ctx.vkd.cmdBindDescriptorSets(
         command_buffer,
         .compute,
@@ -314,42 +261,12 @@ pub fn appendPipelineCommands(
         undefined,
     );
 
-    const image_barrier = vk.ImageMemoryBarrier{
-        .src_access_mask = .{ .shader_read_bit = true },
-        .dst_access_mask = .{ .shader_write_bit = true },
-        .old_layout = .shader_read_only_optimal,
-        .new_layout = .general,
-        .src_queue_family_index = ctx.queue_indices.graphics,
-        .dst_queue_family_index = ctx.queue_indices.compute,
-        .image = self.target_image_info.image,
-        .subresource_range = .{
-            .aspect_mask = .{ .color_bit = true },
-            .base_mip_level = 0,
-            .level_count = 1,
-            .base_array_layer = 0,
-            .layer_count = 1,
-        },
-    };
-    ctx.vkd.cmdPipelineBarrier(
-        command_buffer,
-        .{ .fragment_shader_bit = true },
-        .{ .compute_shader_bit = true },
-        .{},
-        0,
-        undefined,
-        0,
-        undefined,
-        1,
-        @as([*]const vk.ImageMemoryBarrier, @ptrCast(&image_barrier)),
-    );
+    const x_dispatch = @ceil(@as(f32, @floatFromInt((self.image_size.width * self.image_size.height) / 2)) /
+        @as(f32, @floatFromInt(self.work_group_dim.x))) + 1;
 
-    const x_dispatch = @ceil(self.target_image_info.width * self.target_image_info.width) /
-        @as(f32, @floatFromInt(self.work_group_dim.x)) + 1;
-
-    ctx.vkd.cmdDispatch(command_buffer, @as(u32, @intFromFloat(x_dispatch)), 1, 1);
+    ctx.vkd.cmdDispatch(command_buffer, @intFromFloat(x_dispatch), 1, 1);
 }
 
-// TODO: move to common math/mem file
-pub inline fn pow2Align(size: vk.DeviceSize, alignment: vk.DeviceSize) vk.DeviceSize {
-    return (size + alignment - 1) & ~(alignment - 1);
+test "bubble sort produce correct result" {
+    return error.Unimplemented;
 }

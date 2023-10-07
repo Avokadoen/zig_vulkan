@@ -68,6 +68,8 @@ pub fn build(b: *Builder) void {
         // TODO: scatter step(s): calculate new scatter ray + shadow ray + potential reflect + refract ray
         // TODO: order ray step: change sort based if last loop or not i.e writing ray to image or doing more scatter + traversal
         shader_comp.add("draw_rays_spv", "assets/shaders/raytracing/draw_rays.comp", .{});
+
+        shader_comp.add("hit_is_active_bubble_sort", "assets/shaders/sort/hit_is_active_bubble_sort.comp", .{});
     }
 
     exe.step.dependOn(&shader_move_step.step);

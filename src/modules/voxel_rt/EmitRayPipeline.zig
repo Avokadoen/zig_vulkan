@@ -15,9 +15,9 @@ const StagingRamp = render.StagingRamp;
 const Camera = @import("Camera.zig");
 
 const ray_types = @import("ray_pipeline_types.zig");
-const RayBufferCursor = ray_types.RayBufferCursor;
+const RayHitLimits = ray_types.RayHitLimits;
 const Ray = ray_types.Ray;
-const Dispatch2 = ray_types.Dispatch2;
+const Dispatch1D = ray_types.Dispatch1D;
 
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
@@ -37,7 +37,7 @@ target_descriptor_set: vk.DescriptorSet,
 image_size: vk.Extent2D,
 ray_buffer: *const GpuBufferMemory,
 
-work_group_dim: Dispatch2,
+work_group_dim: Dispatch1D,
 
 // TODO: descriptor has a lot of duplicate code with init ...
 // TODO: correctness if init fail, clean up resources created with errdefer
@@ -49,12 +49,12 @@ pub fn init(
     ctx: Context,
     image_size: vk.Extent2D,
     ray_buffer: *const GpuBufferMemory,
-    draw_ray_descriptor_info: [3]vk.DescriptorBufferInfo,
+    draw_ray_descriptor_info: [2]vk.DescriptorBufferInfo,
 ) !EmitRayPipeline {
     const zone = tracy.ZoneN(@src(), @typeName(EmitRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
-    const work_group_dim = Dispatch2.init(ctx);
+    const work_group_dim = Dispatch1D.init(ctx);
 
     const target_descriptor_layout = blk: {
         comptime var layout_bindings: [draw_ray_descriptor_info.len]vk.DescriptorSetLayoutBinding = undefined;
@@ -131,7 +131,7 @@ pub fn init(
         const push_constant_ranges = [_]vk.PushConstantRange{.{
             .stage_flags = .{ .compute_bit = true },
             .offset = 0,
-            // TODO: only need image widht and height!
+            // TODO: dont need Camera.Device, only need a subset
             .size = @sizeOf(Camera.Device),
         }};
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
@@ -144,19 +144,17 @@ pub fn init(
         break :blk try ctx.createPipelineLayout(pipeline_layout_info);
     };
     const pipeline = blk: {
-        const spec_map = [_]vk.SpecializationMapEntry{ .{
-            .constant_id = 0,
-            .offset = @offsetOf(Dispatch2, "x"),
-            .size = @sizeOf(u32),
-        }, .{
-            .constant_id = 1,
-            .offset = @offsetOf(Dispatch2, "y"),
-            .size = @sizeOf(u32),
-        } };
+        const spec_map = [_]vk.SpecializationMapEntry{
+            .{
+                .constant_id = 0,
+                .offset = @offsetOf(Dispatch1D, "x"),
+                .size = @sizeOf(c_uint),
+            },
+        };
         const specialization = vk.SpecializationInfo{
             .map_entry_count = spec_map.len,
             .p_map_entries = &spec_map,
-            .data_size = @sizeOf(Dispatch2),
+            .data_size = @sizeOf(Dispatch1D),
             .p_data = @as(*const anyopaque, @ptrCast(&work_group_dim)),
         };
         const module_create_info = vk.ShaderModuleCreateInfo{
@@ -212,7 +210,12 @@ pub fn deinit(self: EmitRayPipeline, ctx: Context) void {
 }
 
 // TODO: static command buffer (only record once)
-pub fn appendPipelineCommands(self: EmitRayPipeline, ctx: Context, camera: Camera, command_buffer: vk.CommandBuffer) void {
+pub fn appendPipelineCommands(
+    self: EmitRayPipeline,
+    ctx: Context,
+    camera: Camera,
+    command_buffer: vk.CommandBuffer,
+) void {
     const zone = tracy.ZoneN(@src(), @typeName(EmitRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
@@ -253,12 +256,13 @@ pub fn appendPipelineCommands(self: EmitRayPipeline, ctx: Context, camera: Camer
         undefined,
     );
 
+    // zero out limit values
     ctx.vkd.cmdFillBuffer(
         command_buffer,
         self.ray_buffer.buffer,
-        0,
-        @sizeOf(RayBufferCursor) * 4,
-        0,
+        0, // offset
+        @sizeOf(RayHitLimits),
+        0, // value
     );
     const buffer_memory_barrier = vk.BufferMemoryBarrier{
         .src_access_mask = .{ .transfer_write_bit = true },
@@ -267,7 +271,7 @@ pub fn appendPipelineCommands(self: EmitRayPipeline, ctx: Context, camera: Camer
         .dst_queue_family_index = ctx.queue_indices.compute,
         .buffer = self.ray_buffer.buffer,
         .offset = 0,
-        .size = pow2Align(@sizeOf(RayBufferCursor), 4),
+        .size = @sizeOf(RayHitLimits),
     };
     ctx.vkd.cmdPipelineBarrier(
         command_buffer,
@@ -282,10 +286,10 @@ pub fn appendPipelineCommands(self: EmitRayPipeline, ctx: Context, camera: Camer
         undefined,
     );
 
-    const x_dispatch = @ceil(@as(f32, @floatFromInt(self.image_size.width)) / @as(f32, @floatFromInt(self.work_group_dim.x)));
-    const y_dispatch = @ceil(@as(f32, @floatFromInt(self.image_size.height)) / @as(f32, @floatFromInt(self.work_group_dim.y)));
+    const x_dispatch = @ceil(@as(f32, @floatFromInt(self.image_size.width * self.image_size.height)) /
+        @as(f32, @floatFromInt(self.work_group_dim.x))) + 1;
 
-    ctx.vkd.cmdDispatch(command_buffer, @as(u32, @intFromFloat(x_dispatch)), @as(u32, @intFromFloat(y_dispatch)), 1);
+    ctx.vkd.cmdDispatch(command_buffer, @intFromFloat(x_dispatch), 1, 1);
 }
 
 // TODO: move to common math/mem file

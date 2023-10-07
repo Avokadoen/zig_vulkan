@@ -28,11 +28,13 @@
         },
         {
             "name": "(Windows) Launch Release",
-            "type": "lldb",
+            "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/zig-out/bin/zig_vulkan",
+            "program": "${workspaceFolder}/zig-out/bin/zig_vulkan.exe",
             "args": [],
+            "stopAtEntry": false,
             "cwd": "${fileDirname}",
+            "environment": [],
             "preLaunchTask": "release"
         },
         {

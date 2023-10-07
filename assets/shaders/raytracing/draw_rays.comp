@@ -7,19 +7,18 @@
 #extension GL_GOOGLE_include_directive : enable
 #include "ray_commons.glsl"
 
-layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z = 1) in;
+layout(local_size_x_id = 0, local_size_y = 1, local_size_z = 1) in;
 
 layout(Rgba8, binding = 0) uniform writeonly image2D img_output;
 
-layout (set = 0, binding = 1) buffer CursorBuffer
-{
-    RayBufferCursor cursor;
+layout (std430, set = 0, binding = 1) readonly buffer HitLimitBuffer {
+    HitLimits limits;
 };
-layout (set = 0, binding = 2) readonly buffer HitBuffer {
+layout (std430, set = 0, binding = 2) readonly buffer HitBuffer {
     HitRecord hit_records[];
 };
 
-// TOOD: https://bruop.github.io/exposure/
+// TODO: https://bruop.github.io/exposure/
 // source: https://www.shadertoy.com/view/WdjSW3
 vec3 Tonemap_ACES(vec3 x) {
     // Narkowicz 2015, "ACES Filmic Tone Mapping Curve"
@@ -31,17 +30,9 @@ vec3 Tonemap_ACES(vec3 x) {
     return (x * (a * x + b)) / (x * (c * x + d) + e);
 }
 
-shared uint warp_start_index;
-
 void main() {
-    if (gl_LocalInvocationIndex == 0) {
-        const uint work_size = gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z;
-        warp_start_index = work_size * atomicAdd(cursor.cursor, 1);
-    }
-    barrier();
-    
-    const uint hit_index = warp_start_index + gl_LocalInvocationIndex;
-    if (hit_index >= cursor.max_index) {
+    const uint hit_index = gl_GlobalInvocationID.x;
+    if (hit_index > limits.emitted_hit_count) {
         return;
     }
 

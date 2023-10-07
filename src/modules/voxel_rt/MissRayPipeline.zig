@@ -17,7 +17,7 @@ const Camera = @import("Camera.zig");
 const ray_types = @import("ray_pipeline_types.zig");
 const RayBufferCursor = ray_types.RayBufferCursor;
 const Ray = ray_types.Ray;
-const Dispatch2 = ray_types.Dispatch2;
+const Dispatch2 = ray_types.Dispatch2D;
 const ImageInfo = ray_types.ImageInfo;
 
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
@@ -52,7 +52,7 @@ pub fn init(
     ctx: Context,
     ray_buffer: *const GpuBufferMemory,
     image_size: vk.Extent2D,
-    miss_ray_descriptor_info: [3]vk.DescriptorBufferInfo,
+    miss_ray_descriptor_info: [2]vk.DescriptorBufferInfo,
 ) !MissRayPipeline {
     const zone = tracy.ZoneN(@src(), @typeName(MissRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
@@ -135,7 +135,7 @@ pub fn init(
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
             .set_layout_count = 1,
-            .p_set_layouts = @as([*]const vk.DescriptorSetLayout, @ptrCast(&target_descriptor_layout)),
+            .p_set_layouts = @ptrCast(&target_descriptor_layout),
             .push_constant_range_count = 0,
             .p_push_constant_ranges = undefined,
         };
@@ -209,7 +209,11 @@ pub fn deinit(self: MissRayPipeline, ctx: Context) void {
 }
 
 // TODO: static command buffer (only record once)
-pub fn appendPipelineCommands(self: MissRayPipeline, ctx: Context, command_buffer: vk.CommandBuffer) void {
+pub fn appendPipelineCommands(
+    self: MissRayPipeline,
+    ctx: Context,
+    command_buffer: vk.CommandBuffer,
+) void {
     const zone = tracy.ZoneN(@src(), @typeName(MissRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
@@ -266,5 +270,5 @@ pub fn appendPipelineCommands(self: MissRayPipeline, ctx: Context, command_buffe
     const x_dispatch = @ceil(@as(f32, @floatFromInt(self.image_size.width)) / @as(f32, @floatFromInt(self.work_group_dim.x)));
     const y_dispatch = @ceil(@as(f32, @floatFromInt(self.image_size.height)) / @as(f32, @floatFromInt(self.work_group_dim.y)));
 
-    ctx.vkd.cmdDispatch(command_buffer, @as(u32, @intFromFloat(x_dispatch)), @as(u32, @intFromFloat(y_dispatch)), 1);
+    ctx.vkd.cmdDispatch(command_buffer, @as(u32, @intFromFloat(x_dispatch)) * @as(u32, @intFromFloat(y_dispatch)), 1, 1);
 }

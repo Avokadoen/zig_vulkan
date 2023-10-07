@@ -9,27 +9,24 @@
 
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z = 1) in;
 
-layout (set = 0, binding = 0) buffer InHitCursorBuffer {
-    RayBufferCursor in_cursor;
+layout (std430, set = 0, binding = 0) readonly buffer HitLimitBuffer {
+    HitLimits limits;
 };
-layout (set = 0, binding = 1) writeonly buffer InHitRecordBuffer {
-    HitRecord out_hit_records[];
-};
-layout (set = 0, binding = 2) buffer OutHitCursorBuffer {
-    RayBufferCursor out_cursor;
-};
-layout (set = 0, binding = 3) readonly buffer OutHitRecordBuffer {
-    HitRecord in_hit_records[];
+layout (std430, set = 0, binding = 1) buffer HitRecordBuffer {
+    HitRecord hit_records[];
 };
 
 void main() {
     // get the index for ray and hit, max_index is copied over from out_cursor by pipeline
-    const int index = atomicAdd(in_cursor.cursor, 1);
-    if (index > in_cursor.max_index) {
+    const uint hit_index = gl_GlobalInvocationID.x;
+    // TODO: BEFORE COMMITTING in_hit_count
+    if (hit_index >= limits.emitted_hit_count) {
         return;
     }
 
-    HitRecord hit_record = in_hit_records[index];
+    HitRecord hit_record = hit_records[hit_index];
+    // TODO: BEFORE COMMITTING remove
+    if (hit_record.is_active == false) return;
 
     const uint material_index = bitfieldExtract(hit_record.normal_4b_and_material_index_28b, 0, 28);
     const uint normal_index = bitfieldExtract(hit_record.normal_4b_and_material_index_28b, 28, 4);
@@ -45,10 +42,7 @@ void main() {
     hit_record.previous_ray_direction = scatter_dir; 
     hit_record.point = 0.0001 * scatter_dir + hit_record.point;
 
-    // store the biggest scatter index
-    atomicMax(out_cursor.max_index, index);
-
-    out_hit_records[index] = hit_record;
+    hit_records[hit_index] = hit_record;
 }
 
 

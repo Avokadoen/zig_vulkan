@@ -99,7 +99,7 @@ pub fn work(self: *Worker) void {
             // create thread name
             var thread_name_buffer: [32:0]u8 = undefined;
             const thread_name = std.fmt.bufPrint(thread_name_buffer[0..], "worker {d}", .{self.id}) catch std.debug.panic("failed to print thread name", .{});
-            break :blk std.cstr.addNullByte(self.allocator, thread_name) catch std.debug.panic("failed to add '0' sentinel", .{});
+            break :blk self.allocator.dupeZ(u8, thread_name) catch std.debug.panic("failed to add '0' sentinel", .{});
         } else {
             break :blk "worker";
         }

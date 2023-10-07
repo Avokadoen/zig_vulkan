@@ -1,0 +1,160 @@
+#version 450
+
+// SOURCE: https://poniesandlight.co.uk/reflect/bitonic_merge_sort/
+
+#extension GL_EXT_debug_printf : disable
+// debugPrintfEXT("hello world %f", 1.0);
+
+// This extension is strictly not required for vulkan 1.2 target, but is used to silence validator...
+#extension GL_GOOGLE_include_directive : enable
+#include "../raytracing/ray_commons.glsl"
+
+layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z = 1) in;
+
+layout (std430, set = 0, binding = 0) buffer HitLimitsBuffer {
+    HitLimits limits;
+};
+layout (std430, set = 0, binding = 1) buffer HitRecordBuffer {
+    HitRecord hit_records[];
+};
+
+const uint local_mem_size = gl_WorkGroupSize.x * 2;
+shared HitRecord local_hit_records[local_mem_size];
+
+#define LOCAL_MERGE 0
+#define LOCAL_DISPERSE 1
+#define GLOBAL_FLIP 2
+#define GLOBAL_DISPERSE 3
+
+layout(constant_id = 3) const uint algorithm = 0;
+
+// compare two hit records and check if they should be swapped
+bool should_swap(in HitRecord record_a, in HitRecord record_b) {
+    // TODO: use specialization constant here to choose compare method
+    return record_a.is_active == false && record_b.is_active == true;
+}
+
+// Performs compare-and-swap over elements held in SSBO
+void global_compare_and_swap(uvec2 indices) {
+	if (should_swap(hit_records[indices.x], hit_records[indices.y])) {
+		HitRecord tmp = hit_records[indices.x];
+		hit_records[indices.x] = hit_records[indices.y];
+		hit_records[indices.y] = tmp;
+	}
+}
+
+// Performs compare-and-swap over elements held in shared, workgroup-local memory
+void local_compare_and_swap(uvec2 indices) {
+	if (should_swap(local_hit_records[indices.x], local_hit_records[indices.y])) {
+		HitRecord tmp = local_hit_records[indices.x];
+		local_hit_records[indices.x] = local_hit_records[indices.y];
+		local_hit_records[indices.y] = tmp;
+	}
+}
+
+// Performs full-height flip) over globally available indices.
+void global_flip(uint height) {
+    uint prime_index = gl_GlobalInvocationID.x;
+	uint half_height = height >> 1; 
+
+	uint q = ((2 * prime_index) / height) * height;
+	uint x = q + (prime_index % half_height);
+	uint y = q + height - (prime_index % half_height) - 1; 
+
+	global_compare_and_swap(ivec2(x,y));
+}
+
+// Performs full-height disperse over globally available indices.
+void global_disperse(uint height) {
+    uint prime_index = gl_GlobalInvocationID.x;
+	uint half_height = height >> 1; 
+
+	uint q = ((2 * prime_index) / height) * height;
+	uint x = q + (prime_index % (half_height));
+	uint y = q + (prime_index % (half_height)) + half_height;
+
+	global_compare_and_swap(ivec2(x,y));
+}
+
+// Performs full-height flip over locally available indices.
+void local_flip(uint height) {
+    uint prime_index = gl_LocalInvocationID.x;
+    barrier();
+
+    uint half_height = height >> 1; // Note: h >> 1 is equivalent to h / 2 
+    ivec2 indices = 
+        ivec2( height * ( ( 2 * prime_index ) / height ) ) +
+        ivec2( prime_index % half_height, height - 1 - ( prime_index % half_height ) );
+
+    local_compare_and_swap(indices);
+}
+
+// Performs progressively diminishing disperse operations (starting with height)
+// on locally available indices: e.g. h==8 -> 8 : 4 : 2.
+// One disperse operation for every time we can divide h by 2.
+void local_disperse(uint height){
+	uint prime_index = gl_LocalInvocationID.x;
+	
+    for ( ; height > 1 ; height /= 2 ) {
+		barrier();
+
+		uint half_height = height >> 1;
+		ivec2 indices = 
+			ivec2( height * ( ( 2 * prime_index ) / height ) ) +
+			ivec2( prime_index % half_height, half_height + ( prime_index % half_height ) );
+
+		local_compare_and_swap(indices);
+	}
+}
+
+// Perform binary merge sort for local elements, up to a maximum number 
+// of elements h.
+void local_bms(uint height){
+	for ( uint local_height = 2; local_height <= height; local_height <<= 1 ) {  // note:  h <<= 1 is same as h *= 2
+		local_flip( local_height);
+		local_disperse( local_height / 2 );
+	}
+}
+
+
+void main() {
+    uint local_hit_index = gl_LocalInvocationID.x;
+ 	// Calculate global offset for local workgroup
+	uint offset = gl_WorkGroupSize.x * 2 * gl_WorkGroupID.x;
+
+    if (local_hit_index + offset < limits.emitted_hit_count) {
+        return;
+    }
+
+    const bool is_local_algo = algorithm <= LOCAL_DISPERSE;
+
+    if (is_local_algo) {
+        // Each local worker must save two elements to local memory, as there
+        // are twice as many elments as workers.
+        local_hit_records[local_hit_index * 2] = hit_records[offset + local_hit_index * 2];
+        local_hit_records[local_hit_index * 2 + 1] = hit_records[offset + local_hit_index * 2 + 1];
+    }
+
+    const uint height = gl_WorkGroupSize.x * 2;
+    switch(algorithm) {
+        case LOCAL_MERGE:
+            local_bms(height);
+        break;
+        case LOCAL_DISPERSE:
+            local_disperse(height);
+        break;
+        case GLOBAL_FLIP:
+            global_flip(height);
+        break;
+        case GLOBAL_DISPERSE:
+            global_disperse(height);
+        break;
+    }
+
+    if (is_local_algo) {
+		barrier();
+		// push to global memory
+        hit_records[offset + local_hit_index * 2] = local_hit_records[local_hit_index * 2];
+        hit_records[offset + local_hit_index * 2 + 1] = local_hit_records[local_hit_index * 2 + 1];
+	}
+}

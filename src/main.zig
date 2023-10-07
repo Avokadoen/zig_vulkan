@@ -59,7 +59,6 @@ pub fn main() anyerror!void {
         return error.GlfwFailedToInitialize;
     }
     defer glfw.terminate();
-
     if (!glfw.vulkanSupported()) {
         std.debug.panic("vulkan not supported on device (glfw)", .{});
     }
@@ -121,7 +120,6 @@ pub fn main() anyerror!void {
     for (model.xyzi_chunks[0]) |xyzi| {
         grid.insert(@as(usize, @intCast(xyzi.x)) + 200, @as(usize, @intCast(xyzi.z)) + 50, @as(usize, @intCast(xyzi.y)) + 150, xyzi.color_index);
     }
-
     var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, .{
         .internal_resolution_width = internal_render_resolution.x(),
         .internal_resolution_height = internal_render_resolution.y(),
