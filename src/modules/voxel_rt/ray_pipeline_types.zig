@@ -14,11 +14,41 @@ pub const RayHitLimits = extern struct {
     out_miss_count: c_uint,
 };
 
-// Must be synced with assets/shaders/emit_primary_rays.comp Ray
+pub const BrickGridState = extern struct {
+    /// how many bricks in each axis
+    dim: [3]f32,
+    padding1: f32,
+
+    min_point: [3]f32,
+    scale: f32,
+};
+pub const Brick = packed struct {
+    solid_mask: u512,
+};
+
+// must be kept in sync with assets/shaders/raytracing/ray_commonds.glsl Ray
 pub const Ray = extern struct {
     origin: [3]f32,
-    t_value: f32,
+    internal_reflection: f32,
     direction: [3]f32,
+    t_value: f32,
+};
+// must be kept in sync with assets/shaders/raytracing/ray_commonds.glsl RayHit
+pub const RayHit = extern struct {
+    normal_4b_and_material_index_28b: c_uint,
+};
+// must be kept in sync with assets/shaders/raytracing/ray_commonds.glsl RayActive
+pub const RayActive = extern struct {
+    is_active: bool,
+};
+// must be kept in sync with assets/shaders/raytracing/ray_commonds.glsl RayShading
+pub const RayShading = extern struct {
+    color: [3]f32,
+    pixel_coord: c_uint,
+};
+// must be kept in sync with assets/shaders/raytracing/ray_commonds.glsl RayHash
+pub const RayHash = extern struct {
+    value: c_uint,
 };
 
 pub const Dispatch1D = extern struct {

@@ -19,23 +19,26 @@ const RayHitLimits = ray_types.RayHitLimits;
 const Ray = ray_types.Ray;
 const Dispatch1D = ray_types.Dispatch1D;
 
+const RayDeviceResources = @import("RayDeviceResources.zig");
+const Resources = RayDeviceResources.Resources;
+
+const device_resources = [_]Resources{
+    .ray_pipeline_limits,
+    .ray,
+    .ray_hit,
+    .ray_shading,
+};
+
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
 /// compute shader that draws to a target texture
 const EmitRayPipeline = @This();
 
-allocator: Allocator,
-
 pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
 
-// info about the target image
-target_descriptor_layout: vk.DescriptorSetLayout,
-target_descriptor_pool: vk.DescriptorPool,
-target_descriptor_set: vk.DescriptorSet,
-
-image_size: vk.Extent2D,
-ray_buffer: *const GpuBufferMemory,
+ray_device_resources: *const RayDeviceResources,
+descriptor_sets_view: [device_resources.len]vk.DescriptorSet,
 
 work_group_dim: Dispatch1D,
 
@@ -44,89 +47,13 @@ work_group_dim: Dispatch1D,
 
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
-pub fn init(
-    allocator: Allocator,
-    ctx: Context,
-    image_size: vk.Extent2D,
-    ray_buffer: *const GpuBufferMemory,
-    draw_ray_descriptor_info: [2]vk.DescriptorBufferInfo,
-) !EmitRayPipeline {
+pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !EmitRayPipeline {
     const zone = tracy.ZoneN(@src(), @typeName(EmitRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
     const work_group_dim = Dispatch1D.init(ctx);
 
-    const target_descriptor_layout = blk: {
-        comptime var layout_bindings: [draw_ray_descriptor_info.len]vk.DescriptorSetLayoutBinding = undefined;
-        inline for (&layout_bindings, 0..) |*binding, index| {
-            binding.* = vk.DescriptorSetLayoutBinding{
-                .binding = index,
-                .descriptor_type = .storage_buffer,
-                .descriptor_count = 1,
-                .stage_flags = .{
-                    .compute_bit = true,
-                },
-                .p_immutable_samplers = null,
-            };
-        }
-        const layout_info = vk.DescriptorSetLayoutCreateInfo{
-            .flags = .{},
-            .binding_count = layout_bindings.len,
-            .p_bindings = &layout_bindings,
-        };
-        break :blk try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
-    };
-    errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, target_descriptor_layout, null);
-
-    const target_descriptor_pool = blk: {
-        const pool_sizes = [_]vk.DescriptorPoolSize{.{
-            .type = .storage_buffer,
-            .descriptor_count = draw_ray_descriptor_info.len,
-        }};
-        const pool_info = vk.DescriptorPoolCreateInfo{
-            .flags = .{},
-            .max_sets = 1,
-            .pool_size_count = pool_sizes.len,
-            .p_pool_sizes = &pool_sizes,
-        };
-        break :blk try ctx.vkd.createDescriptorPool(ctx.logical_device, &pool_info, null);
-    };
-    errdefer ctx.vkd.destroyDescriptorPool(ctx.logical_device, target_descriptor_pool, null);
-
-    var target_descriptor_set: vk.DescriptorSet = undefined;
-    {
-        const descriptor_set_alloc_info = vk.DescriptorSetAllocateInfo{
-            .descriptor_pool = target_descriptor_pool,
-            .descriptor_set_count = 1,
-            .p_set_layouts = @as([*]const vk.DescriptorSetLayout, @ptrCast(&target_descriptor_layout)),
-        };
-        try ctx.vkd.allocateDescriptorSets(ctx.logical_device, &descriptor_set_alloc_info, @as([*]vk.DescriptorSet, @ptrCast(&target_descriptor_set)));
-    }
-
-    {
-        var write_descriptor_set: [draw_ray_descriptor_info.len]vk.WriteDescriptorSet = undefined;
-        for (&write_descriptor_set, 0..) |*write_desc, index| {
-            write_desc.* = .{
-                .dst_set = target_descriptor_set,
-                .dst_binding = @as(u32, @intCast(index)),
-                .dst_array_element = 0,
-                .descriptor_count = 1,
-                .descriptor_type = .storage_buffer,
-                .p_image_info = undefined,
-                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&draw_ray_descriptor_info[index])),
-                .p_texel_buffer_view = undefined,
-            };
-        }
-
-        ctx.vkd.updateDescriptorSets(
-            ctx.logical_device,
-            write_descriptor_set.len,
-            &write_descriptor_set,
-            0,
-            undefined,
-        );
-    }
-
+    const descriptr_set_layouts = ray_device_resources.getDescriptorSetLayouts(&device_resources);
     const pipeline_layout = blk: {
         const push_constant_ranges = [_]vk.PushConstantRange{.{
             .stage_flags = .{ .compute_bit = true },
@@ -136,8 +63,8 @@ pub fn init(
         }};
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
-            .set_layout_count = 1,
-            .p_set_layouts = @as([*]const vk.DescriptorSetLayout, @ptrCast(&target_descriptor_layout)),
+            .set_layout_count = descriptr_set_layouts.len,
+            .p_set_layouts = &descriptr_set_layouts,
             .push_constant_range_count = push_constant_ranges.len,
             .p_push_constant_ranges = &push_constant_ranges,
         };
@@ -186,14 +113,10 @@ pub fn init(
     errdefer ctx.destroyPipeline(pipeline);
 
     return EmitRayPipeline{
-        .allocator = allocator,
         .pipeline_layout = pipeline_layout,
         .pipeline = pipeline,
-        .target_descriptor_layout = target_descriptor_layout,
-        .target_descriptor_pool = target_descriptor_pool,
-        .target_descriptor_set = target_descriptor_set,
-        .image_size = image_size,
-        .ray_buffer = ray_buffer,
+        .ray_device_resources = ray_device_resources,
+        .descriptor_sets_view = ray_device_resources.getDescriptorSets(&device_resources),
         .work_group_dim = work_group_dim,
     };
 }
@@ -201,9 +124,6 @@ pub fn init(
 pub fn deinit(self: EmitRayPipeline, ctx: Context) void {
     const zone = tracy.ZoneN(@src(), @typeName(EmitRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
-
-    ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
-    ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.target_descriptor_pool, null);
 
     ctx.destroyPipelineLayout(self.pipeline_layout);
     ctx.destroyPipeline(self.pipeline);
@@ -250,8 +170,8 @@ pub fn appendPipelineCommands(
         .compute,
         self.pipeline_layout,
         0,
-        1,
-        @as([*]const vk.DescriptorSet, @ptrCast(&self.target_descriptor_set)),
+        self.descriptor_sets_view.len,
+        &self.descriptor_sets_view,
         0,
         undefined,
     );
@@ -259,7 +179,7 @@ pub fn appendPipelineCommands(
     // zero out limit values
     ctx.vkd.cmdFillBuffer(
         command_buffer,
-        self.ray_buffer.buffer,
+        self.ray_device_resources.ray_buffer.buffer,
         0, // offset
         @sizeOf(RayHitLimits),
         0, // value
@@ -269,7 +189,7 @@ pub fn appendPipelineCommands(
         .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
         .src_queue_family_index = ctx.queue_indices.compute,
         .dst_queue_family_index = ctx.queue_indices.compute,
-        .buffer = self.ray_buffer.buffer,
+        .buffer = self.ray_device_resources.ray_buffer.buffer,
         .offset = 0,
         .size = @sizeOf(RayHitLimits),
     };
@@ -286,13 +206,8 @@ pub fn appendPipelineCommands(
         undefined,
     );
 
-    const x_dispatch = @ceil(@as(f32, @floatFromInt(self.image_size.width * self.image_size.height)) /
+    const x_dispatch = @ceil(self.ray_device_resources.target_image_info.width * self.ray_device_resources.target_image_info.height /
         @as(f32, @floatFromInt(self.work_group_dim.x))) + 1;
 
     ctx.vkd.cmdDispatch(command_buffer, @intFromFloat(x_dispatch), 1, 1);
-}
-
-// TODO: move to common math/mem file
-pub inline fn pow2Align(size: vk.DeviceSize, alignment: vk.DeviceSize) vk.DeviceSize {
-    return (size + alignment - 1) & ~(alignment - 1);
 }

@@ -15,30 +15,33 @@ const StagingRamp = render.StagingRamp;
 const Camera = @import("../Camera.zig");
 
 const ray_types = @import("../ray_pipeline_types.zig");
-const RayBufferCursor = ray_types.RayBufferCursor;
-const Ray = ray_types.Ray;
 const Dispatch1D = ray_types.Dispatch1D;
-const ImageInfo = ray_types.ImageInfo;
 
+const RayDeviceResources = @import("../RayDeviceResources.zig");
+const Resources = RayDeviceResources.Resources;
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
 /// compute shader that calculate miss color
 const BubbleSortPipeline = @This();
+
+const device_resources = [_]Resources{
+    .ray_pipeline_limits,
+    .ray,
+    .ray_hit,
+    .ray_active,
+    .ray_shading,
+    .bricks_set,
+};
 
 allocator: Allocator,
 
 pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
 
-target_descriptor_layout: vk.DescriptorSetLayout,
-target_descriptor_pool: vk.DescriptorPool,
-target_descriptor_set: vk.DescriptorSet,
-
-image_size: vk.Extent2D,
-ray_buffer: *const GpuBufferMemory,
-
 work_group_dim: Dispatch1D,
 
+ray_device_resources: RayDeviceResources,
+descriptor_set_view: [device_resources.len]vk.DescriptorSet,
 submit_wait_stage: [1]vk.PipelineStageFlags = .{.{ .compute_shader_bit = true }},
 
 // TODO: share descriptors across ray pipelines (use vk descriptor buffers!)
@@ -255,8 +258,8 @@ pub fn appendPipelineCommands(self: BubbleSortPipeline, ctx: Context, command_bu
         .compute,
         self.pipeline_layout,
         0,
-        1,
-        @as([*]const vk.DescriptorSet, @ptrCast(&self.target_descriptor_set)),
+        self.descriptor_sets_view.len,
+        &self.descriptor_sets_view,
         0,
         undefined,
     );

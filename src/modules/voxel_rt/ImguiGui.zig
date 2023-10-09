@@ -13,7 +13,7 @@ const BrickState = @import("brick/State.zig");
 const Pipeline = @import("Pipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const Benchmark = @import("Benchmark.zig");
-const TraverseRayPipeline = @import("TraverseRayPipeline.zig");
+const ray_pipeline_types = @import("ray_pipeline_types.zig");
 
 pub const StateBinding = struct {
     camera_ptr: *Camera,
@@ -21,7 +21,7 @@ pub const StateBinding = struct {
     grid_state: BrickState,
     sun_ptr: *Sun,
     gfx_pipeline_shader_constants: *GraphicsPipeline.PushConstant,
-    brick_grid_state: *TraverseRayPipeline.BrickGridState,
+    brick_grid_state: *ray_pipeline_types.BrickGridState,
 };
 
 pub const Config = struct {

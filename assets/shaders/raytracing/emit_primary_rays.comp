@@ -24,25 +24,37 @@ layout (push_constant) readonly uniform PushConstants {
 layout (std430, set = 0, binding = 0) writeonly buffer HitLimitBuffer {
     HitLimits limits;
 };
-layout (std430, set = 0, binding = 1) writeonly buffer HitRecordBuffer {
-    HitRecord initial_records[];
+layout (std430, set = 1, binding = 0) writeonly buffer RayBuffer {
+    Ray rays[];
+};
+layout (std430, set = 2, binding = 0) writeonly buffer RayHitBuffer {
+    RayHit ray_hits[];
+};
+layout (std430, set = 3, binding = 0) writeonly buffer RayShadingBuffer {
+    RayShading ray_shadings[];
 };
 
 
 void main() {
     // TODO: sequential indices should map to tiles in the image instead of stripes for better coherency
-    const uint hit_index = gl_GlobalInvocationID.x;
+    const uint index = gl_GlobalInvocationID.x;
+
+    ray_hits[index] = RayHit(
+        0 // normal_4b_and_material_index_28b
+    );
 
     const uvec2 pixel_coord = uvec2(
-        hit_index % push_constant.image_width,
-        hit_index / push_constant.image_width
+        index % push_constant.image_width,
+        index / push_constant.image_width
     );
 
     if (pixel_coord.y >= push_constant.image_height) {
         return;
     }
 
+    // TODO: emitted_hit_count can be set in the transfer queue
     atomicAdd(limits.emitted_hit_count, 1);
+    // TODO: sorting might be a more effective way of getting this count, 
     atomicAdd(limits.in_hit_count, 1);
 
     // TODO: random dir when multi samples
@@ -52,18 +64,17 @@ void main() {
     const float v = float(pixel_coord.y) / float(push_constant.image_height - 1);
     
     const vec3 ray_dir = fma(push_constant.horizontal, vec3(u), push_constant.lower_left_corner) + fma(vec3(v), push_constant.vertical, -push_constant.origin);
-    const uint pixel = (pixel_coord.x << 16) | pixel_coord.y;
+    rays[index] = Ray(
+        push_constant.origin,   // origin
+        1,                      // internal_reflection
+        ray_dir,                // direction
+        0                       // t_value
+    );
 
-    initial_records[hit_index] = HitRecord(
-        push_constant.origin,   // point
-        0,                      // normal_4b_and_material_index_28b
-        ray_dir,                // previous_ray_direction
-        1,                      // previous_ray_internal_reflection
-        vec3(0),                // previous_color
-        pixel,                  // pixel_coord
-        0,                      // t_value
-        true,                   // is_active
-        0,                      // padding 0 
-        0                       // padding 1 
+
+    const uint pixel = (pixel_coord.x << 16) | pixel_coord.y;
+    ray_shadings[index] = RayShading(
+        vec3(0),    // color
+        pixel       // pixel_coord
     );
 }

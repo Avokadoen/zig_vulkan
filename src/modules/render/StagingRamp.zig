@@ -334,7 +334,6 @@ const StagingBuffer = struct {
         var raw_device_ptr = self.device_buffer_memory.mapped orelse @panic("device pointer was null");
         var dest_location = @as([*]u8, @ptrCast(@alignCast(raw_device_ptr)));
         {
-            // runtime safety is turned off for performance
             const byte_data = std.mem.sliceAsBytes(data);
             @setRuntimeSafety(false);
             for (byte_data, 0..) |elem, i| {

@@ -7,42 +7,55 @@
 #extension GL_GOOGLE_include_directive : enable
 #include "ray_commons.glsl"
 
-layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z = 1) in;
+layout(local_size_x_id = 0, local_size_y = 1, local_size_z = 1) in;
 
 layout (std430, set = 0, binding = 0) readonly buffer HitLimitBuffer {
     HitLimits limits;
 };
-layout (std430, set = 0, binding = 1) buffer HitRecordBuffer {
-    HitRecord hit_records[];
+layout (std430, set = 1, binding = 0) buffer RayBuffer {
+    Ray rays[];
 };
+layout (std430, set = 2, binding = 0) readonly buffer RayHitBuffer {
+    RayHit ray_hits[];
+};
+layout (std430, set = 3, binding = 0) buffer RayShadingBuffer {
+    RayShading ray_shadings[];
+};
+// TODO: BEFORE COMMITTING remove
+layout (std430, set = 4, binding = 0) readonly buffer RayActiveBuffer {
+    RayActive ray_actives[];
+};
+
 
 void main() {
     // get the index for ray and hit, max_index is copied over from out_cursor by pipeline
-    const uint hit_index = gl_GlobalInvocationID.x;
+    const uint index = gl_GlobalInvocationID.x;
     // TODO: BEFORE COMMITTING in_hit_count
-    if (hit_index >= limits.emitted_hit_count) {
+    if (index >= limits.emitted_hit_count) {
         return;
     }
 
-    HitRecord hit_record = hit_records[hit_index];
     // TODO: BEFORE COMMITTING remove
-    if (hit_record.is_active == false) return;
+    if (ray_actives[index].is_active == false) return;
 
-    const uint material_index = bitfieldExtract(hit_record.normal_4b_and_material_index_28b, 0, 28);
-    const uint normal_index = bitfieldExtract(hit_record.normal_4b_and_material_index_28b, 28, 4);
+    uint normal_4b_and_material_index_28b = ray_hits[index].normal_4b_and_material_index_28b;
+    const uint material_index = bitfieldExtract(normal_4b_and_material_index_28b, 0, 28);
+    const uint normal_index = bitfieldExtract(normal_4b_and_material_index_28b, 28, 4);
     const vec3 hit_normal = normal_map[normal_index];
     
     // TODO: actual material
     const vec3 material_albedo = vec3(0.3);
+    ray_shadings[index].color += material_albedo;
+
+
     // TODO actually scatter ray based on material_index and a scatter function (we also have hit_record.ray_direction)
+    Ray ray = rays[index];
+    ray.origin = RayAt(ray, ray.t_value);
+
     const vec3 scatter_dir = hit_normal;
-
-    // update record
-    hit_record.previous_color += material_albedo;
-    hit_record.previous_ray_direction = scatter_dir; 
-    hit_record.point = 0.0001 * scatter_dir + hit_record.point;
-
-    hit_records[hit_index] = hit_record;
+    ray.direction = scatter_dir;
+    ray.origin = 0.0001 * scatter_dir + ray.origin;
+    rays[index] = ray;
 }
 
 

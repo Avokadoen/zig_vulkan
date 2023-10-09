@@ -17,6 +17,7 @@ const memory = render.memory;
 const ray_pipeline_types = @import("ray_pipeline_types.zig");
 
 // TODO: move pipelines to ./internal/render/
+const RayDeviceResources = @import("RayDeviceResources.zig");
 const EmitRayPipeline = @import("EmitRayPipeline.zig");
 const TraverseRayPipeline = @import("TraverseRayPipeline.zig");
 const BubbleSortPipeline = @import("gpu_sort/BubbleSortPipeline.zig");
@@ -80,7 +81,7 @@ render_complete_fence: vk.Fence,
 ray_command_pool: vk.CommandPool,
 // TODO: this should be an array
 ray_command_buffers: vk.CommandBuffer,
-ray_buffer: GpuBufferMemory,
+ray_device_resource: *RayDeviceResources,
 emit_ray_pipeline: EmitRayPipeline,
 traverse_ray_pipeline: TraverseRayPipeline,
 // active_hits_sort_pipeline: BubbleSortPipeline,
@@ -254,60 +255,8 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         @as([*]const vk.CommandBuffer, @ptrCast(&ray_command_buffers)),
     );
 
-    // TODO: allocate according to need
-    var ray_buffer = try GpuBufferMemory.init(
-        ctx,
-        @as(vk.DeviceSize, @intCast(250 * 1024 * 1024)), // alloc 250mb
-        .{ .storage_buffer_bit = true, .transfer_dst_bit = true, .transfer_src_bit = true },
-        .{ .device_local_bit = true },
-    );
-    errdefer ray_buffer.deinit(ctx);
-
-    var traverse_ray_pipeline = try TraverseRayPipeline.init(
-        allocator,
-        ctx,
-        &ray_buffer,
-        internal_render_resolution,
-        init_command_pool,
-        &staging_buffers,
-    );
-    errdefer traverse_ray_pipeline.deinit(ctx);
-
-    // const active_hits_sort_pipeline = try BubbleSortPipeline.init(
-    //     allocator,
-    //     ctx,
-    //     internal_render_resolution,
-    //     &ray_buffer,
-    //     traverse_ray_pipeline.rayPipelineStagesBufferInfos(),
-    // );
-    // errdefer active_hits_sort_pipeline.deinit(ctx);
-
-    const emit_ray_pipeline = try EmitRayPipeline.init(
-        allocator,
-        ctx,
-        internal_render_resolution,
-        &ray_buffer,
-        traverse_ray_pipeline.rayPipelineStagesBufferInfos(),
-    );
-    errdefer emit_ray_pipeline.deinit(ctx);
-
-    const scatter_ray_pipeline = try ScatterRayPipeline.init(
-        allocator,
-        ctx,
-        &ray_buffer,
-        internal_render_resolution,
-        traverse_ray_pipeline.rayPipelineStagesBufferInfos(),
-    );
-    errdefer scatter_ray_pipeline.deinit(ctx);
-
-    const miss_ray_pipeline = try MissRayPipeline.init(
-        allocator,
-        ctx,
-        &ray_buffer,
-        internal_render_resolution,
-        traverse_ray_pipeline.rayPipelineStagesBufferInfos(),
-    );
-    errdefer miss_ray_pipeline.deinit(ctx);
+    var ray_device_resource = try allocator.create(RayDeviceResources);
+    errdefer allocator.destroy(ray_device_resource);
 
     const target_image_info = ray_pipeline_types.ImageInfo{
         .width = @as(f32, @floatFromInt(internal_render_resolution.width)),
@@ -316,13 +265,31 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .sampler = sampler,
         .image_view = compute_image_view,
     };
-    const draw_ray_pipeline = try DrawRayPipeline.init(
+    ray_device_resource.* = try RayDeviceResources.init(
         allocator,
         ctx,
-        &ray_buffer,
         target_image_info,
-        traverse_ray_pipeline.rayPipelineStagesBufferInfos(),
+        init_command_pool,
+        &staging_buffers,
     );
+    errdefer ray_device_resource.deinit(ctx);
+
+    var traverse_ray_pipeline = try TraverseRayPipeline.init(ctx, ray_device_resource);
+    errdefer traverse_ray_pipeline.deinit(ctx);
+
+    // const active_hits_sort_pipeline = try BubbleSortPipeline.init(ctx, ray_device_resource);
+    // errdefer active_hits_sort_pipeline.deinit(ctx);
+
+    const emit_ray_pipeline = try EmitRayPipeline.init(ctx, ray_device_resource);
+    errdefer emit_ray_pipeline.deinit(ctx);
+
+    const scatter_ray_pipeline = try ScatterRayPipeline.init(ctx, ray_device_resource);
+    errdefer scatter_ray_pipeline.deinit(ctx);
+
+    const miss_ray_pipeline = try MissRayPipeline.init(ctx, ray_device_resource);
+    errdefer miss_ray_pipeline.deinit(ctx);
+
+    const draw_ray_pipeline = try DrawRayPipeline.init(ctx, ray_device_resource);
     errdefer draw_ray_pipeline.deinit(ctx);
 
     var vertex_index_buffer = try GpuBufferMemory.init(
@@ -361,7 +328,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .grid_state = grid_state,
         .sun_ptr = sun,
         .gfx_pipeline_shader_constants = gfx_pipeline.shader_constants,
-        .brick_grid_state = traverse_ray_pipeline.brick_grid_state,
+        .brick_grid_state = ray_device_resource.brick_grid_state,
     };
     const gui = ImguiGui.init(
         ctx,
@@ -388,7 +355,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .render_complete_fence = render_complete_fence,
         .ray_command_pool = ray_command_pool,
         .ray_command_buffers = ray_command_buffers,
-        .ray_buffer = ray_buffer,
+        .ray_device_resource = ray_device_resource,
         .emit_ray_pipeline = emit_ray_pipeline,
         .traverse_ray_pipeline = traverse_ray_pipeline,
         // .active_hits_sort_pipeline = active_hits_sort_pipeline,
@@ -430,8 +397,8 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     // self.active_hits_sort_pipeline.deinit(ctx);
     self.traverse_ray_pipeline.deinit(ctx);
     self.emit_ray_pipeline.deinit(ctx);
-
-    self.ray_buffer.deinit(ctx);
+    self.ray_device_resource.deinit(ctx);
+    self.allocator.destroy(self.ray_device_resource);
 
     ctx.vkd.freeCommandBuffers(
         ctx.logical_device,
@@ -579,7 +546,7 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
             .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
             .src_queue_family_index = ctx.queue_indices.compute,
             .dst_queue_family_index = ctx.queue_indices.compute,
-            .buffer = self.traverse_ray_pipeline.ray_hit_buffer.buffer,
+            .buffer = self.ray_device_resource.ray_buffer.buffer,
             .offset = 0,
             .size = vk.WHOLE_SIZE,
         };
@@ -778,16 +745,16 @@ pub fn setDenoisePixelMultiplier(self: *Pipeline, pixel_multiplier: f32) void {
     self.gfx_pipeline.shader_constants.pixel_multiplier = pixel_multiplier;
 }
 
-/// Flush the current traverse_ray_pipeline brick grid state to the GPU
+/// Flush the current ray_device_resource brick grid state to the GPU
 pub fn transferCurrentBrickGridState(self: *Pipeline, ctx: Context) !void {
     const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
     try self.staging_buffers.transferToBuffer(
         ctx,
-        &self.traverse_ray_pipeline.voxel_scene_buffer,
+        &self.ray_device_resource.voxel_scene_buffer,
         0,
-        TraverseRayPipeline.BrickGridState,
-        &[1]TraverseRayPipeline.BrickGridState{self.traverse_ray_pipeline.brick_grid_state.*},
+        ray_pipeline_types.BrickGridState,
+        &[1]ray_pipeline_types.BrickGridState{self.ray_device_resource.brick_grid_state.*},
     );
 }
 

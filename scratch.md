@@ -6,25 +6,35 @@ TODO:
 [x] update host scatter pipeline
 [x] update host traverse pipeline
 [ ] update host main pipeline
+[ ] panic if max sets < 8
+
+[ ] indirect dispatch
+
 
 
 split hit record into multiple buffers:
-Some order should be persistent, but maybe some can be lookup based? (not moved when sorting)
+ - Some order should be persistent, but maybe some can be lookup based? (not moved when sorting)
+ - look into storageBuffer16BitAccess int16
+https://developer.download.nvidia.com/video/gputechconf/gtc/2020/presentations/s21572-a-faster-radix-sort-implementation.pdf
+https://web.archive.org/web/20210709113817/http://www.heterogeneouscompute.org/wordpress/wp-content/uploads/2011/06/RadixSort.pdf
+
 
 # Emit:
 struct Ray {
-[x] vec3 point;
-[x] float internal_reflection;
-[x] vec3 ray_direction;
-[x] float t_value;
+[w] vec3 origin;
+[w] float internal_reflection;
+[w] vec3 direction;
+[w] float t_value;
 };
 struct RayHit {
-0   uint normal_4b_and_material_index_28b;
-    bool is_active;  
+[w] uint normal_4b_and_material_index_28b;
 };
+struct RayActive {
+    bool is_active;  
+}
 struct RayShading {
-0   vec3 previous_color;
-[x] uint pixel_coord;
+[w] vec3 color;
+[w] uint pixel_coord;
 }
 struct RayHash {
     uint value;
@@ -32,17 +42,19 @@ struct RayHash {
 
 # Traverse:
 struct Ray {
-[x] vec3 point;
+[rw]vec3 origin;
     float internal_reflection;
-[x] vec3 ray_direction;
-[x] float t_value;
+[r] vec3 direction;
+[rw]float t_value;
 };
 struct RayHit {
-[x] uint normal_4b_and_material_index_28b;
-[x] bool is_active;  
+[rw]uint normal_4b_and_material_index_28b;
 };
+struct RayActive {
+[w] bool is_active;  
+}
 struct RayShading {
-    vec3 previous_color;
+    vec3 color;
     uint pixel_coord;
 }
 struct RayHash {
@@ -51,37 +63,41 @@ struct RayHash {
 
 # ??sort??
 struct Ray {
-    vec3 point;
-    float internal_reflection;
-    vec3 ray_direction;
-    float t_value;
+[w] vec3 origin;
+[w] float internal_reflection;
+[w] vec3 direction;
+[w] float t_value;
 };
 struct RayHit {
-    uint normal_4b_and_material_index_28b;
-[x] bool is_active;  
+[w] uint normal_4b_and_material_index_28b;
 };
+struct RayActive {
+[wr]bool is_active;  
+}
 struct RayShading {
-    vec3 previous_color;
-    uint pixel_coord;
+[w] vec3 color;
+[w] uint pixel_coord;
 }
 struct RayHash {
-    uint value;
+[w] uint value;
 }
 
 
 # Miss
 struct Ray {
-    vec3 point;
+    vec3 origin;
     float internal_reflection;
-    vec3 ray_direction;
+[r] vec3 direction;
     float t_value;
 };
 struct RayHit {
     uint normal_4b_and_material_index_28b;
-    bool is_active;  
 };
+struct RayActive {
+    bool is_active;  
+}
 struct RayShading {
-[x] vec3 previous_color;
+[rw]vec3 color;
     uint pixel_coord;
 }
 struct RayHash {
@@ -90,17 +106,19 @@ struct RayHash {
 
 # Scatter
 struct Ray {
-[x] vec3 point;
-[x] float internal_reflection;
-[x] vec3 ray_direction;
+[rw]vec3 origin;
+[rw]float internal_reflection;
+[rw]vec3 direction;
     float t_value;
 };
 struct RayHit {
-[x] uint normal_4b_and_material_index_28b;
-    bool is_active;  
+[r] uint normal_4b_and_material_index_28b;
 };
+struct RayActive {
+    bool is_active;  
+}
 struct RayShading {
-[x] vec3 previous_color;
+[rw]vec3 color;
     uint pixel_coord;
 }
 struct RayHash {
@@ -109,58 +127,64 @@ struct RayHash {
 
 # Hash ray
 struct Ray {
-[x] vec3 point;
+[r] vec3 origin;
     float internal_reflection;
-[x] vec3 ray_direction;
+[r] vec3 direction;
     float t_value;
 };
 struct RayHit {
     uint normal_4b_and_material_index_28b;
-    bool is_active;  
 };
+struct RayActive {
+    bool is_active;  
+}
 struct RayShading {
-    vec3 previous_color;
+    vec3 color;
     uint pixel_coord;
 }
 struct RayHash {
-[x] uint value;
+[w] uint value;
 }
 
 
 # Sort on Hash
 struct Ray {
-    vec3 point;
-    float internal_reflection;
-    vec3 ray_direction;
-    float t_value;
+[rw]vec3 origin;
+[rw]float internal_reflection;
+[rw]vec3 direction;
+[rw]float t_value;
 };
 struct RayHit {
-    uint normal_4b_and_material_index_28b;
-    bool is_active;  
+[rw]uint normal_4b_and_material_index_28b;
 };
+struct RayActive {
+[rw]bool is_active;  
+}
 struct RayShading {
-    vec3 previous_color;
-    uint pixel_coord;
+[rw]vec3 color;
+[rw]uint pixel_coord;
 }
 struct RayHash {
-[x] uint value;
+[rw]uint value;
 }
 
 
 # Draw
 struct Ray {
-    vec3 point;
+    vec3 origin;
     float internal_reflection;
-    vec3 ray_direction;
+    vec3 direction;
     float t_value;
 };
 struct RayHit {
     uint normal_4b_and_material_index_28b;
-    bool is_active;  
 };
+struct RayActive {
+    bool is_active;  
+}
 struct RayShading {
-[x] vec3 previous_color;
-[x] uint pixel_coord;
+[r] vec3 color;
+[r] uint pixel_coord;
 }
 struct RayHash {
     uint value;
