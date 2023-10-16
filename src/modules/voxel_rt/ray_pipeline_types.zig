@@ -37,10 +37,6 @@ pub const Ray = extern struct {
 pub const RayHit = extern struct {
     normal_4b_and_material_index_28b: c_uint,
 };
-// must be kept in sync with assets/shaders/raytracing/ray_commonds.glsl RayActive
-pub const RayActive = extern struct {
-    is_active: bool,
-};
 // must be kept in sync with assets/shaders/raytracing/ray_commonds.glsl RayShading
 pub const RayShading = extern struct {
     color: [3]f32,

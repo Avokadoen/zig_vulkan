@@ -25,20 +25,28 @@ const Resources = RayDeviceResources.Resources;
 /// compute shader spawning scattered rays based on hit records
 const ScatterRayPipeline = @This();
 
-const device_resources = [_]Resources{
-    .ray_pipeline_limits,
-    .ray,
-    .ray_hit,
-    .ray_active,
-    .ray_shading,
-    .bricks_set,
+// ping pong resources
+const device_resources = [2][5]Resources{
+    .{
+        .ray_pipeline_limits,
+        .ray_1,
+        .ray_hit_1,
+        .ray_shading_1,
+        .bricks_set,
+    },
+    .{
+        .ray_pipeline_limits,
+        .ray_0,
+        .ray_hit_0,
+        .ray_shading_0,
+        .bricks_set,
+    },
 };
 
 pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
 
 ray_device_resources: *const RayDeviceResources,
-descriptor_set_view: [device_resources.len]vk.DescriptorSet,
 
 work_group_dim: Dispatch1D,
 
@@ -58,7 +66,7 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Scat
     // TODO: change based on NVIDIA vs AMD vs Others?
     const work_group_dim = Dispatch1D.init(ctx);
 
-    const target_descriptor_layouts = ray_device_resources.getDescriptorSetLayouts(&device_resources);
+    const target_descriptor_layouts = ray_device_resources.getDescriptorSetLayouts(&device_resources[0]);
     const pipeline_layout = blk: {
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
@@ -112,7 +120,6 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Scat
         .pipeline_layout = pipeline_layout,
         .pipeline = pipeline,
         .ray_device_resources = ray_device_resources,
-        .descriptor_set_view = ray_device_resources.getDescriptorSets(&device_resources),
         .work_group_dim = work_group_dim,
     };
 }
@@ -125,7 +132,7 @@ pub fn deinit(self: ScatterRayPipeline, ctx: Context) void {
     ctx.destroyPipeline(self.pipeline);
 }
 
-pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_buffer: vk.CommandBuffer) void {
+pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, bounce_index: u32, command_buffer: vk.CommandBuffer) void {
     const zone = tracy.ZoneN(@src(), @typeName(ScatterRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
@@ -143,12 +150,13 @@ pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_bu
     }
 
     // TODO: specify read only vs write only buffer elements (maybe actually loop buffer infos ?)
+    // TODO: we only need this barrier once after traverse and then Scatter and Miss can run in parallel
     const ray_buffer_memory_barrier = vk.BufferMemoryBarrier{
         .src_access_mask = .{ .shader_write_bit = true },
         .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
         .src_queue_family_index = ctx.queue_indices.compute,
         .dst_queue_family_index = ctx.queue_indices.compute,
-        .buffer = self.ray_buffer.buffer,
+        .buffer = self.ray_device_resources.ray_buffer.buffer,
         .offset = 0,
         .size = vk.WHOLE_SIZE,
     };
@@ -168,19 +176,27 @@ pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, command_bu
 
     ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
 
+    const resource_index = @rem(bounce_index, 2);
+    const descriptor_sets = get_desc_set_blk: {
+        if (resource_index == 0) {
+            break :get_desc_set_blk self.ray_device_resources.getDescriptorSets(&device_resources[0]);
+        } else {
+            break :get_desc_set_blk self.ray_device_resources.getDescriptorSets(&device_resources[1]);
+        }
+    };
     ctx.vkd.cmdBindDescriptorSets(
         command_buffer,
         .compute,
         self.pipeline_layout,
         0,
-        self.descriptor_set_view.len,
-        &self.descriptor_set_view,
+        descriptor_sets.len,
+        &descriptor_sets,
         0,
         undefined,
     );
 
-    const x_dispatch = @ceil(@as(f32, @floatFromInt(self.image_size.width * self.image_size.height)) /
-        @as(f32, @floatFromInt(self.work_group_dim.x))) + 1;
+    const x_dispatch = @ceil(self.ray_device_resources.target_image_info.width * self.ray_device_resources.target_image_info.height) /
+        @as(f32, @floatFromInt(self.work_group_dim.x)) + 1;
 
     ctx.vkd.cmdDispatch(command_buffer, @intFromFloat(x_dispatch), 1, 1);
 }

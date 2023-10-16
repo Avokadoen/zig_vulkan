@@ -3,8 +3,6 @@
 #extension GL_EXT_debug_printf : disable
 // debugPrintfEXT("hello world %f", 1.0);
 
-// This extension is strictly not required for vulkan 1.2 target, but is used to silence validator...
-#extension GL_GOOGLE_include_directive : enable
 #include "ray_commons.glsl"
 
 layout(local_size_x_id = 0, local_size_y = 1, local_size_z = 1) in;
@@ -21,13 +19,14 @@ layout (std430, set = 2, binding = 0) buffer RayShadingBuffer {
 
 void main() {
     const uint index = gl_GlobalInvocationID.x + limits.out_hit_count;
-    if (index >= (limits.out_hit_count + limits.out_miss_count)) {
+    if (index >= limits.in_hit_count) {
         return;
     }
 
     Ray ray = rays[index];
 
-    // calculate some sky color in the event of a miss
-    float t = 0.5 * (-ray.direction.y + 1.0);
-    ray_shadings[index].color += fma(vec3(1.0 - t), vec3(1.0), t * vec3(0.5, 0.7, 1.0));
+    // // calculate some sky color in the event of a miss
+    // float t = 0.5 * (-ray.direction.y + 1.0);
+    // ray_shadings[index].color += fma(vec3(1.0 - t), vec3(1.0), t * vec3(0.5, 0.7, 1.0));
+    ray_shadings[index].color += vec3(.5, 0, 0);
 }

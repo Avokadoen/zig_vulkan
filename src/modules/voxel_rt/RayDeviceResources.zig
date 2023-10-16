@@ -22,13 +22,18 @@ const RayHash = ray_pipeline_types.RayHash;
 
 // TODO: convert to a struct ...
 pub const Resources = enum(u32) {
-    // ray buffer info
+    // ray buffer info 0 (ping pong)
     ray_pipeline_limits,
-    ray,
-    ray_hit,
-    ray_active,
-    ray_shading,
-    ray_hash,
+    ray_0,
+    ray_hit_0,
+    ray_shading_0,
+    ray_hash_0,
+
+    // ray buffer info 1 (ping pong)
+    ray_1,
+    ray_hit_1,
+    ray_shading_1,
+    ray_hash_1, // TODO: hash might not need to be dupliacted
 
     // brick buffer info
     bricks_set,
@@ -37,7 +42,8 @@ pub const Resources = enum(u32) {
     // draw image
     draw_image,
 };
-const ray_info_count = @intFromEnum(Resources.ray_hash) + 1;
+
+const ray_info_count = @intFromEnum(Resources.ray_hash_1) + 1;
 const brick_info_count = (@intFromEnum(Resources.bricks) + 1) - ray_info_count;
 const image_info_count = (@intFromEnum(Resources.draw_image) + 1) - brick_info_count - ray_info_count;
 
@@ -235,18 +241,25 @@ pub fn init(
 
         // TODO: when we convert this from enum to a struct we can bake some of the info into the struct.
         const ray_count: u64 = @intFromFloat(target_image_info.width * target_image_info.height);
+        // TODO: offset each entry by item alignment
         const ranges = [descriptor_buffer_count]vk.DeviceSize{
             // limits
             @sizeOf(RayHitLimits),
-            // rays
+            // rays 0
             ray_count * @sizeOf(Ray),
-            // ray hits
+            // ray hits 0
             ray_count * @sizeOf(RayHit),
-            // ray actives
-            ray_count * @sizeOf(RayActive),
-            // ray shadings
+            // ray shadings 0
             ray_count * @sizeOf(RayShading),
-            // ray hashes
+            // ray hashes 0
+            ray_count * @sizeOf(RayHash),
+            // rays 1
+            ray_count * @sizeOf(Ray),
+            // ray hits 1
+            ray_count * @sizeOf(RayHit),
+            // ray shadings 1
+            ray_count * @sizeOf(RayShading),
+            // ray hashes 1
             ray_count * @sizeOf(RayHash),
             // bricks_set
             try std.math.divCeil(vk.DeviceSize, total_bricks, 8),
@@ -420,6 +433,102 @@ pub inline fn getDescriptorSetLayouts(self: RayDeviceResources, comptime resourc
     }
 
     return descriptor_layouts;
+}
+
+/// Reset the bounce iteration limit (out_hit_count and out_miss_count)
+pub inline fn resetRayLimits(self: RayDeviceResources, ctx: Context, command_buffer: vk.CommandBuffer) void {
+    {
+        const limits_memory_barrier = [_]vk.BufferMemoryBarrier{.{
+            .src_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+            .dst_access_mask = .{ .transfer_write_bit = true },
+            .src_queue_family_index = ctx.queue_indices.compute,
+            .dst_queue_family_index = ctx.queue_indices.compute,
+            .buffer = self.ray_buffer.buffer,
+            .offset = 0,
+            .size = @sizeOf(ray_pipeline_types.RayHitLimits),
+        }};
+        ctx.vkd.cmdPipelineBarrier(
+            command_buffer,
+            .{ .compute_shader_bit = true },
+            .{ .transfer_bit = true },
+            .{},
+            0,
+            undefined,
+            limits_memory_barrier.len,
+            &limits_memory_barrier,
+            0,
+            undefined,
+        );
+    }
+
+    var copy_region = [_]vk.BufferCopy{.{
+        .src_offset = @offsetOf(ray_pipeline_types.RayHitLimits, "out_hit_count"),
+        .dst_offset = @offsetOf(ray_pipeline_types.RayHitLimits, "in_hit_count"),
+        .size = @sizeOf(c_uint),
+    }};
+    ctx.vkd.cmdCopyBuffer(
+        command_buffer,
+        self.ray_buffer.buffer,
+        self.ray_buffer.buffer,
+        copy_region.len,
+        &copy_region,
+    );
+
+    {
+        const limits_memory_barrier = [_]vk.BufferMemoryBarrier{.{
+            .src_access_mask = .{ .transfer_write_bit = true },
+            .dst_access_mask = .{ .transfer_write_bit = true },
+            .src_queue_family_index = ctx.queue_indices.compute,
+            .dst_queue_family_index = ctx.queue_indices.compute,
+            .buffer = self.ray_buffer.buffer,
+            .offset = 0,
+            .size = @sizeOf(ray_pipeline_types.RayHitLimits),
+        }};
+        ctx.vkd.cmdPipelineBarrier(
+            command_buffer,
+            .{ .transfer_bit = true },
+            .{ .transfer_bit = true },
+            .{},
+            0,
+            undefined,
+            limits_memory_barrier.len,
+            &limits_memory_barrier,
+            0,
+            undefined,
+        );
+    }
+
+    ctx.vkd.cmdFillBuffer(
+        command_buffer,
+        self.ray_buffer.buffer,
+        @offsetOf(ray_pipeline_types.RayHitLimits, "out_hit_count"),
+        @offsetOf(ray_pipeline_types.RayHitLimits, "out_miss_count") + @sizeOf(c_uint),
+        0,
+    );
+
+    {
+        const limits_memory_barrier = [_]vk.BufferMemoryBarrier{.{
+            .src_access_mask = .{ .transfer_write_bit = true },
+            .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+            .src_queue_family_index = ctx.queue_indices.compute,
+            .dst_queue_family_index = ctx.queue_indices.compute,
+            .buffer = self.ray_buffer.buffer,
+            .offset = 0,
+            .size = @sizeOf(ray_pipeline_types.RayHitLimits),
+        }};
+        ctx.vkd.cmdPipelineBarrier(
+            command_buffer,
+            .{ .transfer_bit = true },
+            .{ .compute_shader_bit = true },
+            .{},
+            0,
+            undefined,
+            limits_memory_barrier.len,
+            &limits_memory_barrier,
+            0,
+            undefined,
+        );
+    }
 }
 
 // TODO: move to common math/mem file

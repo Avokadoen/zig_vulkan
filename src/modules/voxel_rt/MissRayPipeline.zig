@@ -19,10 +19,18 @@ const RayDeviceResources = @import("RayDeviceResources.zig");
 const Resources = RayDeviceResources.Resources;
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
-const device_resources = [_]Resources{
-    .ray_pipeline_limits,
-    .ray,
-    .ray_shading,
+// ping pong resources
+const device_resources = [2][3]Resources{
+    .{
+        .ray_pipeline_limits,
+        .ray_1,
+        .ray_shading_1,
+    },
+    .{
+        .ray_pipeline_limits,
+        .ray_0,
+        .ray_shading_0,
+    },
 };
 
 /// compute shader that calculate miss color
@@ -34,7 +42,6 @@ pipeline: vk.Pipeline,
 work_group_dim: Dispatch1D,
 
 ray_device_resources: *const RayDeviceResources,
-descriptor_sets_view: [device_resources.len]vk.DescriptorSet,
 submit_wait_stage: [1]vk.PipelineStageFlags = .{.{ .compute_shader_bit = true }},
 
 // TODO: share descriptors across ray pipelines (use vk descriptor buffers!)
@@ -50,7 +57,7 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Miss
     // TODO: change based on NVIDIA vs AMD vs Others?
     const work_group_dim = Dispatch1D.init(ctx);
 
-    const target_descriptor_layouts = ray_device_resources.getDescriptorSetLayouts(&device_resources);
+    const target_descriptor_layouts = ray_device_resources.getDescriptorSetLayouts(&device_resources[0]);
     const pipeline_layout = blk: {
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
@@ -105,7 +112,6 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Miss
         .pipeline = pipeline,
         .work_group_dim = work_group_dim,
         .ray_device_resources = ray_device_resources,
-        .descriptor_sets_view = ray_device_resources.getDescriptorSets(&device_resources),
     };
 }
 
@@ -121,6 +127,7 @@ pub fn deinit(self: MissRayPipeline, ctx: Context) void {
 pub fn appendPipelineCommands(
     self: MissRayPipeline,
     ctx: Context,
+    bounce_index: u32,
     command_buffer: vk.CommandBuffer,
 ) void {
     const zone = tracy.ZoneN(@src(), @typeName(MissRayPipeline) ++ " " ++ @src().fn_name);
@@ -165,19 +172,27 @@ pub fn appendPipelineCommands(
 
     ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
 
+    const resource_index = @rem(bounce_index, 2);
+    const descriptor_sets = get_desc_set_blk: {
+        if (resource_index == 0) {
+            break :get_desc_set_blk self.ray_device_resources.getDescriptorSets(&device_resources[0]);
+        } else {
+            break :get_desc_set_blk self.ray_device_resources.getDescriptorSets(&device_resources[1]);
+        }
+    };
     ctx.vkd.cmdBindDescriptorSets(
         command_buffer,
         .compute,
         self.pipeline_layout,
         0,
-        self.descriptor_sets_view.len,
-        &self.descriptor_sets_view,
+        descriptor_sets.len,
+        &descriptor_sets,
         0,
         undefined,
     );
 
-    const x_dispatch = @ceil(@as(f32, @floatFromInt(self.image_size.width * self.image_size.height)) /
-        @as(f32, @floatFromInt(self.work_group_dim.x))) + 1;
+    const x_dispatch = @ceil(self.ray_device_resources.target_image_info.width * self.ray_device_resources.target_image_info.height) /
+        @as(f32, @floatFromInt(self.work_group_dim.x)) + 1;
 
     ctx.vkd.cmdDispatch(command_buffer, @intFromFloat(x_dispatch), 1, 1);
 }

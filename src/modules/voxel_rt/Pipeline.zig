@@ -84,7 +84,6 @@ ray_command_buffers: vk.CommandBuffer,
 ray_device_resource: *RayDeviceResources,
 emit_ray_pipeline: EmitRayPipeline,
 traverse_ray_pipeline: TraverseRayPipeline,
-// active_hits_sort_pipeline: BubbleSortPipeline,
 scatter_ray_pipeline: ScatterRayPipeline,
 miss_ray_pipeline: MissRayPipeline,
 draw_ray_pipeline: DrawRayPipeline,
@@ -277,9 +276,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     var traverse_ray_pipeline = try TraverseRayPipeline.init(ctx, ray_device_resource);
     errdefer traverse_ray_pipeline.deinit(ctx);
 
-    // const active_hits_sort_pipeline = try BubbleSortPipeline.init(ctx, ray_device_resource);
-    // errdefer active_hits_sort_pipeline.deinit(ctx);
-
     const emit_ray_pipeline = try EmitRayPipeline.init(ctx, ray_device_resource);
     errdefer emit_ray_pipeline.deinit(ctx);
 
@@ -358,7 +354,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .ray_device_resource = ray_device_resource,
         .emit_ray_pipeline = emit_ray_pipeline,
         .traverse_ray_pipeline = traverse_ray_pipeline,
-        // .active_hits_sort_pipeline = active_hits_sort_pipeline,
         .scatter_ray_pipeline = scatter_ray_pipeline,
         .miss_ray_pipeline = miss_ray_pipeline,
         .draw_ray_pipeline = draw_ray_pipeline,
@@ -394,7 +389,6 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     self.draw_ray_pipeline.deinit(ctx);
     self.miss_ray_pipeline.deinit(ctx);
     self.scatter_ray_pipeline.deinit(ctx);
-    // self.active_hits_sort_pipeline.deinit(ctx);
     self.traverse_ray_pipeline.deinit(ctx);
     self.emit_ray_pipeline.deinit(ctx);
     self.ray_device_resource.deinit(ctx);
@@ -525,7 +519,6 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
     //
     const ray_tracing_pipeline_complete_semaphore = blk: {
         const max_bounces = @as(u32, @intCast(self.camera.d_camera.max_bounce));
-        _ = max_bounces;
 
         try ctx.vkd.resetCommandPool(ctx.logical_device, self.ray_command_pool, .{});
 
@@ -564,84 +557,26 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
             undefined,
         );
 
-        // for (0..max_bounces + 1) |_| {
-        self.traverse_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+        var bounce_index: u32 = 0;
+        while (bounce_index <= max_bounces) {
+            if (bounce_index > 0) {
+                self.ray_device_resource.resetRayLimits(ctx, self.ray_command_buffers);
+            }
+            self.traverse_ray_pipeline.appendPipelineCommands(ctx, bounce_index, self.ray_command_buffers);
+            self.scatter_ray_pipeline.appendPipelineCommands(ctx, bounce_index, self.ray_command_buffers);
 
-        // self.active_hits_sort_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
-        //     self.miss_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
-        //     self.scatter_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+            self.miss_ray_pipeline.appendPipelineCommands(ctx, bounce_index, self.ray_command_buffers);
+            self.draw_ray_pipeline.appendPipelineCommands(ctx, bounce_index, .draw_miss, bounce_index == 0, self.ray_command_buffers);
 
-        //     {
-        //         {
-        //             const limits_memory_barrier = [_]vk.BufferMemoryBarrier{.{
-        //                 .src_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-        //                 .dst_access_mask = .{ .transfer_write_bit = true },
-        //                 .src_queue_family_index = ctx.queue_indices.compute,
-        //                 .dst_queue_family_index = ctx.queue_indices.compute,
-        //                 .buffer = self.ray_buffer.buffer,
-        //                 .offset = 0,
-        //                 .size = @sizeOf(ray_pipeline_types.RayHitLimits),
-        //             }};
-        //             ctx.vkd.cmdPipelineBarrier(
-        //                 self.ray_command_buffers,
-        //                 .{ .compute_shader_bit = true },
-        //                 .{ .transfer_bit = true },
-        //                 .{},
-        //                 0,
-        //                 undefined,
-        //                 limits_memory_barrier.len,
-        //                 &limits_memory_barrier,
-        //                 0,
-        //                 undefined,
-        //             );
-        //         }
-
-        //         var copy_region = vk.BufferCopy{
-        //             .src_offset = @offsetOf(ray_pipeline_types.RayHitLimits, "out_hit_count"),
-        //             .dst_offset = @offsetOf(ray_pipeline_types.RayHitLimits, "in_hit_count"),
-        //             .size = @sizeOf(c_uint),
-        //         };
-        //         ctx.vkd.cmdCopyBuffer(
-        //             self.ray_command_buffers,
-        //             self.ray_buffer.buffer,
-        //             self.ray_buffer.buffer,
-        //             1,
-        //             @ptrCast(&copy_region),
-        //         );
-        //         ctx.vkd.cmdFillBuffer(
-        //             self.ray_command_buffers,
-        //             self.ray_buffer.buffer,
-        //             @offsetOf(ray_pipeline_types.RayHitLimits, "out_hit_count"),
-        //             @offsetOf(ray_pipeline_types.RayHitLimits, "out_miss_count") + @sizeOf(c_uint),
-        //             0,
-        //         );
-
-        //         {
-        //             const limits_memory_barrier = [_]vk.BufferMemoryBarrier{.{
-        //                 .src_access_mask = .{ .transfer_write_bit = true },
-        //                 .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-        //                 .src_queue_family_index = ctx.queue_indices.compute,
-        //                 .dst_queue_family_index = ctx.queue_indices.compute,
-        //                 .buffer = self.ray_buffer.buffer,
-        //                 .offset = 0,
-        //                 .size = @sizeOf(ray_pipeline_types.RayHitLimits),
-        //             }};
-        //             ctx.vkd.cmdPipelineBarrier(
-        //                 self.ray_command_buffers,
-        //                 .{ .transfer_bit = true },
-        //                 .{ .compute_shader_bit = true },
-        //                 .{},
-        //                 0,
-        //                 undefined,
-        //                 limits_memory_barrier.len,
-        //                 &limits_memory_barrier,
-        //                 0,
-        //                 undefined,
-        //             );
-        //         }
-        //     }
-        // }
-        self.draw_ray_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+            bounce_index += 1;
+        }
+        self.draw_ray_pipeline.appendPipelineCommands(
+            ctx,
+            bounce_index - 1,
+            .draw_hit,
+            false,
+            self.ray_command_buffers,
+        );
 
         try ctx.vkd.endCommandBuffer(self.ray_command_buffers);
 

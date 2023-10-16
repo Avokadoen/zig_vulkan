@@ -31,10 +31,6 @@ struct Ray {
 struct RayHit {
     uint normal_4b_and_material_index_28b;
 };
-// Must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig RayActive
-struct RayActive {
-    bool is_active;  
-};
 // Must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig RayShading
 struct RayShading {
     vec3 color;
@@ -46,10 +42,10 @@ struct RayHash {
 };
 
 const vec3 normal_map[] = vec3[](
-    vec3( 1,  0,  0),
+    vec3(-1,  0,  0),
     vec3( 0,  1,  0),
     vec3( 0,  0,  1),
-    vec3(-1,  0,  0),
+    vec3( 1,  0,  0),
     vec3( 0, -1,  0),
     vec3( 0,  0, -1)
 );

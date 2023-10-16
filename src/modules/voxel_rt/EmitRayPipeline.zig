@@ -24,9 +24,9 @@ const Resources = RayDeviceResources.Resources;
 
 const device_resources = [_]Resources{
     .ray_pipeline_limits,
-    .ray,
-    .ray_hit,
-    .ray_shading,
+    .ray_0,
+    .ray_hit_0,
+    .ray_shading_0,
 };
 
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
@@ -38,7 +38,6 @@ pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
 
 ray_device_resources: *const RayDeviceResources,
-descriptor_sets_view: [device_resources.len]vk.DescriptorSet,
 
 work_group_dim: Dispatch1D,
 
@@ -116,7 +115,6 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Emit
         .pipeline_layout = pipeline_layout,
         .pipeline = pipeline,
         .ray_device_resources = ray_device_resources,
-        .descriptor_sets_view = ray_device_resources.getDescriptorSets(&device_resources),
         .work_group_dim = work_group_dim,
     };
 }
@@ -164,14 +162,14 @@ pub fn appendPipelineCommands(
         &camera.d_camera,
     );
 
-    // bind target texture
+    const descriptor_sets = self.ray_device_resources.getDescriptorSets(&device_resources);
     ctx.vkd.cmdBindDescriptorSets(
         command_buffer,
         .compute,
         self.pipeline_layout,
         0,
-        self.descriptor_sets_view.len,
-        &self.descriptor_sets_view,
+        descriptor_sets.len,
+        &descriptor_sets,
         0,
         undefined,
     );

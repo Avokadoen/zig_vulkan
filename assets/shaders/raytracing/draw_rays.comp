@@ -3,11 +3,17 @@
 #extension GL_EXT_debug_printf : disable
 // debugPrintfEXT("hello world %f", 1.0);
 
-// This extension is strictly not required for vulkan 1.2 target, but is used to silence validator...
-#extension GL_GOOGLE_include_directive : enable
 #include "ray_commons.glsl"
 
 layout(local_size_x_id = 0, local_size_y = 1, local_size_z = 1) in;
+
+const uint DRAW_OP_DRAW_MISS = 1;
+const uint DRAW_OP_DRAW_HIT = 2;
+
+layout (push_constant) readonly uniform PushConstants {
+    uint draw_op;
+} push_constant;
+
 
 layout(Rgba8, set = 0, binding = 0) uniform writeonly image2D img_output;
 
@@ -31,8 +37,20 @@ vec3 Tonemap_ACES(vec3 x) {
 }
 
 void main() {
-    const uint index = gl_GlobalInvocationID.x;
-    if (index > limits.emitted_hit_count) {
+    uint index;
+    uint index_limit;
+
+    if (push_constant.draw_op == DRAW_OP_DRAW_MISS) {
+        index = gl_GlobalInvocationID.x + limits.out_hit_count;
+        index_limit = limits.in_hit_count;
+    } else if (push_constant.draw_op == DRAW_OP_DRAW_HIT) {
+        index = gl_GlobalInvocationID.x;
+        index_limit = limits.out_hit_count;
+    } else {
+        return; 
+    }
+
+    if (index >= index_limit) {
         return;
     }
 
