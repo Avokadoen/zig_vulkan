@@ -25,7 +25,7 @@ struct Ray {
     vec3 origin;
     float internal_reflection;
     vec3 direction;
-    float t_value;
+    float t_value; // TOOD: move it's own buffer and track total_t_value as well
 };
 // Must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig RayHit
 struct RayHit {
@@ -41,14 +41,12 @@ struct RayHash {
     uint value;
 };
 
-const vec3 normal_map[] = vec3[](
-    vec3(-1,  0,  0),
-    vec3( 0,  1,  0),
-    vec3( 0,  0,  1),
-    vec3( 1,  0,  0),
-    vec3( 0, -1,  0),
-    vec3( 0,  0, -1)
-);
+const uint X_AXIS_LEFT_INDEX = 0;
+const uint X_AXIS_RIGHT_INDEX = 3;
+const uint Y_AXIS_DOWN_INDEX = 1;
+const uint Y_AXIS_UP_INDEX = 4;
+const uint Z_AXIS_FRONT_INDEX = 2;
+const uint Z_AXIS_BACK_INDEX = 5;
 
 
 vec3 RayAt(Ray r, float t) {

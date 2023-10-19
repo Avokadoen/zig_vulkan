@@ -175,7 +175,7 @@ bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_mat
 
     // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
    	const vec3 ray_delta = abs(inv_ray_dir);
-	const vec3 ray_step = sign(inv_ray_dir);
+	const vec3 ray_step = sign(r.direction);
     
     vec3 hit_point = RayAt(r, global_t_value);
 
@@ -183,6 +183,13 @@ bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_mat
     const vec3 fposition = (hit_point - g_min) / g_scale;
     const vec3 intersection_delta = floor(fposition) - fposition;
     vec3 side_dist = fma(ray_step, intersection_delta, ray_step * 0.5 + 0.5) * ray_delta;
+
+    // TODO: make this line more readable, only calculate once 
+    const uvec3 normal_axis_bits = uvec3(
+        ((ray_step.x < 0) ? X_AXIS_RIGHT_INDEX : X_AXIS_LEFT_INDEX) << 28,
+        ((ray_step.y < 0) ? Y_AXIS_UP_INDEX : Y_AXIS_DOWN_INDEX) << 28,
+        ((ray_step.z < 0) ? Z_AXIS_FRONT_INDEX : Z_AXIS_FRONT_INDEX) << 28
+    );
 
     float t_value = 0;
     vec3 local_position = floor(fposition + 0.);
@@ -218,11 +225,36 @@ bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_mat
         // TODO: With ray coherency, we should probably just always use DDA branches since they will be mostly coherent and the sorting
         // instruction cost might catch up without it
 
+        
         // progress position with DDA
-        const vec3 mask = vec3(lessThanEqual(side_dist.xyz, min(side_dist.yzx, side_dist.zxy)));
-        t_value = vec3Reduce(mask * side_dist) * g_scale.x;
-        side_dist += mask * ray_delta;
-        local_position += mask * ray_step;
+        if (side_dist.x < side_dist.y) {
+            if (side_dist.x < side_dist.z) {
+                t_value = side_dist.x * g_scale.x;
+                side_dist.x += ray_delta.x;
+                local_position.x += ray_step.x;
+                normal_4b_and_material_index_28b = normal_axis_bits.x;
+            }
+            else {
+                t_value = side_dist.z * g_scale.x;
+                side_dist.z += ray_delta.z;
+                local_position.z += ray_step.z;
+                normal_4b_and_material_index_28b = normal_axis_bits.z;
+            }
+        }
+        else {
+            if (side_dist.y < side_dist.z) {
+                t_value = side_dist.y * g_scale.x;
+                side_dist.y += ray_delta.y;
+                local_position.y += ray_step.y;
+                normal_4b_and_material_index_28b = normal_axis_bits.y;
+            }
+            else {
+                t_value = side_dist.z * g_scale.x;
+                side_dist.z += ray_delta.z;
+                local_position.z += ray_step.z;
+                normal_4b_and_material_index_28b = normal_axis_bits.z;
+            }
+        }
     }
     
     return false;
@@ -249,11 +281,12 @@ bool BrickHit(
     const vec3 intersection_delta = floor(fposition) - fposition;
     vec3 side_dist = fma(ray_step, intersection_delta, ray_step * 0.5 + 0.5) * ray_delta;
 
+    
     // TODO: make this line more readable, only calculate once 
     const uvec3 normal_axis_bits = uvec3(
-        ((ray_step.x < 0) ? 3 : 0) << 28,
-        ((ray_step.y < 0) ? 4 : 1) << 28,
-        ((ray_step.z < 0) ? 5 : 2) << 28
+        ((ray_step.x < 0) ? X_AXIS_RIGHT_INDEX : X_AXIS_LEFT_INDEX) << 28,
+        ((ray_step.y < 0) ? Y_AXIS_UP_INDEX : Y_AXIS_DOWN_INDEX) << 28,
+        ((ray_step.z < 0) ? Z_AXIS_FRONT_INDEX : Z_AXIS_FRONT_INDEX) << 28
     );
 
     vec3 local_position = floor(fposition + 0.);
@@ -274,28 +307,44 @@ bool BrickHit(
         const bool hit_voxel = ((bitfield_final_entry & (1 << mask_offset)) != 0) && t_value >= local_t_min;
         if (hit_voxel) {
             const uint material_index = 0; // TODO
-            const float intersect_t = global_t_value - 0.01 * voxel_scale.x;
 
-            // update ray with new values for writeback
-            r.t_value += intersect_t ;
+            // update ray with new t value for writeback
+            r.t_value += global_t_value + t_value;
 
             // register material index and the normal for the hit
             normal_4b_and_material_index_28b |= material_index;
             return true;
         }
 
-        // TODO: With ray coherency, we should probably just always use DDA branches since they will be mostly coherent and the sorting
-        // instruction cost might catch up without it
-
         // progress position with DDA
-        const bvec3 mask = lessThanEqual(side_dist.xyz, min(side_dist.yzx, side_dist.zxy));
-        const vec3 fmask = vec3(mask);
-        t_value = vec3Reduce(fmask * side_dist) * voxel_scale.x;
-        side_dist += fmask * ray_delta;
-        local_position += fmask * ray_step;
-        
-        // overwrite all bits with normal bits, material index is not defined yet.
-        normal_4b_and_material_index_28b = normal_axis_bits.x * uint(mask.x) + normal_axis_bits.y * uint(mask.y) + normal_axis_bits.z * uint(mask.z);
+        if (side_dist.x < side_dist.y) {
+            if (side_dist.x < side_dist.z) {
+                t_value = side_dist.x * voxel_scale.x;
+                side_dist.x += ray_delta.x;
+                local_position.x += ray_step.x;
+                normal_4b_and_material_index_28b = normal_axis_bits.x;
+            }
+            else {
+                t_value = side_dist.z * voxel_scale.x;
+                side_dist.z += ray_delta.z;
+                local_position.z += ray_step.z;
+                normal_4b_and_material_index_28b = normal_axis_bits.z;
+            }
+        }
+        else {
+            if (side_dist.y < side_dist.z) {
+                t_value = side_dist.y * voxel_scale.x;
+                side_dist.y += ray_delta.y;
+                local_position.y += ray_step.y;
+                normal_4b_and_material_index_28b = normal_axis_bits.y;
+            }
+            else {
+                t_value = side_dist.z * voxel_scale.x;
+                side_dist.z += ray_delta.z;
+                local_position.z += ray_step.z;
+                normal_4b_and_material_index_28b = normal_axis_bits.z;
+            }
+        }
     } 
 
     return false;

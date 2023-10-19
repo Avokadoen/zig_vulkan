@@ -3,6 +3,7 @@ TODO:
 
 [ ] update host main pipeline
 [ ] panic if max sets < 8
+[ ] track total t_value (we reset it in scatter for now for correct position)
 
 [ ] indirect dispatch
 
