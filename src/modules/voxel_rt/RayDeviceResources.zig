@@ -13,10 +13,10 @@ const ray_pipeline_types = @import("./ray_pipeline_types.zig");
 const ImageInfo = ray_pipeline_types.ImageInfo;
 const RayHitLimits = ray_pipeline_types.RayHitLimits;
 const BrickGridState = ray_pipeline_types.BrickGridState;
+const BrickIndex = ray_pipeline_types.BrickIndex;
 const Brick = ray_pipeline_types.Brick;
 const Ray = ray_pipeline_types.Ray;
 const RayHit = ray_pipeline_types.RayHit;
-const RayActive = ray_pipeline_types.RayActive;
 const RayShading = ray_pipeline_types.RayShading;
 const RayHash = ray_pipeline_types.RayHash;
 
@@ -37,6 +37,7 @@ pub const Resources = enum(u32) {
 
     // brick buffer info
     bricks_set,
+    brick_indices,
     bricks,
 
     // draw image
@@ -45,12 +46,12 @@ pub const Resources = enum(u32) {
 
 const ray_info_count = @intFromEnum(Resources.ray_hash_1) + 1;
 const brick_info_count = (@intFromEnum(Resources.bricks) + 1) - ray_info_count;
-const image_info_count = (@intFromEnum(Resources.draw_image) + 1) - brick_info_count - ray_info_count;
+const image_info_count = (@intFromEnum(Resources.draw_image) + 1) - (brick_info_count + ray_info_count);
 
 // each individual data need some buffer info
 const buffer_info_count = @typeInfo(Resources).Enum.fields.len;
 // we use one set per ray buffer type and one set for the brick grid data
-const descriptor_set_count = ray_info_count + (brick_info_count - 1) + image_info_count;
+const descriptor_set_count = ray_info_count + (brick_info_count - 2) + image_info_count;
 const descriptor_buffer_count = buffer_info_count - image_info_count;
 
 const RayDeviceResources = @This();
@@ -162,7 +163,7 @@ pub fn init(
             created_layouts += 1;
         }
 
-        // for brick layout we use one set with 2 bindings
+        // for brick layout we use one set with 3 bindings
         {
             const bindings = [_]vk.DescriptorSetLayoutBinding{ .{
                 .binding = 0,
@@ -174,6 +175,14 @@ pub fn init(
                 .p_immutable_samplers = null,
             }, .{
                 .binding = 1,
+                .descriptor_type = .storage_buffer,
+                .descriptor_count = 1,
+                .stage_flags = .{
+                    .compute_bit = true,
+                },
+                .p_immutable_samplers = null,
+            }, .{
+                .binding = 2,
                 .descriptor_type = .storage_buffer,
                 .descriptor_count = 1,
                 .stage_flags = .{
@@ -261,10 +270,12 @@ pub fn init(
             ray_count * @sizeOf(RayShading),
             // ray hashes 1
             ray_count * @sizeOf(RayHash),
-            // bricks_set
+            // bricks set
             try std.math.divCeil(vk.DeviceSize, total_bricks, 8),
+            // bricks indices
+            total_bricks * @sizeOf(BrickIndex),
             // bricks
-            @sizeOf(Brick) * total_bricks,
+            total_bricks * @sizeOf(Brick),
         };
 
         for (&infos, ranges, 0..) |*info, range, info_index| {
@@ -306,8 +317,9 @@ pub fn init(
                 };
             }
 
+            const brick_desc_set_index = ray_info_count;
             writes[@intFromEnum(Resources.bricks_set)] = vk.WriteDescriptorSet{
-                .dst_set = target_descriptor_sets[ray_info_count],
+                .dst_set = target_descriptor_sets[brick_desc_set_index],
                 .dst_binding = 0,
                 .dst_array_element = 0,
                 .descriptor_count = 1,
@@ -316,9 +328,20 @@ pub fn init(
                 .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&infos[@intFromEnum(Resources.bricks_set)])),
                 .p_texel_buffer_view = undefined,
             };
-            writes[@intFromEnum(Resources.bricks)] = vk.WriteDescriptorSet{
-                .dst_set = target_descriptor_sets[ray_info_count],
+
+            writes[@intFromEnum(Resources.brick_indices)] = vk.WriteDescriptorSet{
+                .dst_set = target_descriptor_sets[brick_desc_set_index],
                 .dst_binding = 1,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&infos[@intFromEnum(Resources.brick_indices)])),
+                .p_texel_buffer_view = undefined,
+            };
+            writes[@intFromEnum(Resources.bricks)] = vk.WriteDescriptorSet{
+                .dst_set = target_descriptor_sets[brick_desc_set_index],
+                .dst_binding = 2,
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
@@ -327,7 +350,7 @@ pub fn init(
                 .p_texel_buffer_view = undefined,
             };
             writes[@intFromEnum(Resources.draw_image)] = vk.WriteDescriptorSet{
-                .dst_set = target_descriptor_sets[ray_info_count + 1],
+                .dst_set = target_descriptor_sets[brick_desc_set_index + 1],
                 .dst_binding = 0,
                 .dst_array_element = 0,
                 .descriptor_count = 1,
@@ -368,11 +391,16 @@ pub fn init(
         test_brick_one,
         test_brick_all,
         test_brick_row,
-        test_brick_one,
-        test_brick_one,
-        test_brick_one,
-        test_brick_all,
-        test_brick_one,
+    });
+    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@intFromEnum(Resources.brick_indices)].offset, BrickIndex, &.{
+        BrickIndex{ .status = .loaded, .request_count = 10, .index = 0 },
+        BrickIndex{ .status = .loaded, .request_count = 10, .index = 1 },
+        BrickIndex{ .status = .loaded, .request_count = 10, .index = 2 },
+        BrickIndex{ .status = .loaded, .request_count = 10, .index = 0 },
+        BrickIndex{ .status = .loaded, .request_count = 10, .index = 0 },
+        BrickIndex{ .status = .loaded, .request_count = 10, .index = 0 },
+        BrickIndex{ .status = .loaded, .request_count = 10, .index = 1 },
+        BrickIndex{ .status = .loaded, .request_count = 10, .index = 0 },
     });
     try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@intFromEnum(Resources.bricks_set)].offset, u8, &.{
         1 << 7 | 1 << 6 | 0 << 5 | 1 << 4 | 1 << 3 | 1 << 2 | 1 << 1 | 1 << 0,
@@ -410,7 +438,7 @@ pub inline fn getDescriptorSets(self: RayDeviceResources, comptime resources: []
     inline for (resources, &descriptor_sets) |resource, *descriptor_set| {
         const index = get_index_blk: {
             if (@intFromEnum(resource) >= @intFromEnum(Resources.bricks)) {
-                break :get_index_blk @intFromEnum(resource) - 1;
+                break :get_index_blk @intFromEnum(resource) - 2;
             }
             break :get_index_blk @intFromEnum(resource);
         };
@@ -425,7 +453,7 @@ pub inline fn getDescriptorSetLayouts(self: RayDeviceResources, comptime resourc
     inline for (resources, &descriptor_layouts) |resource, *descriptor_layout| {
         const index = get_index_blk: {
             if (@intFromEnum(resource) >= @intFromEnum(Resources.bricks)) {
-                break :get_index_blk @intFromEnum(resource) - 1;
+                break :get_index_blk @intFromEnum(resource) - 2;
             }
             break :get_index_blk @intFromEnum(resource);
         };

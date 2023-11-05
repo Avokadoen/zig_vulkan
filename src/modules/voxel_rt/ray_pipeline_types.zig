@@ -14,6 +14,7 @@ pub const RayHitLimits = extern struct {
     out_miss_count: c_uint,
 };
 
+// must be kept in sync with assets/shaders/raytracing/traverse_rays.comp BrickGridState
 pub const BrickGridState = extern struct {
     /// how many bricks in each axis
     dim: [3]f32,
@@ -22,27 +23,40 @@ pub const BrickGridState = extern struct {
     min_point: [3]f32,
     scale: f32,
 };
+pub const BrickIndex = packed struct {
+    pub const Status = enum(u1) {
+        unloaded = 0,
+        loaded = 1,
+    };
+    status: Status,
+    request_count: u7,
+    index: u24,
+};
+// must be kept in sync with assets/shaders/raytracing/ray_commons.glsl BrickRequest
+pub const BrickRequest = extern struct {
+    index: c_uint,
+};
 pub const Brick = packed struct {
     solid_mask: u512,
 };
 
-// must be kept in sync with assets/shaders/raytracing/ray_commonds.glsl Ray
+// must be kept in sync with assets/shaders/raytracing/ray_commons.glsl Ray
 pub const Ray = extern struct {
     origin: [3]f32,
     internal_reflection: f32,
     direction: [3]f32,
     t_value: f32,
 };
-// must be kept in sync with assets/shaders/raytracing/ray_commonds.glsl RayHit
+// must be kept in sync with assets/shaders/raytracing/ray_commons.glsl RayHit
 pub const RayHit = extern struct {
     normal_4b_and_material_index_28b: c_uint,
 };
-// must be kept in sync with assets/shaders/raytracing/ray_commonds.glsl RayShading
+// must be kept in sync with assets/shaders/raytracing/ray_commons.glsl RayShading
 pub const RayShading = extern struct {
     color: [3]f32,
     pixel_coord: c_uint,
 };
-// must be kept in sync with assets/shaders/raytracing/ray_commonds.glsl RayHash
+// must be kept in sync with assets/shaders/raytracing/ray_commons.glsl RayHash
 pub const RayHash = extern struct {
     value: c_uint,
 };

@@ -10,7 +10,7 @@ const shaders = @import("shaders");
 const vk = @import("vulkan");
 const render = @import("../render.zig");
 const Context = render.Context;
-const Texture = render.Texture;
+const texture = render.texture;
 const vk_utils = render.vk_utils;
 const memory = render.memory;
 
@@ -43,7 +43,7 @@ pub const Config = struct {
     metal_buffer: u64 = 256,
     dielectric_buffer: u64 = 256,
 
-    staging_buffers: usize = 2,
+    staging_buffers: usize = 1,
     gfx_pipeline_config: GraphicsPipeline.Config = .{},
 };
 
@@ -163,8 +163,8 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
 
     // Transition from undefined -> general -> shader_read_only_optimal. This is to silence validation layers (compared to undefined to read only which would be invalid)
     // The image will be transitioned back to general when we render with a compute job, and then to shader_read_only_optimal as it is sampled in a fragment shader.
-    try Texture.transitionImageLayout(ctx, init_command_pool, compute_image, .undefined, .general);
-    try Texture.transitionImageLayout(ctx, init_command_pool, compute_image, .general, .shader_read_only_optimal);
+    try texture.transitionImageLayout(ctx, init_command_pool, compute_image, .undefined, .general);
+    try texture.transitionImageLayout(ctx, init_command_pool, compute_image, .general, .shader_read_only_optimal);
 
     const compute_image_view = blk: {
         const image_view_info = vk.ImageViewCreateInfo{

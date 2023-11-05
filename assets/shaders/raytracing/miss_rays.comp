@@ -26,6 +26,6 @@ void main() {
     Ray ray = rays[index];
 
     // calculate some sky color in the event of a miss
-    float t = 0.5 * (-ray.direction.y + 1.0);
+    float t = 0.5 * (ray.direction.y + 1.0);
     ray_shadings[index].color += fma(vec3(1.0 - t), vec3(1.0), t * vec3(0.5, 0.7, 1.0));
 }

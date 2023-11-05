@@ -8,6 +8,12 @@ const uint IGNORE_MAT_METAL = MAT_METAL;
 const uint IGNORE_MAT_DIELECTRIC = MAT_DIELECTRIC;
 const uint IGNORE_MAT_NONE = 3;
 
+// See glsl 4.40 spec chapter 4.7.1 for info on infinity
+// https://www.khronos.org/registry/OpenGL/specs/gl/GLSLangSpec.4.40.pdf
+const float infinity = 0.001 / 0;
+const float pi = 3.14159265358; // 3.1415926535897932385
+const float faccuracy = 0.000001;
+
 // Must be kept in sync with  src/modules/voxel_rt/ray_pipeline_types.zig
 struct HitLimits {
     // How many hit records were emitted by the emit stage for the current frame
@@ -41,13 +47,15 @@ struct RayHash {
     uint value;
 };
 
-const uint X_AXIS_LEFT_INDEX = 0;
-const uint X_AXIS_RIGHT_INDEX = 3;
-const uint Y_AXIS_DOWN_INDEX = 1;
-const uint Y_AXIS_UP_INDEX = 4;
-const uint Z_AXIS_FRONT_INDEX = 2;
-const uint Z_AXIS_BACK_INDEX = 5;
+const uint AXIS_X_LEFT_INDEX = 0;
+const uint AXIS_X_RIGHT_INDEX = 3;
+const uint AXIS_Y_DOWN_INDEX = 1;
+const uint AXIS_Y_UP_INDEX = 4;
+const uint AXIS_Z_FRONT_INDEX = 2;
+const uint AXIS_Z_BACK_INDEX = 5;
 
+const uint BRICK_STATUS_UNLOADED = 0;
+const uint BRICK_STATUS_LOADED = 1;
 
 vec3 RayAt(Ray r, float t) {
     // instruction for: t * dir + origin

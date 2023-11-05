@@ -7,12 +7,6 @@
 
 layout(local_size_x_id = 0, local_size_y = 1, local_size_z = 1) in;
 
-// See glsl 4.40 spec chapter 4.7.1 for info on infinity
-// https://www.khronos.org/registry/OpenGL/specs/gl/GLSLangSpec.4.40.pdf
-const float infinity = 0.001 / 0;
-const float pi = 3.14159265358; // 3.1415926535897932385
-const float faccuracy = 0.000001;
-
 layout (std430, set = 0, binding = 0) buffer HitLimitsBuffer {
     HitLimits limits;
 };
@@ -40,14 +34,19 @@ layout (std430, set = 5, binding = 0) writeonly buffer OutRayShadingBuffer {
 layout (std430, set = 6, binding = 0) readonly buffer BrickSetBuffer {
     uint brick_set_bits[];
 };
+layout (std430, set = 6, binding = 1) buffer BrickIndex {
+    //
+    uint brick_index_24b_req_count_7b_status_1b[];
+};
 struct Brick {
     // 512 bit voxel set mask
     uint solid_mask[16];
 };
-layout (std430, set = 6, binding = 1) readonly buffer BrickBuffer {
+layout (std430, set = 6, binding = 2) readonly buffer BrickBuffer {
     Brick bricks[];
 };
 
+// Must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig BrickGridState
 layout (push_constant) readonly uniform BrickGridState {
     // how many bricks in each axis
     vec3 dim;
@@ -66,7 +65,7 @@ bool BrickHit(
     float t_min, 
     float t_max, 
     float global_t_value, 
-    int brick_index, 
+    uint brick_index, 
     vec3 brick_position, 
     inout uint normal_4b_and_material_index_28b
 );
@@ -186,9 +185,9 @@ bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_mat
 
     // TODO: make this line more readable, only calculate once 
     const uvec3 normal_axis_bits = uvec3(
-        ((ray_step.x < 0) ? X_AXIS_RIGHT_INDEX : X_AXIS_LEFT_INDEX) << 28,
-        ((ray_step.y < 0) ? Y_AXIS_UP_INDEX : Y_AXIS_DOWN_INDEX) << 28,
-        ((ray_step.z < 0) ? Z_AXIS_FRONT_INDEX : Z_AXIS_FRONT_INDEX) << 28
+        ((ray_step.x < 0) ? AXIS_X_RIGHT_INDEX : AXIS_X_LEFT_INDEX) << 28,
+        ((ray_step.y < 0) ? AXIS_Y_UP_INDEX : AXIS_Y_DOWN_INDEX) << 28,
+        ((ray_step.z < 0) ? AXIS_Z_FRONT_INDEX : AXIS_Z_FRONT_INDEX) << 28
     );
 
     float t_value = 0;
@@ -198,33 +197,49 @@ bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_mat
         && all(lessThan(local_position, g_dim)) 
         && global_t_value <= t_max
     ) { 
-        const int grid_index = int(floor(local_position.x + g_dim.x * (local_position.z + g_dim.z * local_position.y)));
+        const uint grid_index = uint(floor(local_position.x + g_dim.x * (local_position.z + g_dim.z * local_position.y)));
         
         // extract the bit for this brick and check if it is set 
-        if (brick_set_bits[grid_index/32]%32 != 0) {
-            // Convert local position to the world space coordinate for the brick
-            vec3 brick_min = fma(local_position, g_scale, brick_grid.min_point);
-            global_t_value = t_value + grid_t_min + 0.01 * g_scale.x;
-            // check if ray hits any voxel in the brick
-            if (BrickHit(
-                r, 
-                ray_step, 
-                ray_delta, 
-                g_scale, 
-                grid_t_min, 
-                t_max, 
-                global_t_value, 
-                grid_index, 
-                brick_min, 
-                normal_4b_and_material_index_28b
-            )) {
-                return true;
+        const uint set_index = grid_index / 32;
+        const uint set_bit_offset = uint(mod(grid_index, 32));
+        const uint set_bits = brick_set_bits[set_index];
+        const uint set_bit = set_bits & (1 << set_bit_offset);
+        
+        if (set_bit != 0) {
+            uint brick_index_bits = brick_index_24b_req_count_7b_status_1b[grid_index];
+            const uint brick_status = bitfieldExtract(brick_index_bits, 0, 1);
+
+            // always increment the req_count, ignore RC and just increment it atleast once
+            const uint req_count = bitfieldExtract(brick_index_bits, 1, 7);
+            if (req_count < 128) {
+                brick_index_24b_req_count_7b_status_1b[grid_index] = bitfieldInsert(brick_index_bits, req_count + 1, 1, 7);
+            }
+
+            if (brick_status == BRICK_STATUS_LOADED) {
+                const uint brick_index = bitfieldExtract(brick_index_bits, 8, 24);
+                // convert local position to the world space coordinate for the brick
+                vec3 brick_min = fma(local_position, g_scale, brick_grid.min_point);
+                global_t_value = t_value + grid_t_min + 0.01 * g_scale.x;
+                // check if ray hits any voxel in the brick
+                if (BrickHit(
+                    r,
+                    ray_step,
+                    ray_delta,
+                    g_scale,
+                    grid_t_min,
+                    t_max,
+                    global_t_value,
+                    brick_index,
+                    brick_min,
+                    normal_4b_and_material_index_28b
+                )) {
+                    return true;
+                }
+            } else {
+                // wait for brick to be loaded before we trace this grid section
+                return false;
             }
         }
-
-        // TODO: With ray coherency, we should probably just always use DDA branches since they will be mostly coherent and the sorting
-        // instruction cost might catch up without it
-
         
         // progress position with DDA
         if (side_dist.x < side_dist.y) {
@@ -268,7 +283,7 @@ bool BrickHit(
     float t_min, 
     float t_max, 
     float global_t_value, 
-    int brick_index, 
+    uint brick_index, 
     vec3 brick_position, 
     inout uint normal_4b_and_material_index_28b
 ) {
@@ -284,9 +299,9 @@ bool BrickHit(
     
     // TODO: make this line more readable, only calculate once 
     const uvec3 normal_axis_bits = uvec3(
-        ((ray_step.x < 0) ? X_AXIS_RIGHT_INDEX : X_AXIS_LEFT_INDEX) << 28,
-        ((ray_step.y < 0) ? Y_AXIS_UP_INDEX : Y_AXIS_DOWN_INDEX) << 28,
-        ((ray_step.z < 0) ? Z_AXIS_FRONT_INDEX : Z_AXIS_FRONT_INDEX) << 28
+        ((ray_step.x < 0) ? AXIS_X_RIGHT_INDEX : AXIS_X_LEFT_INDEX) << 28,
+        ((ray_step.y < 0) ? AXIS_Y_UP_INDEX : AXIS_Y_DOWN_INDEX) << 28,
+        ((ray_step.z < 0) ? AXIS_Z_FRONT_INDEX : AXIS_Z_FRONT_INDEX) << 28
     );
 
     vec3 local_position = floor(fposition + 0.);
