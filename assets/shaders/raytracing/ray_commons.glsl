@@ -26,6 +26,43 @@ struct HitLimits {
     uint out_miss_count;
 };
 
+// Must be kept in sync with  src/modules/voxel_rt/ray_pipeline_types.zig
+struct BrickLimits {
+    // Written by host 
+    uint max_load_request_count;
+    // How many bricks have been requested so far
+    uint load_request_count;
+    // Written by host 
+    uint max_unload_request_count;
+    // How many bricks have been requested so far
+    uint unload_request_count;
+    // How many active bricks can we have
+    uint max_active_bricks;
+    // How many active bricks do we have
+    uint active_bricks;
+};
+
+// Must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig BrickIndex.Status
+const int BRICK_STATUS_UNLOADED = 0;
+const int BRICK_STATUS_LOADING = 1;
+const int BRICK_STATUS_UNLOADING = 2;
+const int BRICK_STATUS_LOADED = 3;
+
+// Must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig BrickIndex
+const int BRICK_INDEX_STATUS_BITS = 2;
+const int BRICK_INDEX_STATUS_OFFSET = 0;
+const int BRICK_INDEX_REQUEST_COUNT_BITS = 8;
+const int BRICK_INDEX_REQUEST_COUNT_OFFSET = BRICK_INDEX_STATUS_BITS + BRICK_INDEX_STATUS_OFFSET;
+const int BRICK_INDEX_INDEX_BITS = 22;
+const int BRICK_INDEX_INDEX_OFFSET = BRICK_INDEX_REQUEST_COUNT_BITS + BRICK_INDEX_REQUEST_COUNT_OFFSET;
+
+const int BRICK_INDEX_REQUEST_COUNT_MAX_VALUE = 2^BRICK_INDEX_REQUEST_COUNT_BITS;
+
+struct Brick {
+    // 512 bit voxel set mask
+    uint solid_mask[16];
+};
+
 // Must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig Ray
 struct Ray {
     vec3 origin;
@@ -53,9 +90,6 @@ const uint AXIS_Y_DOWN_INDEX = 1;
 const uint AXIS_Y_UP_INDEX = 4;
 const uint AXIS_Z_FRONT_INDEX = 2;
 const uint AXIS_Z_BACK_INDEX = 5;
-
-const uint BRICK_STATUS_UNLOADED = 0;
-const uint BRICK_STATUS_LOADED = 1;
 
 vec3 RayAt(Ray r, float t) {
     // instruction for: t * dir + origin

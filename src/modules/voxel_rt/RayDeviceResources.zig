@@ -393,14 +393,14 @@ pub fn init(
         test_brick_row,
     });
     try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@intFromEnum(Resources.brick_indices)].offset, BrickIndex, &.{
-        BrickIndex{ .status = .loaded, .request_count = 10, .index = 0 },
-        BrickIndex{ .status = .loaded, .request_count = 10, .index = 1 },
-        BrickIndex{ .status = .loaded, .request_count = 10, .index = 2 },
-        BrickIndex{ .status = .loaded, .request_count = 10, .index = 0 },
-        BrickIndex{ .status = .loaded, .request_count = 10, .index = 0 },
-        BrickIndex{ .status = .loaded, .request_count = 10, .index = 0 },
-        BrickIndex{ .status = .loaded, .request_count = 10, .index = 1 },
-        BrickIndex{ .status = .loaded, .request_count = 10, .index = 0 },
+        BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
+        BrickIndex{ .status = .loaded, .request_count = 100, .index = 1 },
+        BrickIndex{ .status = .loaded, .request_count = 100, .index = 2 },
+        BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
+        BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
+        BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
+        BrickIndex{ .status = .loaded, .request_count = 100, .index = 1 },
+        BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
     });
     try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@intFromEnum(Resources.bricks_set)].offset, u8, &.{
         1 << 7 | 1 << 6 | 0 << 5 | 1 << 4 | 1 << 3 | 1 << 2 | 1 << 1 | 1 << 0,

@@ -24,20 +24,37 @@ pub const BrickGridState = extern struct {
     scale: f32,
 };
 pub const BrickIndex = packed struct {
-    pub const Status = enum(u1) {
+    pub const Status = enum(u2) {
         unloaded = 0,
-        loaded = 1,
+        loading = 1,
+        unloading = 2,
+        loaded = 3,
     };
     status: Status,
-    request_count: u7,
-    index: u24,
+    request_count: u8,
+    index: u22,
 };
+pub const Brick = packed struct {
+    solid_mask: u512,
+};
+
 // must be kept in sync with assets/shaders/raytracing/ray_commons.glsl BrickRequest
 pub const BrickRequest = extern struct {
     index: c_uint,
 };
-pub const Brick = packed struct {
-    solid_mask: u512,
+pub const BrickLimits = extern struct {
+    // Written by host
+    max_load_request_count: c_uint,
+    // How many bricks have been requested so far
+    load_request_count: c_uint,
+    // Written by host
+    max_unload_request_count: c_uint,
+    // How many bricks have been requested so far
+    unload_request_count: c_uint,
+    // How many active bricks can we have
+    max_active_bricks: c_uint,
+    // How many active bricks do we have
+    active_bricks: c_uint,
 };
 
 // must be kept in sync with assets/shaders/raytracing/ray_commons.glsl Ray

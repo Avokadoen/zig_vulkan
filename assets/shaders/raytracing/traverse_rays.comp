@@ -35,12 +35,7 @@ layout (std430, set = 6, binding = 0) readonly buffer BrickSetBuffer {
     uint brick_set_bits[];
 };
 layout (std430, set = 6, binding = 1) buffer BrickIndex {
-    //
-    uint brick_index_24b_req_count_7b_status_1b[];
-};
-struct Brick {
-    // 512 bit voxel set mask
-    uint solid_mask[16];
+    uint brick_index_21b_req_count_7b_status_4b[];
 };
 layout (std430, set = 6, binding = 2) readonly buffer BrickBuffer {
     Brick bricks[];
@@ -206,17 +201,17 @@ bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_mat
         const uint set_bit = set_bits & (1 << set_bit_offset);
         
         if (set_bit != 0) {
-            uint brick_index_bits = brick_index_24b_req_count_7b_status_1b[grid_index];
-            const uint brick_status = bitfieldExtract(brick_index_bits, 0, 1);
+            const uint brick_index_bits = brick_index_21b_req_count_7b_status_4b[grid_index];
+            const uint brick_status = bitfieldExtract(brick_index_bits, BRICK_INDEX_STATUS_OFFSET, BRICK_INDEX_STATUS_BITS);
 
             // always increment the req_count, ignore RC and just increment it atleast once
-            const uint req_count = bitfieldExtract(brick_index_bits, 1, 7);
-            if (req_count < 128) {
-                brick_index_24b_req_count_7b_status_1b[grid_index] = bitfieldInsert(brick_index_bits, req_count + 1, 1, 7);
+            const uint req_count = bitfieldExtract(brick_index_bits, BRICK_INDEX_REQUEST_COUNT_OFFSET, BRICK_INDEX_REQUEST_COUNT_BITS);
+            if (req_count < BRICK_INDEX_REQUEST_COUNT_MAX_VALUE) {
+                brick_index_21b_req_count_7b_status_4b[grid_index] = bitfieldInsert(brick_index_bits, req_count + 1, BRICK_INDEX_REQUEST_COUNT_OFFSET, BRICK_INDEX_REQUEST_COUNT_BITS);
             }
 
             if (brick_status == BRICK_STATUS_LOADED) {
-                const uint brick_index = bitfieldExtract(brick_index_bits, 8, 24);
+                const uint brick_index = bitfieldExtract(brick_index_bits, BRICK_INDEX_INDEX_OFFSET, BRICK_INDEX_INDEX_BITS);
                 // convert local position to the world space coordinate for the brick
                 vec3 brick_min = fma(local_position, g_scale, brick_grid.min_point);
                 global_t_value = t_value + grid_t_min + 0.01 * g_scale.x;

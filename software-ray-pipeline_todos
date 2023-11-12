@@ -13,20 +13,18 @@
         * [x] move out cursor to begining of buffer
         * [x] hit data is stored in a buffer for a scatter shader to work with
         * [x] loop RayBufferInfo and BrickBufferInfo for descriptor creation
-        * [ ] Brick buffer should be index to actual brick data stored in separate buffer 
+        * [x] Brick buffer should be index to actual brick data stored in separate buffer 
         * [ ] fix bending cubes made apparent by larger grid scale (probably caused by incorrect t_value?)
     * [x] miss pipeline
-    * [ ] scatter pipeline
-        * [ ] ability to tie hit record
+    * [x] scatter pipeline
     * [x] draw ray pipeline
         * [x] resolve RC (flickering) and bottom of image missing output
         * [x] draw misses as well as hits ~~(requires another cursor) (just add some push constant)~~
 * [ ] potentially use a single command buffer? (only record it in individual buffers)
+    * [ ] use command buffer baking, re-record only on setting changes
 * [x] only one atomicAdd pr warp, use shared memory to share start index with threads that use thread id + warp offset to grab rays
 * [ ] t_min + t_max limits in gui and camera
-* [ ] shared resources set up
-* [ ] dedicated cursors for each pipelines to ensure race safety
-* [ ] rename draw_rays stage to draw
+* [x] shared resources set up
 * [ ] proccess rays independent of image_size: vk.Extent2D
 * [ ] Tone mapping with exposure step: https://bruop.github.io/exposure/
 * [ ] figure out sensible way of dealing with shadow rays
