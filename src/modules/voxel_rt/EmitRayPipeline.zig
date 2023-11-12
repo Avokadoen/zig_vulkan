@@ -20,9 +20,9 @@ const Ray = ray_types.Ray;
 const Dispatch1D = ray_types.Dispatch1D;
 
 const RayDeviceResources = @import("RayDeviceResources.zig");
-const Resources = RayDeviceResources.Resources;
+const DeviceOnlyResources = RayDeviceResources.DeviceOnlyResources;
 
-const device_resources = [_]Resources{
+const device_resources = [_]DeviceOnlyResources{
     .ray_pipeline_limits,
     .ray_0,
     .ray_hit_0,

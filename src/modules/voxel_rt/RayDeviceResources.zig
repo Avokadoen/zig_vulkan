@@ -21,7 +21,7 @@ const RayShading = ray_pipeline_types.RayShading;
 const RayHash = ray_pipeline_types.RayHash;
 
 // TODO: convert to a struct ...
-pub const Resources = enum(u32) {
+pub const DeviceOnlyResources = enum(u32) {
     // ray buffer info 0 (ping pong)
     ray_pipeline_limits,
     ray_0,
@@ -42,17 +42,18 @@ pub const Resources = enum(u32) {
 
     // draw image
     draw_image,
+
+    pub const ray_count = @intFromEnum(DeviceOnlyResources.ray_hash_1) + 1;
+    pub const brick_count = (@intFromEnum(DeviceOnlyResources.bricks) + 1) - ray_count;
+    pub const image_count = (@intFromEnum(DeviceOnlyResources.draw_image) + 1) - (brick_count + ray_count);
 };
 
-const ray_info_count = @intFromEnum(Resources.ray_hash_1) + 1;
-const brick_info_count = (@intFromEnum(Resources.bricks) + 1) - ray_info_count;
-const image_info_count = (@intFromEnum(Resources.draw_image) + 1) - (brick_info_count + ray_info_count);
-
 // each individual data need some buffer info
-const buffer_info_count = @typeInfo(Resources).Enum.fields.len;
+pub const buffer_info_count = @typeInfo(DeviceOnlyResources).Enum.fields.len;
+
 // we use one set per ray buffer type and one set for the brick grid data
-const descriptor_set_count = ray_info_count + (brick_info_count - 2) + image_info_count;
-const descriptor_buffer_count = buffer_info_count - image_info_count;
+pub const descriptor_set_count = DeviceOnlyResources.ray_count + (DeviceOnlyResources.brick_count - 2) + DeviceOnlyResources.image_count;
+pub const descriptor_buffer_count = buffer_info_count - DeviceOnlyResources.image_count;
 
 const RayDeviceResources = @This();
 
@@ -110,16 +111,17 @@ pub fn init(
     };
     errdefer allocator.destroy(brick_grid_state);
 
+    // TODO: we dont want to store full grid, we stream grid
     const total_bricks = @as(vk.DeviceSize, @intFromFloat(brick_grid_state.dim[0] * brick_grid_state.dim[1] * brick_grid_state.dim[2]));
     std.debug.assert(total_bricks * @sizeOf(Brick) < voxel_scene_buffer.size);
 
     const target_descriptor_pool = blk: {
         const pool_sizes = [_]vk.DescriptorPoolSize{ .{
             .type = .storage_buffer,
-            .descriptor_count = buffer_info_count - image_info_count,
+            .descriptor_count = descriptor_buffer_count,
         }, .{
             .type = .storage_image,
-            .descriptor_count = image_info_count,
+            .descriptor_count = DeviceOnlyResources.image_count,
         } };
         const pool_info = vk.DescriptorPoolCreateInfo{
             .flags = .{},
@@ -143,7 +145,7 @@ pub fn init(
         }
 
         // for each ray layout we only use one binding
-        inline for (tmp_layout[0..ray_info_count]) |*layout| {
+        inline for (tmp_layout[0..DeviceOnlyResources.ray_count]) |*layout| {
             const binding = [_]vk.DescriptorSetLayoutBinding{.{
                 .binding = 0,
                 .descriptor_type = .storage_buffer,
@@ -195,7 +197,7 @@ pub fn init(
                 .binding_count = bindings.len,
                 .p_bindings = &bindings,
             };
-            tmp_layout[ray_info_count] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
+            tmp_layout[DeviceOnlyResources.ray_count] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
 
             created_layouts += 1;
         }
@@ -218,7 +220,7 @@ pub fn init(
                 .binding_count = bindings.len,
                 .p_bindings = &bindings,
             };
-            tmp_layout[ray_info_count + 1] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
+            tmp_layout[DeviceOnlyResources.ray_count + 1] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
 
             created_layouts += 1;
         }
@@ -280,9 +282,9 @@ pub fn init(
 
         for (&infos, ranges, 0..) |*info, range, info_index| {
             info.* = vk.DescriptorBufferInfo{
-                .buffer = if (info_index < ray_info_count) ray_buffer.buffer else voxel_scene_buffer.buffer,
+                .buffer = if (info_index < DeviceOnlyResources.ray_count) ray_buffer.buffer else voxel_scene_buffer.buffer,
                 // calculate offset by looking at previous info if there is any
-                .offset = if (info_index == 0 or info_index == ray_info_count) 0 else pow2Align(
+                .offset = if (info_index == 0 or info_index == DeviceOnlyResources.ray_count) 0 else pow2Align(
                     infos[info_index - 1].offset + infos[info_index - 1].range,
                     ctx.physical_device_limits.min_storage_buffer_offset_alignment,
                 ),
@@ -301,9 +303,9 @@ pub fn init(
 
             // each ray descriptor is one set
             for (
-                writes[0..ray_info_count],
-                infos[0..ray_info_count],
-                target_descriptor_sets[0..ray_info_count],
+                writes[0..DeviceOnlyResources.ray_count],
+                infos[0..DeviceOnlyResources.ray_count],
+                target_descriptor_sets[0..DeviceOnlyResources.ray_count],
             ) |*write, *info, descriptor_set| {
                 write.* = vk.WriteDescriptorSet{
                     .dst_set = descriptor_set,
@@ -317,39 +319,39 @@ pub fn init(
                 };
             }
 
-            const brick_desc_set_index = ray_info_count;
-            writes[@intFromEnum(Resources.bricks_set)] = vk.WriteDescriptorSet{
+            const brick_desc_set_index = DeviceOnlyResources.ray_count;
+            writes[@intFromEnum(DeviceOnlyResources.bricks_set)] = vk.WriteDescriptorSet{
                 .dst_set = target_descriptor_sets[brick_desc_set_index],
                 .dst_binding = 0,
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&infos[@intFromEnum(Resources.bricks_set)])),
+                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&infos[@intFromEnum(DeviceOnlyResources.bricks_set)])),
                 .p_texel_buffer_view = undefined,
             };
 
-            writes[@intFromEnum(Resources.brick_indices)] = vk.WriteDescriptorSet{
+            writes[@intFromEnum(DeviceOnlyResources.brick_indices)] = vk.WriteDescriptorSet{
                 .dst_set = target_descriptor_sets[brick_desc_set_index],
                 .dst_binding = 1,
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&infos[@intFromEnum(Resources.brick_indices)])),
+                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&infos[@intFromEnum(DeviceOnlyResources.brick_indices)])),
                 .p_texel_buffer_view = undefined,
             };
-            writes[@intFromEnum(Resources.bricks)] = vk.WriteDescriptorSet{
+            writes[@intFromEnum(DeviceOnlyResources.bricks)] = vk.WriteDescriptorSet{
                 .dst_set = target_descriptor_sets[brick_desc_set_index],
                 .dst_binding = 2,
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&infos[@intFromEnum(Resources.bricks)])),
+                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&infos[@intFromEnum(DeviceOnlyResources.bricks)])),
                 .p_texel_buffer_view = undefined,
             };
-            writes[@intFromEnum(Resources.draw_image)] = vk.WriteDescriptorSet{
+            writes[@intFromEnum(DeviceOnlyResources.draw_image)] = vk.WriteDescriptorSet{
                 .dst_set = target_descriptor_sets[brick_desc_set_index + 1],
                 .dst_binding = 0,
                 .dst_array_element = 0,
@@ -387,12 +389,12 @@ pub fn init(
     const test_brick_all = Brick{
         .solid_mask = ~@as(u512, 0),
     };
-    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@intFromEnum(Resources.bricks)].offset, Brick, &.{
+    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@intFromEnum(DeviceOnlyResources.bricks)].offset, Brick, &.{
         test_brick_one,
         test_brick_all,
         test_brick_row,
     });
-    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@intFromEnum(Resources.brick_indices)].offset, BrickIndex, &.{
+    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@intFromEnum(DeviceOnlyResources.brick_indices)].offset, BrickIndex, &.{
         BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
         BrickIndex{ .status = .loaded, .request_count = 100, .index = 1 },
         BrickIndex{ .status = .loaded, .request_count = 100, .index = 2 },
@@ -402,7 +404,7 @@ pub fn init(
         BrickIndex{ .status = .loaded, .request_count = 100, .index = 1 },
         BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
     });
-    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@intFromEnum(Resources.bricks_set)].offset, u8, &.{
+    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@intFromEnum(DeviceOnlyResources.bricks_set)].offset, u8, &.{
         1 << 7 | 1 << 6 | 0 << 5 | 1 << 4 | 1 << 3 | 1 << 2 | 1 << 1 | 1 << 0,
         0,
         0,
@@ -433,11 +435,11 @@ pub inline fn deinit(self: RayDeviceResources, ctx: Context) void {
     self.ray_buffer.deinit(ctx);
 }
 
-pub inline fn getDescriptorSets(self: RayDeviceResources, comptime resources: []const Resources) [resources.len]vk.DescriptorSet {
+pub inline fn getDescriptorSets(self: RayDeviceResources, comptime resources: []const DeviceOnlyResources) [resources.len]vk.DescriptorSet {
     var descriptor_sets: [resources.len]vk.DescriptorSet = undefined;
     inline for (resources, &descriptor_sets) |resource, *descriptor_set| {
         const index = get_index_blk: {
-            if (@intFromEnum(resource) >= @intFromEnum(Resources.bricks)) {
+            if (@intFromEnum(resource) >= @intFromEnum(DeviceOnlyResources.bricks)) {
                 break :get_index_blk @intFromEnum(resource) - 2;
             }
             break :get_index_blk @intFromEnum(resource);
@@ -448,11 +450,11 @@ pub inline fn getDescriptorSets(self: RayDeviceResources, comptime resources: []
     return descriptor_sets;
 }
 
-pub inline fn getDescriptorSetLayouts(self: RayDeviceResources, comptime resources: []const Resources) [resources.len]vk.DescriptorSetLayout {
+pub inline fn getDescriptorSetLayouts(self: RayDeviceResources, comptime resources: []const DeviceOnlyResources) [resources.len]vk.DescriptorSetLayout {
     var descriptor_layouts: [resources.len]vk.DescriptorSetLayout = undefined;
     inline for (resources, &descriptor_layouts) |resource, *descriptor_layout| {
         const index = get_index_blk: {
-            if (@intFromEnum(resource) >= @intFromEnum(Resources.bricks)) {
+            if (@intFromEnum(resource) >= @intFromEnum(DeviceOnlyResources.bricks)) {
                 break :get_index_blk @intFromEnum(resource) - 2;
             }
             break :get_index_blk @intFromEnum(resource);

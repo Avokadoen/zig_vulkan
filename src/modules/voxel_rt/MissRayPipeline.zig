@@ -16,11 +16,11 @@ const ray_types = @import("ray_pipeline_types.zig");
 const Dispatch1D = ray_types.Dispatch1D;
 
 const RayDeviceResources = @import("RayDeviceResources.zig");
-const Resources = RayDeviceResources.Resources;
+const DeviceOnlyResources = RayDeviceResources.DeviceOnlyResources;
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
 // ping pong resources
-const device_resources = [2][3]Resources{
+const device_resources = [2][3]DeviceOnlyResources{
     .{
         .ray_pipeline_limits,
         .ray_1,

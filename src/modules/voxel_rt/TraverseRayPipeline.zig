@@ -17,12 +17,12 @@ const Dispatch1D = ray_pipeline_types.Dispatch1D;
 const BrickGridState = ray_pipeline_types.BrickGridState;
 
 const RayDeviceResources = @import("RayDeviceResources.zig");
-const Resources = RayDeviceResources.Resources;
+const DeviceOnlyResources = RayDeviceResources.DeviceOnlyResources;
 
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
 // ping pong resources
-const device_resources = [2][7]Resources{
+const device_resources = [2][7]DeviceOnlyResources{
     .{
         .ray_pipeline_limits,
         // incoming data

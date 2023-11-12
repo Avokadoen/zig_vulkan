@@ -18,13 +18,13 @@ const ray_types = @import("../ray_pipeline_types.zig");
 const Dispatch1D = ray_types.Dispatch1D;
 
 const RayDeviceResources = @import("../RayDeviceResources.zig");
-const Resources = RayDeviceResources.Resources;
+const DeviceOnlyResources = RayDeviceResources.DeviceOnlyResources;
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
 /// compute shader that calculate miss color
 const BubbleSortPipeline = @This();
 
-const device_resources = [_]Resources{
+const device_resources = [_]DeviceOnlyResources{
     .ray_pipeline_limits,
     .ray,
     .ray_hit,
