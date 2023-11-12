@@ -58,17 +58,34 @@ pub fn build(b: *Builder) void {
         shader_comp.add("ui_vert_spv", "assets/shaders/ui.vert", .{});
         shader_comp.add("ui_frag_spv", "assets/shaders/ui.frag", .{});
 
-        // TODO: actually implement this! :)
-        shader_comp.add("height_map_gen_comp_spv", "assets/shaders/height_map_gen.comp", .{});
-
-        shader_comp.add("emit_primary_rays_spv", "assets/shaders/raytracing/emit_primary_rays.comp", .{});
-        shader_comp.add("traverse_rays_spv", "assets/shaders/raytracing/traverse_rays.comp", .{});
-        shader_comp.add("miss_rays_spv", "assets/shaders/raytracing/miss_rays.comp", .{});
-        shader_comp.add("scatter_rays_spv", "assets/shaders/raytracing/scatter_rays.comp", .{});
-        // TODO: scatter step(s): calculate new scatter ray + shadow ray + potential reflect + refract ray
+        const ray_commons = "assets/shaders/raytracing/ray_commons.glsl";
+        const watched_files = [_][]const u8{ray_commons};
+        shader_comp.add(
+            "emit_primary_rays_spv",
+            "assets/shaders/raytracing/emit_primary_rays.comp",
+            .{ .watched_files = &watched_files },
+        );
+        shader_comp.add(
+            "traverse_rays_spv",
+            "assets/shaders/raytracing/traverse_rays.comp",
+            .{ .watched_files = &watched_files },
+        );
+        shader_comp.add(
+            "miss_rays_spv",
+            "assets/shaders/raytracing/miss_rays.comp",
+            .{ .watched_files = &watched_files },
+        );
+        shader_comp.add(
+            "scatter_rays_spv",
+            "assets/shaders/raytracing/scatter_rays.comp",
+            .{ .watched_files = &watched_files },
+        );
         // TODO: order ray step: change sort based if last loop or not i.e writing ray to image or doing more scatter + traversal
-        shader_comp.add("draw_rays_spv", "assets/shaders/raytracing/draw_rays.comp", .{});
-        // shader_comp.add("hit_is_active_bubble_sort", "assets/shaders/sort/hit_is_active_bubble_sort.comp", .{});
+        shader_comp.add(
+            "draw_rays_spv",
+            "assets/shaders/raytracing/draw_rays.comp",
+            .{ .watched_files = &watched_files },
+        );
     }
 
     exe.step.dependOn(&shader_move_step.step);
