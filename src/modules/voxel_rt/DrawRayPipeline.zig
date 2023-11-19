@@ -17,6 +17,7 @@ const Dispatch1D = ray_types.Dispatch1D;
 
 const RayDeviceResources = @import("RayDeviceResources.zig");
 const DeviceOnlyResources = RayDeviceResources.DeviceOnlyResources;
+const Resource = RayDeviceResources.Resource;
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
 const device_resources = [2][3]DeviceOnlyResources{
@@ -30,6 +31,10 @@ const device_resources = [2][3]DeviceOnlyResources{
         .ray_pipeline_limits,
         .ray_shading_0,
     },
+};
+const resources = [2][3]Resource{
+    Resource.fromArray(DeviceOnlyResources, &device_resources[0]),
+    Resource.fromArray(DeviceOnlyResources, &device_resources[1]),
 };
 
 pub const DrawOp = enum(c_uint) {
@@ -63,7 +68,7 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Draw
 
     const work_group_dim = Dispatch1D.init(ctx);
 
-    const descriptor_layout = ray_device_resources.getDescriptorSetLayouts(&device_resources[0]);
+    const descriptor_layout = ray_device_resources.getDescriptorSetLayouts(&resources[0]);
     const pipeline_layout = blk: {
         const push_constant_ranges = [_]vk.PushConstantRange{.{
             .stage_flags = .{ .compute_bit = true },
@@ -190,9 +195,9 @@ pub fn appendPipelineCommands(
     const resource_index = @rem(bounce_index, 2);
     const descriptor_sets = get_desc_set_blk: {
         if (resource_index == 0) {
-            break :get_desc_set_blk self.ray_device_resources.getDescriptorSets(&device_resources[0]);
+            break :get_desc_set_blk self.ray_device_resources.getDescriptorSets(&resources[0]);
         } else {
-            break :get_desc_set_blk self.ray_device_resources.getDescriptorSets(&device_resources[1]);
+            break :get_desc_set_blk self.ray_device_resources.getDescriptorSets(&resources[1]);
         }
     };
     ctx.vkd.cmdBindDescriptorSets(

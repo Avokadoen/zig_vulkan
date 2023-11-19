@@ -21,6 +21,7 @@ const Dispatch1D = ray_types.Dispatch1D;
 
 const RayDeviceResources = @import("RayDeviceResources.zig");
 const DeviceOnlyResources = RayDeviceResources.DeviceOnlyResources;
+const Resource = RayDeviceResources.Resource;
 
 const device_resources = [_]DeviceOnlyResources{
     .ray_pipeline_limits,
@@ -28,6 +29,7 @@ const device_resources = [_]DeviceOnlyResources{
     .ray_hit_0,
     .ray_shading_0,
 };
+const resources = Resource.fromArray(DeviceOnlyResources, &device_resources);
 
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
@@ -52,7 +54,7 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Emit
 
     const work_group_dim = Dispatch1D.init(ctx);
 
-    const descriptr_set_layouts = ray_device_resources.getDescriptorSetLayouts(&device_resources);
+    const descriptr_set_layouts = ray_device_resources.getDescriptorSetLayouts(&resources);
     const pipeline_layout = blk: {
         const push_constant_ranges = [_]vk.PushConstantRange{.{
             .stage_flags = .{ .compute_bit = true },
@@ -162,7 +164,7 @@ pub fn appendPipelineCommands(
         &camera.d_camera,
     );
 
-    const descriptor_sets = self.ray_device_resources.getDescriptorSets(&device_resources);
+    const descriptor_sets = self.ray_device_resources.getDescriptorSets(&resources);
     ctx.vkd.cmdBindDescriptorSets(
         command_buffer,
         .compute,

@@ -18,6 +18,7 @@ const BrickGridState = ray_pipeline_types.BrickGridState;
 
 const RayDeviceResources = @import("RayDeviceResources.zig");
 const DeviceOnlyResources = RayDeviceResources.DeviceOnlyResources;
+const Resource = RayDeviceResources.Resource;
 
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
@@ -48,6 +49,10 @@ const device_resources = [2][7]DeviceOnlyResources{
         .bricks_set,
     },
 };
+const resources = [2][7]Resource{
+    Resource.fromArray(DeviceOnlyResources, &device_resources[0]),
+    Resource.fromArray(DeviceOnlyResources, &device_resources[1]),
+};
 
 /// compute shader that draws to a target texture
 const TraverseRayPipeline = @This();
@@ -72,7 +77,7 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Trav
     // TODO: change based on NVIDIA vs AMD vs Others?
     const work_group_dim = Dispatch1D.init(ctx);
 
-    const target_descriptor_layouts = ray_device_resources.getDescriptorSetLayouts(&device_resources[0]);
+    const target_descriptor_layouts = ray_device_resources.getDescriptorSetLayouts(&resources[0]);
     const pipeline_layout = blk: {
         const push_constant_range = [_]vk.PushConstantRange{.{
             .stage_flags = .{ .compute_bit = true },
@@ -208,9 +213,9 @@ pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, bounce_in
     const resource_index = @rem(bounce_index, 2);
     const descriptor_sets = get_desc_set_blk: {
         if (resource_index == 0) {
-            break :get_desc_set_blk self.ray_device_resources.getDescriptorSets(&device_resources[0]);
+            break :get_desc_set_blk self.ray_device_resources.getDescriptorSets(&resources[0]);
         } else {
-            break :get_desc_set_blk self.ray_device_resources.getDescriptorSets(&device_resources[1]);
+            break :get_desc_set_blk self.ray_device_resources.getDescriptorSets(&resources[1]);
         }
     };
     ctx.vkd.cmdBindDescriptorSets(

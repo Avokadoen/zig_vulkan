@@ -597,31 +597,73 @@ pub inline fn deinit(self: RayDeviceResources, ctx: Context) void {
     self.request_buffer.deinit(ctx);
 }
 
-pub inline fn getDescriptorSets(self: RayDeviceResources, comptime resources: []const DeviceOnlyResources) [resources.len]vk.DescriptorSet {
+pub const Resource = union(enum) {
+    device: DeviceOnlyResources,
+    host_and_device: HostAndDeviceResources,
+
+    pub fn fromArray(comptime T: type, comptime resources: []const T) [resources.len]Resource {
+        var rtr_res: [resources.len]Resource = undefined;
+        switch (T) {
+            DeviceOnlyResources => {
+                for (&rtr_res, resources) |*rtr, resource| {
+                    rtr.* = Resource{ .device = resource };
+                }
+            },
+            HostAndDeviceResources => {
+                for (&rtr_res, resources) |*rtr, resource| {
+                    rtr.* = Resource{ .host_and_device = resource };
+                }
+            },
+            else => {
+                @compileError("unsupported resource type '" ++ @typeName(T) ++ "'");
+            },
+        }
+
+        return rtr_res;
+    }
+
+    pub fn from(comptime resource: anytype) Resource {
+        const ResType = @TypeOf(resource);
+        switch (ResType) {
+            DeviceOnlyResources => {
+                return Resource{ .device = resource };
+            },
+            HostAndDeviceResources => {
+                return Resource{ .host_and_device = resource };
+            },
+            else => {
+                @compileError("unsupported resource type '" ++ @typeName(ResType) ++ "'");
+            },
+        }
+    }
+
+    pub fn toIndex(resource: Resource) usize {
+        switch (resource) {
+            Resource.device => |d_resource| {
+                if (@intFromEnum(d_resource) >= @intFromEnum(DeviceOnlyResources.bricks)) {
+                    return @intFromEnum(d_resource) - 2;
+                }
+                return @intFromEnum(d_resource);
+            },
+            Resource.host_and_device => |hd_resource| {
+                return @intFromEnum(hd_resource) + DeviceOnlyResources.all_count - 2;
+            },
+        }
+    }
+};
+pub inline fn getDescriptorSets(self: RayDeviceResources, comptime resources: []const Resource) [resources.len]vk.DescriptorSet {
     var descriptor_sets: [resources.len]vk.DescriptorSet = undefined;
     inline for (resources, &descriptor_sets) |resource, *descriptor_set| {
-        const index = get_index_blk: {
-            if (@intFromEnum(resource) >= @intFromEnum(DeviceOnlyResources.bricks)) {
-                break :get_index_blk @intFromEnum(resource) - 2;
-            }
-            break :get_index_blk @intFromEnum(resource);
-        };
-        descriptor_set.* = self.target_descriptor_sets[index];
+        descriptor_set.* = self.target_descriptor_sets[resource.toIndex()];
     }
 
     return descriptor_sets;
 }
 
-pub inline fn getDescriptorSetLayouts(self: RayDeviceResources, comptime resources: []const DeviceOnlyResources) [resources.len]vk.DescriptorSetLayout {
+pub inline fn getDescriptorSetLayouts(self: RayDeviceResources, comptime resources: []const Resource) [resources.len]vk.DescriptorSetLayout {
     var descriptor_layouts: [resources.len]vk.DescriptorSetLayout = undefined;
     inline for (resources, &descriptor_layouts) |resource, *descriptor_layout| {
-        const index = get_index_blk: {
-            if (@intFromEnum(resource) >= @intFromEnum(DeviceOnlyResources.bricks)) {
-                break :get_index_blk @intFromEnum(resource) - 2;
-            }
-            break :get_index_blk @intFromEnum(resource);
-        };
-        descriptor_layout.* = self.target_descriptor_layouts[index];
+        descriptor_layout.* = self.target_descriptor_layouts[resource.toIndex()];
     }
 
     return descriptor_layouts;
