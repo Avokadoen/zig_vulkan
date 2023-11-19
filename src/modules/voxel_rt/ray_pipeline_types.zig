@@ -42,6 +42,7 @@ pub const Brick = packed struct {
 pub const BrickRequest = extern struct {
     index: c_uint,
 };
+// must be kept in sync with assets/shaders/raytracing/ray_commons.glsl BrickLimits
 pub const BrickLimits = extern struct {
     // Written by host
     max_load_request_count: c_uint,

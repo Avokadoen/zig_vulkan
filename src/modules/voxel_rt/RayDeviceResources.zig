@@ -15,12 +15,13 @@ const RayHitLimits = ray_pipeline_types.RayHitLimits;
 const BrickGridState = ray_pipeline_types.BrickGridState;
 const BrickIndex = ray_pipeline_types.BrickIndex;
 const Brick = ray_pipeline_types.Brick;
+const BrickLimits = ray_pipeline_types.BrickLimits;
 const Ray = ray_pipeline_types.Ray;
 const RayHit = ray_pipeline_types.RayHit;
 const RayShading = ray_pipeline_types.RayShading;
 const RayHash = ray_pipeline_types.RayHash;
 
-// TODO: convert to a struct ...
+// TODO: We should definitly rework all this resource stuff ...
 pub const DeviceOnlyResources = enum(u32) {
     // ray buffer info 0 (ping pong)
     ray_pipeline_limits,
@@ -40,20 +41,40 @@ pub const DeviceOnlyResources = enum(u32) {
     brick_indices,
     bricks,
 
+    // brick request
+    brick_req_limits,
+
     // draw image
     draw_image,
 
     pub const ray_count = @intFromEnum(DeviceOnlyResources.ray_hash_1) + 1;
     pub const brick_count = (@intFromEnum(DeviceOnlyResources.bricks) + 1) - ray_count;
-    pub const image_count = (@intFromEnum(DeviceOnlyResources.draw_image) + 1) - (brick_count + ray_count);
+    pub const brick_req_count = (@intFromEnum(DeviceOnlyResources.brick_req_limits) + 1) - (brick_count + ray_count);
+    pub const image_count = (@intFromEnum(DeviceOnlyResources.draw_image) + 1) - (brick_count + brick_req_count + ray_count);
+    pub const all_count = @typeInfo(DeviceOnlyResources).Enum.fields.len;
+};
+
+pub const HostAndDeviceResources = enum(u32) {
+    brick_load_request,
+    brick_unload_request,
+
+    pub const brick_count = @intFromEnum(HostAndDeviceResources.brick_unload_request) + 1;
+    pub const all_count = @typeInfo(HostAndDeviceResources).Enum.fields.len;
 };
 
 // each individual data need some buffer info
-pub const buffer_info_count = @typeInfo(DeviceOnlyResources).Enum.fields.len;
+pub const buffer_info_count = @typeInfo(DeviceOnlyResources).Enum.fields.len + @typeInfo(HostAndDeviceResources).Enum.fields.len;
 
 // we use one set per ray buffer type and one set for the brick grid data
-pub const descriptor_set_count = DeviceOnlyResources.ray_count + (DeviceOnlyResources.brick_count - 2) + DeviceOnlyResources.image_count;
+pub const descriptor_set_count =
+    DeviceOnlyResources.ray_count +
+    (DeviceOnlyResources.brick_count - 2) +
+    DeviceOnlyResources.brick_req_count +
+    DeviceOnlyResources.image_count +
+    (HostAndDeviceResources.brick_count - 1);
+
 pub const descriptor_buffer_count = buffer_info_count - DeviceOnlyResources.image_count;
+pub const descriptor_image_count = DeviceOnlyResources.image_count;
 
 const RayDeviceResources = @This();
 
@@ -69,6 +90,10 @@ target_image_info: ImageInfo,
 buffer_infos: [descriptor_buffer_count]vk.DescriptorBufferInfo,
 ray_buffer: GpuBufferMemory,
 voxel_scene_buffer: GpuBufferMemory,
+request_buffer: GpuBufferMemory,
+
+const brick_load_request_count = 1024;
+const brick_unload_request_count = 1024;
 
 pub fn init(
     allocator: Allocator,
@@ -97,6 +122,15 @@ pub fn init(
     );
     errdefer voxel_scene_buffer.deinit(ctx);
     try voxel_scene_buffer.fill(ctx, init_command_pool, 0, voxel_scene_buffer.size, 0);
+
+    var request_buffer = try GpuBufferMemory.init(
+        ctx,
+        @as(vk.DeviceSize, @intCast(64 * 1024 * 1024)), // alloc 64mb
+        .{ .storage_buffer_bit = true, .transfer_dst_bit = true },
+        .{ .host_visible_bit = true },
+    );
+    errdefer request_buffer.deinit(ctx);
+    try request_buffer.fill(ctx, init_command_pool, 0, request_buffer.size, 0);
 
     const brick_grid_state: *BrickGridState = blk: {
         var state = try allocator.create(BrickGridState);
@@ -202,6 +236,27 @@ pub fn init(
             created_layouts += 1;
         }
 
+        // brick req layout
+        {
+            const bindings = [_]vk.DescriptorSetLayoutBinding{.{
+                .binding = 0,
+                .descriptor_type = .storage_buffer,
+                .descriptor_count = 1,
+                .stage_flags = .{
+                    .compute_bit = true,
+                },
+                .p_immutable_samplers = null,
+            }};
+            const layout_info = vk.DescriptorSetLayoutCreateInfo{
+                .flags = .{},
+                .binding_count = bindings.len,
+                .p_bindings = &bindings,
+            };
+            tmp_layout[DeviceOnlyResources.ray_count + 1] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
+
+            created_layouts += 1;
+        }
+
         // for image we use one set one binding, but storage image
         {
             const bindings = [_]vk.DescriptorSetLayoutBinding{
@@ -220,7 +275,36 @@ pub fn init(
                 .binding_count = bindings.len,
                 .p_bindings = &bindings,
             };
-            tmp_layout[DeviceOnlyResources.ray_count + 1] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
+            tmp_layout[DeviceOnlyResources.ray_count + 2] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
+
+            created_layouts += 1;
+        }
+
+        // for brick request layout we use one set with 2 bindings
+        {
+            const bindings = [_]vk.DescriptorSetLayoutBinding{ .{
+                .binding = 0,
+                .descriptor_type = .storage_buffer,
+                .descriptor_count = 1,
+                .stage_flags = .{
+                    .compute_bit = true,
+                },
+                .p_immutable_samplers = null,
+            }, .{
+                .binding = 1,
+                .descriptor_type = .storage_buffer,
+                .descriptor_count = 1,
+                .stage_flags = .{
+                    .compute_bit = true,
+                },
+                .p_immutable_samplers = null,
+            } };
+            const layout_info = vk.DescriptorSetLayoutCreateInfo{
+                .flags = .{},
+                .binding_count = bindings.len,
+                .p_bindings = &bindings,
+            };
+            tmp_layout[DeviceOnlyResources.ray_count + 3] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
 
             created_layouts += 1;
         }
@@ -252,8 +336,9 @@ pub fn init(
 
         // TODO: when we convert this from enum to a struct we can bake some of the info into the struct.
         const ray_count: u64 = @intFromFloat(target_image_info.width * target_image_info.height);
+
         // TODO: offset each entry by item alignment
-        const ranges = [descriptor_buffer_count]vk.DeviceSize{
+        const ray_ranges = [DeviceOnlyResources.ray_count]vk.DeviceSize{
             // limits
             @sizeOf(RayHitLimits),
             // rays 0
@@ -272,25 +357,61 @@ pub fn init(
             ray_count * @sizeOf(RayShading),
             // ray hashes 1
             ray_count * @sizeOf(RayHash),
+        };
+        const brick_grid_ranges = [DeviceOnlyResources.brick_count + DeviceOnlyResources.brick_req_count]vk.DeviceSize{
             // bricks set
             try std.math.divCeil(vk.DeviceSize, total_bricks, 8),
             // bricks indices
             total_bricks * @sizeOf(BrickIndex),
             // bricks
             total_bricks * @sizeOf(Brick),
+            // brick limits
+            @sizeOf(BrickLimits),
+        };
+        const brick_request_ranges = [HostAndDeviceResources.brick_count]vk.DeviceSize{
+            // load brick requests
+            brick_load_request_count * @sizeOf(c_uint),
+            // unload brick requests
+            brick_unload_request_count * @sizeOf(c_uint),
         };
 
-        for (&infos, ranges, 0..) |*info, range, info_index| {
+        for (infos[0..ray_ranges.len], ray_ranges, 0..) |*info, range, info_index| {
             info.* = vk.DescriptorBufferInfo{
-                .buffer = if (info_index < DeviceOnlyResources.ray_count) ray_buffer.buffer else voxel_scene_buffer.buffer,
-                // calculate offset by looking at previous info if there is any
-                .offset = if (info_index == 0 or info_index == DeviceOnlyResources.ray_count) 0 else pow2Align(
+                .buffer = ray_buffer.buffer,
+                .offset = if (info_index == 0) 0 else pow2Align(
                     infos[info_index - 1].offset + infos[info_index - 1].range,
                     ctx.physical_device_limits.min_storage_buffer_offset_alignment,
                 ),
                 .range = range,
             };
             // TODO: assert we are within the allocated size of 250mb
+        }
+        const brick_grid_start = ray_ranges.len;
+        const brick_grid_end = ray_ranges.len + brick_grid_ranges.len;
+        for (infos[brick_grid_start..brick_grid_end], brick_grid_ranges, 0..) |*info, range, info_index| {
+            info.* = vk.DescriptorBufferInfo{
+                .buffer = voxel_scene_buffer.buffer,
+                .offset = if (info_index == 0) 0 else pow2Align(
+                    infos[info_index - 1].offset + infos[info_index - 1].range,
+                    ctx.physical_device_limits.min_storage_buffer_offset_alignment,
+                ),
+                .range = range,
+            };
+            // TODO: assert we are within the allocated size of 250mb
+        }
+        const brick_req_start = brick_grid_end;
+        const brick_req_end = brick_req_start + HostAndDeviceResources.brick_count;
+        for (infos[brick_req_start..brick_req_end], brick_request_ranges, 0..) |*info, range, info_index| {
+            info.* = vk.DescriptorBufferInfo{
+                .buffer = request_buffer.buffer,
+                // calculate offset by looking at previous info if there is any
+                .offset = if (info_index == 0) 0 else pow2Align(
+                    infos[info_index - 1].offset + infos[info_index - 1].range,
+                    ctx.physical_device_limits.min_storage_buffer_offset_alignment,
+                ),
+                .range = range,
+            };
+            // TODO: assert we are within the allocated size of 64mb
         }
 
         const image_info = vk.DescriptorImageInfo{
@@ -320,6 +441,7 @@ pub fn init(
             }
 
             const brick_desc_set_index = DeviceOnlyResources.ray_count;
+
             writes[@intFromEnum(DeviceOnlyResources.bricks_set)] = vk.WriteDescriptorSet{
                 .dst_set = target_descriptor_sets[brick_desc_set_index],
                 .dst_binding = 0,
@@ -351,14 +473,52 @@ pub fn init(
                 .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&infos[@intFromEnum(DeviceOnlyResources.bricks)])),
                 .p_texel_buffer_view = undefined,
             };
-            writes[@intFromEnum(DeviceOnlyResources.draw_image)] = vk.WriteDescriptorSet{
+
+            writes[@intFromEnum(DeviceOnlyResources.brick_req_limits)] = vk.WriteDescriptorSet{
                 .dst_set = target_descriptor_sets[brick_desc_set_index + 1],
+                .dst_binding = 0,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&infos[@intFromEnum(DeviceOnlyResources.bricks_set)])),
+                .p_texel_buffer_view = undefined,
+            };
+
+            writes[@intFromEnum(DeviceOnlyResources.draw_image)] = vk.WriteDescriptorSet{
+                .dst_set = target_descriptor_sets[brick_desc_set_index + 2],
                 .dst_binding = 0,
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_image,
                 .p_image_info = @as([*]const vk.DescriptorImageInfo, @ptrCast(&image_info)),
                 .p_buffer_info = undefined,
+                .p_texel_buffer_view = undefined,
+            };
+
+            const brick_req_offset = DeviceOnlyResources.all_count;
+            writes[brick_req_offset + @intFromEnum(HostAndDeviceResources.brick_load_request)] = vk.WriteDescriptorSet{
+                .dst_set = target_descriptor_sets[brick_desc_set_index + 3],
+                .dst_binding = 0,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(
+                    &infos[@intFromEnum(DeviceOnlyResources.bricks) + @intFromEnum(HostAndDeviceResources.brick_load_request)],
+                )),
+                .p_texel_buffer_view = undefined,
+            };
+            writes[brick_req_offset + @intFromEnum(HostAndDeviceResources.brick_unload_request)] = vk.WriteDescriptorSet{
+                .dst_set = target_descriptor_sets[brick_desc_set_index + 3],
+                .dst_binding = 1,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(
+                    &infos[@intFromEnum(DeviceOnlyResources.bricks) + @intFromEnum(HostAndDeviceResources.brick_unload_request)],
+                )),
                 .p_texel_buffer_view = undefined,
             };
 
@@ -421,6 +581,7 @@ pub fn init(
         .ray_buffer = ray_buffer,
         .brick_grid_state = brick_grid_state,
         .voxel_scene_buffer = voxel_scene_buffer,
+        .request_buffer = request_buffer,
     };
 }
 
@@ -433,6 +594,7 @@ pub inline fn deinit(self: RayDeviceResources, ctx: Context) void {
     self.allocator.destroy(self.brick_grid_state);
     self.voxel_scene_buffer.deinit(ctx);
     self.ray_buffer.deinit(ctx);
+    self.request_buffer.deinit(ctx);
 }
 
 pub inline fn getDescriptorSets(self: RayDeviceResources, comptime resources: []const DeviceOnlyResources) [resources.len]vk.DescriptorSet {
