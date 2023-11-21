@@ -17,20 +17,18 @@ const Dispatch1D = ray_pipeline_types.Dispatch1D;
 const BrickGridState = ray_pipeline_types.BrickGridState;
 
 const RayDeviceResources = @import("RayDeviceResources.zig");
-const Resources = RayDeviceResources.Resources;
+const DeviceOnlyResources = RayDeviceResources.DeviceOnlyResources;
+const HostAndDeviceResources = RayDeviceResources.HostAndDeviceResources;
+const Resource = RayDeviceResources.Resource;
 
-const device_resources = [_]Resources{
-    .ray_pipeline_limits,
-    .ray_0,
-    .ray_shading_0,
-    .ray_1,
-    .ray_hit_1,
-    .ray_shading_1,
-    .bricks_set,
+const resources = [_]Resource{
+    Resource.from(DeviceOnlyResources.bricks_set),
+    Resource.from(DeviceOnlyResources.brick_req_limits),
+    Resource.from(HostAndDeviceResources.brick_load_request),
 };
 
 /// compute shader that draws to a target texture
-const TraverseRayPipeline = @This();
+const BrickHeartbeatPipeline = @This();
 
 pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
@@ -39,20 +37,16 @@ work_group_dim: Dispatch1D,
 
 ray_device_resources: *const RayDeviceResources,
 
-// TODO: descriptor has a lot of duplicate code with init ...
-// TODO: refactor descriptor sets to share logic between ray pipelines
-// TODO: correctness if init fail, clean up resources created with errdefer
-
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
-pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !TraverseRayPipeline {
-    const zone = tracy.ZoneN(@src(), @typeName(TraverseRayPipeline) ++ " " ++ @src().fn_name);
+pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !BrickHeartbeatPipeline {
+    const zone = tracy.ZoneN(@src(), @typeName(BrickHeartbeatPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
     // TODO: change based on NVIDIA vs AMD vs Others?
     const work_group_dim = Dispatch1D.init(ctx);
 
-    const target_descriptor_layouts = ray_device_resources.getDescriptorSetLayouts(&device_resources[0]);
+    const target_descriptor_layouts = ray_device_resources.getDescriptorSetLayouts(&resources);
     const pipeline_layout = blk: {
         const push_constant_range = [_]vk.PushConstantRange{.{
             .stage_flags = .{ .compute_bit = true },
@@ -82,8 +76,8 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Trav
         };
         const module_create_info = vk.ShaderModuleCreateInfo{
             .flags = .{},
-            .p_code = @as([*]const u32, @ptrCast(&shaders.traverse_rays_spv)),
-            .code_size = shaders.traverse_rays_spv.len,
+            .p_code = @as([*]const u32, @ptrCast(&shaders.brick_heartbeat_spv)),
+            .code_size = shaders.brick_heartbeat_spv.len,
         };
         const module = try ctx.vkd.createShaderModule(ctx.logical_device, &module_create_info, null);
 
@@ -108,7 +102,7 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Trav
     };
     errdefer ctx.destroyPipeline(pipeline);
 
-    return TraverseRayPipeline{
+    return BrickHeartbeatPipeline{
         .pipeline_layout = pipeline_layout,
         .pipeline = pipeline,
         .ray_device_resources = ray_device_resources,
@@ -116,21 +110,21 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Trav
     };
 }
 
-pub fn deinit(self: TraverseRayPipeline, ctx: Context) void {
-    const zone = tracy.ZoneN(@src(), @typeName(TraverseRayPipeline) ++ " " ++ @src().fn_name);
+pub fn deinit(self: BrickHeartbeatPipeline, ctx: Context) void {
+    const zone = tracy.ZoneN(@src(), @typeName(BrickHeartbeatPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
     ctx.destroyPipelineLayout(self.pipeline_layout);
     ctx.destroyPipeline(self.pipeline);
 }
 
-pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, bounce_index: u32, command_buffer: vk.CommandBuffer) void {
-    const zone = tracy.ZoneN(@src(), @typeName(TraverseRayPipeline) ++ " " ++ @src().fn_name);
+pub fn appendPipelineCommands(self: BrickHeartbeatPipeline, ctx: Context, command_buffer: vk.CommandBuffer) void {
+    const zone = tracy.ZoneN(@src(), @typeName(BrickHeartbeatPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
     if (render.consts.enable_validation_layers) {
         const label_info = vk.DebugUtilsLabelEXT{
-            .p_label_name = @typeName(TraverseRayPipeline) ++ " " ++ @src().fn_name,
+            .p_label_name = @typeName(BrickHeartbeatPipeline) ++ " " ++ @src().fn_name,
             .color = [_]f32{ 0.4, 0.2, 0.2, 0.5 },
         };
         ctx.vkd.cmdBeginDebugUtilsLabelEXT(command_buffer, &label_info);
@@ -141,27 +135,15 @@ pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, bounce_in
         }
     }
 
-    // TODO: specify read only vs write only buffer elements (maybe actually loop buffer infos ?)
-    const ray_buffer_memory_barrier = vk.BufferMemoryBarrier{
-        .src_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-        .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-        .src_queue_family_index = ctx.queue_indices.compute,
-        .dst_queue_family_index = ctx.queue_indices.compute,
-        .buffer = self.ray_device_resources.ray_buffer.buffer,
-        .offset = 0,
-        .size = vk.WHOLE_SIZE,
-    };
-    // TODO: specify read only vs write only buffer elements (maybe actually loop buffer infos ?)
-    const brick_buffer_memory_barrier = vk.BufferMemoryBarrier{
-        .src_access_mask = .{ .shader_write_bit = true },
+    const brick_buffer_memory_barrier = [_]vk.BufferMemoryBarrier{.{
+        .src_access_mask = .{ .shader_read_bit = true },
         .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
         .src_queue_family_index = ctx.queue_indices.compute,
         .dst_queue_family_index = ctx.queue_indices.compute,
         .buffer = self.ray_device_resources.voxel_scene_buffer.buffer,
         .offset = 0,
         .size = vk.WHOLE_SIZE,
-    };
-    const frame_mem_barriers = [_]vk.BufferMemoryBarrier{ ray_buffer_memory_barrier, brick_buffer_memory_barrier };
+    }};
     ctx.vkd.cmdPipelineBarrier(
         command_buffer,
         .{ .compute_shader_bit = true },
@@ -169,8 +151,8 @@ pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, bounce_in
         .{},
         0,
         undefined,
-        frame_mem_barriers.len,
-        &frame_mem_barriers,
+        brick_buffer_memory_barrier.len,
+        &brick_buffer_memory_barrier,
         0,
         undefined,
     );
@@ -185,14 +167,7 @@ pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, bounce_in
     );
     ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
 
-    const resource_index = @rem(bounce_index, 2);
-    const descriptor_sets = get_desc_set_blk: {
-        if (resource_index == 0) {
-            break :get_desc_set_blk self.ray_device_resources.getDescriptorSets(&device_resources[0]);
-        } else {
-            break :get_desc_set_blk self.ray_device_resources.getDescriptorSets(&device_resources[1]);
-        }
-    };
+    const descriptor_sets = self.ray_device_resources.getDescriptorSets(&resources);
     ctx.vkd.cmdBindDescriptorSets(
         command_buffer,
         .compute,

@@ -3,7 +3,7 @@
 #extension GL_EXT_debug_printf : disable
 // debugPrintfEXT("hello world %f", 1.0);
 
-#include "../raytracing/traverse_rays.comp"
+#include "../raytracing/ray_commons.glsl"
 
 layout(local_size_x_id = 0, local_size_y = 1, local_size_z = 1) in;
 
@@ -37,17 +37,18 @@ layout (std430, set = 2, binding = 1) writeonly buffer BrickUnloadRequestIndices
 
 void main() {
     const uint brick_index = gl_GlobalInvocationID.x;
-    if (brick_index >= brick_count) {
+    if (brick_index >= brick_grid.brick_count) {
         return;
     }
 
     // Check if brick is set, TODO: load per CU and use subgroups to broadcast 32 bits
-    const uint brick_set_bit = bitfieldExtract(brick_set_bits[brick_index/32], mod(brick_index, 32), 1);
+    const int brick_set_offset = int(brick_index % 32);
+    const uint brick_set_bit = bitfieldExtract(brick_set_bits[brick_index/32], brick_set_offset, 1);
     if (brick_set_bit == 0) {
         return;
     }
 
-    const uint new_brick_index_bits = brick_index_24b_req_count_7b_status_1b[brick_index];
+    const uint brick_index_bits = brick_index_24b_req_count_7b_status_1b[brick_index];
     uint new_brick_index_bits = brick_index_bits;
     const uint brick_status = bitfieldExtract(brick_index_bits, BRICK_INDEX_STATUS_OFFSET, BRICK_INDEX_STATUS_BITS);
     const uint req_count = bitfieldExtract(brick_index_bits, BRICK_INDEX_REQUEST_COUNT_OFFSET, BRICK_INDEX_REQUEST_COUNT_BITS);
@@ -58,18 +59,17 @@ void main() {
 
     // if req count - 1 is 0 and brick is loaded
     if (req_count == 1 && brick_status == BRICK_STATUS_LOADED) {
-        if (brick_limits.unload_request_count < brick_limits.unload_max_request_count) {
+        if (brick_limits.unload_request_count < brick_limits.max_unload_request_count) {
             // register that brick is unloading
             new_brick_index_bits = bitfieldInsert(brick_index_bits, BRICK_STATUS_UNLOADING, BRICK_INDEX_STATUS_OFFSET, BRICK_INDEX_STATUS_BITS);
             const uint index_of_request = atomicAdd(brick_limits.unload_request_count, 1);
             unload_request_brick_indices[index_of_request] = brick_index;
         }
     } 
-    
     // if req count is bigger than 1 and brick is not loaded
-    if (req_count > 1 && brick_status == BRICK_STATUS_UNLOADED) {
+    else if (req_count > 1 && brick_status == BRICK_STATUS_UNLOADED) {
         // If we reached the limit for requests
-        if (brick_limits.load_request_count < brick_limits.load_max_request_count) {
+        if (brick_limits.load_request_count < brick_limits.max_load_request_count) {
             // register that brick is loading
             new_brick_index_bits = bitfieldInsert(brick_index_bits, BRICK_STATUS_LOADING, BRICK_INDEX_STATUS_OFFSET, BRICK_INDEX_STATUS_BITS);
             const uint index_of_request = atomicAdd(brick_limits.load_request_count, 1);

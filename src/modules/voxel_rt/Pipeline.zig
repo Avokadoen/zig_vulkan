@@ -24,6 +24,7 @@ const BubbleSortPipeline = @import("gpu_sort/BubbleSortPipeline.zig");
 const ScatterRayPipeline = @import("ScatterRayPipeline.zig");
 const MissRayPipeline = @import("MissRayPipeline.zig");
 const DrawRayPipeline = @import("DrawRayPipeline.zig");
+const BrickHeartbeatPipeline = @import("BrickHeartbeatPipeline.zig");
 
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const ImguiPipeline = @import("ImguiPipeline.zig");
@@ -87,6 +88,7 @@ traverse_ray_pipeline: TraverseRayPipeline,
 scatter_ray_pipeline: ScatterRayPipeline,
 miss_ray_pipeline: MissRayPipeline,
 draw_ray_pipeline: DrawRayPipeline,
+brick_heartbeat_pipeline: BrickHeartbeatPipeline,
 ray_pipeline_complete_semaphore: vk.Semaphore,
 
 // TODO: rename pipeline
@@ -288,6 +290,9 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     const draw_ray_pipeline = try DrawRayPipeline.init(ctx, ray_device_resource);
     errdefer draw_ray_pipeline.deinit(ctx);
 
+    const brick_heartbeat_pipeline = try BrickHeartbeatPipeline.init(ctx, ray_device_resource);
+    errdefer brick_heartbeat_pipeline.deinit(ctx);
+
     var vertex_index_buffer = try GpuBufferMemory.init(
         ctx,
         memory.bytes_in_mb * 64,
@@ -357,6 +362,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .scatter_ray_pipeline = scatter_ray_pipeline,
         .miss_ray_pipeline = miss_ray_pipeline,
         .draw_ray_pipeline = draw_ray_pipeline,
+        .brick_heartbeat_pipeline = brick_heartbeat_pipeline,
         .ray_pipeline_complete_semaphore = ray_pipeline_complete_semaphore,
         .gfx_pipeline = gfx_pipeline,
         .imgui_pipeline = imgui_pipeline,
@@ -577,6 +583,8 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
             false,
             self.ray_command_buffers,
         );
+
+        self.brick_heartbeat_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
 
         try ctx.vkd.endCommandBuffer(self.ray_command_buffers);
 

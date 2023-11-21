@@ -43,10 +43,10 @@ struct BrickLimits {
 };
 
 // Must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig BrickIndex.Status
-const int BRICK_STATUS_UNLOADED = 0;
-const int BRICK_STATUS_LOADING = 1;
-const int BRICK_STATUS_UNLOADING = 2;
-const int BRICK_STATUS_LOADED = 3;
+const uint BRICK_STATUS_UNLOADED = 0;
+const uint BRICK_STATUS_LOADING = 1;
+const uint BRICK_STATUS_UNLOADING = 2;
+const uint BRICK_STATUS_LOADED = 3;
 
 // Must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig BrickIndex
 const int BRICK_INDEX_STATUS_BITS = 2;
@@ -56,7 +56,7 @@ const int BRICK_INDEX_REQUEST_COUNT_OFFSET = BRICK_INDEX_STATUS_BITS + BRICK_IND
 const int BRICK_INDEX_INDEX_BITS = 22;
 const int BRICK_INDEX_INDEX_OFFSET = BRICK_INDEX_REQUEST_COUNT_BITS + BRICK_INDEX_REQUEST_COUNT_OFFSET;
 
-const int BRICK_INDEX_REQUEST_COUNT_MAX_VALUE = 2^BRICK_INDEX_REQUEST_COUNT_BITS;
+const int BRICK_INDEX_REQUEST_COUNT_MAX_VALUE = ~(~0 << BRICK_INDEX_REQUEST_COUNT_BITS);
 
 struct Brick {
     // 512 bit voxel set mask
