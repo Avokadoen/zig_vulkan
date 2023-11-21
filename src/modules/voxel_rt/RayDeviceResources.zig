@@ -388,25 +388,28 @@ pub fn init(
         }
         const brick_grid_start = ray_ranges.len;
         const brick_grid_end = ray_ranges.len + brick_grid_ranges.len;
-        for (infos[brick_grid_start..brick_grid_end], brick_grid_ranges, 0..) |*info, range, info_index| {
-            info.* = vk.DescriptorBufferInfo{
+        const brick_infos = infos[brick_grid_start..brick_grid_end];
+        for (brick_infos, brick_grid_ranges, 0..) |*brick_info, range, info_index| {
+            brick_info.* = vk.DescriptorBufferInfo{
                 .buffer = voxel_scene_buffer.buffer,
                 .offset = if (info_index == 0) 0 else pow2Align(
-                    infos[info_index - 1].offset + infos[info_index - 1].range,
+                    brick_infos[info_index - 1].offset + brick_infos[info_index - 1].range,
                     ctx.physical_device_limits.min_storage_buffer_offset_alignment,
                 ),
                 .range = range,
             };
             // TODO: assert we are within the allocated size of 250mb
         }
+
         const brick_req_start = brick_grid_end;
         const brick_req_end = brick_req_start + HostAndDeviceResources.brick_count;
-        for (infos[brick_req_start..brick_req_end], brick_request_ranges, 0..) |*info, range, info_index| {
-            info.* = vk.DescriptorBufferInfo{
+        const brick_req_infos = infos[brick_req_start..brick_req_end];
+        for (brick_req_infos, brick_request_ranges, 0..) |*brick_req_info, range, info_index| {
+            brick_req_info.* = vk.DescriptorBufferInfo{
                 .buffer = request_buffer.buffer,
                 // calculate offset by looking at previous info if there is any
                 .offset = if (info_index == 0) 0 else pow2Align(
-                    infos[info_index - 1].offset + infos[info_index - 1].range,
+                    brick_req_infos[info_index - 1].offset + brick_req_infos[info_index - 1].range,
                     ctx.physical_device_limits.min_storage_buffer_offset_alignment,
                 ),
                 .range = range,
