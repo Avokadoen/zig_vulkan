@@ -254,7 +254,7 @@ pub fn appendPipelineCommands(
         );
     }
 
-    const x_dispatch = @ceil(self.ray_device_resources.target_image_info.width * self.ray_device_resources.target_image_info.width) /
+    const x_dispatch = @ceil(self.ray_device_resources.target_image_info.width * self.ray_device_resources.target_image_info.height) /
         @as(f32, @floatFromInt(self.work_group_dim.x)) + 1;
 
     ctx.vkd.cmdDispatch(command_buffer, @as(u32, @intFromFloat(x_dispatch)), 1, 1);
