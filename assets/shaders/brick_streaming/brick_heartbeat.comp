@@ -42,9 +42,7 @@ void main() {
     }
 
     // Check if brick is set, TODO: load per CU and use subgroups to broadcast 32 bits
-    const int brick_set_offset = int(brick_index % 32);
-    const uint brick_set_bit = bitfieldExtract(brick_set_bits[brick_index/32], brick_set_offset, 1);
-    if (brick_set_bit == 0) {
+    if (bitfieldExtract(brick_set_bits[brick_index / 32], int(mod(brick_index, 32)), 1) == 0) {
         return;
     }
 
@@ -58,7 +56,7 @@ void main() {
     }
 
     // if req count - 1 is 0 and brick is loaded
-    if (req_count == 1 && brick_status == BRICK_STATUS_LOADED) {
+    if (req_count <= 1 && brick_status == BRICK_STATUS_LOADED) {
         if (brick_limits.unload_request_count < brick_limits.max_unload_request_count) {
             // register that brick is unloading
             new_brick_index_bits = bitfieldInsert(brick_index_bits, BRICK_STATUS_UNLOADING, BRICK_INDEX_STATUS_OFFSET, BRICK_INDEX_STATUS_BITS);

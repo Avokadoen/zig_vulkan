@@ -331,6 +331,7 @@ pub fn init(
         );
     }
 
+    // generate buffer info and write descriptor sets
     var buffer_infos: [descriptor_buffer_count]vk.DescriptorBufferInfo = blk: {
         var infos: [descriptor_buffer_count]vk.DescriptorBufferInfo = undefined;
 
@@ -380,6 +381,7 @@ pub fn init(
                 .buffer = ray_buffer.buffer,
                 .offset = if (info_index == 0) 0 else pow2Align(
                     infos[info_index - 1].offset + infos[info_index - 1].range,
+                    // TODO: use ray_buffer.memory requirement!
                     ctx.physical_device_limits.min_storage_buffer_offset_alignment,
                 ),
                 .range = range,
@@ -438,7 +440,7 @@ pub fn init(
                     .descriptor_count = 1,
                     .descriptor_type = .storage_buffer,
                     .p_image_info = undefined,
-                    .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(info)),
+                    .p_buffer_info = @ptrCast(info),
                     .p_texel_buffer_view = undefined,
                 };
             }
@@ -452,7 +454,7 @@ pub fn init(
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&infos[@intFromEnum(DeviceOnlyResources.bricks_set)])),
+                .p_buffer_info = @ptrCast(&infos[@intFromEnum(DeviceOnlyResources.bricks_set)]),
                 .p_texel_buffer_view = undefined,
             };
 
@@ -463,7 +465,7 @@ pub fn init(
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&infos[@intFromEnum(DeviceOnlyResources.brick_indices)])),
+                .p_buffer_info = @ptrCast(&infos[@intFromEnum(DeviceOnlyResources.brick_indices)]),
                 .p_texel_buffer_view = undefined,
             };
             writes[@intFromEnum(DeviceOnlyResources.bricks)] = vk.WriteDescriptorSet{
@@ -473,7 +475,7 @@ pub fn init(
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&infos[@intFromEnum(DeviceOnlyResources.bricks)])),
+                .p_buffer_info = @ptrCast(&infos[@intFromEnum(DeviceOnlyResources.bricks)]),
                 .p_texel_buffer_view = undefined,
             };
 
@@ -484,7 +486,7 @@ pub fn init(
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(&infos[@intFromEnum(DeviceOnlyResources.bricks_set)])),
+                .p_buffer_info = @ptrCast(&infos[@intFromEnum(DeviceOnlyResources.brick_req_limits)]),
                 .p_texel_buffer_view = undefined,
             };
 
@@ -494,34 +496,36 @@ pub fn init(
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_image,
-                .p_image_info = @as([*]const vk.DescriptorImageInfo, @ptrCast(&image_info)),
+                .p_image_info = @ptrCast(&image_info),
                 .p_buffer_info = undefined,
                 .p_texel_buffer_view = undefined,
             };
 
-            const brick_req_offset = DeviceOnlyResources.all_count;
-            writes[brick_req_offset + @intFromEnum(HostAndDeviceResources.brick_load_request)] = vk.WriteDescriptorSet{
+            // assert image is last enum value
+            comptime std.debug.assert(@intFromEnum(DeviceOnlyResources.draw_image) == DeviceOnlyResources.all_count - 1);
+            // assert brick set is last buffer enum value
+            comptime std.debug.assert(@intFromEnum(DeviceOnlyResources.draw_image) == @intFromEnum(DeviceOnlyResources.brick_req_limits) + 1);
+
+            const brick_req_write_offset = DeviceOnlyResources.all_count;
+            const brick_req_buffer_offset = @intFromEnum(DeviceOnlyResources.brick_req_limits) + 1;
+            writes[brick_req_write_offset + @intFromEnum(HostAndDeviceResources.brick_load_request)] = vk.WriteDescriptorSet{
                 .dst_set = target_descriptor_sets[brick_desc_set_index + 3],
                 .dst_binding = 0,
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(
-                    &infos[@intFromEnum(DeviceOnlyResources.bricks) + @intFromEnum(HostAndDeviceResources.brick_load_request)],
-                )),
+                .p_buffer_info = @ptrCast(&infos[brick_req_buffer_offset + @intFromEnum(HostAndDeviceResources.brick_load_request)]),
                 .p_texel_buffer_view = undefined,
             };
-            writes[brick_req_offset + @intFromEnum(HostAndDeviceResources.brick_unload_request)] = vk.WriteDescriptorSet{
+            writes[brick_req_write_offset + @intFromEnum(HostAndDeviceResources.brick_unload_request)] = vk.WriteDescriptorSet{
                 .dst_set = target_descriptor_sets[brick_desc_set_index + 3],
                 .dst_binding = 1,
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @as([*]const vk.DescriptorBufferInfo, @ptrCast(
-                    &infos[@intFromEnum(DeviceOnlyResources.bricks) + @intFromEnum(HostAndDeviceResources.brick_unload_request)],
-                )),
+                .p_buffer_info = @ptrCast(&infos[brick_req_buffer_offset + @intFromEnum(HostAndDeviceResources.brick_unload_request)]),
                 .p_texel_buffer_view = undefined,
             };
 
@@ -573,6 +577,18 @@ pub fn init(
         0,
         0,
     });
+
+    // TODO: dont hard code
+    const TODO_TMP_ACTIVE_BRICKS = 8;
+    const brick_limits = [_]BrickLimits{.{
+        .max_load_request_count = brick_load_request_count,
+        .load_request_count = 0,
+        .max_unload_request_count = brick_unload_request_count,
+        .unload_request_count = 0,
+        .max_active_bricks = @intCast(total_bricks),
+        .active_bricks = TODO_TMP_ACTIVE_BRICKS,
+    }};
+    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@intFromEnum(DeviceOnlyResources.brick_req_limits)].offset, BrickLimits, &brick_limits);
 
     return RayDeviceResources{
         .allocator = allocator,
@@ -672,7 +688,59 @@ pub inline fn getDescriptorSetLayouts(self: RayDeviceResources, comptime resourc
     return descriptor_layouts;
 }
 
-/// Reset the bounce iteration limit (out_hit_count and out_miss_count)
+/// Reset the brick request limit counters
+///
+/// Caller should make sure reset is done by calling ``resetBrickReqLimitsBarrier()``
+pub inline fn resetBrickReqLimits(self: RayDeviceResources, ctx: Context, command_buffer: vk.CommandBuffer) void {
+    {
+        const load_request_count_offset = self.buffer_infos[@intFromEnum(DeviceOnlyResources.brick_req_limits)].offset + @offsetOf(BrickLimits, "load_request_count");
+        ctx.vkd.cmdFillBuffer(
+            command_buffer,
+            self.voxel_scene_buffer.buffer,
+            load_request_count_offset,
+            @sizeOf(c_uint),
+            0,
+        );
+    }
+
+    {
+        const unload_request_count_offset = self.buffer_infos[@intFromEnum(DeviceOnlyResources.brick_req_limits)].offset + @offsetOf(BrickLimits, "unload_request_count");
+        ctx.vkd.cmdFillBuffer(
+            command_buffer,
+            self.voxel_scene_buffer.buffer,
+            unload_request_count_offset,
+            @sizeOf(c_uint),
+            0,
+        );
+    }
+}
+
+/// Reset barrier for the brick request limit counters
+pub inline fn resetBrickReqLimitsBarrier(self: RayDeviceResources, ctx: Context, command_buffer: vk.CommandBuffer) void {
+    const limits_memory_barrier = [_]vk.BufferMemoryBarrier{.{
+        .src_access_mask = .{ .transfer_write_bit = true },
+        .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+        .src_queue_family_index = ctx.queue_indices.compute,
+        .dst_queue_family_index = ctx.queue_indices.compute,
+        .buffer = self.voxel_scene_buffer.buffer,
+        .offset = 0,
+        .size = @sizeOf(BrickLimits),
+    }};
+    ctx.vkd.cmdPipelineBarrier(
+        command_buffer,
+        .{ .transfer_bit = true },
+        .{ .compute_shader_bit = true },
+        .{},
+        0,
+        undefined,
+        limits_memory_barrier.len,
+        &limits_memory_barrier,
+        0,
+        undefined,
+    );
+}
+
+/// Reset the ray limit counters
 pub inline fn resetRayLimits(self: RayDeviceResources, ctx: Context, command_buffer: vk.CommandBuffer) void {
     {
         const limits_memory_barrier = [_]vk.BufferMemoryBarrier{.{

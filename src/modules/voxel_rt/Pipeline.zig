@@ -398,6 +398,7 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     self.traverse_ray_pipeline.deinit(ctx);
     self.emit_ray_pipeline.deinit(ctx);
     self.ray_device_resource.deinit(ctx);
+    self.brick_heartbeat_pipeline.deinit(ctx);
     self.allocator.destroy(self.ray_device_resource);
 
     ctx.vkd.freeCommandBuffers(

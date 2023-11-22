@@ -135,6 +135,8 @@ pub fn appendPipelineCommands(self: BrickHeartbeatPipeline, ctx: Context, comman
         }
     }
 
+    self.ray_device_resources.resetBrickReqLimits(ctx, command_buffer);
+
     const brick_buffer_memory_barrier = [_]vk.BufferMemoryBarrier{.{
         .src_access_mask = .{ .shader_read_bit = true },
         .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
@@ -157,14 +159,19 @@ pub fn appendPipelineCommands(self: BrickHeartbeatPipeline, ctx: Context, comman
         undefined,
     );
 
-    ctx.vkd.cmdPushConstants(
-        command_buffer,
-        self.pipeline_layout,
-        .{ .compute_bit = true },
-        0,
-        @sizeOf(BrickGridState),
-        self.ray_device_resources.brick_grid_state,
-    );
+    {
+        // reduce brick dimensions to brick count
+        const brick_dim = self.ray_device_resources.brick_grid_state.dim;
+        const brick_count = brick_dim[0] * brick_dim[1] * brick_dim[2];
+        ctx.vkd.cmdPushConstants(
+            command_buffer,
+            self.pipeline_layout,
+            .{ .compute_bit = true },
+            0,
+            @sizeOf(c_uint),
+            &brick_count,
+        );
+    }
     ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
 
     const descriptor_sets = self.ray_device_resources.getDescriptorSets(&resources);
@@ -178,6 +185,8 @@ pub fn appendPipelineCommands(self: BrickHeartbeatPipeline, ctx: Context, comman
         0,
         undefined,
     );
+
+    self.ray_device_resources.resetBrickReqLimitsBarrier(ctx, command_buffer);
 
     const x_dispatch = @ceil(self.ray_device_resources.target_image_info.width * self.ray_device_resources.target_image_info.height) /
         @as(f32, @floatFromInt(self.work_group_dim.x)) + 1;

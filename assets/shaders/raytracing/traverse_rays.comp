@@ -19,7 +19,6 @@ layout (std430, set = 2, binding = 0) readonly buffer InRayShadingBuffer {
     RayShading in_ray_shadings[];
 };
 
-
 // outgoing rays 
 layout (std430, set = 3, binding = 0) writeonly buffer OutRayBuffer {
     Ray out_rays[];
@@ -194,14 +193,8 @@ bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_mat
     ) { 
         const uint grid_index = uint(floor(local_position.x + g_dim.x * (local_position.z + g_dim.z * local_position.y)));
         
-        // extract the bit for this brick and check if it is set 
-        const uint set_index = grid_index / 32;
-        const uint set_bit_offset = uint(mod(grid_index, 32));
-        const uint set_bits = brick_set_bits[set_index];
-        const uint set_bit = set_bits & (1 << set_bit_offset);
-        
         // If brick has some voxels
-        if (set_bit != 0) {
+        if (bitfieldExtract(brick_set_bits[grid_index / 32], int(mod(grid_index, 32)), 1) != 0) {
             const uint brick_index_bits = brick_index_21b_req_count_7b_status_4b[grid_index];
             const uint brick_status = bitfieldExtract(brick_index_bits, BRICK_INDEX_STATUS_OFFSET, BRICK_INDEX_STATUS_BITS);
 
