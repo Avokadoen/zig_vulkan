@@ -23,7 +23,7 @@ const Resource = RayDeviceResources.Resource;
 
 const resources = [_]Resource{
     Resource.from(DeviceOnlyResources.bricks_set),
-    Resource.from(DeviceOnlyResources.brick_req_limits),
+    Resource.from(HostAndDeviceResources.brick_req_limits),
     Resource.from(HostAndDeviceResources.brick_load_request),
 };
 
