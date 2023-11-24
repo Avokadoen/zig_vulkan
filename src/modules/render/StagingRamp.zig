@@ -380,7 +380,7 @@ const StagingBuffer = struct {
         try ctx.vkd.resetFences(ctx.logical_device, 1, @as([*]const vk.Fence, @ptrCast(&self.fence)));
 
         try self.device_buffer_memory.map(ctx, 0, self.buffer_cursor);
-        try self.device_buffer_memory.flush(ctx, 0, self.buffer_cursor);
+        try self.device_buffer_memory.sync(.flush, ctx, 0, self.buffer_cursor);
         self.device_buffer_memory.unmap(ctx);
         try ctx.vkd.resetCommandPool(ctx.logical_device, self.command_pool, .{});
 

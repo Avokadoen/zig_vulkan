@@ -103,6 +103,7 @@ pub const Device = vk.DeviceWrapper(.{
     .getFenceStatus = true,
     .getImageMemoryRequirements = true,
     .getSwapchainImagesKHR = true,
+    .invalidateMappedMemoryRanges = true,
     .mapMemory = true,
     .queuePresentKHR = true,
     .queueSubmit = true,

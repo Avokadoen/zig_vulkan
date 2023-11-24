@@ -178,7 +178,12 @@ pub fn unmap(self: *GpuBufferMemory, ctx: Context) void {
     }
 }
 
-pub fn flush(self: GpuBufferMemory, ctx: Context, offset: vk.DeviceSize, size: vk.DeviceSize) !void {
+pub const SyncOp = enum {
+    flush,
+    invalidate,
+};
+/// Makes host writes visible to the device
+pub fn sync(self: GpuBufferMemory, comptime sync_op: SyncOp, ctx: Context, offset: vk.DeviceSize, size: vk.DeviceSize) !void {
     const atom_size = memory_util.nonCoherentAtomSize(ctx, size);
     if (atom_size + offset > self.size) return error.InsufficientMemory; // size greater than buffer
 
@@ -187,11 +192,19 @@ pub fn flush(self: GpuBufferMemory, ctx: Context, offset: vk.DeviceSize, size: v
         .offset = offset,
         .size = atom_size,
     };
-    try ctx.vkd.flushMappedMemoryRanges(
-        ctx.logical_device,
-        1,
-        @as([*]const vk.MappedMemoryRange, @ptrCast(&map_range)),
-    );
+
+    switch (sync_op) {
+        .flush => try ctx.vkd.flushMappedMemoryRanges(
+            ctx.logical_device,
+            1,
+            @as([*]const vk.MappedMemoryRange, @ptrCast(&map_range)),
+        ),
+        .invalidate => try ctx.vkd.invalidateMappedMemoryRanges(
+            ctx.logical_device,
+            1,
+            @as([*]const vk.MappedMemoryRange, @ptrCast(&map_range)),
+        ),
+    }
 }
 
 pub fn transferFromDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, data: []T) !void {

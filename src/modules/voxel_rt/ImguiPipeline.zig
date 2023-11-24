@@ -636,5 +636,5 @@ pub fn updateBuffers(
     }
 
     // send changes to GPU
-    try vertex_index_buffer.flush(ctx, self.vertex_index_buffer_offset, self.vertex_size + index_size);
+    try vertex_index_buffer.sync(.flush, ctx, self.vertex_index_buffer_offset, self.vertex_size + index_size);
 }
