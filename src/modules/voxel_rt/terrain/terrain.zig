@@ -77,12 +77,10 @@ pub fn generateCpu(comptime threads_count: usize, allocator: Allocator, seed: u6
             var point: [3]f32 = undefined;
             const thread_x_begin = thread_segment_size * @as(f32, @floatFromInt(thread_id));
             const thread_x_end = std.math.min(thread_x_begin + thread_segment_size, voxel_dim_[0]);
-            var x: f32 = thread_x_begin;
-            while (x < thread_x_end) : (x += 1) {
+            for (thread_x_begin..thread_x_end) |x| {
                 const i_x = @as(usize, @intFromFloat(x));
 
-                var z: f32 = 0;
-                while (z < voxel_dim_[2]) : (z += 1) {
+                for (0..voxel_dim_[2]) |z| {
                     const i_z = @as(usize, @intFromFloat(z));
 
                     point[0] = x * point_mod_[0];
@@ -110,14 +108,13 @@ pub fn generateCpu(comptime threads_count: usize, allocator: Allocator, seed: u6
         @call(.{ .modifier = .always_inline }, insert_job_gen_fn, .{ 0, perlin, voxel_dim, point_mod, ocean_level, grid });
     } else {
         var threads: [threads_count]std.Thread = undefined;
-        comptime var i = 0;
-        inline while (i < threads_count) : (i += 1) {
-            const thread_name = std.fmt.comptimePrint("terrain thread {d}", .{i});
-            threads[i] = try std.Thread.spawn(.{}, insert_job_gen_fn, .{ i, thread_name, perlin, voxel_dim, point_mod, ocean_level, grid });
+        inline for (0..threads_count) |thread_index| {
+            const thread_name = std.fmt.comptimePrint("terrain thread {d}", .{thread_index});
+            threads[thread_index] = try std.Thread.spawn(.{}, insert_job_gen_fn, .{ thread_index, thread_name, perlin, voxel_dim, point_mod, ocean_level, grid });
         }
-        i = 0;
-        inline while (i < threads_count) : (i += 1) {
-            threads[i].join();
+
+        inline for (threads) |thread| {
+            thread.join();
         }
     }
 }

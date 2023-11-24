@@ -146,7 +146,7 @@ pub fn deinit(self: DrawRayPipeline, ctx: Context) void {
 pub fn appendPipelineCommands(
     self: DrawRayPipeline,
     ctx: Context,
-    bounce_index: u32,
+    bounce_index: usize,
     draw_op: DrawOp,
     do_image_transition: bool,
     command_buffer: vk.CommandBuffer,

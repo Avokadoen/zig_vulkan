@@ -137,7 +137,7 @@ pub fn deinit(self: ScatterRayPipeline, ctx: Context) void {
     ctx.destroyPipeline(self.pipeline);
 }
 
-pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, bounce_index: u32, command_buffer: vk.CommandBuffer) void {
+pub fn appendPipelineCommands(self: ScatterRayPipeline, ctx: Context, bounce_index: usize, command_buffer: vk.CommandBuffer) void {
     const zone = tracy.ZoneN(@src(), @typeName(ScatterRayPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 

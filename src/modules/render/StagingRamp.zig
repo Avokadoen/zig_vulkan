@@ -38,9 +38,8 @@ pub fn init(ctx: Context, allocator: Allocator, buffer_count: usize) !StagingRam
         buffers_initialized = i + 1;
     }
     errdefer {
-        var i: usize = 0;
-        while (i < buffers_initialized) : (i += 1) {
-            staging_buffers[i].deinit(ctx);
+        for (0..buffers_initialized) |index| {
+            staging_buffers[index].deinit(ctx);
         }
     }
 

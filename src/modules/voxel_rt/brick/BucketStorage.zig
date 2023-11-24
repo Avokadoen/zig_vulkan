@@ -74,8 +74,7 @@ pub fn init(allocator: Allocator, start_index: u32, material_indices_len: usize,
             .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048),
         };
         const bucket_size = try std.math.powi(u32, 2, min_2_pow_size);
-        var j: usize = 0;
-        while (j < segments_2048) : (j += 1) {
+        for (0..segments_2048) |_| {
             buckets[0].free.appendAssumeCapacity(.{ .start_index = cursor });
             buckets[0].free.appendAssumeCapacity(.{ .start_index = cursor + bucket_size });
             cursor += 2048;
@@ -83,17 +82,15 @@ pub fn init(allocator: Allocator, start_index: u32, material_indices_len: usize,
         cursor = inital_index + bucket_size * 2;
     }
     {
-        comptime var i: usize = 1;
-        inline while (i < buckets.len - 1) : (i += 1) {
+        inline for (1..buckets.len - 1) |bucket_index| {
             const inital_index = cursor;
-            buckets[i] = Bucket{
+            buckets[bucket_index] = Bucket{
                 .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments_2048),
                 .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048 / 2),
             };
-            const bucket_size = try std.math.powi(u32, 2, min_2_pow_size + i);
-            var j: usize = 0;
-            while (j < segments_2048) : (j += 1) {
-                buckets[i].free.appendAssumeCapacity(.{ .start_index = cursor });
+            const bucket_size = try std.math.powi(u32, 2, min_2_pow_size + bucket_index);
+            for (0..segments_2048) |_| {
+                buckets[bucket_index].free.appendAssumeCapacity(.{ .start_index = cursor });
                 cursor += 2048;
             }
             cursor = inital_index + bucket_size;
@@ -104,8 +101,7 @@ pub fn init(allocator: Allocator, start_index: u32, material_indices_len: usize,
             .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048),
         };
         const bucket_size = 512;
-        var j: usize = 0;
-        while (j < segments_2048) : (j += 1) {
+        for (0..segments_2048) |_| {
             buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = cursor });
             buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = cursor + bucket_size });
             buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = cursor + bucket_size * 2 });
@@ -143,15 +139,14 @@ pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_count: usi
         self.buckets[index.bucket_index].occupied.items[index.element_index] = null;
 
         // find a bucket with increased size that is free
-        var i: usize = index.bucket_index + 1;
-        while (i < self.buckets.len) : (i += 1) {
-            if (self.buckets[i].free.items.len > 0) {
+        for (index.bucket_index + 1..self.buckets.len) |bucket_index| {
+            if (self.buckets[bucket_index].free.items.len > 0) {
                 // do bucket stuff to rel
-                const bucket = self.buckets[i].free.pop();
-                const oc_index = try self.buckets[i].appendOccupied(bucket);
+                const bucket = self.buckets[bucket_index].free.pop();
+                const oc_index = try self.buckets[bucket_index].appendOccupied(bucket);
 
                 try self.index.put(brick_index, Index{
-                    .bucket_index = @as(u6, @intCast(i)),
+                    .bucket_index = @as(u6, @intCast(bucket_index)),
                     .element_index = @as(u26, @intCast(oc_index)),
                 });
 

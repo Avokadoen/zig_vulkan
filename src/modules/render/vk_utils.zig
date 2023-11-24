@@ -40,13 +40,10 @@ pub fn isInstanceExtensionsPresent(allocator: Allocator, vkb: dispatch.Base, tar
 
 pub inline fn findMemoryTypeIndex(ctx: Context, type_filter: u32, memory_flags: vk.MemoryPropertyFlags) !u32 {
     const properties = ctx.vki.getPhysicalDeviceMemoryProperties(ctx.physical_device);
-    {
-        var i: u32 = 0;
-        while (i < properties.memory_type_count) : (i += 1) {
-            const correct_type: bool = (type_filter & (@as(u32, 1) << @as(u5, @intCast(i)))) != 0;
-            if (correct_type and (properties.memory_types[i].property_flags.toInt() & memory_flags.toInt()) == memory_flags.toInt()) {
-                return i;
-            }
+    for (0..properties.memory_type_count) |i| {
+        const correct_type: bool = (type_filter & (@as(u32, 1) << @as(u5, @intCast(i)))) != 0;
+        if (correct_type and (properties.memory_types[i].property_flags.toInt() & memory_flags.toInt()) == memory_flags.toInt()) {
+            return @intCast(i);
         }
     }
 

@@ -564,8 +564,7 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
             undefined,
         );
 
-        var bounce_index: u32 = 0;
-        while (bounce_index <= max_bounces) {
+        for (0..max_bounces + 1) |bounce_index| {
             if (bounce_index > 0) {
                 self.ray_device_resource.resetRayLimits(ctx, self.ray_command_buffers);
             }
@@ -574,12 +573,10 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
 
             self.miss_ray_pipeline.appendPipelineCommands(ctx, bounce_index, self.ray_command_buffers);
             self.draw_ray_pipeline.appendPipelineCommands(ctx, bounce_index, .draw_miss, bounce_index == 0, self.ray_command_buffers);
-
-            bounce_index += 1;
         }
         self.draw_ray_pipeline.appendPipelineCommands(
             ctx,
-            bounce_index - 1,
+            max_bounces,
             .draw_hit,
             false,
             self.ray_command_buffers,

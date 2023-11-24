@@ -132,7 +132,7 @@ pub fn deinit(self: MissRayPipeline, ctx: Context) void {
 pub fn appendPipelineCommands(
     self: MissRayPipeline,
     ctx: Context,
-    bounce_index: u32,
+    bounce_index: usize,
     command_buffer: vk.CommandBuffer,
 ) void {
     const zone = tracy.ZoneN(@src(), @typeName(MissRayPipeline) ++ " " ++ @src().fn_name);

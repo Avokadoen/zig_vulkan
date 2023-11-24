@@ -93,12 +93,10 @@ pub fn PerlinNoiseGenerator(comptime point_count: u32) type {
                 const i = @as(usize, @intFromFloat(@floor(point[0])));
                 const j = @as(usize, @intFromFloat(@floor(point[1])));
                 const k = @as(usize, @intFromFloat(@floor(point[2])));
-                var di: usize = 0;
-                while (di < 2) : (di += 1) {
-                    var dj: usize = 0;
-                    while (dj < 2) : (dj += 1) {
-                        var dk: usize = 0;
-                        while (dk < 2) : (dk += 1) {
+
+                inline for (0..2) |di| {
+                    inline for (0..2) |dj| {
+                        inline for (0..2) |dk| {
                             c[di][dj][dk] = self.rand_float[
                                 @as(
                                     usize,
@@ -128,15 +126,12 @@ pub fn PerlinNoiseGenerator(comptime point_count: u32) type {
             // perform trilinear filtering
             var accum: NoiseFloat = 0;
             {
-                var i: usize = 0;
-                while (i < 2) : (i += 1) {
-                    const fi = @as(NoiseFloat, @floatFromInt(i));
-                    var j: usize = 0;
-                    while (j < 2) : (j += 1) {
-                        const fj = @as(NoiseFloat, @floatFromInt(j));
-                        var k: usize = 0;
-                        while (k < 2) : (k += 1) {
-                            const fk = @as(NoiseFloat, @floatFromInt(k));
+                inline for (0..2) |i| {
+                    const fi = comptime @as(NoiseFloat, @floatFromInt(i));
+                    inline for (0..2) |j| {
+                        const fj = comptime @as(NoiseFloat, @floatFromInt(j));
+                        inline for (0..2) |k| {
+                            const fk = comptime @as(NoiseFloat, @floatFromInt(k));
                             accum += (fi * u + (1 - fi) * (1 - u)) *
                                 (fj * v + (1 - fj) * (1 - v)) *
                                 (fk * w + (1 - fk) * (1 - w)) * c[i][j][k];

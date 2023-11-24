@@ -87,8 +87,7 @@ pub fn parseBuffer(comptime strict: bool, allocator: Allocator, buffer: []const 
     vox.xyzi_chunks = try allocator.alloc([]Chunk.XyziElement, num_models);
 
     // TODO: pos will cause out of bounds easily, make code more robust!
-    var model: usize = 0;
-    while (model < num_models) : (model += 1) {
+    for (0..num_models) |model_index| {
         // parse SIZE chunk
         {
             if (strict) {
@@ -107,11 +106,11 @@ pub fn parseBuffer(comptime strict: bool, allocator: Allocator, buffer: []const 
                 .size_z = parseI32(buffer[pos + 8 ..]),
             };
             pos += 12;
-            vox.size_chunks[model] = size;
+            vox.size_chunks[model_index] = size;
             try vox.nodes.append(.{
                 .type_id = .size,
                 .generic_index = vox.generic_chunks.items.len,
-                .index = model,
+                .index = model_index,
             });
         }
 
@@ -127,24 +126,24 @@ pub fn parseBuffer(comptime strict: bool, allocator: Allocator, buffer: []const 
             try vox.generic_chunks.append(try chunkFrom(buffer[pos..]));
             pos += chunk_stride;
 
-            const voxel_count = parseI32(buffer[pos..]);
+            const voxel_count: usize = @intCast(parseI32(buffer[pos..]));
             pos += 4;
-            const xyzis = try allocator.alloc(Chunk.XyziElement, @as(usize, @intCast(voxel_count)));
+
+            const xyzis = try allocator.alloc(Chunk.XyziElement, voxel_count);
             {
-                var i: usize = 0;
-                while (i < voxel_count) : (i += 1) {
-                    xyzis[i].x = buffer[pos];
-                    xyzis[i].y = buffer[pos + 1];
-                    xyzis[i].z = buffer[pos + 2];
-                    xyzis[i].color_index = buffer[pos + 3];
+                for (0..voxel_count) |voxel_index| {
+                    xyzis[voxel_index].x = buffer[pos];
+                    xyzis[voxel_index].y = buffer[pos + 1];
+                    xyzis[voxel_index].z = buffer[pos + 2];
+                    xyzis[voxel_index].color_index = buffer[pos + 3];
                     pos += 4;
                 }
             }
-            vox.xyzi_chunks[model] = xyzis;
+            vox.xyzi_chunks[model_index] = xyzis;
             try vox.nodes.append(.{
                 .type_id = .xyzi,
                 .generic_index = vox.generic_chunks.items.len,
-                .index = model,
+                .index = model_index,
             });
         }
     }
@@ -170,9 +169,8 @@ pub fn parseBuffer(comptime strict: bool, allocator: Allocator, buffer: []const 
                     .b = 0,
                     .a = 1,
                 };
-                var i: usize = 1;
-                while (i < 255) : (i += 1) {
-                    vox.rgba_chunk[i] = Chunk.RgbaElement{
+                for (1..255) |chunk_index| {
+                    vox.rgba_chunk[chunk_index] = Chunk.RgbaElement{
                         .r = buffer[pos],
                         .g = buffer[pos + 1],
                         .b = buffer[pos + 2],

@@ -368,18 +368,16 @@ pub fn init(
         initialized_buffers = i + 1;
     }
     errdefer {
-        var i: usize = 0;
-        while (i < initialized_buffers) : (i += 1) {
+        for (0..initialized_buffers) |buf_index| {
             ctx.vkd.freeCommandBuffers(
                 ctx.logical_device,
-                command_pools[i],
+                command_pools[buf_index],
                 1,
-                @as([*]const vk.CommandBuffer, @ptrCast(&command_buffers[i])),
+                @as([*]const vk.CommandBuffer, @ptrCast(&command_buffers[buf_index])),
             );
         }
-        i = 0;
-        while (i < initialized_pools) : (i += 1) {
-            ctx.vkd.destroyCommandPool(ctx.logical_device, command_pools[i], null);
+        for (0..initialized_pools) |pool_index| {
+            ctx.vkd.destroyCommandPool(ctx.logical_device, command_pools[pool_index], null);
         }
     }
 
