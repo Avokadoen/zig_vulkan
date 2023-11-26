@@ -26,6 +26,8 @@ const MissRayPipeline = @import("MissRayPipeline.zig");
 const DrawRayPipeline = @import("DrawRayPipeline.zig");
 const BrickHeartbeatPipeline = @import("BrickHeartbeatPipeline.zig");
 
+const BrickStream = @import("brick/BrickStream.zig");
+
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const ImguiPipeline = @import("ImguiPipeline.zig");
 const StagingRamp = render.StagingRamp;
@@ -82,14 +84,18 @@ render_complete_fence: vk.Fence,
 ray_command_pool: vk.CommandPool,
 // TODO: this should be an array
 ray_command_buffers: vk.CommandBuffer,
-ray_device_resource: *RayDeviceResources,
+ray_device_resources: *RayDeviceResources,
 emit_ray_pipeline: EmitRayPipeline,
 traverse_ray_pipeline: TraverseRayPipeline,
 scatter_ray_pipeline: ScatterRayPipeline,
 miss_ray_pipeline: MissRayPipeline,
 draw_ray_pipeline: DrawRayPipeline,
+
 brick_heartbeat_pipeline: BrickHeartbeatPipeline,
+
 ray_pipeline_complete_semaphore: vk.Semaphore,
+
+brick_stream: BrickStream,
 
 // TODO: rename pipeline
 gfx_pipeline: GraphicsPipeline,
@@ -256,8 +262,8 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         @as([*]const vk.CommandBuffer, @ptrCast(&ray_command_buffers)),
     );
 
-    var ray_device_resource = try allocator.create(RayDeviceResources);
-    errdefer allocator.destroy(ray_device_resource);
+    var ray_device_resources = try allocator.create(RayDeviceResources);
+    errdefer allocator.destroy(ray_device_resources);
 
     const target_image_info = ray_pipeline_types.ImageInfo{
         .width = @as(f32, @floatFromInt(internal_render_resolution.width)),
@@ -266,7 +272,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .sampler = sampler,
         .image_view = compute_image_view,
     };
-    ray_device_resource.* = try RayDeviceResources.init(
+    ray_device_resources.* = try RayDeviceResources.init(
         allocator,
         ctx,
         target_image_info,
@@ -274,25 +280,28 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         &staging_buffers,
         .{}, // use default config for now
     );
-    errdefer ray_device_resource.deinit(ctx);
+    errdefer ray_device_resources.deinit(ctx);
 
-    var traverse_ray_pipeline = try TraverseRayPipeline.init(ctx, ray_device_resource);
+    var traverse_ray_pipeline = try TraverseRayPipeline.init(ctx, ray_device_resources);
     errdefer traverse_ray_pipeline.deinit(ctx);
 
-    const emit_ray_pipeline = try EmitRayPipeline.init(ctx, ray_device_resource);
+    const emit_ray_pipeline = try EmitRayPipeline.init(ctx, ray_device_resources);
     errdefer emit_ray_pipeline.deinit(ctx);
 
-    const scatter_ray_pipeline = try ScatterRayPipeline.init(ctx, ray_device_resource);
+    const scatter_ray_pipeline = try ScatterRayPipeline.init(ctx, ray_device_resources);
     errdefer scatter_ray_pipeline.deinit(ctx);
 
-    const miss_ray_pipeline = try MissRayPipeline.init(ctx, ray_device_resource);
+    const miss_ray_pipeline = try MissRayPipeline.init(ctx, ray_device_resources);
     errdefer miss_ray_pipeline.deinit(ctx);
 
-    const draw_ray_pipeline = try DrawRayPipeline.init(ctx, ray_device_resource);
+    const draw_ray_pipeline = try DrawRayPipeline.init(ctx, ray_device_resources);
     errdefer draw_ray_pipeline.deinit(ctx);
 
-    const brick_heartbeat_pipeline = try BrickHeartbeatPipeline.init(ctx, ray_device_resource);
+    const brick_heartbeat_pipeline = try BrickHeartbeatPipeline.init(ctx, ray_device_resources);
     errdefer brick_heartbeat_pipeline.deinit(ctx);
+
+    const brick_stream = try BrickStream.init(allocator, ray_device_resources);
+    errdefer brick_stream.deinit();
 
     var vertex_index_buffer = try GpuBufferMemory.init(
         ctx,
@@ -330,7 +339,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .grid_state = grid_state,
         .sun_ptr = sun,
         .gfx_pipeline_shader_constants = gfx_pipeline.shader_constants,
-        .brick_grid_state = ray_device_resource.brick_grid_state,
+        .brick_grid_state = ray_device_resources.brick_grid_state,
     };
     const gui = ImguiGui.init(
         ctx,
@@ -357,7 +366,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .render_complete_fence = render_complete_fence,
         .ray_command_pool = ray_command_pool,
         .ray_command_buffers = ray_command_buffers,
-        .ray_device_resource = ray_device_resource,
+        .ray_device_resources = ray_device_resources,
         .emit_ray_pipeline = emit_ray_pipeline,
         .traverse_ray_pipeline = traverse_ray_pipeline,
         .scatter_ray_pipeline = scatter_ray_pipeline,
@@ -365,6 +374,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .draw_ray_pipeline = draw_ray_pipeline,
         .brick_heartbeat_pipeline = brick_heartbeat_pipeline,
         .ray_pipeline_complete_semaphore = ray_pipeline_complete_semaphore,
+        .brick_stream = brick_stream,
         .gfx_pipeline = gfx_pipeline,
         .imgui_pipeline = imgui_pipeline,
         .camera = camera,
@@ -398,9 +408,12 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     self.scatter_ray_pipeline.deinit(ctx);
     self.traverse_ray_pipeline.deinit(ctx);
     self.emit_ray_pipeline.deinit(ctx);
-    self.ray_device_resource.deinit(ctx);
+    self.ray_device_resources.deinit(ctx);
     self.brick_heartbeat_pipeline.deinit(ctx);
-    self.allocator.destroy(self.ray_device_resource);
+
+    self.brick_stream.deinit();
+
+    self.allocator.destroy(self.ray_device_resources);
 
     ctx.vkd.freeCommandBuffers(
         ctx.logical_device,
@@ -507,6 +520,14 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
         try ctx.vkd.resetFences(ctx.logical_device, 1, @as([*]const vk.Fence, @ptrCast(&self.render_complete_fence)));
     }
 
+    // grab any new brick requests
+    {
+        try self.ray_device_resources.mapBrickRequestData(ctx);
+        defer self.ray_device_resources.request_buffer.unmap(ctx);
+
+        try self.brick_stream.handleBrickRequests(ctx, self.ray_device_resources);
+    }
+
     // The pipeline has the following stages:
     //
     //         emit
@@ -547,7 +568,7 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
             .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
             .src_queue_family_index = ctx.queue_indices.compute,
             .dst_queue_family_index = ctx.queue_indices.compute,
-            .buffer = self.ray_device_resource.ray_buffer.buffer,
+            .buffer = self.ray_device_resources.ray_buffer.buffer,
             .offset = 0,
             .size = vk.WHOLE_SIZE,
         };
@@ -567,7 +588,7 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
 
         for (0..max_bounces + 1) |bounce_index| {
             if (bounce_index > 0) {
-                self.ray_device_resource.resetRayLimits(ctx, self.ray_command_buffers);
+                self.ray_device_resources.resetRayLimits(ctx, self.ray_command_buffers);
             }
             self.traverse_ray_pipeline.appendPipelineCommands(ctx, bounce_index, self.ray_command_buffers);
             self.scatter_ray_pipeline.appendPipelineCommands(ctx, bounce_index, self.ray_command_buffers);
@@ -693,10 +714,10 @@ pub fn transferCurrentBrickGridState(self: *Pipeline, ctx: Context) !void {
     defer zone.End();
     try self.staging_buffers.transferToBuffer(
         ctx,
-        &self.ray_device_resource.voxel_scene_buffer,
+        &self.ray_device_resources.voxel_scene_buffer,
         0,
         ray_pipeline_types.BrickGridState,
-        &[1]ray_pipeline_types.BrickGridState{self.ray_device_resource.brick_grid_state.*},
+        &[1]ray_pipeline_types.BrickGridState{self.ray_device_resources.brick_grid_state.*},
     );
 }
 
