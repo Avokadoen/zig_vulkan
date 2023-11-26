@@ -25,28 +25,28 @@ const Resource = RayDeviceResources.Resource;
 // ping pong resources
 const device_resources = [2][7]DeviceOnlyResources{
     .{
-        .ray_pipeline_limits,
+        .ray_pipeline_limits_s,
         // incoming data
-        .ray_0,
-        .ray_shading_0,
+        .ray_0_s,
+        .ray_shading_0_s,
         // outgoing data
-        .ray_1,
-        .ray_hit_1,
-        .ray_shading_1,
+        .ray_1_s,
+        .ray_hit_1_s,
+        .ray_shading_1_s,
         // readonly brick data
-        .bricks_set,
+        .bricks_set_s,
     },
     .{
-        .ray_pipeline_limits,
+        .ray_pipeline_limits_s,
         // incoming data
-        .ray_1,
-        .ray_shading_1,
+        .ray_1_s,
+        .ray_shading_1_s,
         // outgoing data
-        .ray_0,
-        .ray_hit_0,
-        .ray_shading_0,
+        .ray_0_s,
+        .ray_hit_0_s,
+        .ray_shading_0_s,
         // readonly brick data
-        .bricks_set,
+        .bricks_set_s,
     },
 };
 const resources = [2][7]Resource{

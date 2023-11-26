@@ -23,14 +23,14 @@ const Resource = RayDeviceResources.Resource;
 // ping pong resources
 const device_resources = [2][3]DeviceOnlyResources{
     .{
-        .ray_pipeline_limits,
-        .ray_1,
-        .ray_shading_1,
+        .ray_pipeline_limits_s,
+        .ray_1_s,
+        .ray_shading_1_s,
     },
     .{
-        .ray_pipeline_limits,
-        .ray_0,
-        .ray_shading_0,
+        .ray_pipeline_limits_s,
+        .ray_0_s,
+        .ray_shading_0_s,
     },
 };
 const resources = [2][3]Resource{

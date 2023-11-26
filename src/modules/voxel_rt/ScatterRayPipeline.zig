@@ -29,18 +29,18 @@ const ScatterRayPipeline = @This();
 // ping pong resources
 const device_resources = [2][5]DeviceOnlyResources{
     .{
-        .ray_pipeline_limits,
-        .ray_1,
-        .ray_hit_1,
-        .ray_shading_1,
-        .bricks_set,
+        .ray_pipeline_limits_s,
+        .ray_1_s,
+        .ray_hit_1_s,
+        .ray_shading_1_s,
+        .bricks_set_s,
     },
     .{
-        .ray_pipeline_limits,
-        .ray_0,
-        .ray_hit_0,
-        .ray_shading_0,
-        .bricks_set,
+        .ray_pipeline_limits_s,
+        .ray_0_s,
+        .ray_hit_0_s,
+        .ray_shading_0_s,
+        .bricks_set_s,
     },
 };
 const resources = [2][5]Resource{

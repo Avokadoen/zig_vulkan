@@ -22,9 +22,9 @@ const HostAndDeviceResources = RayDeviceResources.HostAndDeviceResources;
 const Resource = RayDeviceResources.Resource;
 
 const resources = [_]Resource{
-    Resource.from(DeviceOnlyResources.bricks_set),
-    Resource.from(HostAndDeviceResources.brick_req_limits),
-    Resource.from(HostAndDeviceResources.brick_load_request),
+    Resource.from(DeviceOnlyResources.bricks_set_s),
+    Resource.from(HostAndDeviceResources.brick_req_limits_s),
+    Resource.from(HostAndDeviceResources.brick_load_request_s),
 };
 
 /// compute shader that draws to a target texture

@@ -22,14 +22,14 @@ const Resource = RayDeviceResources.Resource;
 
 const device_resources = [2][3]DeviceOnlyResources{
     .{
-        .draw_image,
-        .ray_pipeline_limits,
-        .ray_shading_1,
+        .draw_image_s,
+        .ray_pipeline_limits_s,
+        .ray_shading_1_s,
     },
     .{
-        .draw_image,
-        .ray_pipeline_limits,
-        .ray_shading_0,
+        .draw_image_s,
+        .ray_pipeline_limits_s,
+        .ray_shading_0_s,
     },
 };
 const resources = [2][3]Resource{

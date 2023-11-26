@@ -24,10 +24,10 @@ const DeviceOnlyResources = RayDeviceResources.DeviceOnlyResources;
 const Resource = RayDeviceResources.Resource;
 
 const device_resources = [_]DeviceOnlyResources{
-    .ray_pipeline_limits,
-    .ray_0,
-    .ray_hit_0,
-    .ray_shading_0,
+    .ray_pipeline_limits_s,
+    .ray_0_s,
+    .ray_hit_0_s,
+    .ray_shading_0_s,
 };
 const resources = Resource.fromArray(DeviceOnlyResources, &device_resources);
 
