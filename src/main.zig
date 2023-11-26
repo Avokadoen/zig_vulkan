@@ -126,6 +126,7 @@ pub fn main() anyerror!void {
         .camera = .{
             .samples_per_pixel = 2,
             .max_bounce = 0,
+            .origin = @Vector(3, f32){ 0, 0, 4 },
         },
         .sun = .{
             .enabled = true,
