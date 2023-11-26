@@ -238,7 +238,8 @@ pub fn init(
                 .binding_count = bindings.len,
                 .p_bindings = &bindings,
             };
-            tmp_layout[DeviceOnlyResources.ray_count] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
+            const brick_set_index = (Resource{ .device = .bricks_set_s }).toDescriptorIndex();
+            tmp_layout[brick_set_index] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
 
             created_layouts += 1;
         }
@@ -261,7 +262,8 @@ pub fn init(
                 .binding_count = bindings.len,
                 .p_bindings = &bindings,
             };
-            tmp_layout[DeviceOnlyResources.ray_count + 1] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
+            const image_set_index = (Resource{ .device = .draw_image_s }).toDescriptorIndex();
+            tmp_layout[image_set_index] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
 
             created_layouts += 1;
         }
@@ -290,7 +292,8 @@ pub fn init(
                 .binding_count = bindings.len,
                 .p_bindings = &bindings,
             };
-            tmp_layout[DeviceOnlyResources.ray_count + 2] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
+            const brick_req_set_index = (Resource{ .host_and_device = .brick_load_request_s }).toDescriptorIndex();
+            tmp_layout[brick_req_set_index] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
 
             created_layouts += 1;
         }
@@ -311,7 +314,8 @@ pub fn init(
                 .binding_count = bindings.len,
                 .p_bindings = &bindings,
             };
-            tmp_layout[DeviceOnlyResources.ray_count + 3] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
+            const brick_req_limits_index = (Resource{ .host_and_device = .brick_req_limits_s }).toDescriptorIndex();
+            tmp_layout[brick_req_limits_index] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
 
             created_layouts += 1;
         }
@@ -454,48 +458,52 @@ pub fn init(
 
             const brick_desc_set_index = DeviceOnlyResources.ray_count;
 
-            writes[@intFromEnum(DeviceOnlyResources.bricks_set_s)] = vk.WriteDescriptorSet{
-                .dst_set = target_descriptor_sets[brick_desc_set_index],
-                .dst_binding = 0,
-                .dst_array_element = 0,
-                .descriptor_count = 1,
-                .descriptor_type = .storage_buffer,
-                .p_image_info = undefined,
-                .p_buffer_info = @ptrCast(&infos[@intFromEnum(DeviceOnlyResources.bricks_set_s)]),
-                .p_texel_buffer_view = undefined,
-            };
+            {
+                const brick_set_res = Resource{ .device = .bricks_set_s };
+                writes[@intFromEnum(DeviceOnlyResources.bricks_set_s)] = vk.WriteDescriptorSet{
+                    .dst_set = target_descriptor_sets[brick_set_res.toDescriptorIndex()],
+                    .dst_binding = 0,
+                    .dst_array_element = 0,
+                    .descriptor_count = 1,
+                    .descriptor_type = .storage_buffer,
+                    .p_image_info = undefined,
+                    .p_buffer_info = @ptrCast(&infos[brick_set_res.toBufferIndex()]),
+                    .p_texel_buffer_view = undefined,
+                };
+                writes[@intFromEnum(DeviceOnlyResources.brick_indices_b)] = vk.WriteDescriptorSet{
+                    .dst_set = target_descriptor_sets[brick_set_res.toDescriptorIndex()],
+                    .dst_binding = 1,
+                    .dst_array_element = 0,
+                    .descriptor_count = 1,
+                    .descriptor_type = .storage_buffer,
+                    .p_image_info = undefined,
+                    .p_buffer_info = @ptrCast(&infos[(Resource{ .device = .brick_indices_b }).toBufferIndex()]),
+                    .p_texel_buffer_view = undefined,
+                };
+                writes[@intFromEnum(DeviceOnlyResources.bricks_b)] = vk.WriteDescriptorSet{
+                    .dst_set = target_descriptor_sets[brick_set_res.toDescriptorIndex()],
+                    .dst_binding = 2,
+                    .dst_array_element = 0,
+                    .descriptor_count = 1,
+                    .descriptor_type = .storage_buffer,
+                    .p_image_info = undefined,
+                    .p_buffer_info = @ptrCast(&infos[(Resource{ .device = .bricks_b }).toBufferIndex()]),
+                    .p_texel_buffer_view = undefined,
+                };
+            }
 
-            writes[@intFromEnum(DeviceOnlyResources.brick_indices_b)] = vk.WriteDescriptorSet{
-                .dst_set = target_descriptor_sets[brick_desc_set_index],
-                .dst_binding = 1,
-                .dst_array_element = 0,
-                .descriptor_count = 1,
-                .descriptor_type = .storage_buffer,
-                .p_image_info = undefined,
-                .p_buffer_info = @ptrCast(&infos[@intFromEnum(DeviceOnlyResources.brick_indices_b)]),
-                .p_texel_buffer_view = undefined,
-            };
-            writes[@intFromEnum(DeviceOnlyResources.bricks_b)] = vk.WriteDescriptorSet{
-                .dst_set = target_descriptor_sets[brick_desc_set_index],
-                .dst_binding = 2,
-                .dst_array_element = 0,
-                .descriptor_count = 1,
-                .descriptor_type = .storage_buffer,
-                .p_image_info = undefined,
-                .p_buffer_info = @ptrCast(&infos[@intFromEnum(DeviceOnlyResources.bricks_b)]),
-                .p_texel_buffer_view = undefined,
-            };
-
-            writes[@intFromEnum(DeviceOnlyResources.draw_image_s)] = vk.WriteDescriptorSet{
-                .dst_set = target_descriptor_sets[brick_desc_set_index + 1],
-                .dst_binding = 0,
-                .dst_array_element = 0,
-                .descriptor_count = 1,
-                .descriptor_type = .storage_image,
-                .p_image_info = @ptrCast(&image_info),
-                .p_buffer_info = undefined,
-                .p_texel_buffer_view = undefined,
-            };
+            {
+                writes[@intFromEnum(DeviceOnlyResources.draw_image_s)] = vk.WriteDescriptorSet{
+                    .dst_set = target_descriptor_sets[brick_desc_set_index + 1],
+                    .dst_binding = 0,
+                    .dst_array_element = 0,
+                    .descriptor_count = 1,
+                    .descriptor_type = .storage_image,
+                    .p_image_info = @ptrCast(&image_info),
+                    .p_buffer_info = undefined,
+                    .p_texel_buffer_view = undefined,
+                };
+            }
 
             // assert image is last enum value
             comptime std.debug.assert(@intFromEnum(DeviceOnlyResources.draw_image_s) == DeviceOnlyResources.all_count - 1);
@@ -503,7 +511,6 @@ pub fn init(
             comptime std.debug.assert(@intFromEnum(DeviceOnlyResources.draw_image_s) == @intFromEnum(DeviceOnlyResources.bricks_b) + 1);
 
             const brick_req_write_offset = DeviceOnlyResources.all_count;
-            const brick_req_buffer_offset = @intFromEnum(DeviceOnlyResources.bricks_b) + 1;
             writes[brick_req_write_offset + @intFromEnum(HostAndDeviceResources.brick_load_request_s)] = vk.WriteDescriptorSet{
                 .dst_set = target_descriptor_sets[brick_desc_set_index + 2],
                 .dst_binding = 0,
@@ -511,7 +518,7 @@ pub fn init(
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @ptrCast(&infos[brick_req_buffer_offset + @intFromEnum(HostAndDeviceResources.brick_load_request_s)]),
+                .p_buffer_info = @ptrCast(&infos[(Resource{ .host_and_device = .brick_load_request_s }).toBufferIndex()]),
                 .p_texel_buffer_view = undefined,
             };
             writes[brick_req_write_offset + @intFromEnum(HostAndDeviceResources.brick_unload_request_b)] = vk.WriteDescriptorSet{
@@ -521,7 +528,7 @@ pub fn init(
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @ptrCast(&infos[brick_req_buffer_offset + @intFromEnum(HostAndDeviceResources.brick_unload_request_b)]),
+                .p_buffer_info = @ptrCast(&infos[(Resource{ .host_and_device = .brick_unload_request_b }).toBufferIndex()]),
                 .p_texel_buffer_view = undefined,
             };
 
@@ -532,7 +539,7 @@ pub fn init(
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @ptrCast(&infos[brick_req_buffer_offset + @intFromEnum(HostAndDeviceResources.brick_req_limits_s)]),
+                .p_buffer_info = @ptrCast(&infos[(Resource{ .host_and_device = .brick_req_limits_s }).toBufferIndex()]),
                 .p_texel_buffer_view = undefined,
             };
 
@@ -550,58 +557,78 @@ pub fn init(
         break :blk infos;
     };
 
-    const test_brick_none = Brick{
-        .solid_mask = @as(u512, 0),
-    };
-    _ = test_brick_none;
-    const test_brick_one = Brick{
-        .solid_mask = @as(u512, 1),
-    };
-    const test_brick_row = Brick{
-        .solid_mask = @as(u512, 0b01111111),
-    };
-    const test_brick_all = Brick{
-        .solid_mask = ~@as(u512, 0),
-    };
-    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@intFromEnum(DeviceOnlyResources.bricks_b)].offset, Brick, &.{
-        test_brick_one,
-        test_brick_all,
-        test_brick_row,
-    });
-    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@intFromEnum(DeviceOnlyResources.brick_indices_b)].offset, BrickIndex, &.{
-        BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
-        BrickIndex{ .status = .loaded, .request_count = 100, .index = 1 },
-        BrickIndex{ .status = .loaded, .request_count = 100, .index = 2 },
-        BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
-        BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
-        BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
-        BrickIndex{ .status = .loaded, .request_count = 100, .index = 1 },
-        BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
-    });
-    try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[@intFromEnum(DeviceOnlyResources.bricks_set_s)].offset, u8, &.{
-        1 << 7 | 1 << 6 | 0 << 5 | 1 << 4 | 1 << 3 | 1 << 2 | 1 << 1 | 1 << 0,
-        0,
-        0,
-        0,
-    });
+    // brick transfer
+    {
+        const test_brick_none = Brick{
+            .solid_mask = @as(u512, 0),
+        };
+        _ = test_brick_none;
+        const test_brick_one = Brick{
+            .solid_mask = @as(u512, 1),
+        };
+        const test_brick_row = Brick{
+            .solid_mask = @as(u512, 0b01111111),
+        };
+        const test_brick_all = Brick{
+            .solid_mask = ~@as(u512, 0),
+        };
 
-    // TODO: dont hard code
-    const TODO_TMP_ACTIVE_BRICKS = 8;
-    const brick_limits = [_]BrickLimits{.{
-        .max_load_request_count = brick_load_request_count,
-        .load_request_count = 0,
-        .max_unload_request_count = brick_unload_request_count,
-        .unload_request_count = 0,
-        .max_active_bricks = @intCast(total_bricks),
-        .active_bricks = TODO_TMP_ACTIVE_BRICKS,
-    }};
-    try staging_buffer.transferToBuffer(
-        ctx,
-        &voxel_scene_buffer,
-        buffer_infos[@intFromEnum(HostAndDeviceResources.brick_req_limits_s)].offset,
-        BrickLimits,
-        &brick_limits,
-    );
+        const brick_buffer_index = (Resource{ .device = .bricks_b }).toBufferIndex();
+        try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[brick_buffer_index].offset, Brick, &.{
+            test_brick_one,
+            test_brick_all,
+            test_brick_row,
+        });
+    }
+
+    // brick indices transfer
+    {
+        const brick_indices_buffer_index = (Resource{ .device = .brick_indices_b }).toBufferIndex();
+        try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[brick_indices_buffer_index].offset, BrickIndex, &.{
+            BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
+            BrickIndex{ .status = .loaded, .request_count = 100, .index = 1 },
+            BrickIndex{ .status = .loaded, .request_count = 100, .index = 2 },
+            BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
+            BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
+            BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
+            BrickIndex{ .status = .loaded, .request_count = 100, .index = 1 },
+            BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
+        });
+    }
+
+    // brick set bits transfer
+    {
+        const brick_set_buffer_index = (Resource{ .device = .bricks_set_s }).toBufferIndex();
+        try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[brick_set_buffer_index].offset, u8, &.{
+            1 << 7 | 1 << 6 | 0 << 5 | 1 << 4 | 1 << 3 | 1 << 2 | 1 << 1 | 1 << 0,
+            0,
+            0,
+            0,
+        });
+    }
+
+    // brick limits transfer
+    {
+        // TODO: dont hard code
+        const TODO_TMP_ACTIVE_BRICKS = 8;
+        const brick_limits = [_]BrickLimits{.{
+            .max_load_request_count = brick_load_request_count,
+            .load_request_count = 0,
+            .max_unload_request_count = brick_unload_request_count,
+            .unload_request_count = 0,
+            .max_active_bricks = @intCast(total_bricks),
+            .active_bricks = TODO_TMP_ACTIVE_BRICKS,
+        }};
+
+        const brick_req_limits_buffer_index = (Resource{ .host_and_device = .brick_req_limits_s }).toBufferIndex();
+        try staging_buffer.transferToBuffer(
+            ctx,
+            &request_buffer,
+            buffer_infos[brick_req_limits_buffer_index].offset,
+            BrickLimits,
+            &brick_limits,
+        );
+    }
 
     return RayDeviceResources{
         .allocator = allocator,
@@ -716,6 +743,32 @@ pub const Resource = union(enum) {
             },
         }
     }
+
+    pub fn toBufferIndex(comptime resource: Resource) usize {
+        // Preconditions
+        comptime {
+            // Expect draw_image_s to be last entry
+            std.debug.assert(@intFromEnum(DeviceOnlyResources.draw_image_s) == DeviceOnlyResources.all_count - 1);
+
+            switch (resource) {
+                Resource.device => |d_resource| {
+                    if (d_resource == DeviceOnlyResources.draw_image_s) {
+                        @compileError(@tagName(d_resource) ++ " is not a legal buffer literal");
+                    }
+                },
+                Resource.host_and_device => {},
+            }
+        }
+
+        switch (resource) {
+            Resource.device => |d_resource| {
+                return @intFromEnum(d_resource);
+            },
+            Resource.host_and_device => |hd_resource| {
+                return @intFromEnum(hd_resource) + DeviceOnlyResources.all_count - DeviceOnlyResources.image_count;
+            },
+        }
+    }
 };
 pub inline fn getDescriptorSets(self: RayDeviceResources, comptime resources: []const Resource) [resources.len]vk.DescriptorSet {
     var descriptor_sets: [resources.len]vk.DescriptorSet = undefined;
@@ -739,11 +792,12 @@ pub inline fn getDescriptorSetLayouts(self: RayDeviceResources, comptime resourc
 ///
 /// Caller should make sure reset is done by calling ``resetBrickReqLimitsBarrier()``
 pub inline fn resetBrickReqLimits(self: RayDeviceResources, ctx: Context, command_buffer: vk.CommandBuffer) void {
+    const brick_req_limits_buffer_index = (Resource{ .host_and_device = .brick_req_limits_s }).toBufferIndex();
     {
-        const load_request_count_offset = self.buffer_infos[@intFromEnum(HostAndDeviceResources.brick_req_limits_s)].offset + @offsetOf(BrickLimits, "load_request_count");
+        const load_request_count_offset = self.buffer_infos[brick_req_limits_buffer_index].offset + @offsetOf(BrickLimits, "load_request_count");
         ctx.vkd.cmdFillBuffer(
             command_buffer,
-            self.voxel_scene_buffer.buffer,
+            self.request_buffer.buffer,
             load_request_count_offset,
             @sizeOf(c_uint),
             0,
@@ -751,10 +805,10 @@ pub inline fn resetBrickReqLimits(self: RayDeviceResources, ctx: Context, comman
     }
 
     {
-        const unload_request_count_offset = self.buffer_infos[@intFromEnum(HostAndDeviceResources.brick_req_limits_s)].offset + @offsetOf(BrickLimits, "unload_request_count");
+        const unload_request_count_offset = self.buffer_infos[brick_req_limits_buffer_index].offset + @offsetOf(BrickLimits, "unload_request_count");
         ctx.vkd.cmdFillBuffer(
             command_buffer,
-            self.voxel_scene_buffer.buffer,
+            self.request_buffer.buffer,
             unload_request_count_offset,
             @sizeOf(c_uint),
             0,
