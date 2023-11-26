@@ -21,6 +21,11 @@ const RayHit = ray_pipeline_types.RayHit;
 const RayShading = ray_pipeline_types.RayShading;
 const RayHash = ray_pipeline_types.RayHash;
 
+pub const Config = struct {
+    brick_load_request_count: c_uint = 1024,
+    brick_unload_request_count: c_uint = 1024,
+};
+
 // TODO: We should definitly rework all this resource stuff ...
 /// Resources only accessible on device
 ///
@@ -99,8 +104,8 @@ ray_buffer: GpuBufferMemory,
 voxel_scene_buffer: GpuBufferMemory,
 request_buffer: GpuBufferMemory,
 
-const brick_load_request_count = 1024;
-const brick_unload_request_count = 1024;
+brick_load_request_count: c_uint,
+brick_unload_request_count: c_uint,
 
 pub fn init(
     allocator: Allocator,
@@ -108,6 +113,7 @@ pub fn init(
     target_image_info: ImageInfo,
     init_command_pool: vk.CommandPool,
     staging_buffer: *StagingRamp,
+    config: Config,
 ) !RayDeviceResources {
     const zone = tracy.ZoneN(@src(), @typeName(RayDeviceResources) ++ " " ++ @src().fn_name);
     defer zone.End();
@@ -380,9 +386,9 @@ pub fn init(
         };
         const brick_request_ranges = [HostAndDeviceResources.brick_req_count + HostAndDeviceResources.brick_limits_count]vk.DeviceSize{
             // load brick requests
-            brick_load_request_count * @sizeOf(c_uint),
+            config.brick_load_request_count * @sizeOf(c_uint),
             // unload brick requests
-            brick_unload_request_count * @sizeOf(c_uint),
+            config.brick_unload_request_count * @sizeOf(c_uint),
             // brick limits
             @sizeOf(BrickLimits),
         };
@@ -612,9 +618,9 @@ pub fn init(
         // TODO: dont hard code
         const TODO_TMP_ACTIVE_BRICKS = 8;
         const brick_limits = [_]BrickLimits{.{
-            .max_load_request_count = brick_load_request_count,
+            .max_load_request_count = config.brick_load_request_count,
             .load_request_count = 0,
-            .max_unload_request_count = brick_unload_request_count,
+            .max_unload_request_count = config.brick_unload_request_count,
             .unload_request_count = 0,
             .max_active_bricks = @intCast(total_bricks),
             .active_bricks = TODO_TMP_ACTIVE_BRICKS,
@@ -641,6 +647,8 @@ pub fn init(
         .brick_grid_state = brick_grid_state,
         .voxel_scene_buffer = voxel_scene_buffer,
         .request_buffer = request_buffer,
+        .brick_load_request_count = config.brick_load_request_count,
+        .brick_unload_request_count = config.brick_unload_request_count,
     };
 }
 

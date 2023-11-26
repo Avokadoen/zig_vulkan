@@ -272,6 +272,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         target_image_info,
         init_command_pool,
         &staging_buffers,
+        .{}, // use default config for now
     );
     errdefer ray_device_resource.deinit(ctx);
 
@@ -626,9 +627,9 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
         .p_wait_semaphores = &wait_semaphores,
         .p_wait_dst_stage_mask = &stage_masks,
         .command_buffer_count = 1,
-        .p_command_buffers = @as([*]const vk.CommandBuffer, @ptrCast(&self.gfx_pipeline.command_buffers[image_index])),
+        .p_command_buffers = @ptrCast(&self.gfx_pipeline.command_buffers[image_index]),
         .signal_semaphore_count = 1,
-        .p_signal_semaphores = @as([*]const vk.Semaphore, @ptrCast(&self.render_complete_semaphore)),
+        .p_signal_semaphores = @ptrCast(&self.render_complete_semaphore),
     };
 
     try ctx.vkd.queueSubmit(
