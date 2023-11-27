@@ -224,7 +224,7 @@ const AssetMoveStep = struct {
     builder: *Builder,
 
     fn init(b: *Builder) !*AssetMoveStep {
-        var step = Step.init(.{ .id = .custom, .name = "assets", .owner = b, .makeFn = make });
+        const step = Step.init(.{ .id = .custom, .name = "assets", .owner = b, .makeFn = make });
 
         const self = try b.allocator.create(AssetMoveStep);
         self.* = .{
@@ -248,8 +248,9 @@ const AssetMoveStep = struct {
         var dst_assets_dir = try fs.openDirAbsolute(dst_asset_path, .{});
         defer dst_assets_dir.close();
 
-        var src_assets_dir = try fs.cwd().openIterableDir("assets/", .{
+        var src_assets_dir = try fs.cwd().openDir("assets/", .{
             .access_sub_paths = true,
+            .iterate = true,
         });
         defer src_assets_dir.close();
 
@@ -260,7 +261,7 @@ const AssetMoveStep = struct {
 };
 
 // TODO: HACK: catch unreachable to avoid error hell from recursion
-fn copyDir(b: *Builder, src_dir: fs.IterableDir, dst_parent_dir: fs.Dir) void {
+fn copyDir(b: *Builder, src_dir: fs.Dir, dst_parent_dir: fs.Dir) void {
     const Kind = fs.File.Kind;
 
     var walker = src_dir.walk(b.allocator) catch unreachable;
@@ -268,7 +269,7 @@ fn copyDir(b: *Builder, src_dir: fs.IterableDir, dst_parent_dir: fs.Dir) void {
     while (walker.next() catch unreachable) |asset| {
         switch (asset.kind) {
             Kind.directory => {
-                var src_child_dir = src_dir.dir.openIterableDir(asset.path, .{
+                var src_child_dir = src_dir.openDir(asset.path, .{
                     .access_sub_paths = true,
                 }) catch unreachable;
                 defer src_child_dir.close();
@@ -284,7 +285,7 @@ fn copyDir(b: *Builder, src_dir: fs.IterableDir, dst_parent_dir: fs.Dir) void {
                 if (std.mem.eql(u8, asset.path[0..7], "shaders")) {
                     continue; // skip shader folder which will be compiled by glslc before being moved
                 }
-                src_dir.dir.copyFile(asset.path, dst_parent_dir, asset.path, .{}) catch unreachable;
+                src_dir.copyFile(asset.path, dst_parent_dir, asset.path, .{}) catch unreachable;
             },
             else => {}, // don't care
         }
@@ -303,7 +304,7 @@ inline fn createFolder(path: []const u8) std.os.MakeDirError!void {
 }
 
 inline fn thisDir() []const u8 {
-    return comptime std.fs.path.dirname(@src().file) orelse ".";
+    return comptime std.fs.path.dirname(@src().file) orelse unreachable;
 }
 
 fn glfwLink(b: *std.Build, step: *std.build.CompileStep) void {
@@ -313,5 +314,5 @@ fn glfwLink(b: *std.Build, step: *std.build.CompileStep) void {
         .optimize = step.optimize,
     });
     step.addModule("mach-glfw", glfw_dep.module("mach-glfw"));
-    try @import("mach_glfw").link(b, step);
+    @import("mach_glfw").link(glfw_dep.builder, step);
 }

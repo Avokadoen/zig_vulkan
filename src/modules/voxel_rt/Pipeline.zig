@@ -537,12 +537,12 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
     //           |       |
     //      sort_active  |
     //          / \      |
-    //         v   v     |
+    //         v   v     |-([1] no)
     //       miss  hit   |
     //        |      x---|
-    //        \     / \_ _ _ _(Depending on if we are done performing bounces)
-    //         \   /
-    //           v
+    //        \     / \- - - -([1] reached max bounce?)
+    //         \   /\
+    //           v   ([1] yes)
     //          draw
     //
     //
@@ -610,8 +610,8 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
 
         {
             @setRuntimeSafety(false);
-            var semo_null_ptr: [*c]const vk.Semaphore = null;
-            var wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
+            const semo_null_ptr: [*c]const vk.Semaphore = null;
+            const wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
             // perform the compute ray tracing, draw to target texture
             const submit_info = vk.SubmitInfo{
                 .wait_semaphore_count = 0,

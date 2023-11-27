@@ -107,7 +107,7 @@ pub const Data = struct {
             var image_count: u32 = 0;
             _ = try ctx.vkd.getSwapchainImagesKHR(ctx.logical_device, swapchain_khr, &image_count, null);
 
-            var images = try allocator.alloc(vk.Image, image_count);
+            const images = try allocator.alloc(vk.Image, image_count);
             errdefer allocator.free(images);
 
             // TODO: handle incomplete
@@ -249,17 +249,16 @@ pub const SupportDetails = struct {
         if (self.capabilities.current_extent.width != std.math.maxInt(u32)) {
             return self.capabilities.current_extent;
         } else {
-            var window_size = blk: {
+            const window_size = blk: {
                 const size = window.getFramebufferSize();
                 break :blk vk.Extent2D{ .width = @as(u32, @intCast(size.width)), .height = @as(u32, @intCast(size.height)) };
             };
 
-            const clamp = std.math.clamp;
             const min = self.capabilities.min_image_extent;
             const max = self.capabilities.max_image_extent;
             return vk.Extent2D{
-                .width = clamp(window_size.width, min.width, max.width),
-                .height = clamp(window_size.height, min.height, max.height),
+                .width = std.math.clamp(window_size.width, min.width, max.width),
+                .height = std.math.clamp(window_size.height, min.height, max.height),
             };
         }
     }

@@ -3,7 +3,7 @@ const Mutex = std.Thread.Mutex;
 
 const BucketStorage = @import("./BucketStorage.zig");
 
-pub const AtomicCount = std.atomic.Atomic(u32);
+pub const AtomicCount = std.atomic.Value(u32);
 
 /// type used to record changes in host/device buffers in order to only send changed data to the gpu
 pub const DeviceDataDelta = struct {

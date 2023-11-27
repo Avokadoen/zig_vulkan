@@ -14,7 +14,7 @@ const Worker = @This();
 
 /// a FIFO queue of jobs for a given worker
 const JobQueue = std.fifo.LinearFifo(Job, .Dynamic);
-const Signal = std.atomic.Atomic(bool);
+const Signal = std.atomic.Value(bool);
 
 pub const Insert = struct { x: usize, y: usize, z: usize, material_index: u8 };
 pub const JobTag = enum {

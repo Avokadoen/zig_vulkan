@@ -76,8 +76,8 @@ pub inline fn endOneTimeCommandBuffer(ctx: Context, command_pool: vk.CommandPool
 
     {
         @setRuntimeSafety(false);
-        var semo_null_ptr: [*c]const vk.Semaphore = null;
-        var wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
+        const semo_null_ptr: [*c]const vk.Semaphore = null;
+        const wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
         // perform the compute ray tracing, draw to target texture
         const submit_info = vk.SubmitInfo{
             .wait_semaphore_count = 0,

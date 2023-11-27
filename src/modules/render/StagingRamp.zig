@@ -142,7 +142,7 @@ pub fn deinit(self: StagingRamp, ctx: Context, allocator: Allocator) void {
 inline fn getIdleRamp(self: *StagingRamp, ctx: Context, size: vk.DeviceSize) !usize {
     var full_ramps: usize = 0;
     // get a idle buffer
-    var index: usize = blk: {
+    const index: usize = blk: {
         for (self.staging_buffers, 0..) |ramp, i| {
             // if ramp is out of memory
             if (ramp.buffer_cursor + size >= buffer_size) {
@@ -278,7 +278,7 @@ const StagingBuffer = struct {
         try self.device_buffer_memory.map(ctx, self.buffer_cursor, data_size);
         defer self.device_buffer_memory.unmap(ctx);
 
-        var raw_ptr = self.device_buffer_memory.mapped orelse @panic("device pointer was null");
+        const raw_ptr = self.device_buffer_memory.mapped orelse @panic("device pointer was null");
         var dest_location: [*]T = @ptrCast(@alignCast(raw_ptr));
         std.mem.copy(T, dest_location[0..data.len], data);
 
@@ -330,7 +330,7 @@ const StagingBuffer = struct {
         //       This is because we get runtime errors from using T and data directly.
         //       It *SEEMS* like alignment error is a zig bug, but might as well be an application bug.
         //       If the bug is an application bug, then we need to find a way to fix it instead of disabling safety ...
-        var raw_device_ptr = self.device_buffer_memory.mapped orelse @panic("device pointer was null");
+        const raw_device_ptr = self.device_buffer_memory.mapped orelse @panic("device pointer was null");
         var dest_location = @as([*]u8, @ptrCast(@alignCast(raw_device_ptr)));
         {
             const byte_data = std.mem.sliceAsBytes(data);
@@ -480,8 +480,8 @@ const StagingBuffer = struct {
 
         {
             @setRuntimeSafety(false);
-            var semo_null_ptr: [*c]const vk.Semaphore = null;
-            var wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
+            const semo_null_ptr: [*c]const vk.Semaphore = null;
+            const wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
             // perform the compute ray tracing, draw to target texture
             const submit_info = vk.SubmitInfo{
                 .wait_semaphore_count = 0,

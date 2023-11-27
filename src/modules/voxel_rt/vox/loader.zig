@@ -230,7 +230,7 @@ inline fn buildPath(allocator: Allocator, path: []const u8) ![]const u8 {
     const exe_path = try std.fs.selfExeDirPath(buf[0..]);
     const path_segments = [_][]const u8{ exe_path, path };
 
-    var zig_use_path = try std.fs.path.join(allocator, path_segments[0..]);
+    const zig_use_path = try std.fs.path.join(allocator, path_segments[0..]);
     errdefer allocator.destroy(zig_use_path.ptr);
 
     const sep = [_]u8{std.fs.path.sep};

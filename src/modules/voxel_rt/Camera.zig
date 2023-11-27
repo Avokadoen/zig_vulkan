@@ -161,7 +161,7 @@ pub fn turnPitch(self: *Camera, angle: f32) void {
 
     // arbitrary restrict rotation so that camera does not become inversed
     const euler_x_rotation = self.pitch.extractEulerAngles().x();
-    if (@fabs(euler_x_rotation) >= 90) {
+    if (@abs(euler_x_rotation) >= 90) {
         self.pitch = prev_pitch;
     }
 

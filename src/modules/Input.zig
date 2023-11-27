@@ -159,7 +159,7 @@ fn keyCallback(window: glfw.Window, key: Key, scan_code: i32, action: Action, mo
     _ = scan_code;
 
     var owned_mods = mods;
-    var parsed_mods = @as(*Mods, @ptrCast(&owned_mods));
+    const parsed_mods = @as(*Mods, @ptrCast(&owned_mods));
     const event = KeyEvent{
         .key = key,
         .action = action,
@@ -193,7 +193,7 @@ fn charCallback(window: glfw.Window, codepoint: u21) void {
 
 fn mouseBtnCallback(window: glfw.Window, button: MouseButton, action: Action, mods: Mods) void {
     var owned_mods = mods;
-    var parsed_mods = @as(*Mods, @ptrCast(&owned_mods));
+    const parsed_mods = @as(*Mods, @ptrCast(&owned_mods));
     const event = MouseButtonEvent{
         .button = button,
         .action = action,

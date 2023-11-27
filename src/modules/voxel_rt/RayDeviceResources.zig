@@ -146,7 +146,7 @@ pub fn init(
     try request_buffer.fill(ctx, init_command_pool, 0, request_buffer.size, 0);
 
     const brick_grid_state: *BrickGridState = blk: {
-        var state = try allocator.create(BrickGridState);
+        const state = try allocator.create(BrickGridState);
         state.* = BrickGridState{
             .dim = [_]f32{ 32, 32, 32 },
             .padding1 = 0,
@@ -349,7 +349,7 @@ pub fn init(
     }
 
     // generate buffer info and write descriptor sets
-    var buffer_infos: [descriptor_buffer_count]vk.DescriptorBufferInfo = blk: {
+    const buffer_infos: [descriptor_buffer_count]vk.DescriptorBufferInfo = blk: {
         var infos: [descriptor_buffer_count]vk.DescriptorBufferInfo = undefined;
 
         // TODO: when we convert this from enum to a struct we can bake some of the info into the struct.

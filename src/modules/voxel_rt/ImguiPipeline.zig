@@ -596,13 +596,13 @@ pub fn updateBuffers(
     try vertex_index_buffer.map(ctx, self.vertex_index_buffer_offset, self.vertex_size + index_size);
     defer vertex_index_buffer.unmap(ctx);
 
-    var raw_vertex_pointer = vertex_index_buffer.mapped orelse @panic("device pointer was null");
+    const raw_vertex_pointer = vertex_index_buffer.mapped orelse @panic("device pointer was null");
     var vertex_dest = @as([*]zgui.DrawVert, @ptrCast(@alignCast(raw_vertex_pointer)));
     var vertex_offset: usize = 0;
 
     // map index_dest to be the buffer memory + vertex byte offset
     const index_address = @intFromPtr(vertex_index_buffer.mapped) + @as(usize, @intCast(self.vertex_size));
-    var index_raw_ptr = @as(?*anyopaque, @ptrFromInt(index_address)) orelse @panic("device pointer was null");
+    const index_raw_ptr = @as(?*anyopaque, @ptrFromInt(index_address)) orelse @panic("device pointer was null");
     var index_dest = @as(
         [*]zgui.DrawIdx,
         @ptrCast(@alignCast(index_raw_ptr)),

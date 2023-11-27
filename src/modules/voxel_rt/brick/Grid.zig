@@ -75,14 +75,11 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         result[3] = base_t;
         break :blk result;
     };
-    const max_point_scale = blk: {
-        var result = [4]f32{
-            min_point_base_t[0] + @as(f32, @floatFromInt(dim_x)) * config.scale,
-            min_point_base_t[1] + @as(f32, @floatFromInt(dim_y)) * config.scale,
-            min_point_base_t[2] + @as(f32, @floatFromInt(dim_z)) * config.scale,
-            config.scale,
-        };
-        break :blk result;
+    const max_point_scale = [4]f32{
+        min_point_base_t[0] + @as(f32, @floatFromInt(dim_x)) * config.scale,
+        min_point_base_t[1] + @as(f32, @floatFromInt(dim_y)) * config.scale,
+        min_point_base_t[2] + @as(f32, @floatFromInt(dim_z)) * config.scale,
+        config.scale,
     };
 
     const state = try allocator.create(State);
@@ -90,21 +87,21 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 
     // initialize all delta structures
     // these are used to track changes that should be pushed to GPU
-    var higher_order_grid_delta = try allocator.create(State.DeviceDataDelta);
+    const higher_order_grid_delta = try allocator.create(State.DeviceDataDelta);
     errdefer allocator.destroy(higher_order_grid_delta);
     higher_order_grid_delta.* = State.DeviceDataDelta.init();
 
-    var brick_statuses_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
+    const brick_statuses_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
     errdefer allocator.free(brick_statuses_deltas);
     @memset(brick_statuses_deltas, State.DeviceDataDelta.init());
 
-    var brick_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
+    const brick_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
     errdefer allocator.free(brick_indices_deltas);
     @memset(brick_indices_deltas, State.DeviceDataDelta.init());
 
     const bricks_delta = State.DeviceDataDelta.init();
 
-    var material_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
+    const material_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
     errdefer allocator.free(material_indices_deltas);
     @memset(material_indices_deltas, State.DeviceDataDelta.init());
 
@@ -142,7 +139,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     var workers = try allocator.alloc(Worker, config.workers_count);
     errdefer allocator.free(workers);
 
-    var worker_threads = try allocator.alloc(std.Thread, config.workers_count);
+    const worker_threads = try allocator.alloc(std.Thread, config.workers_count);
     errdefer allocator.free(worker_threads);
     for (worker_threads, 0..) |*thread, i| {
         workers[i] = try Worker.init(i, config.workers_count, state, allocator, 4096);

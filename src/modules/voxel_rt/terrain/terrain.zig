@@ -45,7 +45,7 @@ pub fn generateCpu(comptime threads_count: usize, allocator: Allocator, seed: u6
     defer zone.End();
 
     const perlin = blk: {
-        var p = try allocator.create(Perlin);
+        const p = try allocator.create(Perlin);
         p.* = Perlin.init(seed);
         break :blk p;
     };
