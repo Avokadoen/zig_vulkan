@@ -15,10 +15,9 @@ const InputModeCursor = Input.InputModeCursor;
 
 // TODO: API topology
 const VoxelRT = @import("modules/VoxelRT.zig");
-const BrickGrid = VoxelRT.BrickGrid;
+const GridState = VoxelRT.GridState;
 const gpu_types = VoxelRT.gpu_types;
-const vox = VoxelRT.vox;
-const terrain = VoxelRT.terrain;
+const vox = @import("modules/voxel_rt/vox/loader.zig");
 
 pub const application_name = "zig vulkan";
 pub const internal_render_resolution = za.GenericVector(2, u32).new(500, 250);
@@ -78,49 +77,10 @@ pub fn main() anyerror!void {
     const ctx = try render.Context.init(allocator, application_name, &window);
     defer ctx.deinit();
 
-    var grid = try BrickGrid.init(allocator, 64, 32, 64, .{
-        .min_point = [3]f32{ -32, -16, -32 },
-        .material_indices_per_brick = 128,
-        .workers_count = 4,
-    });
-    defer grid.deinit();
+    // TODO:
+    const grid_state: GridState = undefined;
 
-    // force workers to sleep while terrain generate
-    grid.sleepWorkers();
-
-    const model = try vox.load(false, allocator, "../assets/models/doom.vox");
-    defer model.deinit();
-
-    var albedo_color: [256]gpu_types.Albedo = undefined;
-    var materials: [256]gpu_types.Material = undefined;
-    // insert terrain color
-    for (terrain.color_data, 0..) |color, i| {
-        albedo_color[i] = color;
-    }
-    // insert terrain materials
-    for (terrain.material_data, 0..) |material, i| {
-        materials[i] = material;
-    }
-
-    for (model.rgba_chunk[terrain.color_data.len..], 0..) |rgba, i| {
-        const albedo_index = i + terrain.color_data.len;
-        albedo_color[albedo_index] = .{
-            .color = za.Vec4.new(
-                @as(f32, @floatFromInt(rgba.r)) / 255,
-                @as(f32, @floatFromInt(rgba.g)) / 255,
-                @as(f32, @floatFromInt(rgba.b)) / 255,
-                @as(f32, @floatFromInt(rgba.a)) / 255,
-            ).data,
-        };
-        const material_index = i + terrain.material_data.len;
-        materials[material_index] = .{ .type = .metal, .type_index = 0, .albedo_index = @as(u8, @intCast(albedo_index)) };
-    }
-
-    // Test what we are loading
-    for (model.xyzi_chunks[0]) |xyzi| {
-        grid.insert(@as(usize, @intCast(xyzi.x)) + 200, @as(usize, @intCast(xyzi.z)) + 50, @as(usize, @intCast(xyzi.y)) + 150, xyzi.color_index);
-    }
-    var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, .{
+    var voxel_rt = try VoxelRT.init(allocator, ctx, grid_state, .{
         .internal_resolution_width = internal_render_resolution.x(),
         .internal_resolution_height = internal_render_resolution.y(),
         .camera = .{
@@ -137,9 +97,6 @@ pub fn main() anyerror!void {
     });
     defer voxel_rt.deinit(allocator, ctx);
 
-    try voxel_rt.pushAlbedo(ctx, albedo_color[0..]);
-    try voxel_rt.pushMaterials(ctx, materials[0..]);
-
     window.setInputMode(glfw.Window.InputMode.cursor, glfw.Window.InputModeCursor.disabled);
 
     // init input module with default input handler functions
@@ -153,8 +110,6 @@ pub fn main() anyerror!void {
     defer input.deinit(allocator);
     input.setInputModeCursor(.disabled);
     input.setImguiWantInput(false);
-
-    voxel_rt.brick_grid.wakeWorkers();
 
     var prev_frame = std.time.milliTimestamp();
     // Loop until the user closes the window
@@ -187,7 +142,6 @@ pub fn main() anyerror!void {
         }
         voxel_rt.updateSun(dt);
 
-        try voxel_rt.updateGridDelta(ctx);
         try voxel_rt.draw(ctx, dt);
 
         // Poll for and process events

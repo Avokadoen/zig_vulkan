@@ -112,7 +112,15 @@ init_command_pool: vk.CommandPool, // kept in case of rescale
 // shared vertex index buffer for imgui and graphics pipeline
 vertex_index_buffer: GpuBufferMemory,
 
-pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.Extent2D, grid_state: GridState, camera: *Camera, sun: *Sun, config: Config) !Pipeline {
+pub fn init(
+    ctx: Context,
+    allocator: Allocator,
+    internal_render_resolution: vk.Extent2D,
+    grid_state: GridState,
+    camera: *Camera,
+    sun: *Sun,
+    config: Config,
+) !Pipeline {
     const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 

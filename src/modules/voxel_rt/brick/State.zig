@@ -1,8 +1,6 @@
 const std = @import("std");
 const Mutex = std.Thread.Mutex;
 
-const BucketStorage = @import("./BucketStorage.zig");
-
 pub const AtomicCount = std.atomic.Value(u32);
 
 /// type used to record changes in host/device buffers in order to only send changed data to the gpu
@@ -147,6 +145,3 @@ material_indices: []u8,
 active_bricks: AtomicCount,
 
 device_state: Device,
-
-// used to determine which worker is scheduled a job
-work_segment_size: usize,
