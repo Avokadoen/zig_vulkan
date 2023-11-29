@@ -30,10 +30,8 @@ pub const PushConstant = struct {
 
 sampler: vk.Sampler,
 
-vertex_index_buffer_offset: vk.DeviceSize,
-vertex_size: vk.DeviceSize,
-vertex_buffer_len: c_int,
-index_buffer_len: c_int,
+vertex_buffer_offset: vk.DeviceSize = undefined,
+index_buffer_offset: vk.DeviceSize = undefined,
 
 font_image: vk.Image,
 font_view: vk.ImageView,
@@ -54,7 +52,6 @@ pub fn init(
     render_pass: vk.RenderPass,
     swapchain_image_count: usize,
     staging_buffers: *StagingRamp,
-    vertex_index_buffer_offset: vk.DeviceSize,
     image_memory_type: u32,
     image_memory: vk.DeviceMemory,
     image_memory_capacity: vk.DeviceSize,
@@ -449,10 +446,6 @@ pub fn init(
 
     return ImguiPipeline{
         .sampler = sampler,
-        .vertex_index_buffer_offset = vertex_index_buffer_offset,
-        .vertex_size = 0,
-        .vertex_buffer_len = 0,
-        .index_buffer_len = 0,
         .font_image = font_image,
         .font_view = font_view,
         .pipeline_cache = pipeline_cache,
@@ -489,12 +482,17 @@ pub fn recordCommandBuffer(
     self: ImguiPipeline,
     ctx: Context,
     command_buffer: vk.CommandBuffer,
-    buffer_offset: vk.DeviceSize,
     vertex_index_buffer: GpuBufferMemory,
 ) !void {
     const zone = tracy.ZoneN(@src(), @typeName(ImguiPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
+    const draw_data: zgui.DrawData = zgui.getDrawData();
+    if (draw_data.valid == false or (draw_data.total_idx_count + draw_data.total_vtx_count) == 0) {
+        return;
+    }
+
+    ctx.vkd.cmdBindPipeline(command_buffer, .graphics, self.pipeline);
     ctx.vkd.cmdBindDescriptorSets(
         command_buffer,
         .graphics,
@@ -505,69 +503,87 @@ pub fn recordCommandBuffer(
         0,
         undefined,
     );
-    ctx.vkd.cmdBindPipeline(command_buffer, .graphics, self.pipeline);
-
-    const display_size = zgui.io.getDisplaySize();
     const viewport = vk.Viewport{
-        .x = 0,
-        .y = 0,
-        .width = display_size[0],
-        .height = display_size[1],
+        .x = draw_data.display_pos[0],
+        .y = draw_data.display_pos[1],
+        .width = draw_data.display_size[0],
+        .height = draw_data.display_size[1],
         .min_depth = 0,
         .max_depth = 1,
     };
     ctx.vkd.cmdSetViewport(command_buffer, 0, 1, @as([*]const vk.Viewport, @ptrCast(&viewport)));
 
     // UI scale and translate via push constants
-    const push_constant = PushConstant{
-        .scale = [2]f32{ 2 / display_size[0], 2 / display_size[1] },
-        .translate = [2]f32{ -1, -1 },
+    const ui_push_constant = PushConstant{
+        .scale = [2]f32{
+            2 / draw_data.display_size[0],
+            2 / draw_data.display_size[1],
+        },
+        .translate = [2]f32{
+            -1,
+            -1,
+        },
     };
-    ctx.vkd.cmdPushConstants(command_buffer, self.pipeline_layout, .{ .vertex_bit = true }, 0, @sizeOf(PushConstant), &push_constant);
+    ctx.vkd.cmdPushConstants(
+        command_buffer,
+        self.pipeline_layout,
+        .{ .vertex_bit = true },
+        0,
+        @sizeOf(PushConstant),
+        &ui_push_constant,
+    );
 
-    // Render commands
-    const im_draw_data = zgui.getDrawData();
-    var vertex_offset: c_uint = 0;
-    var index_offset: c_uint = 0;
-
-    if (im_draw_data.cmd_lists_count > 0) {
-        const vertex_offsets = [_]vk.DeviceSize{buffer_offset};
+    if (draw_data.cmd_lists_count > 0) {
         ctx.vkd.cmdBindVertexBuffers(
             command_buffer,
             0,
             1,
-            @as([*]const vk.Buffer, @ptrCast(&vertex_index_buffer.buffer)),
-            &vertex_offsets,
+            @ptrCast(&vertex_index_buffer.buffer),
+            @ptrCast(&self.vertex_buffer_offset),
         );
-        ctx.vkd.cmdBindIndexBuffer(command_buffer, vertex_index_buffer.buffer, buffer_offset + self.vertex_size, .uint16);
+        ctx.vkd.cmdBindIndexBuffer(
+            command_buffer,
+            vertex_index_buffer.buffer,
+            self.index_buffer_offset,
+            .uint16,
+        );
 
-        for (im_draw_data.cmd_lists[0..@as(usize, @intCast(im_draw_data.cmd_lists_count))]) |command_list| {
+        // Render commands
+        var vertex_offset: i32 = 0;
+        var index_offset: u32 = 0;
+        const command_lists = draw_data.cmd_lists[0..@as(usize, @intCast(draw_data.cmd_lists_count))];
+        for (command_lists) |command_list| {
             const command_buffer_length = command_list.getCmdBufferLength();
             const command_buffer_data = command_list.getCmdBufferData();
 
             for (command_buffer_data[0..@as(usize, @intCast(command_buffer_length))]) |draw_command| {
+                const X = 0;
+                const Y = 1;
+                const Z = 2;
+                const W = 3;
                 const scissor_rect = vk.Rect2D{
                     .offset = .{
-                        .x = @max(@as(i32, @intFromFloat(draw_command.clip_rect[0])), 0),
-                        .y = @max(@as(i32, @intFromFloat(draw_command.clip_rect[1])), 0),
+                        .x = @max(@as(i32, @intFromFloat(draw_command.clip_rect[X])), 0),
+                        .y = @max(@as(i32, @intFromFloat(draw_command.clip_rect[Y])), 0),
                     },
                     .extent = .{
-                        .width = @as(u32, @intFromFloat(draw_command.clip_rect[2] - draw_command.clip_rect[0])),
-                        .height = @as(u32, @intFromFloat(draw_command.clip_rect[3] - draw_command.clip_rect[1])),
+                        .width = @as(u32, @intFromFloat(draw_command.clip_rect[Z] - draw_command.clip_rect[X])),
+                        .height = @as(u32, @intFromFloat(draw_command.clip_rect[W] - draw_command.clip_rect[Y])),
                     },
                 };
                 ctx.vkd.cmdSetScissor(command_buffer, 0, 1, @as([*]const vk.Rect2D, @ptrCast(&scissor_rect)));
+
                 ctx.vkd.cmdDrawIndexed(
                     command_buffer,
                     draw_command.elem_count,
                     1,
-                    @as(u32, @intCast(index_offset)),
-                    @as(i32, @intCast(vertex_offset)),
+                    index_offset,
+                    vertex_offset,
                     0,
                 );
                 index_offset += draw_command.elem_count;
             }
-            vertex_offset += @as(c_uint, @intCast(command_list.getVertexBufferLength()));
+            vertex_offset += command_list.getVertexBufferLength();
         }
     }
 }
@@ -576,6 +592,7 @@ pub fn recordCommandBuffer(
 pub fn updateBuffers(
     self: *ImguiPipeline,
     ctx: Context,
+    buffer_offset: vk.DeviceSize,
     vertex_index_buffer: *GpuBufferMemory,
 ) !void {
     const zone = tracy.ZoneN(@src(), @typeName(ImguiPipeline) ++ " " ++ @src().fn_name);
@@ -586,55 +603,59 @@ pub fn updateBuffers(
         return;
     }
 
-    self.vertex_size = @as(vk.DeviceSize, @intCast(draw_data.total_vtx_count * @sizeOf(zgui.DrawVert)));
-    const index_size = @as(vk.DeviceSize, @intCast(draw_data.total_idx_count * @sizeOf(zgui.DrawIdx)));
-    self.vertex_buffer_len = draw_data.total_vtx_count;
-    self.index_buffer_len = draw_data.total_idx_count;
-    if (index_size == 0 or self.vertex_size == 0) return; // nothing to draw
-    std.debug.assert(self.vertex_size + index_size < vertex_index_buffer.size);
-
-    try vertex_index_buffer.map(ctx, self.vertex_index_buffer_offset, self.vertex_size + index_size);
-    defer vertex_index_buffer.unmap(ctx);
-
-    const raw_vertex_pointer = vertex_index_buffer.mapped orelse @panic("device pointer was null");
-    var vertex_dest = @as([*]zgui.DrawVert, @ptrCast(@alignCast(raw_vertex_pointer)));
-    var vertex_offset: usize = 0;
-
-    // map index_dest to be the buffer memory + vertex byte offset
-    const index_address = @intFromPtr(vertex_index_buffer.mapped) + @as(usize, @intCast(self.vertex_size));
-    const index_raw_ptr = @as(?*anyopaque, @ptrFromInt(index_address)) orelse @panic("device pointer was null");
-    var index_dest = @as(
-        [*]zgui.DrawIdx,
-        @ptrCast(@alignCast(index_raw_ptr)),
-    );
-    var index_offset: usize = 0;
-
-    for (draw_data.cmd_lists[0..@as(usize, @intCast(draw_data.cmd_lists_count))]) |command_list| {
-        // transfer vertex data
-        {
-            const vertex_buffer_length = @as(usize, @intCast(command_list.getVertexBufferLength()));
-            const vertex_buffer_data = command_list.getVertexBufferData()[0..vertex_buffer_length];
-            std.mem.copy(
-                zgui.DrawVert,
-                vertex_dest[vertex_offset .. vertex_offset + vertex_buffer_data.len],
-                vertex_buffer_data,
-            );
-            vertex_offset += vertex_buffer_data.len;
-        }
-
-        // transfer index data
-        {
-            const index_buffer_length = @as(usize, @intCast(command_list.getIndexBufferLength()));
-            const index_buffer_data = command_list.getIndexBufferData()[0..index_buffer_length];
-            std.mem.copy(
-                zgui.DrawIdx,
-                index_dest[index_offset .. index_offset + index_buffer_data.len],
-                index_buffer_data,
-            );
-            index_offset += index_buffer_data.len;
-        }
+    const vertex_count = draw_data.total_vtx_count;
+    const index_count = draw_data.total_idx_count;
+    if (index_count == 0 or vertex_count == 0) {
+        return; // nothing to draw
     }
 
-    // send changes to GPU
-    try vertex_index_buffer.sync(.flush, ctx, self.vertex_index_buffer_offset, self.vertex_size + index_size);
+    const vertex_size = @as(vk.DeviceSize, @intCast(vertex_count * @sizeOf(zgui.DrawVert)));
+    const index_size = @as(vk.DeviceSize, @intCast(index_count * @sizeOf(zgui.DrawIdx)));
+
+    {
+        var vertex_offset: vk.DeviceSize = 0;
+        var index_offset: vk.DeviceSize = vertex_size;
+
+        try vertex_index_buffer.checkCapacity(ctx, vertex_size + index_size);
+
+        try vertex_index_buffer.map(ctx, buffer_offset, vertex_size + index_size);
+        defer vertex_index_buffer.unmap(ctx);
+
+        const command_lists = draw_data.cmd_lists[0..@as(usize, @intCast(draw_data.cmd_lists_count))];
+        for (command_lists) |command_list| {
+            // transfer vertex data for this command list
+            {
+                const vertex_buffer_length: usize = @intCast(command_list.getVertexBufferLength());
+                const vertex_buffer_data = command_list.getVertexBufferData()[0..vertex_buffer_length];
+
+                const vertex_slice = vertex_index_buffer.mappedAs(zgui.DrawVert, vertex_offset, vertex_buffer_length);
+                std.mem.copy(zgui.DrawVert, vertex_slice, vertex_buffer_data);
+
+                vertex_offset += @as(vk.DeviceSize, @intCast(@sizeOf(zgui.DrawVert) * vertex_buffer_length));
+            }
+
+            // transfer index data for this command list
+            {
+                const index_buffer_length: usize = @intCast(command_list.getIndexBufferLength());
+                const index_buffer_data = command_list.getIndexBufferData()[0..index_buffer_length];
+
+                const index_slice = vertex_index_buffer.mappedAs(zgui.DrawIdx, index_offset, index_buffer_length);
+                std.mem.copy(zgui.DrawIdx, index_slice, index_buffer_data);
+
+                index_offset += @as(vk.DeviceSize, @intCast(@sizeOf(zgui.DrawIdx) * index_buffer_length));
+            }
+        }
+
+        // send changes to GPU
+        try vertex_index_buffer.sync(
+            .flush,
+            ctx,
+            buffer_offset,
+            vertex_size + index_size,
+        );
+    }
+
+    self.vertex_buffer_offset = buffer_offset;
+    self.index_buffer_offset = self.vertex_buffer_offset + vertex_size;
+    vertex_index_buffer.len = vertex_size + index_size + buffer_offset;
 }

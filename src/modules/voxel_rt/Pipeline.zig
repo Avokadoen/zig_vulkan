@@ -334,7 +334,6 @@ pub fn init(
         render_pass,
         swapchain.images.len,
         &staging_buffers,
-        gfx_pipeline.bytes_used_in_buffer,
         image_memory_type_index,
         image_memory,
         image_memory_capacity,
@@ -637,7 +636,11 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
     };
 
     self.gui.newFrame(ctx, self, image_index == 0, dt);
-    try self.imgui_pipeline.updateBuffers(ctx, &self.vertex_index_buffer);
+    try self.imgui_pipeline.updateBuffers(
+        ctx,
+        self.gfx_pipeline.bytes_used_in_buffer,
+        &self.vertex_index_buffer,
+    );
 
     // re-record command buffer to update any state
     try ctx.vkd.resetCommandPool(ctx.logical_device, self.gfx_pipeline.command_pools[image_index], .{});
@@ -1086,7 +1089,6 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
     try self.imgui_pipeline.recordCommandBuffer(
         ctx,
         command_buffer,
-        self.gfx_pipeline.bytes_used_in_buffer,
         self.vertex_index_buffer,
     );
 

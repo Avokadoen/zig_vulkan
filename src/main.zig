@@ -138,7 +138,6 @@ pub fn main() anyerror!void {
             call_pitch = false;
             mouse_delta.data[0] = 0;
             mouse_delta.data[1] = 0;
-            // try voxel_rt.debugUpdateTerrain(ctx);
         }
         voxel_rt.updateSun(dt);
 

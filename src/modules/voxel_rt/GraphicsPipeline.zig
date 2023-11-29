@@ -77,12 +77,25 @@ pub fn init(
     const zone = tracy.ZoneN(@src(), @typeName(GraphicsPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
-    try vertex_index_buffer.transferToDevice(ctx, Vertex, 0, vertices[0..]);
-    try vertex_index_buffer.transferToDevice(ctx, u16, vertex_size, indices[0..]);
-
     const bytes_used_in_buffer = memory.nonCoherentAtomSize(ctx, vertex_size * indices_size);
-    if (bytes_used_in_buffer > vertex_index_buffer.size) {
-        return error.OutOfDeviceMemory;
+    {
+        try vertex_index_buffer.checkCapacity(ctx, bytes_used_in_buffer);
+
+        // transfer vertex and index buffer
+        try vertex_index_buffer.map(ctx, vertex_index_buffer.len, bytes_used_in_buffer);
+        defer vertex_index_buffer.unmap(ctx);
+
+        {
+            const device_vertices = vertex_index_buffer.mappedAs(Vertex, 0, vertices.len);
+            std.mem.copy(Vertex, device_vertices, &vertices);
+        }
+        {
+            const device_indices = vertex_index_buffer.mappedAs(u16, vertex_size, indices.len);
+            std.mem.copy(u16, device_indices, &indices);
+        }
+        try vertex_index_buffer.sync(.flush, ctx, vertex_index_buffer.len, bytes_used_in_buffer);
+
+        vertex_index_buffer.len += bytes_used_in_buffer;
     }
 
     const descriptor_pool = blk: {

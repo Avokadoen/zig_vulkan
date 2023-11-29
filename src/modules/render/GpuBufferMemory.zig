@@ -11,15 +11,14 @@ const memory_util = @import("memory.zig");
 /// Vulkan buffer abstraction
 const GpuBufferMemory = @This();
 
-// TODO: might not make sense if different type, should be array
 /// how many elements does the buffer contain
-len: u32,
-// TODO: rename capacity, and add an accumulating size variable
+len: vk.DeviceSize,
 /// how many bytes *can* be stored in the buffer
 size: vk.DeviceSize,
 buffer: vk.Buffer,
 memory: vk.DeviceMemory,
 mapped: ?*anyopaque,
+map_offset: vk.DeviceSize = 0,
 
 /// create a undefined buffer that can be utilized later
 pub fn @"undefined"() GpuBufferMemory {
@@ -72,6 +71,12 @@ pub fn init(ctx: Context, size: vk.DeviceSize, buf_usage_flags: vk.BufferUsageFl
     };
 }
 
+pub inline fn checkCapacity(self: GpuBufferMemory, ctx: Context, extra: vk.DeviceSize) error{InsufficientMemory}!void {
+    if (memory_util.nonCoherentAtomSize(ctx, self.len + extra) > self.size) {
+        return error.InsufficientMemory;
+    }
+}
+
 pub const CopyConfig = struct {
     src_offset: vk.DeviceSize = 0,
     dst_offset: vk.DeviceSize = 0,
@@ -104,68 +109,6 @@ pub fn fill(self: GpuBufferMemory, ctx: Context, command_pool: vk.CommandPool, d
     try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, command_buffer);
 }
 
-/// Same as copy but caller manage synchronization
-pub fn manualCopy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, command_buffer: vk.CommandBuffer, fence: vk.Fence, config: CopyConfig) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(GpuBufferMemory) ++ " " ++ @src().fn_name);
-    defer zone.End();
-
-    var copy_region = vk.BufferCopy{
-        .src_offset = config.src_offset,
-        .dst_offset = config.dst_offset,
-        .size = config.size,
-    };
-    const begin_info = vk.CommandBufferBeginInfo{
-        .flags = .{
-            .one_time_submit_bit = true,
-        },
-        .p_inheritance_info = null,
-    };
-
-    try ctx.vkd.beginCommandBuffer(command_buffer, &begin_info);
-    ctx.vkd.cmdCopyBuffer(command_buffer, self.buffer, into.buffer, 1, @as([*]vk.BufferCopy, @ptrCast(&copy_region)));
-    try ctx.vkd.endCommandBuffer(command_buffer);
-
-    {
-        @setRuntimeSafety(false);
-        const semo_null_ptr: [*c]const vk.Semaphore = null;
-        const wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
-        // perform the compute ray tracing, draw to target texture
-        const submit_info = vk.SubmitInfo{
-            .wait_semaphore_count = 0,
-            .p_wait_semaphores = semo_null_ptr,
-            .p_wait_dst_stage_mask = wait_null_ptr,
-            .command_buffer_count = 1,
-            .p_command_buffers = @as([*]const vk.CommandBuffer, @ptrCast(&command_buffer)),
-            .signal_semaphore_count = 0,
-            .p_signal_semaphores = semo_null_ptr,
-        };
-        try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @as([*]const vk.SubmitInfo, @ptrCast(&submit_info)), fence);
-    }
-}
-
-/// Transfer data from host to device
-pub fn transferToDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, offset: usize, data: []const T) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(GpuBufferMemory) ++ " " ++ @src().fn_name);
-    defer zone.End();
-
-    if (self.mapped != null) {
-        // TODO: implement a transfer for already mapped memory
-        return error.MemoryAlreadyMapped; // can't used transfer if memory is externally mapped
-    }
-    // transfer empty data slice is NOP
-    if (data.len <= 0) return;
-
-    const size = data.len * @sizeOf(T);
-    const map_size = memory_util.nonCoherentAtomSize(ctx, size);
-    if (map_size + offset > self.size) return error.OutOfDeviceMemory; // size greater than buffer
-
-    const gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, offset, map_size, .{})) orelse return error.FailedToMapGPUMem;
-    var typed_gpu_mem = @as([*]T, @ptrCast(@alignCast(gpu_mem)));
-    std.mem.copy(T, typed_gpu_mem[0..data.len], data);
-    ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
-    self.len = @as(u32, @intCast(data.len));
-}
-
 pub fn map(self: *GpuBufferMemory, ctx: Context, offset: vk.DeviceSize, size: vk.DeviceSize) !void {
     const zone = tracy.ZoneN(@src(), @typeName(GpuBufferMemory) ++ " " ++ @src().fn_name);
     defer zone.End();
@@ -175,10 +118,15 @@ pub fn map(self: *GpuBufferMemory, ctx: Context, offset: vk.DeviceSize, size: vk
             break :blk vk.WHOLE_SIZE;
         }
         const atom_size = memory_util.nonCoherentAtomSize(ctx, size);
-        if (atom_size + offset > self.size) return error.InsufficientMemory; // size greater than buffer
+
+        if (atom_size + offset > self.size - self.map_offset) {
+            return error.InsufficientMemory;
+        }
+
         break :blk atom_size;
     };
 
+    self.map_offset = offset;
     self.mapped = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, offset, map_size, .{})) orelse return error.FailedToMapGPUMem;
 }
 
@@ -192,6 +140,34 @@ pub fn unmap(self: *GpuBufferMemory, ctx: Context) void {
     }
 }
 
+/// Cast currently mapped memory + offset as *T, assume memory is mapped
+pub inline fn mappedAsPtr(self: GpuBufferMemory, comptime T: type, offset: vk.DeviceSize) *T {
+    const cast_ptr: *T = cast_blk: {
+        const address: vk.DeviceSize = @intCast(@intFromPtr(self.mapped.?));
+        const offset_address: usize = @intCast(address + offset);
+        break :cast_blk @ptrFromInt(offset_address);
+    };
+
+    return cast_ptr;
+}
+
+/// Cast currently mapped memory + offset as [*]T, assume memory is mapped
+pub inline fn mappedAsC(self: GpuBufferMemory, comptime T: type, offset: vk.DeviceSize) [*]T {
+    const cast_ptr: [*]T = cast_blk: {
+        const address: vk.DeviceSize = @intCast(@intFromPtr(self.mapped.?));
+        const offset_address: usize = @intCast(address + offset);
+        break :cast_blk @ptrFromInt(offset_address);
+    };
+
+    return cast_ptr;
+}
+
+/// Cast currently mapped memory + offset as []T, assume memory is mapped
+pub inline fn mappedAs(self: GpuBufferMemory, comptime T: type, offset: vk.DeviceSize, len: usize) []T {
+    const c_slice = self.mappedAsC(T, offset);
+    return c_slice[0..len];
+}
+
 pub const SyncOp = enum {
     flush,
     invalidate,
@@ -202,7 +178,9 @@ pub fn sync(self: GpuBufferMemory, comptime sync_op: SyncOp, ctx: Context, offse
     defer zone.End();
 
     const atom_size = memory_util.nonCoherentAtomSize(ctx, size);
-    if (atom_size + offset > self.size) return error.InsufficientMemory; // size greater than buffer
+    if (atom_size + offset > self.size - self.map_offset) {
+        return error.InsufficientMemory;
+    }
 
     const map_range = vk.MappedMemoryRange{
         .memory = self.memory,
@@ -222,70 +200,6 @@ pub fn sync(self: GpuBufferMemory, comptime sync_op: SyncOp, ctx: Context, offse
             @as([*]const vk.MappedMemoryRange, @ptrCast(&map_range)),
         ),
     }
-}
-
-pub fn transferFromDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, data: []T) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(GpuBufferMemory) ++ " " ++ @src().fn_name);
-    defer zone.End();
-
-    if (self.mapped != null) {
-        // TODO: implement a transfer for already mapped memory
-        return error.MemoryAlreadyMapped; // can't used transfer if memory is externally mapped
-    }
-
-    const gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, self.size, .{})) orelse return error.FailedToMapGPUMem;
-    const gpu_mem_start = @intFromPtr(gpu_mem);
-
-    var i: usize = 0;
-    var offset: usize = 0;
-    {
-        @setRuntimeSafety(false);
-        while (offset + @sizeOf(T) <= self.size and i < data.len) : (i += 1) {
-            offset = @sizeOf(T) * i;
-            data[i] = @as(*T, @ptrFromInt(gpu_mem_start + offset)).*;
-        }
-    }
-    ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
-}
-
-/// Transfer data from host to device, allows you to send multiple chunks of data in the same buffer.
-/// offsets are index offsets, not byte offsets
-pub fn batchTransfer(self: *GpuBufferMemory, ctx: Context, comptime T: type, offsets: []usize, datas: [][]const T) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(GpuBufferMemory) ++ " " ++ @src().fn_name);
-    defer zone.End();
-
-    if (self.mapped != null) {
-        // TODO: implement a transfer for already mapped memory
-        return error.MemoryAlreadyMapped; // can't used transfer if memory is externally mapped
-    }
-
-    if (offsets.len == 0) return;
-    if (offsets.len != datas.len) {
-        return error.OffsetDataMismatch; // inconsistent offset and data size indicate a programatic error
-    }
-
-    // calculate how far in the memory location we are going
-    const size = datas[datas.len - 1].len * @sizeOf(T) + offsets[offsets.len - 1] * @sizeOf(T);
-    if (self.size < size) {
-        return error.InsufficentBufferSize; // size of buffer is less than data being transfered
-    }
-
-    const gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, self.size, .{})) orelse return error.FailedToMapGPUMem;
-    const gpu_mem_start = @intFromPtr(gpu_mem);
-    {
-        @setRuntimeSafety(false);
-        for (offsets, 0..) |offset, i| {
-            const byte_offset = offset * @sizeOf(T);
-            for (datas[i], 0..) |element, j| {
-                const mem_location = gpu_mem_start + byte_offset + j * @sizeOf(T);
-                const ptr = @as(*T, @ptrFromInt(mem_location));
-                ptr.* = element;
-            }
-        }
-    }
-    ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
-
-    self.len = std.math.max(self.len, @as(u32, @intCast(datas[datas.len - 1].len + offsets[offsets.len - 1])));
 }
 
 /// destroy buffer and free memory
