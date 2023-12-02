@@ -15,7 +15,6 @@ const ray_types = @import("../ray_pipeline_types.zig");
 const RayDeviceResources = @import("../RayDeviceResources.zig");
 const Resource = RayDeviceResources.Resource;
 
-/// compute shader that draws to a target texture
 const BrickStream = @This();
 
 allocator: Allocator,
@@ -118,7 +117,7 @@ const FrameSnapshot = struct {
         }
         // read brick unload requests
         if (self.brick_limits.unload_request_count > 0) {
-            const brick_unload_buffer_info = ray_device_resources.getBufferInfo(Resource{ .host_and_device = .brick_unload_request_b });
+            const brick_unload_buffer_info = ray_device_resources.getBufferInfo(Resource{ .host_and_device = .brick_unload_request_s });
             const brick_unload_adr = base_adr + brick_unload_buffer_info.offset;
             const brick_unload_ptr: [*]const c_uint = @ptrFromInt(brick_unload_adr);
             const brick_unload_slice = brick_unload_ptr[0..self.brick_limits.unload_request_count];

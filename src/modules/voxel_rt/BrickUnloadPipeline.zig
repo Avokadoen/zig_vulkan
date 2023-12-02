@@ -24,11 +24,10 @@ const Resource = RayDeviceResources.Resource;
 const resources = [_]Resource{
     Resource.from(DeviceOnlyResources.bricks_set_s),
     Resource.from(HostAndDeviceResources.brick_req_limits_s),
-    Resource.from(HostAndDeviceResources.brick_load_request_s),
     Resource.from(HostAndDeviceResources.brick_unload_request_s),
 };
 
-const BrickHeartbeatPipeline = @This();
+const BrickUnloadPipeline = @This();
 
 pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
@@ -39,8 +38,8 @@ ray_device_resources: *const RayDeviceResources,
 
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
-pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !BrickHeartbeatPipeline {
-    const zone = tracy.ZoneN(@src(), @typeName(BrickHeartbeatPipeline) ++ " " ++ @src().fn_name);
+pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !BrickUnloadPipeline {
+    const zone = tracy.ZoneN(@src(), @typeName(BrickUnloadPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
     // TODO: change based on NVIDIA vs AMD vs Others?
@@ -48,17 +47,12 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Bric
 
     const target_descriptor_layouts = ray_device_resources.getDescriptorSetLayouts(&resources);
     const pipeline_layout = blk: {
-        const push_constant_range = [_]vk.PushConstantRange{.{
-            .stage_flags = .{ .compute_bit = true },
-            .offset = 0,
-            .size = @sizeOf(BrickGridState),
-        }};
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
             .set_layout_count = target_descriptor_layouts.len,
             .p_set_layouts = &target_descriptor_layouts,
-            .push_constant_range_count = push_constant_range.len,
-            .p_push_constant_ranges = &push_constant_range,
+            .push_constant_range_count = 0,
+            .p_push_constant_ranges = undefined,
         };
         break :blk try ctx.createPipelineLayout(pipeline_layout_info);
     };
@@ -76,8 +70,8 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Bric
         };
         const module_create_info = vk.ShaderModuleCreateInfo{
             .flags = .{},
-            .p_code = @as([*]const u32, @ptrCast(&shaders.brick_heartbeat_spv)),
-            .code_size = shaders.brick_heartbeat_spv.len,
+            .p_code = @as([*]const u32, @ptrCast(&shaders.brick_unload_handling_spv)),
+            .code_size = shaders.brick_unload_handling_spv.len,
         };
         const module = try ctx.vkd.createShaderModule(ctx.logical_device, &module_create_info, null);
 
@@ -102,7 +96,7 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Bric
     };
     errdefer ctx.destroyPipeline(pipeline);
 
-    return BrickHeartbeatPipeline{
+    return BrickUnloadPipeline{
         .pipeline_layout = pipeline_layout,
         .pipeline = pipeline,
         .ray_device_resources = ray_device_resources,
@@ -110,21 +104,21 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Bric
     };
 }
 
-pub fn deinit(self: BrickHeartbeatPipeline, ctx: Context) void {
-    const zone = tracy.ZoneN(@src(), @typeName(BrickHeartbeatPipeline) ++ " " ++ @src().fn_name);
+pub fn deinit(self: BrickUnloadPipeline, ctx: Context) void {
+    const zone = tracy.ZoneN(@src(), @typeName(BrickUnloadPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
     ctx.destroyPipelineLayout(self.pipeline_layout);
     ctx.destroyPipeline(self.pipeline);
 }
 
-pub fn appendPipelineCommands(self: BrickHeartbeatPipeline, ctx: Context, command_buffer: vk.CommandBuffer) void {
-    const zone = tracy.ZoneN(@src(), @typeName(BrickHeartbeatPipeline) ++ " " ++ @src().fn_name);
+pub fn appendPipelineCommands(self: BrickUnloadPipeline, ctx: Context, command_buffer: vk.CommandBuffer) void {
+    const zone = tracy.ZoneN(@src(), @typeName(BrickUnloadPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
     if (render.consts.enable_validation_layers) {
         const label_info = vk.DebugUtilsLabelEXT{
-            .p_label_name = @typeName(BrickHeartbeatPipeline) ++ " " ++ @src().fn_name,
+            .p_label_name = @typeName(BrickUnloadPipeline) ++ " " ++ @src().fn_name,
             .color = [_]f32{ 0.4, 0.2, 0.2, 0.5 },
         };
         ctx.vkd.cmdBeginDebugUtilsLabelEXT(command_buffer, &label_info);
@@ -134,8 +128,6 @@ pub fn appendPipelineCommands(self: BrickHeartbeatPipeline, ctx: Context, comman
             ctx.vkd.cmdEndDebugUtilsLabelEXT(command_buffer);
         }
     }
-
-    self.ray_device_resources.resetBrickReqLimits(ctx, command_buffer);
 
     const brick_buffer_memory_barrier = [_]vk.BufferMemoryBarrier{.{
         .src_access_mask = .{ .shader_read_bit = true },
@@ -159,19 +151,6 @@ pub fn appendPipelineCommands(self: BrickHeartbeatPipeline, ctx: Context, comman
         undefined,
     );
 
-    {
-        // reduce brick dimensions to brick count
-        const brick_dim = self.ray_device_resources.brick_grid_state.dim;
-        const brick_count = brick_dim[0] * brick_dim[1] * brick_dim[2];
-        ctx.vkd.cmdPushConstants(
-            command_buffer,
-            self.pipeline_layout,
-            .{ .compute_bit = true },
-            0,
-            @sizeOf(c_uint),
-            &brick_count,
-        );
-    }
     ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
 
     const descriptor_sets = self.ray_device_resources.getDescriptorSets(&resources);
@@ -185,8 +164,6 @@ pub fn appendPipelineCommands(self: BrickHeartbeatPipeline, ctx: Context, comman
         0,
         undefined,
     );
-
-    self.ray_device_resources.resetBrickReqLimitsBarrier(ctx, command_buffer);
 
     const x_dispatch = @ceil(self.ray_device_resources.target_image_info.width * self.ray_device_resources.target_image_info.height) /
         @as(f32, @floatFromInt(self.work_group_dim.x)) + 1;

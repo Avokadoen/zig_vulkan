@@ -196,16 +196,16 @@ bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_mat
         // If brick has some voxels
         if (bitfieldExtract(brick_set_bits[grid_index / 32], int(mod(grid_index, 32)), 1) != 0) {
             const uint brick_index_bits = brick_index_21b_req_count_7b_status_4b[grid_index];
-            const uint brick_status = bitfieldExtract(brick_index_bits, BRICK_INDEX_STATUS_OFFSET, BRICK_INDEX_STATUS_BITS);
+            const uint brick_status = bitfieldExtract(brick_index_bits, BRICK_STATUS_OFFSET, BRICK_STATUS_BITS);
 
             // always increment the req_count, ignore RC and just increment it atleast once
-            const uint req_count = bitfieldExtract(brick_index_bits, BRICK_INDEX_REQUEST_COUNT_OFFSET, BRICK_INDEX_REQUEST_COUNT_BITS);
-            if (req_count < BRICK_INDEX_REQUEST_COUNT_MAX_VALUE) {
-                brick_index_21b_req_count_7b_status_4b[grid_index] = bitfieldInsert(brick_index_bits, req_count + 1, BRICK_INDEX_REQUEST_COUNT_OFFSET, BRICK_INDEX_REQUEST_COUNT_BITS);
+            const uint req_count = bitfieldExtract(brick_index_bits, BRICK_REQUEST_COUNT_OFFSET, BRICK_REQUEST_COUNT_BITS);
+            if (req_count < BRICK_REQUEST_COUNT_MAX_VALUE) {
+                brick_index_21b_req_count_7b_status_4b[grid_index] = bitfieldInsert(brick_index_bits, req_count + 1, BRICK_REQUEST_COUNT_OFFSET, BRICK_REQUEST_COUNT_BITS);
             }
 
             if (brick_status == BRICK_STATUS_LOADED) {
-                const uint brick_index = bitfieldExtract(brick_index_bits, BRICK_INDEX_INDEX_OFFSET, BRICK_INDEX_INDEX_BITS);
+                const uint brick_index = bitfieldExtract(brick_index_bits, BRICK_INDEX_OFFSET, BRICK_INDEX_BITS);
                 // convert local position to the world space coordinate for the brick
                 vec3 brick_min = fma(local_position, g_scale, brick_grid.min_point);
                 global_t_value = t_value + grid_t_min + 0.01 * g_scale.x;
@@ -224,7 +224,8 @@ bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_mat
                 )) {
                     return true;
                 }
-            } else {
+            } 
+            else {
                 // wait for brick to be loaded before we trace this grid section
                 return false;
             }

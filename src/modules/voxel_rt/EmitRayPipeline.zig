@@ -33,7 +33,6 @@ const resources = Resource.fromArray(DeviceOnlyResources, &device_resources);
 
 // TODO: refactor command buffer should only be recorded on init and when rescaling!
 
-/// compute shader that draws to a target texture
 const EmitRayPipeline = @This();
 
 pipeline_layout: vk.PipelineLayout,

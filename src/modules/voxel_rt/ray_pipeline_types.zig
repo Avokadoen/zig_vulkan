@@ -55,7 +55,7 @@ pub const BrickLimits = extern struct {
     // How many active bricks can we have
     max_active_bricks: c_uint,
     // How many active bricks do we have
-    active_bricks: c_uint,
+    active_bricks: c_int,
 };
 
 // must be kept in sync with assets/shaders/raytracing/ray_commons.glsl Ray

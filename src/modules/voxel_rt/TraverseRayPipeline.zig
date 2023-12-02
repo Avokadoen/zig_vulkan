@@ -54,7 +54,6 @@ const resources = [2][7]Resource{
     Resource.fromArray(DeviceOnlyResources, &device_resources[1]),
 };
 
-/// compute shader that draws to a target texture
 const TraverseRayPipeline = @This();
 
 pipeline_layout: vk.PipelineLayout,

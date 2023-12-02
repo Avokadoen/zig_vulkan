@@ -67,10 +67,8 @@ pub const HostAndDeviceResources = enum(u32) {
 
     // request indices
     brick_load_request_s,
-    brick_unload_request_b,
+    brick_unload_request_s,
 
-    pub const brick_limits_count = (@intFromEnum(HostAndDeviceResources.brick_req_limits_s) + 1);
-    pub const brick_req_count = @intFromEnum(HostAndDeviceResources.brick_unload_request_b) + 1 - brick_limits_count;
     pub const all_count = @typeInfo(HostAndDeviceResources).Enum.fields.len;
 };
 
@@ -82,8 +80,7 @@ pub const descriptor_set_count =
     DeviceOnlyResources.ray_count +
     (DeviceOnlyResources.brick_count - 2) +
     DeviceOnlyResources.image_count +
-    HostAndDeviceResources.brick_limits_count +
-    (HostAndDeviceResources.brick_req_count - 1);
+    HostAndDeviceResources.all_count;
 
 pub const descriptor_buffer_count = buffer_info_count - DeviceOnlyResources.image_count;
 pub const descriptor_image_count = DeviceOnlyResources.image_count;
@@ -102,8 +99,8 @@ target_image_info: ImageInfo,
 buffer_infos: [descriptor_buffer_count]vk.DescriptorBufferInfo,
 ray_buffer: GpuBufferMemory,
 voxel_scene_buffer: GpuBufferMemory,
-request_buffer: GpuBufferMemory,
 
+request_buffer: GpuBufferMemory,
 brick_load_request_count: c_uint,
 brick_unload_request_count: c_uint,
 
@@ -274,9 +271,9 @@ pub fn init(
             created_layouts += 1;
         }
 
-        // for brick request layout we use one set with 2 bindings
+        // for brick load request layout
         {
-            const bindings = [_]vk.DescriptorSetLayoutBinding{ .{
+            const bindings = [_]vk.DescriptorSetLayoutBinding{.{
                 .binding = 0,
                 .descriptor_type = .storage_buffer,
                 .descriptor_count = 1,
@@ -284,21 +281,35 @@ pub fn init(
                     .compute_bit = true,
                 },
                 .p_immutable_samplers = null,
-            }, .{
-                .binding = 1,
-                .descriptor_type = .storage_buffer,
-                .descriptor_count = 1,
-                .stage_flags = .{
-                    .compute_bit = true,
-                },
-                .p_immutable_samplers = null,
-            } };
+            }};
             const layout_info = vk.DescriptorSetLayoutCreateInfo{
                 .flags = .{},
                 .binding_count = bindings.len,
                 .p_bindings = &bindings,
             };
             const brick_req_set_index = (Resource{ .host_and_device = .brick_load_request_s }).toDescriptorIndex();
+            tmp_layout[brick_req_set_index] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
+
+            created_layouts += 1;
+        }
+
+        // for brick unload request layout
+        {
+            const bindings = [_]vk.DescriptorSetLayoutBinding{.{
+                .binding = 0,
+                .descriptor_type = .storage_buffer,
+                .descriptor_count = 1,
+                .stage_flags = .{
+                    .compute_bit = true,
+                },
+                .p_immutable_samplers = null,
+            }};
+            const layout_info = vk.DescriptorSetLayoutCreateInfo{
+                .flags = .{},
+                .binding_count = bindings.len,
+                .p_bindings = &bindings,
+            };
+            const brick_req_set_index = (Resource{ .host_and_device = .brick_unload_request_s }).toDescriptorIndex();
             tmp_layout[brick_req_set_index] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
 
             created_layouts += 1;
@@ -384,7 +395,7 @@ pub fn init(
             // bricks
             total_bricks * @sizeOf(Brick),
         };
-        const brick_request_ranges = [HostAndDeviceResources.brick_req_count + HostAndDeviceResources.brick_limits_count]vk.DeviceSize{
+        const brick_request_ranges = [HostAndDeviceResources.all_count]vk.DeviceSize{
             // brick limits
             @sizeOf(BrickLimits),
             // load brick requests
@@ -538,14 +549,14 @@ pub fn init(
                 .p_buffer_info = @ptrCast(&infos[(Resource{ .host_and_device = .brick_load_request_s }).toBufferIndex()]),
                 .p_texel_buffer_view = undefined,
             };
-            writes[brick_req_write_offset + @intFromEnum(HostAndDeviceResources.brick_unload_request_b)] = vk.WriteDescriptorSet{
-                .dst_set = target_descriptor_sets[brick_desc_set_index + 3],
-                .dst_binding = 1,
+            writes[brick_req_write_offset + @intFromEnum(HostAndDeviceResources.brick_unload_request_s)] = vk.WriteDescriptorSet{
+                .dst_set = target_descriptor_sets[brick_desc_set_index + 4],
+                .dst_binding = 0,
                 .dst_array_element = 0,
                 .descriptor_count = 1,
                 .descriptor_type = .storage_buffer,
                 .p_image_info = undefined,
-                .p_buffer_info = @ptrCast(&infos[(Resource{ .host_and_device = .brick_unload_request_b }).toBufferIndex()]),
+                .p_buffer_info = @ptrCast(&infos[(Resource{ .host_and_device = .brick_unload_request_s }).toBufferIndex()]),
                 .p_texel_buffer_view = undefined,
             };
 
@@ -584,6 +595,11 @@ pub fn init(
             test_brick_one,
             test_brick_all,
             test_brick_row,
+            test_brick_one,
+            test_brick_one,
+            test_brick_one,
+            test_brick_all,
+            test_brick_one,
         });
     }
 
@@ -594,11 +610,11 @@ pub fn init(
             BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
             BrickIndex{ .status = .loaded, .request_count = 100, .index = 1 },
             BrickIndex{ .status = .loaded, .request_count = 100, .index = 2 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 1 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
+            BrickIndex{ .status = .loaded, .request_count = 100, .index = 3 },
+            BrickIndex{ .status = .loaded, .request_count = 100, .index = 4 },
+            BrickIndex{ .status = .loaded, .request_count = 100, .index = 5 },
+            BrickIndex{ .status = .loaded, .request_count = 100, .index = 6 },
+            BrickIndex{ .status = .loaded, .request_count = 100, .index = 7 },
         });
     }
 
@@ -944,18 +960,15 @@ pub inline fn resetRayLimits(self: RayDeviceResources, ctx: Context, command_buf
 pub fn invalidateBrickRequestData(self: RayDeviceResources, ctx: Context) !void {
     // Preconditions
     comptime {
-        // brick_req_limits_s must be first enum
-        std.debug.assert(@intFromEnum(HostAndDeviceResources.brick_req_limits_s) == 0);
-
-        // brick_unload_request_b must be last enum
-        std.debug.assert(@intFromEnum(HostAndDeviceResources.brick_unload_request_b) ==
-            (HostAndDeviceResources.all_count - 1));
+        // The 3 brick request enums must be in order
+        std.debug.assert(@intFromEnum(HostAndDeviceResources.brick_req_limits_s) == (@intFromEnum(HostAndDeviceResources.brick_load_request_s) - 1));
+        std.debug.assert(@intFromEnum(HostAndDeviceResources.brick_load_request_s) == (@intFromEnum(HostAndDeviceResources.brick_unload_request_s) - 1));
     }
 
     const first_request_dat_index = (Resource{ .host_and_device = .brick_req_limits_s }).toBufferIndex();
     const req_data_offset = self.buffer_infos[first_request_dat_index].offset;
 
-    const last_request_dat_index = (Resource{ .host_and_device = .brick_unload_request_b }).toBufferIndex();
+    const last_request_dat_index = (Resource{ .host_and_device = .brick_unload_request_s }).toBufferIndex();
     const last_byte = self.buffer_infos[last_request_dat_index].offset +
         self.buffer_infos[last_request_dat_index].range;
 
@@ -967,7 +980,7 @@ pub fn mapBrickRequestData(self: *RayDeviceResources, ctx: Context) !void {
     const first_request_dat_index = (Resource{ .host_and_device = .brick_req_limits_s }).toBufferIndex();
     const req_data_offset = self.buffer_infos[first_request_dat_index].offset;
 
-    const last_request_dat_index = (Resource{ .host_and_device = .brick_unload_request_b }).toBufferIndex();
+    const last_request_dat_index = (Resource{ .host_and_device = .brick_unload_request_s }).toBufferIndex();
     const last_byte = self.buffer_infos[last_request_dat_index].offset +
         self.buffer_infos[last_request_dat_index].range;
 

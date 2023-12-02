@@ -588,7 +588,6 @@ pub fn recordCommandBuffer(
     }
 }
 
-// TODO: do not make new buffers if buffer is larger than total count
 pub fn updateBuffers(
     self: *ImguiPipeline,
     ctx: Context,
@@ -612,11 +611,11 @@ pub fn updateBuffers(
     const vertex_size = @as(vk.DeviceSize, @intCast(vertex_count * @sizeOf(zgui.DrawVert)));
     const index_size = @as(vk.DeviceSize, @intCast(index_count * @sizeOf(zgui.DrawIdx)));
 
+    try vertex_index_buffer.checkCapacity(ctx, vertex_size + index_size);
+
     {
         var vertex_offset: vk.DeviceSize = 0;
         var index_offset: vk.DeviceSize = vertex_size;
-
-        try vertex_index_buffer.checkCapacity(ctx, vertex_size + index_size);
 
         try vertex_index_buffer.map(ctx, buffer_offset, vertex_size + index_size);
         defer vertex_index_buffer.unmap(ctx);

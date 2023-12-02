@@ -92,6 +92,12 @@ pub fn build(b: *Builder) void {
             "assets/shaders/brick_streaming/brick_heartbeat.comp",
             .{ .watched_files = &watched_files },
         );
+
+        shader_comp.add(
+            "brick_unload_handling_spv",
+            "assets/shaders/brick_streaming/brick_unload_handling.comp",
+            .{ .watched_files = &watched_files },
+        );
     }
 
     exe.step.dependOn(&shader_move_step.step);

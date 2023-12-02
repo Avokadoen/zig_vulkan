@@ -25,6 +25,7 @@ const ScatterRayPipeline = @import("ScatterRayPipeline.zig");
 const MissRayPipeline = @import("MissRayPipeline.zig");
 const DrawRayPipeline = @import("DrawRayPipeline.zig");
 const BrickHeartbeatPipeline = @import("BrickHeartbeatPipeline.zig");
+const BrickUnloadPipeline = @import("BrickUnloadPipeline.zig");
 
 const BrickStream = @import("brick/BrickStream.zig");
 
@@ -92,6 +93,7 @@ miss_ray_pipeline: MissRayPipeline,
 draw_ray_pipeline: DrawRayPipeline,
 
 brick_heartbeat_pipeline: BrickHeartbeatPipeline,
+brick_unload_pipeline: BrickUnloadPipeline,
 
 ray_pipeline_complete_semaphore: vk.Semaphore,
 
@@ -308,6 +310,9 @@ pub fn init(
     const brick_heartbeat_pipeline = try BrickHeartbeatPipeline.init(ctx, ray_device_resources);
     errdefer brick_heartbeat_pipeline.deinit(ctx);
 
+    const brick_unload_pipeline = try BrickUnloadPipeline.init(ctx, ray_device_resources);
+    errdefer brick_heartbeat_pipeline.deinit(ctx);
+
     const brick_stream = try BrickStream.init(allocator, ray_device_resources);
     errdefer brick_stream.deinit();
 
@@ -317,6 +322,7 @@ pub fn init(
         .{ .vertex_buffer_bit = true, .index_buffer_bit = true },
         .{ .host_visible_bit = true },
     );
+
     const gfx_pipeline = try GraphicsPipeline.init(
         allocator,
         ctx,
@@ -328,6 +334,7 @@ pub fn init(
         config.gfx_pipeline_config,
     );
     errdefer gfx_pipeline.deinit(allocator, ctx);
+
     const imgui_pipeline = try ImguiPipeline.init(
         ctx,
         allocator,
@@ -380,6 +387,7 @@ pub fn init(
         .miss_ray_pipeline = miss_ray_pipeline,
         .draw_ray_pipeline = draw_ray_pipeline,
         .brick_heartbeat_pipeline = brick_heartbeat_pipeline,
+        .brick_unload_pipeline = brick_unload_pipeline,
         .ray_pipeline_complete_semaphore = ray_pipeline_complete_semaphore,
         .brick_stream = brick_stream,
         .gfx_pipeline = gfx_pipeline,
@@ -417,6 +425,7 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     self.emit_ray_pipeline.deinit(ctx);
     self.ray_device_resources.deinit(ctx);
     self.brick_heartbeat_pipeline.deinit(ctx);
+    self.brick_unload_pipeline.deinit(ctx);
 
     self.brick_stream.deinit();
 
@@ -612,6 +621,7 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
         );
 
         self.brick_heartbeat_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+        self.brick_unload_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
 
         try ctx.vkd.endCommandBuffer(self.ray_command_buffers);
 
