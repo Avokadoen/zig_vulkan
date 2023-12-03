@@ -38,7 +38,6 @@ const ImguiGui = @import("ImguiGui.zig");
 
 const Camera = @import("Camera.zig");
 const Sun = @import("Sun.zig");
-const GridState = @import("brick/State.zig");
 const gpu_types = @import("gpu_types.zig");
 
 pub const Config = struct {
@@ -118,7 +117,6 @@ pub fn init(
     ctx: Context,
     allocator: Allocator,
     internal_render_resolution: vk.Extent2D,
-    grid_state: GridState,
     camera: *Camera,
     sun: *Sun,
     config: Config,
@@ -350,7 +348,6 @@ pub fn init(
 
     const state_binding = ImguiGui.StateBinding{
         .camera_ptr = camera,
-        .grid_state = grid_state,
         .sun_ptr = sun,
         .gfx_pipeline_shader_constants = gfx_pipeline.shader_constants,
         .brick_grid_state = ray_device_resources.brick_grid_state,
@@ -740,186 +737,6 @@ pub fn transferCurrentBrickGridState(self: *Pipeline, ctx: Context) !void {
         ray_pipeline_types.BrickGridState,
         &[1]ray_pipeline_types.BrickGridState{self.ray_device_resources.brick_grid_state.*},
     );
-}
-
-/// Transfer grid data to GPU
-pub fn transferGridState(self: *Pipeline, ctx: Context, grid: GridState) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
-    defer zone.End();
-    _ = self;
-    _ = ctx;
-    _ = grid;
-    // const grid_data = [_]GridState.Device{grid.device_state};
-    // const buffer_offset = self.compute_pipeline.uniform_offsets[0];
-    // try self.staging_buffers.transferToBuffer(
-    //     ctx,
-    //     &self.compute_pipeline.buffers,
-    //     buffer_offset,
-    //     GridState.Device,
-    //     grid_data[0..],
-    // );
-}
-
-/// Transfer material data to GPU
-pub fn transferMaterials(self: *Pipeline, ctx: Context, offset: usize, materials: []const gpu_types.Material) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
-    defer zone.End();
-    _ = self;
-    _ = ctx;
-    _ = offset;
-    _ = materials;
-    // const buffer_offset = self.compute_pipeline.storage_offsets[0];
-    // try self.staging_buffers.transferToBuffer(
-    //     ctx,
-    //     &self.compute_pipeline.buffers,
-    //     buffer_offset + offset * @sizeOf(gpu_types.Material),
-    //     gpu_types.Material,
-    //     materials,
-    // );
-}
-
-/// Transfer albedo data to GPU
-pub fn transferAlbedos(self: *Pipeline, ctx: Context, offset: usize, albedo: []const gpu_types.Albedo) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
-    defer zone.End();
-    _ = self;
-    _ = ctx;
-    _ = offset;
-    _ = albedo;
-    // const buffer_offset = self.compute_pipeline.storage_offsets[1];
-    // try self.staging_buffers.transferToBuffer(
-    //     ctx,
-    //     &self.compute_pipeline.buffers,
-    //     buffer_offset + offset * @sizeOf(gpu_types.Albedo),
-    //     gpu_types.Albedo,
-    //     albedo,
-    // );
-}
-
-/// Transfer metal data to GPU
-pub fn transferMetals(self: *Pipeline, ctx: Context, offset: usize, metals: []const gpu_types.Metal) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
-    defer zone.End();
-    _ = self;
-    _ = ctx;
-    _ = offset;
-    _ = metals;
-    // const buffer_offset = self.compute_pipeline.storage_offsets[2];
-    // try self.staging_buffers.transferToBuffer(
-    //     ctx,
-    //     &self.compute_pipeline.buffers,
-    //     buffer_offset + offset * @sizeOf(gpu_types.Metal),
-    //     gpu_types.Metal,
-    //     metals,
-    // );
-}
-
-/// Transfer dielectric data to GPU
-pub fn transferDielectrics(self: *Pipeline, ctx: Context, offset: usize, dielectrics: []const gpu_types.Dielectric) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
-    defer zone.End();
-    _ = self;
-    _ = ctx;
-    _ = offset;
-    _ = dielectrics;
-    // const buffer_offset = self.compute_pipeline.storage_offsets[3];
-    // try self.staging_buffers.transferToBuffer(
-    //     ctx,
-    //     &self.compute_pipeline.buffers,
-    //     buffer_offset + offset * @sizeOf(gpu_types.Dielectric),
-    //     gpu_types.Dielectric,
-    //     dielectrics,
-    // );
-}
-
-/// Transfer higher order grid data to GPU
-pub inline fn transferHigherOrderGrid(self: *Pipeline, ctx: Context, offset: usize, higher_order_grid: []const u8) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
-    defer zone.End();
-    _ = self;
-    _ = ctx;
-    _ = offset;
-    _ = higher_order_grid;
-    // const buffer_offset = self.compute_pipeline.storage_offsets[4];
-    // try self.staging_buffers.transferToBuffer(
-    //     ctx,
-    //     &self.compute_pipeline.buffers,
-    //     buffer_offset + offset * @sizeOf(u8),
-    //     u8,
-    //     higher_order_grid,
-    // );
-}
-
-/// Transfer entry types data to GPU
-pub inline fn transferBrickStatuses(self: *Pipeline, ctx: Context, offset: usize, brick_statuses: []const GridState.BrickStatusMask) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
-    defer zone.End();
-    _ = self;
-    _ = ctx;
-    _ = offset;
-    _ = brick_statuses;
-    // const buffer_offset = self.compute_pipeline.storage_offsets[5];
-    // try self.staging_buffers.transferToBuffer(
-    //     ctx,
-    //     &self.compute_pipeline.buffers,
-    //     buffer_offset + offset * @sizeOf(GridState.BrickStatusMask),
-    //     GridState.BrickStatusMask,
-    //     brick_statuses,
-    // );
-}
-
-/// Transfer entry indices data to GPU
-pub inline fn transferBrickIndices(self: *Pipeline, ctx: Context, offset: usize, brick_indices: []const GridState.BrickIndex) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
-    defer zone.End();
-    _ = self;
-    _ = ctx;
-    _ = offset;
-    _ = brick_indices;
-    // const buffer_offset = self.compute_pipeline.storage_offsets[6];
-    // try self.staging_buffers.transferToBuffer(
-    //     ctx,
-    //     &self.compute_pipeline.buffers,
-    //     buffer_offset + offset * @sizeOf(GridState.BrickIndex),
-    //     GridState.BrickIndex,
-    //     brick_indices,
-    // );
-}
-
-/// Transfer bricks data to GPU
-pub fn transferBricks(self: *Pipeline, ctx: Context, offset: usize, bricks: []const GridState.Brick) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
-    defer zone.End();
-    _ = self;
-    _ = ctx;
-    _ = offset;
-    _ = bricks;
-    // const buffer_offset = self.compute_pipeline.storage_offsets[7];
-    // try self.staging_buffers.transferToBuffer(
-    //     ctx,
-    //     &self.compute_pipeline.buffers,
-    //     buffer_offset + offset * @sizeOf(GridState.Brick),
-    //     GridState.Brick,
-    //     bricks,
-    // );
-}
-
-/// Transfer material index data to GPU
-pub inline fn transferMaterialIndices(self: *Pipeline, ctx: Context, offset: usize, material_indices: []const u8) !void {
-    const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
-    defer zone.End();
-    _ = self;
-    _ = ctx;
-    _ = offset;
-    _ = material_indices;
-    // const buffer_offset = self.compute_pipeline.storage_offsets[8];
-    // try self.staging_buffers.transferToBuffer(
-    //     ctx,
-    //     &self.compute_pipeline.buffers,
-    //     buffer_offset + offset * @sizeOf(u8),
-    //     u8,
-    //     material_indices,
-    // );
 }
 
 // TODO: make allow to multithread this

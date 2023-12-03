@@ -15,7 +15,6 @@ const InputModeCursor = Input.InputModeCursor;
 
 // TODO: API topology
 const VoxelRT = @import("modules/VoxelRT.zig");
-const GridState = VoxelRT.GridState;
 const gpu_types = VoxelRT.gpu_types;
 const vox = @import("modules/voxel_rt/vox/loader.zig");
 
@@ -77,10 +76,7 @@ pub fn main() anyerror!void {
     const ctx = try render.Context.init(allocator, application_name, &window);
     defer ctx.deinit();
 
-    // TODO:
-    const grid_state: GridState = undefined;
-
-    var voxel_rt = try VoxelRT.init(allocator, ctx, grid_state, .{
+    var voxel_rt = try VoxelRT.init(allocator, ctx, .{
         .internal_resolution_width = internal_render_resolution.x(),
         .internal_resolution_height = internal_render_resolution.y(),
         .camera = .{

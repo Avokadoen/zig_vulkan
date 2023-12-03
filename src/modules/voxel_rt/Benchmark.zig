@@ -3,13 +3,11 @@ const std = @import("std");
 const za = @import("zalgebra");
 const tracy = @import("ztracy");
 
-const BrickState = @import("brick/State.zig");
 const Camera = @import("Camera.zig");
 const Context = @import("../render.zig").Context;
 
 const Benchmark = @This();
 
-brick_state: BrickState,
 sun_enabled: bool,
 camera: *Camera,
 timer: f32,
@@ -20,7 +18,7 @@ path_orientation_fraction: f32,
 report: Report,
 
 /// You should probably use VoxelRT.createBenchmark ...
-pub fn init(camera: *Camera, brick_state: BrickState, sun_enabled: bool) Benchmark {
+pub fn init(camera: *Camera, brick_dimensions: [3]f32, sun_enabled: bool) Benchmark {
     const zone = tracy.ZoneN(@src(), @typeName(Benchmark) ++ " " ++ @src().fn_name);
     defer zone.End();
 
@@ -36,13 +34,12 @@ pub fn init(camera: *Camera, brick_state: BrickState, sun_enabled: bool) Benchma
     camera.propogatePitchChange();
 
     return Benchmark{
-        .brick_state = brick_state,
         .sun_enabled = sun_enabled,
         .camera = camera,
         .timer = 0,
         .path_point_fraction = path_point_fraction,
         .path_orientation_fraction = path_orientation_fraction,
-        .report = Report.init(brick_state),
+        .report = Report.init(brick_dimensions),
     };
 }
 
@@ -88,16 +85,14 @@ pub fn printReport(self: Benchmark, device_name: []const u8) void {
 }
 
 pub const Report = struct {
-    const Vec3U = za.GenericVector(3, u32);
-
     min_delta_time: f32,
     max_delta_time: f32,
 
     delta_time_sum: f32,
     delta_time_sum_samples: u32,
-    brick_dim: Vec3U,
+    brick_dimensions: [3]f32,
 
-    pub fn init(brick_state: BrickState) Report {
+    pub fn init(brick_dimensions: [3]f32) Report {
         const zone = tracy.ZoneN(@src(), @typeName(Report) ++ " " ++ @src().fn_name);
         defer zone.End();
 
@@ -106,11 +101,7 @@ pub const Report = struct {
             .max_delta_time = 0,
             .delta_time_sum = 0,
             .delta_time_sum_samples = 0,
-            .brick_dim = Vec3U.new(
-                brick_state.device_state.voxel_dim_x,
-                brick_state.device_state.voxel_dim_y,
-                brick_state.device_state.voxel_dim_z,
-            ),
+            .brick_dimensions = brick_dimensions,
         };
     }
 
@@ -139,7 +130,7 @@ pub const Report = struct {
             "Avg frame time",
             self.average() * std.time.ms_per_s,
             "Brick state info",
-            self.brick_dim.data,
+            self.brick_dimensions,
             "Sun enabled",
             sun_enabled,
             " > image dimensions",

@@ -12,7 +12,6 @@ const Context = render.Context;
 const Pipeline = @import("voxel_rt/Pipeline.zig");
 pub const Camera = @import("voxel_rt/Camera.zig");
 pub const Sun = @import("voxel_rt/Sun.zig");
-pub const GridState = @import("voxel_rt/brick/State.zig");
 pub const Benchmark = @import("voxel_rt/Benchmark.zig");
 pub const gpu_types = @import("voxel_rt/gpu_types.zig");
 
@@ -32,7 +31,7 @@ sun: *Sun,
 pipeline: Pipeline,
 
 /// init VoxelRT, api takes ownership of the grid_state
-pub fn init(allocator: Allocator, ctx: Context, grid_state: GridState, config: Config) !VoxelRT {
+pub fn init(allocator: Allocator, ctx: Context, config: Config) !VoxelRT {
     const camera = try allocator.create(Camera);
     errdefer allocator.destroy(camera);
     camera.* = Camera.init(
@@ -53,26 +52,11 @@ pub fn init(allocator: Allocator, ctx: Context, grid_state: GridState, config: C
             .width = config.internal_resolution_width,
             .height = config.internal_resolution_height,
         },
-        grid_state,
         camera,
         sun,
         config.pipeline,
     );
     errdefer pipeline.deinit(ctx);
-
-    const metals = [_]gpu_types.Metal{.{
-        .fuzz = 0.45,
-    }};
-    try pipeline.transferMetals(ctx, 0, metals[0..]);
-    const dielectrics = [_]gpu_types.Dielectric{
-        .{
-            .internal_reflection = 1.333, // water
-        },
-        .{
-            .internal_reflection = 1.52, // glass
-        },
-    };
-    try pipeline.transferDielectrics(ctx, 0, dielectrics[0..]);
 
     return VoxelRT{
         .camera = camera,

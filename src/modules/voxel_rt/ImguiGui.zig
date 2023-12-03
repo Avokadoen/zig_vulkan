@@ -9,7 +9,6 @@ const Context = render.Context;
 
 const Camera = @import("Camera.zig");
 const Sun = @import("Sun.zig");
-const BrickState = @import("brick/State.zig");
 const Pipeline = @import("Pipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const Benchmark = @import("Benchmark.zig");
@@ -17,8 +16,6 @@ const ray_pipeline_types = @import("ray_pipeline_types.zig");
 
 pub const StateBinding = struct {
     camera_ptr: *Camera,
-    /// used in benchmark report, TODO: remove this field (brick_grid_state is the same)
-    grid_state: BrickState,
     sun_ptr: *Sun,
     gfx_pipeline_shader_constants: *GraphicsPipeline.PushConstant,
     brick_grid_state: *ray_pipeline_types.BrickGridState,
@@ -283,7 +280,7 @@ inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
                 }
                 self.benchmark = Benchmark.init(
                     self.state_binding.camera_ptr,
-                    self.state_binding.grid_state,
+                    self.state_binding.brick_grid_state.dim,
                     (self.state_binding.sun_ptr.device_data.enabled > 0),
                 );
             }
