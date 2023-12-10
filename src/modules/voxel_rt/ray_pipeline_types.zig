@@ -15,7 +15,7 @@ pub const RayHitLimits = extern struct {
 };
 
 // must be kept in sync with assets/shaders/raytracing/traverse_rays.comp BrickGridState
-pub const BrickGridState = extern struct {
+pub const BrickGridMetadata = extern struct {
     /// how many bricks in each axis
     dim: [3]f32,
     padding1: f32,

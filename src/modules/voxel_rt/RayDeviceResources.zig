@@ -12,7 +12,7 @@ const StagingRamp = render.StagingRamp;
 const ray_pipeline_types = @import("./ray_pipeline_types.zig");
 const ImageInfo = ray_pipeline_types.ImageInfo;
 const RayHitLimits = ray_pipeline_types.RayHitLimits;
-const BrickGridState = ray_pipeline_types.BrickGridState;
+const BrickGridMetadata = ray_pipeline_types.BrickGridMetadata;
 const BrickIndex = ray_pipeline_types.BrickIndex;
 const Brick = ray_pipeline_types.Brick;
 const BrickLimits = ray_pipeline_types.BrickLimits;
@@ -21,10 +21,7 @@ const RayHit = ray_pipeline_types.RayHit;
 const RayShading = ray_pipeline_types.RayShading;
 const RayHash = ray_pipeline_types.RayHash;
 
-pub const Config = struct {
-    brick_load_request_count: c_uint = 1024,
-    brick_unload_request_count: c_uint = 1024,
-};
+const HostBrickState = @import("brick/HostBrickState.zig");
 
 // TODO: We should definitly rework all this resource stuff ...
 /// Resources only accessible on device
@@ -93,16 +90,14 @@ target_descriptor_pool: vk.DescriptorPool,
 target_descriptor_layouts: [descriptor_set_count]vk.DescriptorSetLayout,
 target_descriptor_sets: [descriptor_set_count]vk.DescriptorSet,
 
-brick_grid_state: *BrickGridState,
-
 target_image_info: ImageInfo,
 buffer_infos: [descriptor_buffer_count]vk.DescriptorBufferInfo,
 ray_buffer: GpuBufferMemory,
 voxel_scene_buffer: GpuBufferMemory,
 
 request_buffer: GpuBufferMemory,
-brick_load_request_count: c_uint,
-brick_unload_request_count: c_uint,
+
+host_brick_state: *const HostBrickState,
 
 pub fn init(
     allocator: Allocator,
@@ -110,7 +105,7 @@ pub fn init(
     target_image_info: ImageInfo,
     init_command_pool: vk.CommandPool,
     staging_buffer: *StagingRamp,
-    config: Config,
+    host_brick_state: *const HostBrickState,
 ) !RayDeviceResources {
     const zone = tracy.ZoneN(@src(), @typeName(RayDeviceResources) ++ " " ++ @src().fn_name);
     defer zone.End();
@@ -137,26 +132,13 @@ pub fn init(
         ctx,
         @as(vk.DeviceSize, @intCast(64 * 1024 * 1024)), // alloc 64mb
         .{ .storage_buffer_bit = true, .transfer_dst_bit = true },
-        .{ .host_visible_bit = true },
+        .{ .device_local_bit = true, .host_visible_bit = true },
     );
     errdefer request_buffer.deinit(ctx);
     try request_buffer.fill(ctx, init_command_pool, 0, request_buffer.size, 0);
 
-    const brick_grid_state: *BrickGridState = blk: {
-        const state = try allocator.create(BrickGridState);
-        state.* = BrickGridState{
-            .dim = [_]f32{ 32, 32, 32 },
-            .padding1 = 0,
-            .min_point = [_]f32{-1} ** 3,
-            .scale = 2,
-        };
-
-        break :blk state;
-    };
-    errdefer allocator.destroy(brick_grid_state);
-
     // TODO: we dont want to store full grid, we stream grid
-    const total_bricks = @as(vk.DeviceSize, @intFromFloat(brick_grid_state.dim[0] * brick_grid_state.dim[1] * brick_grid_state.dim[2]));
+    const total_bricks: vk.DeviceSize = @intCast(host_brick_state.brick_limits.active_bricks);
     std.debug.assert(total_bricks * @sizeOf(Brick) < voxel_scene_buffer.size);
 
     const target_descriptor_pool = blk: {
@@ -399,9 +381,9 @@ pub fn init(
             // brick limits
             @sizeOf(BrickLimits),
             // load brick requests
-            config.brick_load_request_count * @sizeOf(c_uint),
+            host_brick_state.brick_limits.max_load_request_count * @sizeOf(c_uint),
             // unload brick requests
-            config.brick_unload_request_count * @sizeOf(c_uint),
+            host_brick_state.brick_limits.max_unload_request_count * @sizeOf(c_uint),
         };
 
         for (infos[0..ray_ranges.len], ray_ranges, 0..) |*info, range, info_index| {
@@ -576,79 +558,51 @@ pub fn init(
 
     // brick transfer
     {
-        const test_brick_none = Brick{
-            .solid_mask = @as(u512, 0),
-        };
-        _ = test_brick_none;
-        const test_brick_one = Brick{
-            .solid_mask = @as(u512, 1),
-        };
-        const test_brick_row = Brick{
-            .solid_mask = @as(u512, 0b01111111),
-        };
-        const test_brick_all = Brick{
-            .solid_mask = ~@as(u512, 0),
-        };
-
         const brick_buffer_index = (Resource{ .device = .bricks_b }).toBufferIndex();
-        try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[brick_buffer_index].offset, Brick, &.{
-            test_brick_one,
-            test_brick_all,
-            test_brick_row,
-            test_brick_one,
-            test_brick_one,
-            test_brick_one,
-            test_brick_all,
-            test_brick_one,
-        });
+        try staging_buffer.transferToBuffer(
+            ctx,
+            &voxel_scene_buffer,
+            buffer_infos[brick_buffer_index].offset,
+            Brick,
+            host_brick_state.getActiveBricks(),
+        );
     }
 
     // brick indices transfer
     {
         const brick_indices_buffer_index = (Resource{ .device = .brick_indices_b }).toBufferIndex();
-        try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[brick_indices_buffer_index].offset, BrickIndex, &.{
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 1 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 2 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 3 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 4 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 5 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 6 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 7 },
-        });
+        try staging_buffer.transferToBuffer(
+            ctx,
+            &voxel_scene_buffer,
+            buffer_infos[brick_indices_buffer_index].offset,
+            BrickIndex,
+            host_brick_state.getActiveBrickIndices(),
+        );
     }
 
     // brick set bits transfer
     {
         const brick_set_buffer_index = (Resource{ .device = .bricks_set_s }).toBufferIndex();
-        try staging_buffer.transferToBuffer(ctx, &voxel_scene_buffer, buffer_infos[brick_set_buffer_index].offset, u8, &.{
-            1 << 7 | 1 << 6 | 0 << 5 | 1 << 4 | 1 << 3 | 1 << 2 | 1 << 1 | 1 << 0,
-            0,
-            0,
-            0,
-        });
+        try staging_buffer.transferToBuffer(
+            ctx,
+            &voxel_scene_buffer,
+            buffer_infos[brick_set_buffer_index].offset,
+            u1,
+            host_brick_state.getActiveBrickSets(),
+        );
     }
 
     // brick limits transfer
     {
-        // TODO: dont hard code
-        const TODO_TMP_ACTIVE_BRICKS = 8;
-        const brick_limits = [_]BrickLimits{.{
-            .max_load_request_count = config.brick_load_request_count,
-            .load_request_count = 0,
-            .max_unload_request_count = config.brick_unload_request_count,
-            .unload_request_count = 0,
-            .max_active_bricks = @intCast(total_bricks),
-            .active_bricks = TODO_TMP_ACTIVE_BRICKS,
-        }};
-
         const brick_req_limits_buffer_index = (Resource{ .host_and_device = .brick_req_limits_s }).toBufferIndex();
+
+        const limits_slice = [1]BrickLimits{host_brick_state.brick_limits};
         try staging_buffer.transferToBuffer(
             ctx,
             &request_buffer,
             buffer_infos[brick_req_limits_buffer_index].offset,
             BrickLimits,
-            &brick_limits,
+            &limits_slice,
         );
     }
 
@@ -660,11 +614,9 @@ pub fn init(
         .target_descriptor_sets = target_descriptor_sets,
         .target_image_info = target_image_info,
         .ray_buffer = ray_buffer,
-        .brick_grid_state = brick_grid_state,
         .voxel_scene_buffer = voxel_scene_buffer,
         .request_buffer = request_buffer,
-        .brick_load_request_count = config.brick_load_request_count,
-        .brick_unload_request_count = config.brick_unload_request_count,
+        .host_brick_state = host_brick_state,
     };
 }
 
@@ -674,7 +626,6 @@ pub inline fn deinit(self: RayDeviceResources, ctx: Context) void {
     }
     ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.target_descriptor_pool, null);
 
-    self.allocator.destroy(self.brick_grid_state);
     self.voxel_scene_buffer.deinit(ctx);
     self.ray_buffer.deinit(ctx);
     self.request_buffer.deinit(ctx);

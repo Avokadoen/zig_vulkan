@@ -28,6 +28,7 @@ const BrickHeartbeatPipeline = @import("BrickHeartbeatPipeline.zig");
 const BrickUnloadPipeline = @import("BrickUnloadPipeline.zig");
 
 const BrickStream = @import("brick/BrickStream.zig");
+const HostBrickState = @import("brick/HostBrickState.zig");
 
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const ImguiPipeline = @import("ImguiPipeline.zig");
@@ -119,6 +120,7 @@ pub fn init(
     internal_render_resolution: vk.Extent2D,
     camera: *Camera,
     sun: *Sun,
+    host_brick_state: *HostBrickState,
     config: Config,
 ) !Pipeline {
     const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
@@ -286,7 +288,7 @@ pub fn init(
         target_image_info,
         init_command_pool,
         &staging_buffers,
-        .{}, // use default config for now
+        host_brick_state,
     );
     errdefer ray_device_resources.deinit(ctx);
 
@@ -311,7 +313,7 @@ pub fn init(
     const brick_unload_pipeline = try BrickUnloadPipeline.init(ctx, ray_device_resources);
     errdefer brick_heartbeat_pipeline.deinit(ctx);
 
-    const brick_stream = try BrickStream.init(allocator, ray_device_resources);
+    const brick_stream = try BrickStream.init(allocator, host_brick_state.brick_limits);
     errdefer brick_stream.deinit();
 
     var vertex_index_buffer = try GpuBufferMemory.init(
@@ -350,7 +352,7 @@ pub fn init(
         .camera_ptr = camera,
         .sun_ptr = sun,
         .gfx_pipeline_shader_constants = gfx_pipeline.shader_constants,
-        .brick_grid_state = ray_device_resources.brick_grid_state,
+        .brick_grid_metadata = &host_brick_state.grid_metadata,
     };
     const gui = ImguiGui.init(
         ctx,
@@ -734,8 +736,8 @@ pub fn transferCurrentBrickGridState(self: *Pipeline, ctx: Context) !void {
         ctx,
         &self.ray_device_resources.voxel_scene_buffer,
         0,
-        ray_pipeline_types.BrickGridState,
-        &[1]ray_pipeline_types.BrickGridState{self.ray_device_resources.brick_grid_state.*},
+        ray_pipeline_types.BrickGridMetadata,
+        &[1]ray_pipeline_types.BrickGridMetadata{self.ray_device_resources.host_brick_state.grid_metadata},
     );
 }
 

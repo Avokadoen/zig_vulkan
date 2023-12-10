@@ -10,7 +10,8 @@ const render = @import("../../render.zig");
 const Context = render.Context;
 const GpuBufferMemory = render.GpuBufferMemory;
 
-const ray_types = @import("../ray_pipeline_types.zig");
+const ray_pipeline_types = @import("../ray_pipeline_types.zig");
+const BrickLimits = ray_pipeline_types.BrickLimits;
 
 const RayDeviceResources = @import("../RayDeviceResources.zig");
 const Resource = RayDeviceResources.Resource;
@@ -20,13 +21,13 @@ const BrickStream = @This();
 allocator: Allocator,
 frame_snapshot: FrameSnapshot,
 
-pub fn init(allocator: Allocator, ray_device_resources: *const RayDeviceResources) Allocator.Error!BrickStream {
+pub fn init(allocator: Allocator, brick_limits: BrickLimits) Allocator.Error!BrickStream {
     const zone = tracy.ZoneN(@src(), @typeName(BrickStream) ++ " " ++ @src().fn_name);
     defer zone.End();
 
     return BrickStream{
         .allocator = allocator,
-        .frame_snapshot = try FrameSnapshot.init(allocator, ray_device_resources),
+        .frame_snapshot = try FrameSnapshot.init(allocator, brick_limits),
     };
 }
 
@@ -52,31 +53,31 @@ pub fn deinit(self: BrickStream) void {
 }
 
 const FrameSnapshot = struct {
-    brick_limits: ray_types.BrickLimits,
+    brick_limits: BrickLimits,
     brick_load_requests: ArrayListUnmanaged(c_uint),
     brick_unload_requests: ArrayListUnmanaged(c_uint),
 
     /// Initialize the frame snapshot by preallocating request buffers
     ///
     /// ``snapshot()`` must be called before reading
-    pub fn init(allocator: Allocator, ray_device_resources: *const RayDeviceResources) Allocator.Error!FrameSnapshot {
+    pub fn init(allocator: Allocator, brick_limits: BrickLimits) Allocator.Error!FrameSnapshot {
         const zone = tracy.ZoneN(@src(), @typeName(FrameSnapshot) ++ " " ++ @src().fn_name);
         defer zone.End();
 
         var brick_load_requests = try ArrayListUnmanaged(c_uint).initCapacity(
             allocator,
-            ray_device_resources.brick_load_request_count,
+            @intCast(brick_limits.max_load_request_count),
         );
         errdefer brick_load_requests.deinit(allocator);
 
         var brick_unload_requests = try ArrayListUnmanaged(c_uint).initCapacity(
             allocator,
-            ray_device_resources.brick_load_request_count,
+            @intCast(brick_limits.max_unload_request_count),
         );
         errdefer brick_unload_requests.deinit(allocator);
 
         return FrameSnapshot{
-            .brick_limits = undefined,
+            .brick_limits = brick_limits,
             .brick_load_requests = brick_load_requests,
             .brick_unload_requests = brick_unload_requests,
         };
@@ -104,7 +105,7 @@ const FrameSnapshot = struct {
         {
             const brick_req_limits_buffer_info = ray_device_resources.getBufferInfo(Resource{ .host_and_device = .brick_req_limits_s });
             const brick_req_limits_adr = base_adr + brick_req_limits_buffer_info.offset;
-            const brick_req_limtis_ptr: *const ray_types.BrickLimits = @ptrFromInt(brick_req_limits_adr);
+            const brick_req_limtis_ptr: *const ray_pipeline_types.BrickLimits = @ptrFromInt(brick_req_limits_adr);
             self.brick_limits = brick_req_limtis_ptr.*;
         }
         // read brick load requests

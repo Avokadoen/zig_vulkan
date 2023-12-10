@@ -14,7 +14,7 @@ const StagingRamp = render.StagingRamp;
 
 const ray_pipeline_types = @import("ray_pipeline_types.zig");
 const Dispatch1D = ray_pipeline_types.Dispatch1D;
-const BrickGridState = ray_pipeline_types.BrickGridState;
+const BrickGridMetadata = ray_pipeline_types.BrickGridMetadata;
 
 const RayDeviceResources = @import("RayDeviceResources.zig");
 const DeviceOnlyResources = RayDeviceResources.DeviceOnlyResources;

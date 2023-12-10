@@ -14,6 +14,7 @@ pub const Camera = @import("voxel_rt/Camera.zig");
 pub const Sun = @import("voxel_rt/Sun.zig");
 pub const Benchmark = @import("voxel_rt/Benchmark.zig");
 pub const gpu_types = @import("voxel_rt/gpu_types.zig");
+pub const HostBrickState = @import("voxel_rt/brick/HostBrickState.zig");
 
 pub const Config = struct {
     internal_resolution_width: u32 = 1280,
@@ -30,8 +31,8 @@ sun: *Sun,
 
 pipeline: Pipeline,
 
-/// init VoxelRT, api takes ownership of the grid_state
-pub fn init(allocator: Allocator, ctx: Context, config: Config) !VoxelRT {
+/// init VoxelRT
+pub fn init(allocator: Allocator, ctx: Context, host_brick_state: *HostBrickState, config: Config) !VoxelRT {
     const camera = try allocator.create(Camera);
     errdefer allocator.destroy(camera);
     camera.* = Camera.init(
@@ -54,6 +55,7 @@ pub fn init(allocator: Allocator, ctx: Context, config: Config) !VoxelRT {
         },
         camera,
         sun,
+        host_brick_state,
         config.pipeline,
     );
     errdefer pipeline.deinit(ctx);

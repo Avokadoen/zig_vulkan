@@ -14,7 +14,7 @@ const StagingRamp = render.StagingRamp;
 
 const ray_pipeline_types = @import("ray_pipeline_types.zig");
 const Dispatch1D = ray_pipeline_types.Dispatch1D;
-const BrickGridState = ray_pipeline_types.BrickGridState;
+const BrickGridMetadata = ray_pipeline_types.BrickGridMetadata;
 
 const RayDeviceResources = @import("RayDeviceResources.zig");
 const DeviceOnlyResources = RayDeviceResources.DeviceOnlyResources;
@@ -51,7 +51,7 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Bric
         const push_constant_range = [_]vk.PushConstantRange{.{
             .stage_flags = .{ .compute_bit = true },
             .offset = 0,
-            .size = @sizeOf(BrickGridState),
+            .size = @sizeOf(BrickGridMetadata),
         }};
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
@@ -161,15 +161,13 @@ pub fn appendPipelineCommands(self: BrickHeartbeatPipeline, ctx: Context, comman
 
     {
         // reduce brick dimensions to brick count
-        const brick_dim = self.ray_device_resources.brick_grid_state.dim;
-        const brick_count = brick_dim[0] * brick_dim[1] * brick_dim[2];
         ctx.vkd.cmdPushConstants(
             command_buffer,
             self.pipeline_layout,
             .{ .compute_bit = true },
             0,
-            @sizeOf(c_uint),
-            &brick_count,
+            @sizeOf(c_int),
+            &self.ray_device_resources.host_brick_state.brick_limits.active_bricks,
         );
     }
     ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.compute, self.pipeline);

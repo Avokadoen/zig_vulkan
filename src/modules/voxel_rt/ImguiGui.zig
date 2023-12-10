@@ -18,7 +18,7 @@ pub const StateBinding = struct {
     camera_ptr: *Camera,
     sun_ptr: *Sun,
     gfx_pipeline_shader_constants: *GraphicsPipeline.PushConstant,
-    brick_grid_state: *ray_pipeline_types.BrickGridState,
+    brick_grid_metadata: *ray_pipeline_types.BrickGridMetadata,
 };
 
 pub const Config = struct {
@@ -280,7 +280,7 @@ inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
                 }
                 self.benchmark = Benchmark.init(
                     self.state_binding.camera_ptr,
-                    self.state_binding.brick_grid_state.dim,
+                    self.state_binding.brick_grid_metadata.dim,
                     (self.state_binding.sun_ptr.device_data.enabled > 0),
                 );
             }
@@ -347,13 +347,13 @@ fn drawGridSettingsWindowIfEnabled(self: *ImguiGui, ctx: Context, pipeline: *Pip
 
     var change_occured = false;
     change_occured = change_occured or zgui.dragFloat("scale##grid", .{
-        .v = &self.state_binding.brick_grid_state.scale,
+        .v = &self.state_binding.brick_grid_metadata.scale,
         .speed = 0.1,
         .min = 0.1,
         .max = 1000,
     });
     change_occured = change_occured or zgui.dragFloat3("position##grid", .{
-        .v = &self.state_binding.brick_grid_state.min_point,
+        .v = &self.state_binding.brick_grid_metadata.min_point,
         .speed = 0.5,
         .min = -10000,
         .max = 10000,

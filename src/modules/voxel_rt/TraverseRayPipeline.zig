@@ -14,7 +14,7 @@ const StagingRamp = render.StagingRamp;
 
 const ray_pipeline_types = @import("ray_pipeline_types.zig");
 const Dispatch1D = ray_pipeline_types.Dispatch1D;
-const BrickGridState = ray_pipeline_types.BrickGridState;
+const BrickGridMetadata = ray_pipeline_types.BrickGridMetadata;
 
 const RayDeviceResources = @import("RayDeviceResources.zig");
 const DeviceOnlyResources = RayDeviceResources.DeviceOnlyResources;
@@ -81,7 +81,7 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Trav
         const push_constant_range = [_]vk.PushConstantRange{.{
             .stage_flags = .{ .compute_bit = true },
             .offset = 0,
-            .size = @sizeOf(BrickGridState),
+            .size = @sizeOf(BrickGridMetadata),
         }};
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
@@ -204,8 +204,8 @@ pub fn appendPipelineCommands(self: TraverseRayPipeline, ctx: Context, bounce_in
         self.pipeline_layout,
         .{ .compute_bit = true },
         0,
-        @sizeOf(BrickGridState),
-        self.ray_device_resources.brick_grid_state,
+        @sizeOf(BrickGridMetadata),
+        &self.ray_device_resources.host_brick_state.grid_metadata,
     );
     ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
 
