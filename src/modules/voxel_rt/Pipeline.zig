@@ -490,7 +490,7 @@ pub const DrawError = error{
     OutOfRegions,
 };
 /// draw a new frame, delta time is only used by gui
-pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
+pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt: f32) DrawError!void {
     const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
@@ -536,11 +536,37 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) DrawError!void {
     }
 
     // grab any new brick requests
-    {
+    load_bricks_blk: {
         try self.ray_device_resources.mapBrickRequestData(ctx);
         defer self.ray_device_resources.request_buffer.unmap(ctx);
 
-        try self.brick_stream.handleBrickRequests(ctx, self.ray_device_resources);
+        const snapshot = try self.brick_stream.takeSnapshot(
+            ctx,
+            self.ray_device_resources,
+        );
+
+        if (snapshot.brick_limits.load_request_count == 0) {
+            break :load_bricks_blk;
+        }
+
+        // TODO: remove alloc, alloc on init
+        const new_bricks = try self.allocator.alloc(ray_pipeline_types.Brick, snapshot.brick_limits.load_request_count);
+        defer self.allocator.free(new_bricks);
+
+        std.debug.assert(snapshot.brick_limits.max_active_bricks >= snapshot.brick_limits.active_bricks);
+        std.debug.assert(snapshot.brick_limits.active_bricks >= 0);
+
+        const load_req_count: usize = @intCast(@min(
+            snapshot.brick_limits.load_request_count,
+            snapshot.brick_limits.max_active_bricks - @as(c_uint, @intCast(snapshot.brick_limits.active_bricks)),
+        ));
+
+        for (snapshot.brick_load_requests[0..load_req_count], new_bricks) |load_index, *new_brick| {
+            new_brick.* = host_brick_state.bricks[load_index];
+            std.debug.print("{any}\n", .{new_brick.*});
+        }
+
+        host_brick_state.brick_limits = snapshot.brick_limits;
     }
 
     // The pipeline has the following stages:

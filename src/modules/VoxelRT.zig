@@ -67,8 +67,8 @@ pub fn init(allocator: Allocator, ctx: Context, host_brick_state: *HostBrickStat
     };
 }
 
-pub fn draw(self: *VoxelRT, ctx: Context, delta_time: f32) !void {
-    try self.pipeline.draw(ctx, delta_time);
+pub fn draw(self: *VoxelRT, ctx: Context, host_brick_state: *HostBrickState, delta_time: f32) !void {
+    try self.pipeline.draw(ctx, host_brick_state, delta_time);
 }
 
 pub fn updateSun(self: *VoxelRT, delta_time: f32) void {

@@ -93,7 +93,6 @@ pub inline fn getActiveBrickIndices(self: HostBrickState) []const BrickIndex {
     return self.brick_indices[0..@intCast(self.brick_limits.active_bricks)];
 }
 
-// TODO: alignment issue?
 pub inline fn getActiveBrickSets(self: HostBrickState) []const u1 {
     std.debug.assert(self.brick_limits.active_bricks >= 0);
 

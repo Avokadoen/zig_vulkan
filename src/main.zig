@@ -63,11 +63,11 @@ pub fn main() anyerror!void {
     }
 
     // Create a windowed mode window
-    var window = glfw.Window.create(3840, 2160, application_name, null, null, .{
+    var window = glfw.Window.create(1080, 720, application_name, null, null, .{
         .center_cursor = true,
         .client_api = .no_api,
-        .maximized = true,
-        .scale_to_monitor = true,
+        .maximized = false,
+        .scale_to_monitor = false,
         .focused = true,
     }) orelse {
         return error.GlfwCreateWindowFailed;
@@ -158,7 +158,7 @@ pub fn main() anyerror!void {
         }
         voxel_rt.updateSun(dt);
 
-        try voxel_rt.draw(ctx, dt);
+        try voxel_rt.draw(ctx, &host_brick_state, dt);
 
         // Poll for and process events
         glfw.pollEvents();

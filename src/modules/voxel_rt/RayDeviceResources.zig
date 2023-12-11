@@ -97,6 +97,7 @@ voxel_scene_buffer: GpuBufferMemory,
 
 request_buffer: GpuBufferMemory,
 
+// TODO: move
 host_brick_state: *const HostBrickState,
 
 pub fn init(
