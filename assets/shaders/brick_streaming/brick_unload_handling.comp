@@ -7,11 +7,6 @@
 
 layout(local_size_x_id = 0, local_size_y = 1, local_size_z = 1) in;
 
-// Must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig BrickGridState
-layout (push_constant) readonly uniform BrickGridState {
-    uint brick_count;
-} brick_grid;
-
 // TODO: dont care about brick set for this
 layout (std430, set = 0, binding = 0) readonly buffer BrickSetBuffer {
     uint brick_set_bits[];
@@ -23,7 +18,7 @@ layout (std430, set = 0, binding = 2) buffer BrickBuffer {
     Brick bricks[];
 };
 
-layout (std430, set = 1, binding = 0) buffer BrickRequestLimits {
+layout (std430, set = 1, binding = 0) readonly buffer BrickRequestLimits {
     BrickLimits brick_limits;
 };
 layout (std430, set = 2, binding = 0) readonly buffer BrickUnloadRequestIndices {
@@ -36,17 +31,11 @@ void main() {
         return;
     }
 
-    uint remove_index = unload_request_brick_indices[unload_request_index];
-    if (0 == brick_limits.active_bricks || remove_index >= brick_limits.active_bricks - 1) {
-        return;
-    }
-
     // We perform a swap remove to unload brick. 
     // This means we grab the last active brick and swap this the index requested to be removed
-    const int swap_index = atomicAdd(brick_limits.active_bricks, -1) - 1;
+    uint remove_index = unload_request_brick_indices[unload_request_index];
+    const int swap_index = int(brick_limits.active_bricks) - int(1 + remove_index); 
     if (swap_index < 0) {
-        // UB: we ignore RC and set the brick count to 0, assumption is that this will always lead to 0 in the case of empty 
-        brick_limits.active_bricks = 0;
         return;
     }
 
