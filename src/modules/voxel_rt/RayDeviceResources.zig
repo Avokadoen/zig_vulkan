@@ -139,8 +139,9 @@ pub fn init(
     try request_buffer.fill(ctx, init_command_pool, 0, request_buffer.size, 0);
 
     // TODO: we dont want to store full grid, we stream grid
-    const total_bricks: vk.DeviceSize = @intCast(host_brick_state.brick_limits.active_bricks);
-    std.debug.assert(total_bricks * @sizeOf(Brick) < voxel_scene_buffer.size);
+    const bricks_in_grid: vk.DeviceSize = @intCast(host_brick_state.bricks.len);
+    // TODO: incomplete assert, must include rest of types
+    std.debug.assert(bricks_in_grid * @sizeOf(Brick) < voxel_scene_buffer.size);
 
     const target_descriptor_pool = blk: {
         const pool_sizes = [_]vk.DescriptorPoolSize{ .{
@@ -372,11 +373,11 @@ pub fn init(
         };
         const brick_grid_ranges = [DeviceOnlyResources.brick_count]vk.DeviceSize{
             // bricks set
-            try std.math.divCeil(vk.DeviceSize, total_bricks, 8),
+            try std.math.divCeil(vk.DeviceSize, bricks_in_grid, 8),
             // bricks indices
-            total_bricks * @sizeOf(BrickIndex),
+            bricks_in_grid * @sizeOf(BrickIndex),
             // bricks
-            total_bricks * @sizeOf(Brick),
+            @as(vk.DeviceSize, @intCast(host_brick_state.brick_limits.max_active_bricks)) * @sizeOf(Brick),
         };
         const brick_request_ranges = [HostAndDeviceResources.all_count]vk.DeviceSize{
             // brick limits
@@ -565,7 +566,7 @@ pub fn init(
             &voxel_scene_buffer,
             buffer_infos[brick_indices_buffer_index].offset,
             BrickIndex,
-            host_brick_state.getActiveBrickIndices(),
+            host_brick_state.getBrickIndices(),
         );
     }
 

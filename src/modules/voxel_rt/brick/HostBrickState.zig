@@ -22,6 +22,7 @@ brick_limits: BrickLimits,
 ///       unloading indices is done on gpu so host is not signaled or coherent in this case
 brick_indices: []BrickIndex,
 bricks: []Brick,
+brick_indices_index: []c_uint,
 brick_set: []u8,
 
 pub fn init(
@@ -35,13 +36,13 @@ pub fn init(
         .load_request_count = 0,
         .max_unload_request_count = config.brick_unload_request_count,
         .unload_request_count = 0,
-        .max_active_bricks = @intFromFloat(grid_metadata.dim[0] * grid_metadata.dim[1] * grid_metadata.dim[2]),
+        .max_active_bricks = @intFromFloat(grid_metadata.dim[0] * grid_metadata.dim[1] * grid_metadata.dim[2]), // TODO: reduce
         .active_bricks = 0,
     };
 
-    const voxel_count: usize = @intCast(brick_limits.max_active_bricks * 8 * 8 * 8);
+    const grid_brick_count: usize = @intFromFloat(grid_metadata.dim[0] * grid_metadata.dim[1] * grid_metadata.dim[2]);
 
-    const brick_indices = try allocator.alloc(BrickIndex, voxel_count);
+    const brick_indices = try allocator.alloc(BrickIndex, grid_brick_count);
     errdefer allocator.free(brick_indices);
     if (zero_out_mem) {
         @memset(brick_indices, BrickIndex{
@@ -51,7 +52,7 @@ pub fn init(
         });
     }
 
-    const bricks = try allocator.alloc(Brick, voxel_count);
+    const bricks = try allocator.alloc(Brick, grid_brick_count);
     errdefer allocator.free(bricks);
     if (zero_out_mem) {
         @memset(bricks, Brick{
@@ -59,7 +60,13 @@ pub fn init(
         });
     }
 
-    const brick_set = try allocator.alloc(u8, voxel_count / 8);
+    const brick_indices_index = try allocator.alloc(c_uint, grid_brick_count);
+    errdefer allocator.free(brick_indices_index);
+    if (zero_out_mem) {
+        @memset(brick_indices_index, 0);
+    }
+
+    const brick_set = try allocator.alloc(u8, grid_brick_count / 8);
     errdefer allocator.free(brick_set);
     if (zero_out_mem) {
         @memset(brick_set, 0);
@@ -71,14 +78,16 @@ pub fn init(
         .brick_limits = brick_limits,
         .brick_indices = brick_indices,
         .bricks = bricks,
+        .brick_indices_index = brick_indices_index,
         .brick_set = brick_set,
     };
 }
 
 pub fn deinit(self: HostBrickState) void {
-    self.allocator.free(self.brick_indices);
-    self.allocator.free(self.bricks);
     self.allocator.free(self.brick_set);
+    self.allocator.free(self.brick_indices_index);
+    self.allocator.free(self.bricks);
+    self.allocator.free(self.brick_indices);
 }
 
 pub inline fn getActiveBricks(self: HostBrickState) []const Brick {
@@ -87,10 +96,16 @@ pub inline fn getActiveBricks(self: HostBrickState) []const Brick {
     return self.bricks[0..@intCast(self.brick_limits.active_bricks)];
 }
 
-pub inline fn getActiveBrickIndices(self: HostBrickState) []const BrickIndex {
+pub inline fn getActiveBrickIndicesIndex(self: HostBrickState) []const c_uint {
     std.debug.assert(self.brick_limits.active_bricks >= 0);
 
-    return self.brick_indices[0..@intCast(self.brick_limits.active_bricks)];
+    return self.brick_indices_index[0..@intCast(self.brick_limits.active_bricks)];
+}
+
+pub inline fn getBrickIndices(self: HostBrickState) []const BrickIndex {
+    std.debug.assert(self.brick_limits.active_bricks >= 0);
+
+    return self.brick_indices;
 }
 
 pub inline fn getActiveBrickSets(self: HostBrickState) []const u1 {
@@ -146,6 +161,21 @@ pub fn setupTestScene(self: *HostBrickState) void {
         };
         std.debug.assert(self.brick_limits.active_bricks == brick_indices.len);
         @memcpy(self.brick_indices[0..brick_indices.len], &brick_indices);
+    }
+
+    {
+        const brick_indices_index = [_]c_uint{
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+        };
+        std.debug.assert(self.brick_limits.active_bricks == brick_indices_index.len);
+        @memcpy(self.brick_indices_index[0..brick_indices_index.len], &brick_indices_index);
     }
 
     {
