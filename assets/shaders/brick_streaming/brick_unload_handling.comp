@@ -12,7 +12,7 @@ layout (std430, set = 0, binding = 0) readonly buffer BrickSetBuffer {
     uint brick_set_bits[];
 };
 layout (std430, set = 0, binding = 1) buffer BrickIndex {
-    uint brick_index_22b_req_count_8b_status_2b[];
+    uint brick_index_req_count_status[];
 };
 layout (std430, set = 0, binding = 2) buffer BrickBuffer {
     Brick bricks[];
@@ -31,6 +31,10 @@ void main() {
         return;
     }
 
+    if (brick_limits.active_bricks <= 0) {
+        return;
+    }
+
     // We perform a swap remove to unload brick. 
     // This means we grab the last active brick and swap this the index requested to be removed
     uint remove_index = unload_request_brick_indices[unload_request_index];
@@ -39,28 +43,28 @@ void main() {
         return;
     }
 
-    const uint remove_brick_meta_bits = brick_index_22b_req_count_8b_status_2b[remove_index];
+    const uint remove_brick_meta_bits = brick_index_req_count_status[remove_index];
     const uint removed_brick_index = bitfieldExtract(
         remove_brick_meta_bits,
         BRICK_INDEX_OFFSET,
         BRICK_INDEX_BITS
     );
 
-    const uint swap_brick_meta_bits = brick_index_22b_req_count_8b_status_2b[swap_index];
+    const uint swap_brick_meta_bits = brick_index_req_count_status[swap_index];
     const uint swap_brick_index = bitfieldExtract(
         swap_brick_meta_bits,
         BRICK_INDEX_OFFSET,
         BRICK_INDEX_BITS
     );
 
-    brick_index_22b_req_count_8b_status_2b[swap_index] = bitfieldInsert(
+    brick_index_req_count_status[swap_index] = bitfieldInsert(
         swap_brick_meta_bits, 
         removed_brick_index, 
         BRICK_INDEX_OFFSET, 
         BRICK_INDEX_BITS
     );
 
-    brick_index_22b_req_count_8b_status_2b[remove_index] = bitfieldInsert(
+    brick_index_req_count_status[remove_index] = bitfieldInsert(
         remove_brick_meta_bits,
         BRICK_STATUS_UNLOADED,
         BRICK_STATUS_OFFSET,

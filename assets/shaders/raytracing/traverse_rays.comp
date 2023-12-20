@@ -34,7 +34,7 @@ layout (std430, set = 6, binding = 0) readonly buffer BrickSetBuffer {
     uint brick_set_bits[];
 };
 layout (std430, set = 6, binding = 1) buffer BrickIndex {
-    uint brick_index_21b_req_count_7b_status_4b[];
+    uint brick_index_req_count_status[];
 };
 layout (std430, set = 6, binding = 2) readonly buffer BrickBuffer {
     Brick bricks[];
@@ -195,13 +195,13 @@ bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_mat
         
         // If brick has some voxels
         if (bitfieldExtract(brick_set_bits[grid_index / 32], int(mod(grid_index, 32)), 1) != 0) {
-            const uint brick_index_bits = brick_index_21b_req_count_7b_status_4b[grid_index];
+            const uint brick_index_bits = brick_index_req_count_status[grid_index];
             const uint brick_status = bitfieldExtract(brick_index_bits, BRICK_STATUS_OFFSET, BRICK_STATUS_BITS);
 
-            // always increment the req_count, ignore RC and just increment it atleast once
+            // increment the req_count if it is not "in flight", ignore RC and just increment it atleast once
             const uint req_count = bitfieldExtract(brick_index_bits, BRICK_REQUEST_COUNT_OFFSET, BRICK_REQUEST_COUNT_BITS);
-            if (req_count < BRICK_REQUEST_COUNT_MAX_VALUE) {
-                brick_index_21b_req_count_7b_status_4b[grid_index] = bitfieldInsert(brick_index_bits, req_count + 1, BRICK_REQUEST_COUNT_OFFSET, BRICK_REQUEST_COUNT_BITS);
+            if (req_count < BRICK_REQUEST_COUNT_MAX_VALUE && (brick_status == BRICK_STATUS_LOADED || brick_status == BRICK_STATUS_UNLOADED)) {
+                brick_index_req_count_status[grid_index] = bitfieldInsert(brick_index_bits, req_count + 1, BRICK_REQUEST_COUNT_OFFSET, BRICK_REQUEST_COUNT_BITS);
             }
 
             if (brick_status == BRICK_STATUS_LOADED) {
@@ -307,9 +307,9 @@ bool BrickHit(
         const int mask_index = bit_offset / 32;
         const int mask_offset = bit_offset % 32;
         const uint uint_mask = solid_mask[mask_index];
-        const uint bitfield_final_entry = bitfieldExtract(uint_mask, 0, mask_offset + 1);
+        const uint bitfield_final_entry = bitfieldExtract(uint_mask, mask_offset, 1);
 
-        const bool hit_voxel = ((bitfield_final_entry & (1 << mask_offset)) != 0) && t_value >= local_t_min;
+        const bool hit_voxel = (bitfield_final_entry != 0) && t_value >= local_t_min;
         if (hit_voxel) {
             const uint material_index = 0; // TODO
 

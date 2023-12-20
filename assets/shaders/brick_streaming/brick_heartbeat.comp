@@ -18,7 +18,7 @@ layout (std430, set = 0, binding = 0) readonly buffer BrickSetBuffer {
     uint brick_set_bits[];
 };
 layout (std430, set = 0, binding = 1) buffer BrickIndex {
-    uint brick_index_22b_req_count_8b_status_2b[];
+    uint brick_index_req_count_status[];
 };
 
 layout (std430, set = 0, binding = 2) readonly buffer BrickBuffer {
@@ -46,7 +46,7 @@ void main() {
         return;
     }
 
-    const uint brick_index_bits = brick_index_22b_req_count_8b_status_2b[brick_index];
+    const uint brick_index_bits = brick_index_req_count_status[brick_index];
     uint new_brick_index_bits = brick_index_bits;
     const uint brick_status = bitfieldExtract(brick_index_bits, BRICK_STATUS_OFFSET, BRICK_STATUS_BITS);
     const uint req_count = bitfieldExtract(brick_index_bits, BRICK_REQUEST_COUNT_OFFSET, BRICK_REQUEST_COUNT_BITS);
@@ -66,7 +66,7 @@ void main() {
     } 
     // if req count is bigger than 1 and brick is not loaded
     else if (req_count > 1 && brick_status == BRICK_STATUS_UNLOADED) {
-        // If we reached the limit for requests
+        // If we haven't reached the limit for requests
         if (brick_limits.load_request_count < brick_limits.max_load_request_count) {
             // register that brick is loading
             new_brick_index_bits = bitfieldInsert(brick_index_bits, BRICK_STATUS_LOADING, BRICK_STATUS_OFFSET, BRICK_STATUS_BITS);
@@ -76,7 +76,7 @@ void main() {
     }
 
     if (new_brick_index_bits != brick_index_bits) {
-        brick_index_22b_req_count_8b_status_2b[brick_index] = new_brick_index_bits;
+        brick_index_req_count_status[brick_index] = new_brick_index_bits;
     }
 }
 
