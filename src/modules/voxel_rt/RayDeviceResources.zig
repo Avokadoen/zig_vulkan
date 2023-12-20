@@ -511,37 +511,25 @@ pub fn init(
             comptime std.debug.assert(@intFromEnum(DeviceOnlyResources.draw_image_s) == @intFromEnum(DeviceOnlyResources.bricks_b) + 1);
 
             const brick_req_write_offset = DeviceOnlyResources.all_count;
-            writes[brick_req_write_offset + @intFromEnum(HostAndDeviceResources.brick_req_limits_s)] = vk.WriteDescriptorSet{
-                .dst_set = target_descriptor_sets[brick_desc_set_index + 2],
-                .dst_binding = 0,
-                .dst_array_element = 0,
-                .descriptor_count = 1,
-                .descriptor_type = .storage_buffer,
-                .p_image_info = undefined,
-                .p_buffer_info = @ptrCast(&infos[(Resource{ .host_and_device = .brick_req_limits_s }).toBufferIndex()]),
-                .p_texel_buffer_view = undefined,
-            };
 
-            writes[brick_req_write_offset + @intFromEnum(HostAndDeviceResources.brick_load_request_s)] = vk.WriteDescriptorSet{
-                .dst_set = target_descriptor_sets[brick_desc_set_index + 3],
-                .dst_binding = 0,
-                .dst_array_element = 0,
-                .descriptor_count = 1,
-                .descriptor_type = .storage_buffer,
-                .p_image_info = undefined,
-                .p_buffer_info = @ptrCast(&infos[(Resource{ .host_and_device = .brick_load_request_s }).toBufferIndex()]),
-                .p_texel_buffer_view = undefined,
-            };
-            writes[brick_req_write_offset + @intFromEnum(HostAndDeviceResources.brick_unload_request_s)] = vk.WriteDescriptorSet{
-                .dst_set = target_descriptor_sets[brick_desc_set_index + 4],
-                .dst_binding = 0,
-                .dst_array_element = 0,
-                .descriptor_count = 1,
-                .descriptor_type = .storage_buffer,
-                .p_image_info = undefined,
-                .p_buffer_info = @ptrCast(&infos[(Resource{ .host_and_device = .brick_unload_request_s }).toBufferIndex()]),
-                .p_texel_buffer_view = undefined,
-            };
+            // we must be at the end of the writes for for loop to make sense
+            std.debug.assert(brick_req_write_offset + HostAndDeviceResources.all_count == writes.len);
+
+            // write all HostAndDeviceResources
+            inline for (0..HostAndDeviceResources.all_count) |nth_host_and_dev_res| {
+                const dst_set_index = brick_desc_set_index + 2 + nth_host_and_dev_res;
+                const host_and_device_res: HostAndDeviceResources = @enumFromInt(nth_host_and_dev_res);
+                writes[brick_req_write_offset + nth_host_and_dev_res] = vk.WriteDescriptorSet{
+                    .dst_set = target_descriptor_sets[dst_set_index],
+                    .dst_binding = 0,
+                    .dst_array_element = 0,
+                    .descriptor_count = 1,
+                    .descriptor_type = .storage_buffer,
+                    .p_image_info = undefined,
+                    .p_buffer_info = @ptrCast(&infos[(Resource{ .host_and_device = host_and_device_res }).toBufferIndex()]),
+                    .p_texel_buffer_view = undefined,
+                };
+            }
 
             break :write_blk writes;
         };
