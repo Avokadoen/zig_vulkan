@@ -24,6 +24,9 @@ layout (std430, set = 1, binding = 0) readonly buffer BrickRequestLimits {
 layout (std430, set = 2, binding = 0) readonly buffer BrickUnloadRequestIndices {
     uint unload_request_brick_indices[];
 };
+layout (std430, set = 3, binding = 0) buffer BrickIndexToBrickIndicesIndex {
+    uint brick_index_to_brick_indices_index[];
+};
 
 void main() {
     const uint unload_request_index = gl_GlobalInvocationID.x;
@@ -38,39 +41,46 @@ void main() {
     // We perform a swap remove to unload brick. 
     // This means we grab the last active brick and swap this the index requested to be removed
     uint remove_index = unload_request_brick_indices[unload_request_index];
-    const int swap_index = int(brick_limits.active_bricks) - int(1 + remove_index); 
-    if (swap_index < 0) {
-        return;
-    }
+    
+    const uint deleted_index_bits = brick_index_req_count_status[remove_index];
 
-    const uint remove_brick_meta_bits = brick_index_req_count_status[remove_index];
-    const uint removed_brick_index = bitfieldExtract(
-        remove_brick_meta_bits,
-        BRICK_INDEX_OFFSET,
-        BRICK_INDEX_BITS
-    );
-
-    const uint swap_brick_meta_bits = brick_index_req_count_status[swap_index];
-    const uint swap_brick_index = bitfieldExtract(
-        swap_brick_meta_bits,
-        BRICK_INDEX_OFFSET,
-        BRICK_INDEX_BITS
-    );
-
-    brick_index_req_count_status[swap_index] = bitfieldInsert(
-        swap_brick_meta_bits, 
-        removed_brick_index, 
-        BRICK_INDEX_OFFSET, 
-        BRICK_INDEX_BITS
-    );
-
+    // Index is no longer active
     brick_index_req_count_status[remove_index] = bitfieldInsert(
-        remove_brick_meta_bits,
+        deleted_index_bits,
         BRICK_STATUS_UNLOADED,
         BRICK_STATUS_OFFSET,
         BRICK_STATUS_BITS
     );
 
-    bricks[removed_brick_index] = bricks[swap_brick_index];
+    const uint inactive_brick_index = bitfieldExtract(
+        deleted_index_bits,
+        BRICK_INDEX_OFFSET,
+        BRICK_INDEX_BITS
+    );
+
+    const int removed_brick_index = brick_limits.active_bricks - int(unload_request_index + 1);
+    if (removed_brick_index <= 0) {
+        return;
+    }
+
+    // Optimization: early exit here if we are working within the unload count index range
+    const int last_valid_index = (brick_limits.active_bricks - int(brick_limits.unload_request_count));
+    if (int(inactive_brick_index) > last_valid_index) {
+        return; 
+    }
+
+    // move the brick in delete slot to its new location
+    bricks[inactive_brick_index] = bricks[removed_brick_index];
+
+    // map a brick index to a index to the index buffer 
+    const uint brick_index_index = brick_index_to_brick_indices_index[removed_brick_index];
+    brick_index_to_brick_indices_index[inactive_brick_index] = brick_index_index;
+
+    brick_index_req_count_status[brick_index_index] = bitfieldInsert(
+        brick_index_req_count_status[brick_index_index],
+        inactive_brick_index,
+        BRICK_INDEX_OFFSET,
+        BRICK_INDEX_BITS
+    );
 }
 

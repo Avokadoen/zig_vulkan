@@ -31,6 +31,7 @@ sun: *Sun,
 
 pipeline: Pipeline,
 
+// TODO: host_brick_state should only be added as a imgui argument
 /// init VoxelRT
 pub fn init(allocator: Allocator, ctx: Context, host_brick_state: *HostBrickState, config: Config) !VoxelRT {
     const camera = try allocator.create(Camera);

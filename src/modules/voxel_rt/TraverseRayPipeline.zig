@@ -120,7 +120,6 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Trav
         };
         defer ctx.destroyShaderModule(stage.module);
 
-        // TOOD: read on defer_compile_bit_nv
         const pipeline_info = vk.ComputePipelineCreateInfo{
             .flags = .{},
             .stage = stage,

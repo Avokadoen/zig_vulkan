@@ -90,7 +90,6 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Bric
         };
         defer ctx.destroyShaderModule(stage.module);
 
-        // TOOD: read on defer_compile_bit_nv
         const pipeline_info = vk.ComputePipelineCreateInfo{
             .flags = .{},
             .stage = stage,
@@ -161,13 +160,15 @@ pub fn appendPipelineCommands(self: BrickHeartbeatPipeline, ctx: Context, comman
 
     {
         // reduce brick dimensions to brick count
+        const grid_brick_dim = self.ray_device_resources.host_brick_state.grid_metadata.dim;
+        const total_brick_count: c_uint = @intFromFloat(grid_brick_dim[0] * grid_brick_dim[1] * grid_brick_dim[2]);
         ctx.vkd.cmdPushConstants(
             command_buffer,
             self.pipeline_layout,
             .{ .compute_bit = true },
             0,
             @sizeOf(c_int),
-            &self.ray_device_resources.host_brick_state.brick_limits.active_bricks,
+            &total_brick_count,
         );
     }
     ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.compute, self.pipeline);

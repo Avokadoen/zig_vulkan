@@ -93,7 +93,9 @@ pub fn transferToImage(
     try self.staging_buffers[index].transferToImage(ctx, src_layout, dst_layout, image, width, height, T, data);
 }
 
-/// transfer to device storage buffer
+/// Transfer to device storage buffer
+///
+/// NOTE: Lifetime of data only needs to match call to transferToBuffer, data is copied to staging buffer.
 pub fn transferToBuffer(self: *StagingRamp, ctx: Context, buffer: *GpuBufferMemory, offset: vk.DeviceSize, comptime T: type, data: []const T) !void {
     const transfer_zone = tracy.ZoneN(@src(), "schedule buffers transfer");
     defer transfer_zone.End();
@@ -280,7 +282,7 @@ const StagingBuffer = struct {
 
         const raw_ptr = self.device_buffer_memory.mapped orelse @panic("device pointer was null");
         var dest_location: [*]T = @ptrCast(@alignCast(raw_ptr));
-        std.mem.copy(T, dest_location[0..data.len], data);
+        @memcpy(dest_location[0..data.len], data);
 
         const region = vk.BufferImageCopy{
             .buffer_offset = self.buffer_cursor,
@@ -327,9 +329,8 @@ const StagingBuffer = struct {
         defer self.device_buffer_memory.unmap(ctx);
 
         // TODO: here we align as u8 and later we reinterpret data as a byte array.
-        //       This is because we get runtime errors from using T and data directly.
-        //       It *SEEMS* like alignment error is a zig bug, but might as well be an application bug.
-        //       If the bug is an application bug, then we need to find a way to fix it instead of disabling safety ...
+        //       This is because we get an appropriate runtime error from using T and data directly when address does not align.
+        //       It might be worth using T with appropriate address alignment
         const raw_device_ptr = self.device_buffer_memory.mapped orelse @panic("device pointer was null");
         var dest_location = @as([*]u8, @ptrCast(@alignCast(raw_device_ptr)));
         {

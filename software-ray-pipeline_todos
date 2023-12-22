@@ -1,9 +1,10 @@
-* [ ] share logic between pipelines for descriptors
+* [x] share logic between pipelines for descriptors
 * [ ] common data structure with ray buffer and different buffer regions
 * [ ] integrate tracy!
-    * [ ] basic cpu integration as the rest of codebase
-    * [ ] gpu using vulkan queries?
+    * [x] basic cpu integration as the rest of codebase
+    * [ ] gpu using vulkan queries
 * [ ] static command buffers + handle of window rescale + changin rt settings (rerecord on demand)
+* [ ] split ray commons (bad for shader compile times, ugly wall of defines)
 * [ ] implement all steps/stages
     * [x] emit
     * [ ] traverse 
@@ -16,26 +17,37 @@
         * [x] Brick buffer should be index to actual brick data stored in separate buffer 
         * [ ] fix bending cubes made apparent by larger grid scale (probably caused by incorrect t_value?)
     * [x] miss pipeline
-    * [x] scatter pipeline
+    * [ ] scatter pipeline
+        * [ ] material data lookup
+            * [ ] color
+            * [ ] scatter behaviour (mat type)
+        * [ ] activate scatter functions
     * [x] draw ray pipeline
         * [x] resolve RC (flickering) and bottom of image missing output
         * [x] draw misses as well as hits ~~(requires another cursor) (just add some push constant)~~
 * [ ] potentially use a single command buffer? (only record it in individual buffers)
     * [ ] use command buffer baking, re-record only on setting changes
+* [ ] brick streaming
+    * [x] unloading
+    * [x] loading
+* [ ] dynamic voxel scenes possible (can be as simple as single voxel on/off to start)
 * [x] only one atomicAdd pr warp, use shared memory to share start index with threads that use thread id + warp offset to grab rays
 * [ ] t_min + t_max limits in gui and camera
 * [x] shared resources set up
 * [ ] proccess rays independent of image_size: vk.Extent2D
 * [ ] Tone mapping with exposure step: https://bruop.github.io/exposure/
 * [ ] figure out sensible way of dealing with shadow rays
-* [ ] Gpu memory should be handled outside of pipelines (Ray and brick memory)
-    * [ ] have GlobalBufferInfo + (Stage)BufferInfo with mappings from global to stage info
-    * [ ] move DescriptorBufferInfo stuff out of the pipelines and deal what that in one module in the code for easier readability 
+* [x] Gpu memory should be handled outside of pipelines (Ray and brick memory)
+    * [x] have GlobalBufferInfo + (Stage)BufferInfo with mappings from global to stage info
+    * [x] move DescriptorBufferInfo stuff out of the pipelines and deal what that in one module in the code for easier readability
+    * [ ] make ticket on a simpler abstraction
 * [ ] Merge common data points of Ray and Hit Record into separate buffer to save memory bandwith. Potentail race condtions must also be considered!
-* [ ] Map one stage to one queue
+* [ ] Fix alignment todo in src\modules\render\StagingRamp.zig
+* [ ] Map one stage to one queue?
 * [ ] Define stage number for each pipeline in a central location
 * [ ] ~~Only do one vkQueueSubmit per bounce (submit all stages at once)~~ Since we plan different queue between each stage we cant do this :(
-* [ ] Replace timeline semaphore syncing with normal memory barriers!
+    * [ ] should be fine to do? Should use a single queue for all work except transfers (so potentially 2 vkQueueSubmits)
+* [x] Replace timeline semaphore syncing with normal memory barriers!
 
 
 

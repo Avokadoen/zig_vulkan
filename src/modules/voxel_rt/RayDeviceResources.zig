@@ -20,6 +20,7 @@ const Ray = ray_pipeline_types.Ray;
 const RayHit = ray_pipeline_types.RayHit;
 const RayShading = ray_pipeline_types.RayShading;
 const RayHash = ray_pipeline_types.RayHash;
+const BrickLoadRequest = ray_pipeline_types.BrickLoadRequest;
 
 const HostBrickState = @import("brick/HostBrickState.zig");
 
@@ -65,6 +66,12 @@ pub const HostAndDeviceResources = enum(u32) {
     // request indices
     brick_load_request_s,
     brick_unload_request_s,
+
+    // brick load request data
+    brick_load_request_result_s, // TODO: we can merge brick_load_request_s and brick_load_request_result_s (reuse the memory)
+
+    // map a brick index to it's index (brick_indices index)
+    brick_index_indices_s, // TODO: can be device only!
 
     pub const all_count = @typeInfo(HostAndDeviceResources).Enum.fields.len;
 };
@@ -277,6 +284,28 @@ pub fn init(
             created_layouts += 1;
         }
 
+        // brick req limits layout
+        {
+            const bindings = [_]vk.DescriptorSetLayoutBinding{.{
+                .binding = 0,
+                .descriptor_type = .storage_buffer,
+                .descriptor_count = 1,
+                .stage_flags = .{
+                    .compute_bit = true,
+                },
+                .p_immutable_samplers = null,
+            }};
+            const layout_info = vk.DescriptorSetLayoutCreateInfo{
+                .flags = .{},
+                .binding_count = bindings.len,
+                .p_bindings = &bindings,
+            };
+            const brick_req_limits_index = (Resource{ .host_and_device = .brick_req_limits_s }).toDescriptorIndex();
+            tmp_layout[brick_req_limits_index] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
+
+            created_layouts += 1;
+        }
+
         // for brick unload request layout
         {
             const bindings = [_]vk.DescriptorSetLayoutBinding{.{
@@ -299,7 +328,7 @@ pub fn init(
             created_layouts += 1;
         }
 
-        // brick req limits layout
+        // brick load request data
         {
             const bindings = [_]vk.DescriptorSetLayoutBinding{.{
                 .binding = 0,
@@ -315,11 +344,35 @@ pub fn init(
                 .binding_count = bindings.len,
                 .p_bindings = &bindings,
             };
-            const brick_req_limits_index = (Resource{ .host_and_device = .brick_req_limits_s }).toDescriptorIndex();
+            const brick_req_limits_index = (Resource{ .host_and_device = .brick_load_request_result_s }).toDescriptorIndex();
             tmp_layout[brick_req_limits_index] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
 
             created_layouts += 1;
         }
+
+        // brick index indices
+        {
+            const bindings = [_]vk.DescriptorSetLayoutBinding{.{
+                .binding = 0,
+                .descriptor_type = .storage_buffer,
+                .descriptor_count = 1,
+                .stage_flags = .{
+                    .compute_bit = true,
+                },
+                .p_immutable_samplers = null,
+            }};
+            const layout_info = vk.DescriptorSetLayoutCreateInfo{
+                .flags = .{},
+                .binding_count = bindings.len,
+                .p_bindings = &bindings,
+            };
+            const brick_req_limits_index = (Resource{ .host_and_device = .brick_index_indices_s }).toDescriptorIndex();
+            tmp_layout[brick_req_limits_index] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
+
+            created_layouts += 1;
+        }
+
+        std.debug.assert(created_layouts == tmp_layout.len);
 
         break :blk tmp_layout;
     };
@@ -386,6 +439,10 @@ pub fn init(
             host_brick_state.brick_limits.max_load_request_count * @sizeOf(c_uint),
             // unload brick requests
             host_brick_state.brick_limits.max_unload_request_count * @sizeOf(c_uint),
+            // brick load request data
+            host_brick_state.brick_limits.max_load_request_count * @sizeOf(BrickLoadRequest),
+            // brick index indices
+            @as(vk.DeviceSize, @intCast(host_brick_state.brick_limits.max_active_bricks)) * @sizeOf(c_uint),
         };
 
         for (infos[0..ray_ranges.len], ray_ranges, 0..) |*info, range, info_index| {
@@ -546,30 +603,6 @@ pub fn init(
         break :blk infos;
     };
 
-    // brick transfer
-    {
-        const brick_buffer_index = (Resource{ .device = .bricks_b }).toBufferIndex();
-        try staging_buffer.transferToBuffer(
-            ctx,
-            &voxel_scene_buffer,
-            buffer_infos[brick_buffer_index].offset,
-            Brick,
-            host_brick_state.getActiveBricks(),
-        );
-    }
-
-    // brick indices transfer
-    {
-        const brick_indices_buffer_index = (Resource{ .device = .brick_indices_b }).toBufferIndex();
-        try staging_buffer.transferToBuffer(
-            ctx,
-            &voxel_scene_buffer,
-            buffer_infos[brick_indices_buffer_index].offset,
-            BrickIndex,
-            host_brick_state.getBrickIndices(),
-        );
-    }
-
     // brick set bits transfer
     {
         const brick_set_buffer_index = (Resource{ .device = .bricks_set_s }).toBufferIndex();
@@ -577,8 +610,8 @@ pub fn init(
             ctx,
             &voxel_scene_buffer,
             buffer_infos[brick_set_buffer_index].offset,
-            u1,
-            host_brick_state.getActiveBrickSets(),
+            u8,
+            host_brick_state.brick_set,
         );
     }
 

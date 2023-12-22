@@ -23,6 +23,7 @@ pub const BrickGridMetadata = extern struct {
     min_point: [3]f32,
     scale: f32,
 };
+// must be kept in sync with assets/shaders/raytracing/ray_commons.glsl BRICK_STATUS_BITS ... etc
 pub const BrickIndex = packed struct {
     pub const Status = enum(u2) {
         unloaded = 0,
@@ -56,6 +57,13 @@ pub const BrickLimits = extern struct {
     max_active_bricks: c_uint,
     // How many active bricks do we have
     active_bricks: c_int,
+};
+// must be kept in sync with assets/shaders/brick_streaming/brick_load_handling.comp
+pub const BrickLoadRequest = extern struct {
+    /// Index to the index entry for this brick load
+    brick_index_index: c_uint, // :)
+    /// Index to the brick in the brick buffer
+    brick_index_32b: c_uint,
 };
 
 // must be kept in sync with assets/shaders/raytracing/ray_commons.glsl Ray

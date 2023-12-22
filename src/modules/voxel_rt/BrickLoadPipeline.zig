@@ -24,11 +24,11 @@ const Resource = RayDeviceResources.Resource;
 const resources = [_]Resource{
     Resource.from(DeviceOnlyResources.bricks_set_s),
     Resource.from(HostAndDeviceResources.brick_req_limits_s),
-    Resource.from(HostAndDeviceResources.brick_unload_request_s),
+    Resource.from(HostAndDeviceResources.brick_load_request_result_s),
     Resource.from(HostAndDeviceResources.brick_index_indices_s),
 };
 
-const BrickUnloadPipeline = @This();
+const BrickLoadPipeline = @This();
 
 pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
@@ -39,8 +39,8 @@ ray_device_resources: *const RayDeviceResources,
 
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
-pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !BrickUnloadPipeline {
-    const zone = tracy.ZoneN(@src(), @typeName(BrickUnloadPipeline) ++ " " ++ @src().fn_name);
+pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !BrickLoadPipeline {
+    const zone = tracy.ZoneN(@src(), @typeName(BrickLoadPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
     // TODO: change based on NVIDIA vs AMD vs Others?
@@ -71,8 +71,8 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Bric
         };
         const module_create_info = vk.ShaderModuleCreateInfo{
             .flags = .{},
-            .p_code = @as([*]const u32, @ptrCast(&shaders.brick_unload_handling_spv)),
-            .code_size = shaders.brick_unload_handling_spv.len,
+            .p_code = @as([*]const u32, @ptrCast(&shaders.brick_load_handling_spv)),
+            .code_size = shaders.brick_load_handling_spv.len,
         };
         const module = try ctx.vkd.createShaderModule(ctx.logical_device, &module_create_info, null);
 
@@ -96,7 +96,7 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Bric
     };
     errdefer ctx.destroyPipeline(pipeline);
 
-    return BrickUnloadPipeline{
+    return BrickLoadPipeline{
         .pipeline_layout = pipeline_layout,
         .pipeline = pipeline,
         .ray_device_resources = ray_device_resources,
@@ -104,22 +104,22 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Bric
     };
 }
 
-pub fn deinit(self: BrickUnloadPipeline, ctx: Context) void {
-    const zone = tracy.ZoneN(@src(), @typeName(BrickUnloadPipeline) ++ " " ++ @src().fn_name);
+pub fn deinit(self: BrickLoadPipeline, ctx: Context) void {
+    const zone = tracy.ZoneN(@src(), @typeName(BrickLoadPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
     ctx.destroyPipelineLayout(self.pipeline_layout);
     ctx.destroyPipeline(self.pipeline);
 }
 
-pub fn appendPipelineCommands(self: BrickUnloadPipeline, ctx: Context, command_buffer: vk.CommandBuffer) void {
-    const zone = tracy.ZoneN(@src(), @typeName(BrickUnloadPipeline) ++ " " ++ @src().fn_name);
+pub fn appendPipelineCommands(self: BrickLoadPipeline, ctx: Context, command_buffer: vk.CommandBuffer) void {
+    const zone = tracy.ZoneN(@src(), @typeName(BrickLoadPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
     if (render.consts.enable_validation_layers) {
         const label_info = vk.DebugUtilsLabelEXT{
-            .p_label_name = @typeName(BrickUnloadPipeline) ++ " " ++ @src().fn_name,
-            .color = [_]f32{ 0.4, 0.2, 0.2, 0.5 },
+            .p_label_name = @typeName(BrickLoadPipeline) ++ " " ++ @src().fn_name,
+            .color = [_]f32{ 0.4, 0.8, 0.2, 0.5 },
         };
         ctx.vkd.cmdBeginDebugUtilsLabelEXT(command_buffer, &label_info);
     }
@@ -129,6 +129,7 @@ pub fn appendPipelineCommands(self: BrickUnloadPipeline, ctx: Context, command_b
         }
     }
 
+    // TODO remove barrier when we move this to dedicated queue
     const brick_buffer_memory_barrier = [_]vk.BufferMemoryBarrier{.{
         .src_access_mask = .{ .shader_read_bit = true },
         .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },

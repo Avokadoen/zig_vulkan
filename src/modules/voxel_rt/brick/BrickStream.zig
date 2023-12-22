@@ -93,22 +93,22 @@ const FrameSnapshot = struct {
         self.brick_load_requests.clearRetainingCapacity();
 
         // grab device request data and move it into the snapshot
-        const base_adr = @intFromPtr(ray_device_resources.request_buffer.mapped);
+        const base_addr = @intFromPtr(ray_device_resources.request_buffer.mapped);
 
         // read brick request limits
         {
             const brick_req_limits_buffer_info = ray_device_resources.getBufferInfo(Resource{ .host_and_device = .brick_req_limits_s });
-            const brick_req_limits_adr = base_adr + brick_req_limits_buffer_info.offset;
+            const brick_req_limits_adr = base_addr + brick_req_limits_buffer_info.offset;
             const brick_req_limtis_ptr: *const ray_pipeline_types.BrickLimits = @ptrFromInt(brick_req_limits_adr);
             self.brick_limits = brick_req_limtis_ptr.*;
         }
         // read brick load requests
         if (self.brick_limits.load_request_count > 0) {
-            const brick_load_buffer_info = ray_device_resources.getBufferInfo(Resource{ .host_and_device = .brick_load_request_s });
-            const brick_load_adr = base_adr + brick_load_buffer_info.offset;
-            const brick_load_ptr: [*]const c_uint = @ptrFromInt(brick_load_adr);
-            const brick_load_slice = brick_load_ptr[0..self.brick_limits.load_request_count];
-            self.brick_load_requests.appendSliceAssumeCapacity(brick_load_slice);
+            const buffer_info = ray_device_resources.getBufferInfo(Resource{ .host_and_device = .brick_load_request_s });
+            const addr = base_addr + buffer_info.offset;
+            const ptr: [*]const c_uint = @ptrFromInt(addr);
+            const slice = ptr[0..self.brick_limits.load_request_count];
+            self.brick_load_requests.appendSliceAssumeCapacity(slice);
         }
     }
 

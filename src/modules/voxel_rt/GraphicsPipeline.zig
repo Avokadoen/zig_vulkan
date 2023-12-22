@@ -87,11 +87,11 @@ pub fn init(
 
         {
             const device_vertices = vertex_index_buffer.mappedAs(Vertex, 0, vertices.len);
-            std.mem.copy(Vertex, device_vertices, &vertices);
+            @memcpy(device_vertices, &vertices);
         }
         {
             const device_indices = vertex_index_buffer.mappedAs(u16, vertex_size, indices.len);
-            std.mem.copy(u16, device_indices, &indices);
+            @memcpy(device_indices, &indices);
         }
         try vertex_index_buffer.sync(.flush, ctx, vertex_index_buffer.len, bytes_used_in_buffer);
 

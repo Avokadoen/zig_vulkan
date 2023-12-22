@@ -1,0 +1,57 @@
+#version 450
+
+#extension GL_EXT_debug_printf : disable
+// debugPrintfEXT("hello world %f", 1.0);
+
+#include "../raytracing/ray_commons.glsl"
+
+layout(local_size_x_id = 0, local_size_y = 1, local_size_z = 1) in;
+
+/// This compute job handles sparse load requests, these can originate from app updating existing voxels, or by the brick streaming system
+
+// TODO: dont care about brick set for this
+layout (std430, set = 0, binding = 0) readonly buffer BrickSetBuffer {
+    uint brick_set_bits[];
+};
+layout (std430, set = 0, binding = 1) writeonly buffer BrickIndex {
+    uint brick_index_req_count_status[];
+};
+layout (std430, set = 0, binding = 2) readonly buffer BrickBuffer {
+    Brick bricks[];
+};
+
+layout (std430, set = 1, binding = 0) readonly buffer BrickRequestLimits {
+    BrickLimits brick_limits;
+};
+// must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig
+struct LoadRequest {
+    uint brick_index_index; // :)
+    uint brick_index_32b; 
+};
+layout (std430, set = 2, binding = 0) readonly buffer BrickLoadRequests {
+    LoadRequest load_requests[];
+};
+layout (std430, set = 3, binding = 0) writeonly buffer BrickIndexToBrickIndicesIndex {
+    uint brick_index_to_brick_indices_index[];
+};
+
+void main() {
+    const uint load_request_index = gl_GlobalInvocationID.x;
+    if (load_request_index >= brick_limits.load_request_count) {
+        return;
+    }
+
+    // Get data needed to update buffers
+    LoadRequest load_request = load_requests[load_request_index];
+
+    // TODO: NOTE: This is extremly error prone code. If any value overflows, then it might assign bits outside 
+    //             of variable bits 
+    // Create our new index
+    uint new_index_bits = (BRICK_STATUS_LOADED << BRICK_STATUS_OFFSET) |
+        (BRICK_REQUEST_COUNT_MAX_VALUE << BRICK_REQUEST_COUNT_OFFSET) |
+        (load_request.brick_index_32b << BRICK_INDEX_OFFSET); 
+
+    brick_index_req_count_status[load_request.brick_index_index] = new_index_bits;
+    brick_index_to_brick_indices_index[load_request.brick_index_32b] = load_request.brick_index_index;
+}
+

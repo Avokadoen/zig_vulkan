@@ -628,7 +628,7 @@ pub fn updateBuffers(
                 const vertex_buffer_data = command_list.getVertexBufferData()[0..vertex_buffer_length];
 
                 const vertex_slice = vertex_index_buffer.mappedAs(zgui.DrawVert, vertex_offset, vertex_buffer_length);
-                std.mem.copy(zgui.DrawVert, vertex_slice, vertex_buffer_data);
+                @memcpy(vertex_slice, vertex_buffer_data);
 
                 vertex_offset += @as(vk.DeviceSize, @intCast(@sizeOf(zgui.DrawVert) * vertex_buffer_length));
             }
@@ -639,7 +639,7 @@ pub fn updateBuffers(
                 const index_buffer_data = command_list.getIndexBufferData()[0..index_buffer_length];
 
                 const index_slice = vertex_index_buffer.mappedAs(zgui.DrawIdx, index_offset, index_buffer_length);
-                std.mem.copy(zgui.DrawIdx, index_slice, index_buffer_data);
+                @memcpy(index_slice, index_buffer_data);
 
                 index_offset += @as(vk.DeviceSize, @intCast(@sizeOf(zgui.DrawIdx) * index_buffer_length));
             }
