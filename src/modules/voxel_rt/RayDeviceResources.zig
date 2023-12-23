@@ -24,12 +24,33 @@ const BrickLoadRequest = ray_pipeline_types.BrickLoadRequest;
 
 const HostBrickState = @import("brick/HostBrickState.zig");
 
+fn countDescriptorSets(comptime Enum: type) comptime_int {
+    var count: comptime_int = 0;
+    const enum_info = @typeInfo(Enum).Enum;
+    inline for (enum_info.fields) |field| {
+        if (field.name.len < 3) {
+            @compileError(field.name ++ " enum field must atleast 3 characters");
+        }
+        if (field.name[field.name.len - 2] != '_') {
+            @compileError(field.name ++ " enum field must end with '_x (s or b)'");
+        }
+
+        switch (field.name[field.name.len - 1]) {
+            's' => count += 1,
+            'b' => {},
+            else => @compileError(field.name ++ " enum field must end with 's' or 'b'"),
+        }
+    }
+    return count;
+}
+
 // TODO: We should definitly rework all this resource stuff ...
 /// Resources only accessible on device
 ///
-/// Postfix indicate if enum represent set and binding, or just a binding
-/// _s - The resource is binding specified resource and all subsequent bindings
-/// _b - The resource is just a binding and cant be requested as a set
+/// Postfix indicate if enum represent set and binding, or just a binding:
+///
+///     - "_s":  The resource is binding specified resource and all subsequent bindings
+///     - "_b":  The resource is just a binding and cant be requested as a set
 pub const DeviceOnlyResources = enum(u32) {
     ray_pipeline_limits_s,
 
@@ -80,11 +101,7 @@ pub const HostAndDeviceResources = enum(u32) {
 pub const buffer_info_count = @typeInfo(DeviceOnlyResources).Enum.fields.len + @typeInfo(HostAndDeviceResources).Enum.fields.len;
 
 // we use one set per ray buffer type and one set for the brick grid data
-pub const descriptor_set_count =
-    DeviceOnlyResources.ray_count +
-    (DeviceOnlyResources.brick_count - 2) +
-    DeviceOnlyResources.image_count +
-    HostAndDeviceResources.all_count;
+pub const descriptor_set_count = countDescriptorSets(DeviceOnlyResources) + countDescriptorSets(HostAndDeviceResources);
 
 pub const descriptor_buffer_count = buffer_info_count - DeviceOnlyResources.image_count;
 pub const descriptor_image_count = DeviceOnlyResources.image_count;
@@ -514,8 +531,6 @@ pub fn init(
                 };
             }
 
-            const brick_desc_set_index = DeviceOnlyResources.ray_count;
-
             {
                 const brick_set_res = Resource{ .device = .bricks_set_s };
                 writes[@intFromEnum(DeviceOnlyResources.bricks_set_s)] = vk.WriteDescriptorSet{
@@ -551,8 +566,9 @@ pub fn init(
             }
 
             {
+                const image_set_index = (Resource{ .device = .draw_image_s }).toDescriptorIndex();
                 writes[@intFromEnum(DeviceOnlyResources.draw_image_s)] = vk.WriteDescriptorSet{
-                    .dst_set = target_descriptor_sets[brick_desc_set_index + 1],
+                    .dst_set = target_descriptor_sets[image_set_index],
                     .dst_binding = 0,
                     .dst_array_element = 0,
                     .descriptor_count = 1,
@@ -563,21 +579,17 @@ pub fn init(
                 };
             }
 
-            // assert image is last enum value
-            comptime std.debug.assert(@intFromEnum(DeviceOnlyResources.draw_image_s) == DeviceOnlyResources.all_count - 1);
-            // assert brick set is last buffer enum value
-            comptime std.debug.assert(@intFromEnum(DeviceOnlyResources.draw_image_s) == @intFromEnum(DeviceOnlyResources.bricks_b) + 1);
-
             const brick_req_write_offset = DeviceOnlyResources.all_count;
 
             // we must be at the end of the writes for for loop to make sense
             std.debug.assert(brick_req_write_offset + HostAndDeviceResources.all_count == writes.len);
 
             // write all HostAndDeviceResources
-            inline for (0..HostAndDeviceResources.all_count) |nth_host_and_dev_res| {
-                const dst_set_index = brick_desc_set_index + 2 + nth_host_and_dev_res;
+            const host_device_writes = writes[brick_req_write_offset .. brick_req_write_offset + HostAndDeviceResources.all_count];
+            inline for (host_device_writes, 0..) |*write, nth_host_and_dev_res| {
+                const dst_set_index = comptime countDescriptorSets(DeviceOnlyResources) + nth_host_and_dev_res;
                 const host_and_device_res: HostAndDeviceResources = @enumFromInt(nth_host_and_dev_res);
-                writes[brick_req_write_offset + nth_host_and_dev_res] = vk.WriteDescriptorSet{
+                write.* = vk.WriteDescriptorSet{
                     .dst_set = target_descriptor_sets[dst_set_index],
                     .dst_binding = 0,
                     .dst_array_element = 0,
