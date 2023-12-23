@@ -11,6 +11,10 @@ Zig build toolchain does most of the heavy lifting. The only systems
 requirement is the [Vulkan SDK](https://www.lunarg.com/vulkan-sdk/). 
 Make sure you download Vulkan 1.2 or up 
 
+
+
+On linux you should get any [listed requirements for glfw](https://www.glfw.org/docs/latest/compile_guide.html)
+
 **This project also uses latest zig version**
 
 # Run the project
@@ -34,6 +38,14 @@ $ zig build run
 # Run tests 
 
 Currently the code base is not really well tested, but you can run the few tests by doin ``zig build test``
+
+# Issues
+
+## Linux
+ 
+### Missing asm/ioctls.h
+
+``error: 'asm/ioctls.h' file not found`` might be due to missing kernel headers. A work around if you have verfified that they are indeed installed is to create a symlink: ``sudo ln -s /usr/include/asm-generic /usr/include/asm``
 
 # Sources:
 

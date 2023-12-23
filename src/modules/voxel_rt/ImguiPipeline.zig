@@ -109,14 +109,20 @@ pub fn init(
         memory_requirements.memory_type_bits,
         .{ .device_local_bit = true },
     );
+
+    image_memory_cursor.* = std.mem.alignForward(
+        vk.DeviceSize,
+        image_memory_cursor.*,
+        memory_requirements.alignment,
+    );
+
     // In the event that any of the asserts below fail, we should allocate more memory
     // we will not handle this for now, but a memory abstraction is needed sooner or later ...
     std.debug.assert(image_memory_type == memory_type_index);
     std.debug.assert(image_memory_cursor.* + memory_requirements.size < image_memory_capacity);
-    std.debug.assert(image_memory_cursor.* % memory_requirements.alignment == 0);
-    const align_cursor = (image_memory_cursor.* + memory_requirements.alignment - 1) & ~(memory_requirements.alignment - 1);
-    try ctx.vkd.bindImageMemory(ctx.logical_device, font_image, image_memory, align_cursor);
-    image_memory_cursor.* = align_cursor + memory_requirements.size;
+
+    try ctx.vkd.bindImageMemory(ctx.logical_device, font_image, image_memory, image_memory_cursor.*);
+    image_memory_cursor.* += memory_requirements.size;
 
     const font_view = blk: {
         const view_info = vk.ImageViewCreateInfo{
