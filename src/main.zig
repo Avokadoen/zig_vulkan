@@ -15,9 +15,9 @@ const InputModeCursor = Input.InputModeCursor;
 
 // TODO: API topology
 const VoxelRT = @import("modules/VoxelRT.zig");
-const gpu_types = VoxelRT.gpu_types;
 const vox = @import("modules/voxel_rt/vox/loader.zig");
 const HostBrickState = VoxelRT.HostBrickState;
+const Material = VoxelRT.Material;
 
 pub const application_name = "zig vulkan";
 pub const internal_render_resolution = za.GenericVector(2, u32).new(500, 250);
@@ -77,17 +77,34 @@ pub fn main() anyerror!void {
     const ctx = try render.Context.init(allocator, application_name, &window);
     defer ctx.deinit();
 
-    var host_brick_state = try HostBrickState.init(
-        allocator,
-        .{
-            .dim = [_]f32{ 32, 32, 32 },
-            .padding1 = 0,
-            .min_point = [_]f32{-1} ** 3,
-            .scale = 2,
-        },
-        .{},
-        true,
-    );
+    var host_brick_state = try init_grid_blk: {
+        const materials: [HostBrickState.max_unique_materials]VoxelRT.Material = [4]Material{
+            // water
+            Material.dielectric([3]f32{ 0.117, 0.45, 0.85 }, 1.333),
+            // glass
+            Material.dielectric([3]f32{ 0.6, 0.63, 0.6 }, 1.52),
+            // bronze
+            Material.metal([3]f32{ 0.804, 0.498, 0.196 }, 0.45),
+            // dirt
+            Material.lambertian([3]f32{ 0.490, 0.26667, 0.06667 }),
+        } ++ [_]Material{
+            // void
+            Material.lambertian([3]f32{ 0, 0, 0 }),
+        } ** 251;
+
+        break :init_grid_blk HostBrickState.init(
+            allocator,
+            .{
+                .dim = [_]f32{ 32, 32, 32 },
+                .padding1 = 0,
+                .min_point = [_]f32{-1} ** 3,
+                .scale = 2,
+            },
+            materials,
+            .{},
+            true,
+        );
+    };
     defer host_brick_state.deinit();
 
     host_brick_state.setupTestScene();

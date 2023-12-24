@@ -19,6 +19,9 @@ layout (std430, set = 2, binding = 0) readonly buffer RayHitBuffer {
 layout (std430, set = 3, binding = 0) buffer RayShadingBuffer {
     RayShading ray_shadings[];
 };
+layout (std430, set = 4, binding = 0) readonly buffer MaterialBuffer {
+    vec4 materials[]; // TODO: materials is small enough to be in shared buffer
+};
 
 const vec3 normal_map[] = vec3[](
     vec3(-1,  0,  0), // X_AXIS_LEFT_INDEX = 0;
@@ -42,9 +45,8 @@ void main() {
     const uint normal_index = bitfieldExtract(normal_4b_and_material_index_28b, 28, 4);
     const vec3 hit_normal = normal_map[normal_index];
     
-    // TODO: actual material
-    const vec3 material_albedo = vec3(0, 0.3, 0);
-    ray_shadings[index].color += material_albedo;
+    const Material material = Vec4ToMaterial(materials[material_index]);
+    ray_shadings[index].color += material.albedo;
 
 
     // TODO actually scatter ray based on material_index and a scatter function (we also have hit_record.ray_direction)
@@ -53,7 +55,7 @@ void main() {
 
     // use old direction and move ray to hit point
     // HACK: scew origin by hit surface normal to avoid self intersections
-    ray.origin = RayAt(ray, ray.t_value) + scatter_dir * 0.1;
+    ray.origin = RayAt(ray, ray.t_value) + hit_normal * 0.1;
     ray.direction = scatter_dir;
     ray.t_value = 0;
 

@@ -71,12 +71,16 @@ pub const DeviceOnlyResources = enum(u32) {
     brick_indices_b,
     bricks_b,
 
+    // materials
+    materials_s,
+
     // draw image
     draw_image_s,
 
     pub const ray_count = @intFromEnum(DeviceOnlyResources.ray_hash_1_s) + 1;
     pub const brick_count = (@intFromEnum(DeviceOnlyResources.bricks_b) + 1) - ray_count;
-    pub const image_count = (@intFromEnum(DeviceOnlyResources.draw_image_s) + 1) - (brick_count + ray_count);
+    pub const material_count = (@intFromEnum(DeviceOnlyResources.materials_s) + 1) - (ray_count + brick_count);
+    pub const image_count = (@intFromEnum(DeviceOnlyResources.draw_image_s) + 1) - (ray_count + brick_count + material_count);
     pub const all_count = @typeInfo(DeviceOnlyResources).Enum.fields.len;
 };
 
@@ -185,6 +189,7 @@ pub fn init(
     };
     errdefer ctx.vkd.destroyDescriptorPool(ctx.logical_device, target_descriptor_pool, null);
 
+    // TODO: can create layouts in just two calls?
     const target_descriptor_layouts = blk: {
         var tmp_layout: [descriptor_set_count]vk.DescriptorSetLayout = undefined;
 
@@ -251,6 +256,28 @@ pub fn init(
             };
             const brick_set_index = (Resource{ .device = .bricks_set_s }).toDescriptorIndex();
             tmp_layout[brick_set_index] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
+
+            created_layouts += 1;
+        }
+
+        // material layout
+        {
+            const bindings = [_]vk.DescriptorSetLayoutBinding{.{
+                .binding = 0,
+                .descriptor_type = .storage_buffer,
+                .descriptor_count = 1,
+                .stage_flags = .{
+                    .compute_bit = true,
+                },
+                .p_immutable_samplers = null,
+            }};
+            const layout_info = vk.DescriptorSetLayoutCreateInfo{
+                .flags = .{},
+                .binding_count = bindings.len,
+                .p_bindings = &bindings,
+            };
+            const material_set_index = (Resource{ .device = .materials_s }).toDescriptorIndex();
+            tmp_layout[material_set_index] = try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
 
             created_layouts += 1;
         }
@@ -441,14 +468,17 @@ pub fn init(
             // ray hashes 1
             ray_count * @sizeOf(RayHash),
         };
-        const brick_grid_ranges = [DeviceOnlyResources.brick_count]vk.DeviceSize{
+        const brick_grid_ranges = [DeviceOnlyResources.brick_count + DeviceOnlyResources.material_count]vk.DeviceSize{
             // bricks set
             try std.math.divCeil(vk.DeviceSize, bricks_in_grid, 8),
             // bricks indices
             bricks_in_grid * @sizeOf(BrickIndex),
             // bricks
             @as(vk.DeviceSize, @intCast(host_brick_state.brick_limits.max_active_bricks)) * @sizeOf(Brick),
+            // materials
+            @as(vk.DeviceSize, @intCast(host_brick_state.brick_limits.max_active_bricks)) * @sizeOf(ray_pipeline_types.Material),
         };
+
         const brick_request_ranges = [HostAndDeviceResources.all_count]vk.DeviceSize{
             // brick limits
             @sizeOf(BrickLimits),
@@ -465,7 +495,8 @@ pub fn init(
         for (infos[0..ray_ranges.len], ray_ranges, 0..) |*info, range, info_index| {
             info.* = vk.DescriptorBufferInfo{
                 .buffer = ray_buffer.buffer,
-                .offset = if (info_index == 0) 0 else pow2Align(
+                .offset = if (info_index == 0) 0 else std.mem.alignForward(
+                    vk.DeviceSize,
                     infos[info_index - 1].offset + infos[info_index - 1].range,
                     // TODO: use ray_buffer.memory requirement!
                     ctx.physical_device_limits.min_storage_buffer_offset_alignment,
@@ -474,13 +505,19 @@ pub fn init(
             };
             // TODO: assert we are within the allocated size of 250mb
         }
+
         const brick_grid_start = ray_ranges.len;
         const brick_grid_end = ray_ranges.len + brick_grid_ranges.len;
+
+        std.debug.assert(brick_grid_start == (Resource{ .device = .bricks_set_s }).toBufferIndex());
+        std.debug.assert(brick_grid_end - 1 == (Resource{ .device = .materials_s }).toBufferIndex());
+
         const brick_infos = infos[brick_grid_start..brick_grid_end];
         for (brick_infos, brick_grid_ranges, 0..) |*brick_info, range, info_index| {
             brick_info.* = vk.DescriptorBufferInfo{
                 .buffer = voxel_scene_buffer.buffer,
-                .offset = if (info_index == 0) 0 else pow2Align(
+                .offset = if (info_index == 0) 0 else std.mem.alignForward(
+                    vk.DeviceSize,
                     brick_infos[info_index - 1].offset + brick_infos[info_index - 1].range,
                     ctx.physical_device_limits.min_storage_buffer_offset_alignment,
                 ),
@@ -496,7 +533,8 @@ pub fn init(
             brick_req_info.* = vk.DescriptorBufferInfo{
                 .buffer = request_buffer.buffer,
                 // calculate offset by looking at previous info if there is any
-                .offset = if (info_index == 0) 0 else pow2Align(
+                .offset = if (info_index == 0) 0 else std.mem.alignForward(
+                    vk.DeviceSize,
                     brick_req_infos[info_index - 1].offset + brick_req_infos[info_index - 1].range,
                     ctx.physical_device_limits.min_storage_buffer_offset_alignment,
                 ),
@@ -565,6 +603,22 @@ pub fn init(
                 };
             }
 
+            // write material descriptor set
+            {
+                const material_set_index = (Resource{ .device = .materials_s }).toDescriptorIndex();
+                writes[@intFromEnum(DeviceOnlyResources.materials_s)] = vk.WriteDescriptorSet{
+                    .dst_set = target_descriptor_sets[material_set_index],
+                    .dst_binding = 0,
+                    .dst_array_element = 0,
+                    .descriptor_count = 1,
+                    .descriptor_type = .storage_buffer,
+                    .p_image_info = undefined,
+                    .p_buffer_info = @ptrCast(&infos[(Resource{ .device = .materials_s }).toBufferIndex()]),
+                    .p_texel_buffer_view = undefined,
+                };
+            }
+
+            // write image descriptor set
             {
                 const image_set_index = (Resource{ .device = .draw_image_s }).toDescriptorIndex();
                 writes[@intFromEnum(DeviceOnlyResources.draw_image_s)] = vk.WriteDescriptorSet{
@@ -638,6 +692,18 @@ pub fn init(
             buffer_infos[brick_req_limits_buffer_index].offset,
             BrickLimits,
             &limits_slice,
+        );
+    }
+
+    // materials
+    {
+        const material_buffer_index = (Resource{ .device = .materials_s }).toBufferIndex();
+        try staging_buffer.transferToBuffer(
+            ctx,
+            &voxel_scene_buffer,
+            buffer_infos[material_buffer_index].offset,
+            ray_pipeline_types.Material,
+            &host_brick_state.grid_materials,
         );
     }
 
@@ -735,6 +801,9 @@ pub const Resource = union(enum) {
         switch (resource) {
             Resource.device => |d_resource| {
                 const neg_offset: usize = offset_blk: {
+                    if (@intFromEnum(d_resource) == @intFromEnum(DeviceOnlyResources.brick_indices_b)) {
+                        break :offset_blk 1;
+                    }
                     if (@intFromEnum(d_resource) >= @intFromEnum(DeviceOnlyResources.bricks_b)) {
                         break :offset_blk 2;
                     }
@@ -976,9 +1045,4 @@ pub fn mapBrickRequestData(self: *RayDeviceResources, ctx: Context) !void {
 pub inline fn getBufferInfo(self: RayDeviceResources, comptime resource: Resource) vk.DescriptorBufferInfo {
     const index = resource.toBufferIndex();
     return self.buffer_infos[index];
-}
-
-// TODO: move to common math/mem file
-pub inline fn pow2Align(size: vk.DeviceSize, alignment: vk.DeviceSize) vk.DeviceSize {
-    return (size + alignment - 1) & ~(alignment - 1);
 }

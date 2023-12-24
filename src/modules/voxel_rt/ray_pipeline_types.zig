@@ -120,3 +120,48 @@ pub const ImageInfo = struct {
     sampler: vk.Sampler,
     image_view: vk.ImageView,
 };
+
+// must be kept in sync with assets/shaders/raytracing/ray_commons.glsl Material & Vec4ToMaterial
+pub const Material = packed struct {
+    pub const Type = enum(u16) {
+        lambertian = 0,
+        metal = 1,
+        dielectric = 2,
+    };
+
+    albedo_x: f32,
+    albedo_y: f32,
+    albedo_z: f32,
+    type: Type,
+    type_value: f16,
+
+    pub fn lambertian(albedo: [3]f32) Material {
+        return Material{
+            .albedo_x = albedo[0],
+            .albedo_y = albedo[1],
+            .albedo_z = albedo[2],
+            .type = .lambertian,
+            .type_value = 0,
+        };
+    }
+
+    pub fn metal(albedo: [3]f32, fizz: f16) Material {
+        return Material{
+            .albedo_x = albedo[0],
+            .albedo_y = albedo[1],
+            .albedo_z = albedo[2],
+            .type = .metal,
+            .type_value = fizz,
+        };
+    }
+
+    pub fn dielectric(albedo: [3]f32, internal_reflectance: f16) Material {
+        return Material{
+            .albedo_x = albedo[0],
+            .albedo_y = albedo[1],
+            .albedo_z = albedo[2],
+            .type = .dielectric,
+            .type_value = internal_reflectance,
+        };
+    }
+};

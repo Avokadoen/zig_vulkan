@@ -8,6 +8,9 @@ const Brick = ray_pipeline_types.Brick;
 const BrickIndex = ray_pipeline_types.BrickIndex;
 const BrickGridMetadata = ray_pipeline_types.BrickGridMetadata;
 const BrickLimits = ray_pipeline_types.BrickLimits;
+const Material = ray_pipeline_types.Material;
+
+pub const max_unique_materials = std.math.maxInt(u8);
 
 pub const Config = struct {
     brick_load_request_count: c_uint = 1024,
@@ -23,10 +26,12 @@ brick_limits: BrickLimits,
 brick_indices: []BrickIndex,
 bricks: []Brick,
 brick_set: []u8,
+grid_materials: [max_unique_materials]Material,
 
 pub fn init(
     allocator: Allocator,
     grid_metadata: BrickGridMetadata,
+    grid_materials: [max_unique_materials]Material,
     config: Config,
     comptime zero_out_mem: bool,
 ) !HostBrickState {
@@ -72,6 +77,7 @@ pub fn init(
         .brick_indices = brick_indices,
         .bricks = bricks,
         .brick_set = brick_set,
+        .grid_materials = grid_materials,
     };
 }
 

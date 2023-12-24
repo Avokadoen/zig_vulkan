@@ -95,3 +95,27 @@ vec3 RayAt(Ray r, float t) {
     // instruction for: t * dir + origin
     return fma(vec3(t), r.direction, r.origin);
 }
+
+// Must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig Material
+const uint MAT_T_LAMBERTIAN = 0;
+const uint MAT_T_METAL = 1;
+const uint MAT_T_DIELECTRIC = 2;
+struct Material {
+    vec3 albedo;
+    uint type;
+    /// Lambertian: ignored
+    /// Metal:      fizz value
+    /// Dielectric: interal reflection value
+    float type_value;
+};
+Material Vec4ToMaterial(vec4 vec) {
+    const vec2 unpack = unpackHalf2x16(floatBitsToUint(vec.a));
+    const uint type = floatBitsToUint(unpack.x);
+    const float type_value = unpack.y;
+
+    return Material(
+        vec.xyz,
+        type,
+        type_value
+    );
+}

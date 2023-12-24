@@ -13,8 +13,10 @@ const Pipeline = @import("voxel_rt/Pipeline.zig");
 pub const Camera = @import("voxel_rt/Camera.zig");
 pub const Sun = @import("voxel_rt/Sun.zig");
 pub const Benchmark = @import("voxel_rt/Benchmark.zig");
-pub const gpu_types = @import("voxel_rt/gpu_types.zig");
 pub const HostBrickState = @import("voxel_rt/brick/HostBrickState.zig");
+
+const ray_pipeline_types = @import("voxel_rt/ray_pipeline_types.zig");
+pub const Material = ray_pipeline_types.Material;
 
 pub const Config = struct {
     internal_resolution_width: u32 = 1280,
@@ -74,16 +76,6 @@ pub fn draw(self: *VoxelRT, ctx: Context, host_brick_state: *HostBrickState, del
 
 pub fn updateSun(self: *VoxelRT, delta_time: f32) void {
     self.sun.update(delta_time);
-}
-
-/// push the materials to GPU
-pub fn pushMaterials(self: *VoxelRT, ctx: Context, materials: []const gpu_types.Material) !void {
-    try self.pipeline.transferMaterials(ctx, 0, materials);
-}
-
-/// push the albedo to GPU
-pub fn pushAlbedo(self: *VoxelRT, ctx: Context, albedos: []const gpu_types.Albedo) !void {
-    try self.pipeline.transferAlbedos(ctx, 0, albedos);
 }
 
 pub fn deinit(self: VoxelRT, allocator: Allocator, ctx: Context) void {

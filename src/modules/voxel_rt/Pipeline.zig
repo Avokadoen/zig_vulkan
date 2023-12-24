@@ -40,14 +40,8 @@ const ImguiGui = @import("ImguiGui.zig");
 
 const Camera = @import("Camera.zig");
 const Sun = @import("Sun.zig");
-const gpu_types = @import("gpu_types.zig");
 
 pub const Config = struct {
-    material_buffer: u64 = 256,
-    albedo_buffer: u64 = 256,
-    metal_buffer: u64 = 256,
-    dielectric_buffer: u64 = 256,
-
     staging_buffers: usize = 1,
     gfx_pipeline_config: GraphicsPipeline.Config = .{},
 };
