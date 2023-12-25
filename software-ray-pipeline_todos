@@ -30,6 +30,7 @@
 * [ ] brick streaming
     * [x] unloading
     * [x] loading
+    * [ ] remove allocs in pipeline draw used for streaming 
 * [ ] dynamic voxel scenes possible (can be as simple as single voxel on/off to start)
 * [x] only one atomicAdd pr warp, use shared memory to share start index with threads that use thread id + warp offset to grab rays
 * [ ] t_min + t_max limits in gui and camera

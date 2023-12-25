@@ -44,6 +44,27 @@ fn countDescriptorSets(comptime Enum: type) comptime_int {
     return count;
 }
 
+// count all bindings that are not using slot 0
+fn countBindings(comptime Enum: type) comptime_int {
+    var count: comptime_int = 0;
+    const enum_info = @typeInfo(Enum).Enum;
+    inline for (enum_info.fields) |field| {
+        if (field.name.len < 3) {
+            @compileError(field.name ++ " enum field must atleast 3 characters");
+        }
+        if (field.name[field.name.len - 2] != '_') {
+            @compileError(field.name ++ " enum field must end with '_x (s or b)'");
+        }
+
+        switch (field.name[field.name.len - 1]) {
+            's' => {},
+            'b' => count += 1,
+            else => @compileError(field.name ++ " enum field must end with 's' or 'b'"),
+        }
+    }
+    return count;
+}
+
 // TODO: We should definitly rework all this resource stuff ...
 /// Resources only accessible on device
 ///
@@ -73,13 +94,14 @@ pub const DeviceOnlyResources = enum(u32) {
 
     // materials
     materials_s,
+    material_indices_b,
 
     // draw image
     draw_image_s,
 
     pub const ray_count = @intFromEnum(DeviceOnlyResources.ray_hash_1_s) + 1;
     pub const brick_count = (@intFromEnum(DeviceOnlyResources.bricks_b) + 1) - ray_count;
-    pub const material_count = (@intFromEnum(DeviceOnlyResources.materials_s) + 1) - (ray_count + brick_count);
+    pub const material_count = (@intFromEnum(DeviceOnlyResources.material_indices_b) + 1) - (ray_count + brick_count);
     pub const image_count = (@intFromEnum(DeviceOnlyResources.draw_image_s) + 1) - (ray_count + brick_count + material_count);
     pub const all_count = @typeInfo(DeviceOnlyResources).Enum.fields.len;
 };
@@ -262,7 +284,7 @@ pub fn init(
 
         // material layout
         {
-            const bindings = [_]vk.DescriptorSetLayoutBinding{.{
+            const bindings = [_]vk.DescriptorSetLayoutBinding{ .{
                 .binding = 0,
                 .descriptor_type = .storage_buffer,
                 .descriptor_count = 1,
@@ -270,7 +292,15 @@ pub fn init(
                     .compute_bit = true,
                 },
                 .p_immutable_samplers = null,
-            }};
+            }, .{
+                .binding = 1,
+                .descriptor_type = .storage_buffer,
+                .descriptor_count = 1,
+                .stage_flags = .{
+                    .compute_bit = true,
+                },
+                .p_immutable_samplers = null,
+            } };
             const layout_info = vk.DescriptorSetLayoutCreateInfo{
                 .flags = .{},
                 .binding_count = bindings.len,
@@ -477,6 +507,8 @@ pub fn init(
             @as(vk.DeviceSize, @intCast(host_brick_state.brick_limits.max_active_bricks)) * @sizeOf(Brick),
             // materials
             @as(vk.DeviceSize, @intCast(host_brick_state.brick_limits.max_active_bricks)) * @sizeOf(ray_pipeline_types.Material),
+            // material indices
+            @as(vk.DeviceSize, @intCast(host_brick_state.brick_limits.max_active_bricks)) * 512 * @sizeOf(HostBrickState.material_index),
         };
 
         const brick_request_ranges = [HostAndDeviceResources.all_count]vk.DeviceSize{
@@ -510,7 +542,7 @@ pub fn init(
         const brick_grid_end = ray_ranges.len + brick_grid_ranges.len;
 
         std.debug.assert(brick_grid_start == (Resource{ .device = .bricks_set_s }).toBufferIndex());
-        std.debug.assert(brick_grid_end - 1 == (Resource{ .device = .materials_s }).toBufferIndex());
+        std.debug.assert(brick_grid_end - 1 == (Resource{ .device = .material_indices_b }).toBufferIndex());
 
         const brick_infos = infos[brick_grid_start..brick_grid_end];
         for (brick_infos, brick_grid_ranges, 0..) |*brick_info, range, info_index| {
@@ -614,6 +646,16 @@ pub fn init(
                     .descriptor_type = .storage_buffer,
                     .p_image_info = undefined,
                     .p_buffer_info = @ptrCast(&infos[(Resource{ .device = .materials_s }).toBufferIndex()]),
+                    .p_texel_buffer_view = undefined,
+                };
+                writes[@intFromEnum(DeviceOnlyResources.material_indices_b)] = vk.WriteDescriptorSet{
+                    .dst_set = target_descriptor_sets[material_set_index],
+                    .dst_binding = 1,
+                    .dst_array_element = 0,
+                    .descriptor_count = 1,
+                    .descriptor_type = .storage_buffer,
+                    .p_image_info = undefined,
+                    .p_buffer_info = @ptrCast(&infos[(Resource{ .device = .material_indices_b }).toBufferIndex()]),
                     .p_texel_buffer_view = undefined,
                 };
             }
@@ -801,18 +843,20 @@ pub const Resource = union(enum) {
         switch (resource) {
             Resource.device => |d_resource| {
                 const neg_offset: usize = offset_blk: {
-                    if (@intFromEnum(d_resource) == @intFromEnum(DeviceOnlyResources.brick_indices_b)) {
-                        break :offset_blk 1;
+                    comptime var offset = 0;
+                    inline for (0..@intFromEnum(d_resource) + 1) |enum_value| {
+                        const enum_tag: DeviceOnlyResources = @enumFromInt(enum_value);
+                        const enum_name = @tagName(enum_tag);
+                        if (enum_name[enum_name.len - 1] == 'b') {
+                            offset += 1;
+                        }
                     }
-                    if (@intFromEnum(d_resource) >= @intFromEnum(DeviceOnlyResources.bricks_b)) {
-                        break :offset_blk 2;
-                    }
-                    break :offset_blk 0;
+                    break :offset_blk offset;
                 };
                 return @intFromEnum(d_resource) - neg_offset;
             },
             Resource.host_and_device => |hd_resource| {
-                const neg_offset: usize = 2;
+                const neg_offset: usize = countBindings(DeviceOnlyResources);
                 return @intFromEnum(hd_resource) + DeviceOnlyResources.all_count - neg_offset;
             },
         }

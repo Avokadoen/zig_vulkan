@@ -573,6 +573,9 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
             // TODO: remove alloc, alloc on init
             const new_brick_indices = try self.allocator.alloc(ray_pipeline_types.BrickLoadRequest, load_req_count);
             defer self.allocator.free(new_brick_indices);
+            // TODO: remove alloc, alloc on init
+            const new_material_indices = try self.allocator.alloc(HostBrickState.material_index, load_req_count * 512);
+            defer self.allocator.free(new_material_indices);
 
             std.debug.assert(host_brick_state.brick_limits.max_active_bricks >= host_brick_state.brick_limits.active_bricks);
 
@@ -581,9 +584,33 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
                 new_bricks,
                 new_brick_indices,
                 active_bricks_before_load..,
-            ) |load_index, *new_brick, *new_brick_index, brick_buffer_index| {
+                0..,
+            ) |
+                load_index,
+                *new_brick,
+                *new_brick_index,
+                brick_buffer_index,
+                loop_iter,
+            | {
                 const brick_index = host_brick_state.brick_indices[load_index].index;
                 new_brick.* = host_brick_state.bricks[brick_index];
+
+                {
+                    const mat_indices_dest = dest_blk: {
+                        const start = loop_iter * 512;
+                        const end = start + 512;
+                        break :dest_blk new_material_indices[start..end];
+                    };
+
+                    const mat_indices_src = src_blk: {
+                        const start = brick_index * 512;
+                        const end = start + 512;
+                        break :src_blk host_brick_state.voxel_material_indices[start..end];
+                    };
+
+                    @memcpy(mat_indices_dest, mat_indices_src);
+                }
+
                 new_brick_index.* = ray_pipeline_types.BrickLoadRequest{
                     .brick_index_index = load_index,
                     .brick_index_32b = @intCast(brick_buffer_index),
@@ -600,6 +627,22 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
                     self.ray_device_resources.buffer_infos[brick_buffer_index].offset + new_bricks_offset,
                     ray_pipeline_types.Brick,
                     new_bricks,
+                );
+            }
+
+            // Transfer material indices
+            {
+                const material_indices_index = (RayDeviceResources.Resource{ .device = .material_indices_b }).toBufferIndex();
+                const new_material_indices_offset: vk.DeviceSize = @intCast(
+                    host_brick_state.brick_limits.active_bricks * 512 * @sizeOf(HostBrickState.material_index),
+                );
+
+                try self.staging_buffers.transferToBuffer(
+                    ctx,
+                    &self.ray_device_resources.voxel_scene_buffer,
+                    self.ray_device_resources.buffer_infos[material_indices_index].offset + new_material_indices_offset,
+                    HostBrickState.material_index,
+                    new_material_indices,
                 );
             }
 

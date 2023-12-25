@@ -1,3 +1,4 @@
+const std = @import("std");
 const vk = @import("vulkan");
 const render = @import("../render.zig");
 const Context = render.Context;
@@ -75,7 +76,9 @@ pub const Ray = extern struct {
 };
 // must be kept in sync with assets/shaders/raytracing/ray_commons.glsl RayHit
 pub const RayHit = extern struct {
-    normal_4b_and_material_index_28b: c_uint,
+    pub const max_global_brick_index = std.math.maxInt(u20);
+
+    normal_index_3b_voxel_index_9b_brick_index_20b: c_uint,
 };
 // must be kept in sync with assets/shaders/raytracing/ray_commons.glsl RayShading
 pub const RayShading = extern struct {

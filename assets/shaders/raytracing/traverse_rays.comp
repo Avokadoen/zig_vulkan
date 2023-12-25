@@ -50,7 +50,7 @@ layout (push_constant) readonly uniform BrickGridState {
 } brick_grid;
 
 bool AdvIntersect(vec3 box_min_point, vec3 box_max_point, Ray r, vec3 inv_ray_dir, inout float t_min, inout float t_max);
-bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_material_index_28b);
+bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_index_3b_voxel_index_9b_brick_index_20b);
 bool BrickHit(
     inout Ray r, 
     vec3 g_scale, 
@@ -61,7 +61,7 @@ bool BrickHit(
     float global_t_value, 
     uint brick_index, 
     vec3 brick_position, 
-    inout uint normal_4b_and_material_index_28b
+    inout uint normal_index_3b_voxel_index_9b_brick_index_20b
 );
 
 void main() {
@@ -73,15 +73,15 @@ void main() {
     Ray ray = in_rays[index];
     RayShading ray_shading = in_ray_shadings[index];
 
-    uint normal_4b_and_material_index_28b = 0;
+    uint normal_index_3b_voxel_index_9b_brick_index_20b = 0;
     // TODO: configurable
     float t_min = 0.0001;
     float t_max = 1000 - ray.t_value;
-    if (GridHit(ray, t_min, t_max, normal_4b_and_material_index_28b)) {
+    if (GridHit(ray, t_min, t_max, normal_index_3b_voxel_index_9b_brick_index_20b)) {
         const uint out_index = atomicAdd(limits.out_hit_count, 1);
         out_ray_shadings[out_index] = ray_shading;
         out_rays[out_index] = ray;
-        out_ray_hits[out_index].normal_4b_and_material_index_28b = normal_4b_and_material_index_28b;
+        out_ray_hits[out_index].normal_index_3b_voxel_index_9b_brick_index_20b = normal_index_3b_voxel_index_9b_brick_index_20b;
     } else {
         const uint out_index = limits.in_hit_count - (atomicAdd(limits.out_miss_count, 1) + 1);
         out_ray_shadings[out_index] = ray_shading;
@@ -135,13 +135,13 @@ bool AdvNormIntersect(vec3 box_min_point, vec3 box_max_point, Ray r, vec3 inv_ra
     
     if (t_mins.x >= t_mins.y && t_mins.x >= t_mins.z) {
         t_min = max(t_min, t_mins.x);
-        normal_bits = ((inv_ray_dir.x < 0) ? 3 : 0) << 28;
+        normal_bits = ((inv_ray_dir.x < 0) ? 3 : 0) << NORMAL_BITS_OFFSET;
     } else if (t_mins.y >= t_mins.x && t_mins.y >= t_mins.z) {
         t_min = max(t_min, t_mins.y);
-        normal_bits = ((inv_ray_dir.y < 0) ? 4 : 1) << 28;
+        normal_bits = ((inv_ray_dir.y < 0) ? 4 : 1) << NORMAL_BITS_OFFSET;
     } else {
         t_min = max(t_min, t_mins.z);
-        normal_bits = ((inv_ray_dir.z < 0) ? 5 : 2) << 28;
+        normal_bits = ((inv_ray_dir.z < 0) ? 5 : 2) << NORMAL_BITS_OFFSET;
     }
     t_max = min(t_max, minComponent(t_maxes));
     
@@ -149,7 +149,7 @@ bool AdvNormIntersect(vec3 box_min_point, vec3 box_max_point, Ray r, vec3 inv_ra
 }
 
 /// Traverses the brick grid and calculates any potential hit with the grid
-bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_material_index_28b) {
+bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_index_3b_voxel_index_9b_brick_index_20b) {
     const vec3 g_scale = vec3(brick_grid.scale);
     const vec3 g_dim = brick_grid.dim;
 
@@ -159,7 +159,7 @@ bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_mat
     const vec3 inv_ray_dir = safeInverse(r.direction);
     float grid_t_min = t_min;
     float grid_t_max = t_max;
-    if (!AdvNormIntersect(g_min, g_max, r, inv_ray_dir, normal_4b_and_material_index_28b, grid_t_min, grid_t_max)) {
+    if (!AdvNormIntersect(g_min, g_max, r, inv_ray_dir, normal_index_3b_voxel_index_9b_brick_index_20b, grid_t_min, grid_t_max)) {
         return false;
     }
 
@@ -179,9 +179,9 @@ bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_mat
 
     // TODO: make this line more readable, only calculate once 
     const uvec3 normal_axis_bits = uvec3(
-        ((ray_step.x < 0) ? AXIS_X_RIGHT_INDEX : AXIS_X_LEFT_INDEX) << 28,
-        ((ray_step.y < 0) ? AXIS_Y_UP_INDEX : AXIS_Y_DOWN_INDEX) << 28,
-        ((ray_step.z < 0) ? AXIS_Z_FRONT_INDEX : AXIS_Z_FRONT_INDEX) << 28
+        ((ray_step.x < 0) ? AXIS_X_RIGHT_INDEX : AXIS_X_LEFT_INDEX) << NORMAL_BITS_OFFSET,
+        ((ray_step.y < 0) ? AXIS_Y_UP_INDEX : AXIS_Y_DOWN_INDEX) << NORMAL_BITS_OFFSET,
+        ((ray_step.z < 0) ? AXIS_Z_FRONT_INDEX : AXIS_Z_FRONT_INDEX) << NORMAL_BITS_OFFSET
     );
 
     float t_value = 0;
@@ -220,7 +220,7 @@ bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_mat
                     global_t_value,
                     brick_index,
                     brick_min,
-                    normal_4b_and_material_index_28b
+                    normal_index_3b_voxel_index_9b_brick_index_20b
                 )) {
                     return true;
                 }
@@ -237,13 +237,13 @@ bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_mat
                 t_value = side_dist.x * g_scale.x;
                 side_dist.x += ray_delta.x;
                 local_position.x += ray_step.x;
-                normal_4b_and_material_index_28b = normal_axis_bits.x;
+                normal_index_3b_voxel_index_9b_brick_index_20b = normal_axis_bits.x;
             }
             else {
                 t_value = side_dist.z * g_scale.x;
                 side_dist.z += ray_delta.z;
                 local_position.z += ray_step.z;
-                normal_4b_and_material_index_28b = normal_axis_bits.z;
+                normal_index_3b_voxel_index_9b_brick_index_20b = normal_axis_bits.z;
             }
         }
         else {
@@ -251,13 +251,13 @@ bool GridHit(inout Ray r, float t_min, float t_max, inout uint normal_4b_and_mat
                 t_value = side_dist.y * g_scale.x;
                 side_dist.y += ray_delta.y;
                 local_position.y += ray_step.y;
-                normal_4b_and_material_index_28b = normal_axis_bits.y;
+                normal_index_3b_voxel_index_9b_brick_index_20b = normal_axis_bits.y;
             }
             else {
                 t_value = side_dist.z * g_scale.x;
                 side_dist.z += ray_delta.z;
                 local_position.z += ray_step.z;
-                normal_4b_and_material_index_28b = normal_axis_bits.z;
+                normal_index_3b_voxel_index_9b_brick_index_20b = normal_axis_bits.z;
             }
         }
     }
@@ -275,7 +275,7 @@ bool BrickHit(
     float global_t_value, 
     uint brick_index, 
     vec3 brick_position, 
-    inout uint normal_4b_and_material_index_28b
+    inout uint normal_index_3b_voxel_index_9b_brick_index_20b
 ) {
     vec3 voxel_scale = g_scale * vec3(0.125);
     // optimization: copy solid mask from SSBO to localize the mask memory
@@ -289,9 +289,9 @@ bool BrickHit(
     
     // TODO: make this line more readable, only calculate once 
     const uvec3 normal_axis_bits = uvec3(
-        ((ray_step.x < 0) ? AXIS_X_RIGHT_INDEX : AXIS_X_LEFT_INDEX) << 28,
-        ((ray_step.y < 0) ? AXIS_Y_UP_INDEX : AXIS_Y_DOWN_INDEX) << 28,
-        ((ray_step.z < 0) ? AXIS_Z_FRONT_INDEX : AXIS_Z_FRONT_INDEX) << 28
+        ((ray_step.x < 0) ? AXIS_X_RIGHT_INDEX : AXIS_X_LEFT_INDEX) << NORMAL_BITS_OFFSET,
+        ((ray_step.y < 0) ? AXIS_Y_UP_INDEX : AXIS_Y_DOWN_INDEX) << NORMAL_BITS_OFFSET,
+        ((ray_step.z < 0) ? AXIS_Z_FRONT_INDEX : AXIS_Z_FRONT_INDEX) << NORMAL_BITS_OFFSET
     );
 
     vec3 local_position = floor(fposition + 0.);
@@ -303,21 +303,30 @@ bool BrickHit(
         && all(lessThan(local_position, vec3(8))) 
         && t_value <= local_t_max
     ) { 
-        const int bit_offset = int(floor(local_position.x + 8 * (local_position.z + 8 * local_position.y)));
-        const int mask_index = bit_offset / 32;
-        const int mask_offset = bit_offset % 32;
+        const int voxel_index = int(floor(local_position.x + 8 * (local_position.z + 8 * local_position.y)));
+        const int mask_index = voxel_index / 32;
+        const int mask_offset = voxel_index % 32;
         const uint uint_mask = solid_mask[mask_index];
         const uint bitfield_final_entry = bitfieldExtract(uint_mask, mask_offset, 1);
 
         const bool hit_voxel = (bitfield_final_entry != 0) && t_value >= local_t_min;
         if (hit_voxel) {
-            const uint material_index = 0; // TODO
-
             // update ray with new t value for writeback
             r.t_value += global_t_value + t_value;
 
-            // register material index and the normal for the hit
-            normal_4b_and_material_index_28b |= material_index;
+            // register brick and voxel index and the normal for the hit
+            normal_index_3b_voxel_index_9b_brick_index_20b  = bitfieldInsert(
+                normal_index_3b_voxel_index_9b_brick_index_20b,
+                voxel_index,
+                20,
+                9
+            );
+            normal_index_3b_voxel_index_9b_brick_index_20b  = bitfieldInsert(
+                normal_index_3b_voxel_index_9b_brick_index_20b,
+                brick_index,
+                0,
+                20
+            );
             return true;
         }
 
@@ -327,13 +336,13 @@ bool BrickHit(
                 t_value = side_dist.x * voxel_scale.x;
                 side_dist.x += ray_delta.x;
                 local_position.x += ray_step.x;
-                normal_4b_and_material_index_28b = normal_axis_bits.x;
+                normal_index_3b_voxel_index_9b_brick_index_20b = normal_axis_bits.x;
             }
             else {
                 t_value = side_dist.z * voxel_scale.x;
                 side_dist.z += ray_delta.z;
                 local_position.z += ray_step.z;
-                normal_4b_and_material_index_28b = normal_axis_bits.z;
+                normal_index_3b_voxel_index_9b_brick_index_20b = normal_axis_bits.z;
             }
         }
         else {
@@ -341,13 +350,13 @@ bool BrickHit(
                 t_value = side_dist.y * voxel_scale.x;
                 side_dist.y += ray_delta.y;
                 local_position.y += ray_step.y;
-                normal_4b_and_material_index_28b = normal_axis_bits.y;
+                normal_index_3b_voxel_index_9b_brick_index_20b = normal_axis_bits.y;
             }
             else {
                 t_value = side_dist.z * voxel_scale.x;
                 side_dist.z += ray_delta.z;
                 local_position.z += ray_step.z;
-                normal_4b_and_material_index_28b = normal_axis_bits.z;
+                normal_index_3b_voxel_index_9b_brick_index_20b = normal_axis_bits.z;
             }
         }
     } 

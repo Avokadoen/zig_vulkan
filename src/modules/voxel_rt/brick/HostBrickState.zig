@@ -10,7 +10,8 @@ const BrickGridMetadata = ray_pipeline_types.BrickGridMetadata;
 const BrickLimits = ray_pipeline_types.BrickLimits;
 const Material = ray_pipeline_types.Material;
 
-pub const max_unique_materials = std.math.maxInt(u8);
+pub const material_index = u8;
+pub const max_unique_materials = std.math.maxInt(material_index);
 
 pub const Config = struct {
     brick_load_request_count: c_uint = 1024,
@@ -25,6 +26,7 @@ brick_limits: BrickLimits,
 ///       unloading indices is done on gpu so host is not signaled or coherent in this case
 brick_indices: []BrickIndex,
 bricks: []Brick,
+voxel_material_indices: []material_index,
 brick_set: []u8,
 grid_materials: [max_unique_materials]Material,
 
@@ -36,6 +38,7 @@ pub fn init(
     comptime zero_out_mem: bool,
 ) !HostBrickState {
     const grid_brick_count: usize = @intFromFloat(grid_metadata.dim[0] * grid_metadata.dim[1] * grid_metadata.dim[2]);
+    std.debug.assert(grid_brick_count <= ray_pipeline_types.RayHit.max_global_brick_index);
 
     const brick_limits = BrickLimits{
         .max_load_request_count = config.brick_load_request_count,
@@ -64,6 +67,13 @@ pub fn init(
         });
     }
 
+    // TODO: oof too much memory :(
+    const voxel_material_indices = try allocator.alloc(material_index, grid_brick_count * 8 * 8 * 8);
+    errdefer allocator.free(voxel_material_indices);
+    if (zero_out_mem) {
+        @memset(voxel_material_indices, 0);
+    }
+
     const brick_set = try allocator.alloc(u8, try std.math.divCeil(usize, grid_brick_count, 8));
     errdefer allocator.free(brick_set);
     if (zero_out_mem) {
@@ -76,6 +86,7 @@ pub fn init(
         .brick_limits = brick_limits,
         .brick_indices = brick_indices,
         .bricks = bricks,
+        .voxel_material_indices = voxel_material_indices,
         .brick_set = brick_set,
         .grid_materials = grid_materials,
     };
@@ -83,13 +94,14 @@ pub fn init(
 
 pub fn deinit(self: HostBrickState) void {
     self.allocator.free(self.brick_set);
+    self.allocator.free(self.voxel_material_indices);
     self.allocator.free(self.bricks);
     self.allocator.free(self.brick_indices);
 }
 
 /// Temporary debug scene
 pub fn setupTestScene(self: *HostBrickState) void {
-    {
+    const grid_bricks = brick_blk: {
         const test_brick_all = Brick{
             .solid_mask = ~@as(u512, 0),
         };
@@ -127,7 +139,9 @@ pub fn setupTestScene(self: *HostBrickState) void {
             test_brick_seven,
         };
         @memcpy(self.bricks[0..bricks.len], &bricks);
-    }
+
+        break :brick_blk bricks;
+    };
 
     {
         const brick_indices = [_]BrickIndex{
@@ -145,5 +159,15 @@ pub fn setupTestScene(self: *HostBrickState) void {
 
     {
         self.brick_set[0] = 1 << 7 | 1 << 6 | 0 << 5 | 1 << 4 | 1 << 3 | 1 << 2 | 1 << 1 | 1 << 0;
+    }
+
+    {
+        // currently we only set 4 materials in main so lets just rotate material
+        for (grid_bricks, 0..) |brick, brick_index| {
+            // assumes all bits are sequential
+            for (0..@popCount(brick.solid_mask)) |voxel_index| {
+                self.voxel_material_indices[brick_index * 512 + voxel_index] = @intCast(voxel_index % 4);
+            }
+        }
     }
 }

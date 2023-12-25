@@ -22,6 +22,10 @@ layout (std430, set = 3, binding = 0) buffer RayShadingBuffer {
 layout (std430, set = 4, binding = 0) readonly buffer MaterialBuffer {
     vec4 materials[]; // TODO: materials is small enough to be in shared buffer
 };
+layout (std430, set = 4, binding = 1) readonly buffer MaterialIndexBuffer {
+    uint material_indices_8b[];
+};
+
 
 const vec3 normal_map[] = vec3[](
     vec3(-1,  0,  0), // X_AXIS_LEFT_INDEX = 0;
@@ -29,7 +33,7 @@ const vec3 normal_map[] = vec3[](
     vec3( 0,  0,  1), // Z_AXIS_FRONT_INDEX = 2;
     vec3( 1,  0,  0), // X_AXIS_RIGHT_INDEX = 3;
     vec3( 0,  1,  0), // Y_AXIS_UP_INDEX = 4;
-    vec3( 0,  0, -1)  // Z_AXIS_FRONT_INDEX = 5;
+    vec3( 0,  0, -1)  // Z_AXIS_BACK_INDEX = 5;
 );
 
 void main() {
@@ -40,18 +44,27 @@ void main() {
     }
 
     // extract material index and normal index
-    uint normal_4b_and_material_index_28b = ray_hits[index].normal_4b_and_material_index_28b;
-    const uint material_index = bitfieldExtract(normal_4b_and_material_index_28b, 0, 28);
-    const uint normal_index = bitfieldExtract(normal_4b_and_material_index_28b, 28, 4);
-    const vec3 hit_normal = normal_map[normal_index];
+    uint normal_index_3b_voxel_index_9b_brick_index_20b = ray_hits[index].normal_index_3b_voxel_index_9b_brick_index_20b;
     
-    const Material material = Vec4ToMaterial(materials[material_index]);
-    ray_shadings[index].color += material.albedo;
-
+    const uint brick_index = bitfieldExtract(normal_index_3b_voxel_index_9b_brick_index_20b, 0, 20);
+    const uint voxel_index = bitfieldExtract(normal_index_3b_voxel_index_9b_brick_index_20b, 20, 9);
+    const uint normal_index = bitfieldExtract(normal_index_3b_voxel_index_9b_brick_index_20b, 29, 3);
 
     // TODO actually scatter ray based on material_index and a scatter function (we also have hit_record.ray_direction)
     Ray ray = rays[index];
+    const vec3 hit_normal = normal_map[normal_index];
     const vec3 scatter_dir = hit_normal;
+
+    // get the index for the voxels material index
+    const int material_indices_index = int(brick_index * 512 + voxel_index);
+    // get the bits that contain the actual material index
+    const uint material_index_bits = material_indices_8b[material_indices_index / 4];
+    // extract the bits and get the final material index we care about
+    const uint material_index = bitfieldExtract(material_index_bits, (material_indices_index % 4) * 8, 8);
+
+    const Material material = Vec4ToMaterial(materials[material_index]);
+    ray_shadings[index].color += material.albedo;
+
 
     // use old direction and move ray to hit point
     // HACK: scew origin by hit surface normal to avoid self intersections

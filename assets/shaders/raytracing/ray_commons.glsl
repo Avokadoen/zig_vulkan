@@ -72,8 +72,13 @@ struct Ray {
 };
 // Must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig RayHit
 struct RayHit {
-    uint normal_4b_and_material_index_28b;
+    // 3 bits for normal index MSB
+    // 9 bits for voxel index 
+    // 20 bits for brick index LSB
+    uint normal_index_3b_voxel_index_9b_brick_index_20b;
 };
+const uint NORMAL_BITS_OFFSET = 29;
+
 // Must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig RayShading
 struct RayShading {
     vec3 color;
