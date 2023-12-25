@@ -17,6 +17,9 @@ layout (std430, set = 2, binding = 0) buffer RayShadingBuffer {
     RayShading ray_shadings[];
 };
 
+const vec3 start_value = vec3(1);
+const vec3 end_value = vec3(0.5, 0.7, 1.0);
+
 void main() {
     const uint index = gl_GlobalInvocationID.x + limits.out_hit_count;
     if (index >= limits.in_hit_count) {
@@ -26,6 +29,6 @@ void main() {
     Ray ray = rays[index];
 
     // calculate some sky color in the event of a miss
-    float t = 0.5 * (ray.direction.y + 1.0);
-    ray_shadings[index].color += fma(vec3(1.0 - t), vec3(1.0), t * vec3(0.5, 0.7, 1.0));
+    float y_factor = 0.5 * (ray.direction.y + 1.0);
+    ray_shadings[index].color += vec3(1.0 - y_factor) * start_value + y_factor * end_value;
 }

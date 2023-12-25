@@ -114,9 +114,10 @@ struct Material {
     float type_value;
 };
 Material Vec4ToMaterial(vec4 vec) {
-    const vec2 unpack = unpackHalf2x16(floatBitsToUint(vec.a));
-    const uint type = floatBitsToUint(unpack.x);
-    const float type_value = unpack.y;
+    const uint type_bits = floatBitsToUint(vec.w);
+    const uint type = bitfieldExtract(type_bits, 0, 16);
+    const uint type_value_bits = bitfieldExtract(type_bits, 16, 16);
+    const float type_value = uintBitsToFloat(type_value_bits);
 
     return Material(
         vec.xyz,

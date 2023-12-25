@@ -65,7 +65,7 @@ void main() {
     rays[index] = Ray(
         push_constant.origin,   // origin
         1,                      // internal_reflection
-        ray_dir,                // direction
+        normalize(ray_dir),     // direction
         0                       // t_value
     );
 

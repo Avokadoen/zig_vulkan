@@ -4,6 +4,7 @@
 // debugPrintfEXT("hello world %f", 1.0);
 
 #include "ray_commons.glsl"
+#include "../rand.comp" // TODO: rename .glsl
 
 layout(local_size_x_id = 0, local_size_y = 1, local_size_z = 1) in;
 
@@ -26,7 +27,6 @@ layout (std430, set = 4, binding = 1) readonly buffer MaterialIndexBuffer {
     uint material_indices_8b[];
 };
 
-
 const vec3 normal_map[] = vec3[](
     vec3(-1,  0,  0), // X_AXIS_LEFT_INDEX = 0;
     vec3( 0, -1,  0), // Y_AXIS_DOWN_INDEX = 1;
@@ -35,6 +35,8 @@ const vec3 normal_map[] = vec3[](
     vec3( 0,  1,  0), // Y_AXIS_UP_INDEX = 4;
     vec3( 0,  0, -1)  // Z_AXIS_BACK_INDEX = 5;
 );
+
+bool scatterLambertian(Ray r_in, vec3 hit_point, vec3 hit_normal, out vec3 scattered);
 
 void main() {
     // get the index for ray and hit, max_index is copied over from out_cursor by pipeline
@@ -53,7 +55,6 @@ void main() {
     // TODO actually scatter ray based on material_index and a scatter function (we also have hit_record.ray_direction)
     Ray ray = rays[index];
     const vec3 hit_normal = normal_map[normal_index];
-    const vec3 scatter_dir = hit_normal;
 
     // get the index for the voxels material index
     const int material_indices_index = int(brick_index * 512 + voxel_index);
@@ -65,25 +66,44 @@ void main() {
     const Material material = Vec4ToMaterial(materials[material_index]);
     ray_shadings[index].color += material.albedo;
 
+    vec3 scatter_dir;
+    bool break_ray_traversal = false;
+    switch (material.type) {
+        case MAT_T_LAMBERTIAN:
+        break_ray_traversal = scatterLambertian(ray, RayAt(ray, ray.t_value), hit_normal, scatter_dir);
+        ray.direction = scatter_dir;
+        break;
+
+        case MAT_T_METAL: // TODO:
+        break_ray_traversal = scatterLambertian(ray, RayAt(ray, ray.t_value), hit_normal, ray.direction);
+        break;
+
+        case MAT_T_DIELECTRIC: // TODO:
+        break_ray_traversal = scatterLambertian(ray, RayAt(ray, ray.t_value), hit_normal, ray.direction);
+        break;
+
+        default:
+        // unreachable
+        ray_shadings[index].color = vec3(1, 0, 0);
+        ray.direction = hit_normal;
+        break;
+    }
 
     // use old direction and move ray to hit point
     // HACK: scew origin by hit surface normal to avoid self intersections
-    ray.origin = RayAt(ray, ray.t_value) + hit_normal * 0.1;
-    ray.direction = scatter_dir;
+    ray.origin += hit_normal * 0.05;
     ray.t_value = 0;
+    ray.direction = normalize(ray.direction);
 
     rays[index] = ray;
 }
 
 
-// bool scatterLambertian(Material material, Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scattered) {
-//     // TODO: better random hemisphere
-//     vec3 scatter_dir = normalize(hit.normal + RandVec3(hit.point.xy + hit.point.z, -0.4, 0.4));
-//     scattered = CreateRay(hit.point, scatter_dir, IGNORE_MAT_NONE);
-
-//     attenuation = AlbedoColor(material);
-//     return true;
-// }
+bool scatterLambertian(Ray r_in, vec3 hit_point, vec3 hit_normal, out vec3 scattered) {
+    // TODO: better random hemisphere
+    scattered = normalize(hit_normal + RandVec3(hit_point.xy + hit_point.z, -0.4, 0.4));
+    return true;
+}
 
 // bool scatterMetal(Material material, Ray r_in, HitRecord hit, out vec3 attenuation, out Ray scattered) {
 //     vec3 reflected = reflect(r_in.direction, hit.normal);
