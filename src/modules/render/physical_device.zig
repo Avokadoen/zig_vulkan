@@ -75,7 +75,14 @@ pub const QueueFamilyIndices = struct {
 
 /// check if physical device supports given target extensions
 // TODO: unify with getRequiredInstanceExtensions?
-pub fn isDeviceExtensionsPresent(allocator: Allocator, vki: dispatch.Instance, device: vk.PhysicalDevice, target_extensions: []const [*:0]const u8) !bool {
+pub fn isDeviceExtensionsPresent(
+    allocator: Allocator,
+    vki: dispatch.Instance,
+    device: vk.PhysicalDevice,
+    target_extensions: []const [*:0]const u8,
+    comptime panic_on_missing: bool,
+) !bool {
+
     // query extensions available
     var supported_extensions_count: u32 = 0;
     // TODO: handle "VkResult.incomplete"
@@ -88,13 +95,16 @@ pub fn isDeviceExtensionsPresent(allocator: Allocator, vki: dispatch.Instance, d
     extensions.items.len = supported_extensions_count;
 
     var matches: u32 = 0;
-    for (target_extensions) |target_extension| {
-        cmp: for (extensions.items) |existing| {
+    ext_loop: for (target_extensions) |target_extension| {
+        for (extensions.items) |existing| {
             const existing_name = @as([*:0]const u8, @ptrCast(&existing.extension_name));
             if (std.mem.orderZ(u8, target_extension, existing_name) == .eq) {
                 matches += 1;
-                break :cmp;
+                continue :ext_loop;
             }
+        }
+        if (panic_on_missing) {
+            std.debug.panic("missing extension {s}", .{target_extension});
         }
     }
 
@@ -119,7 +129,7 @@ pub fn selectPrimary(allocator: Allocator, vki: dispatch.Instance, instance: vk.
     var device_score: i32 = -1;
     var device_index: ?usize = null;
     for (devices, 0..) |device, i| {
-        const new_score = try deviceHeuristic(allocator, vki, device, surface);
+        const new_score = try deviceHeuristic(allocator, vki, device, surface, false);
         if (device_score < new_score) {
             device_score = new_score;
             device_index = i;
@@ -131,26 +141,57 @@ pub fn selectPrimary(allocator: Allocator, vki: dispatch.Instance, instance: vk.
     }
 
     const val = devices[device_index.?];
+
+    _ = try deviceHeuristic(allocator, vki, val, surface, true);
+
     return val;
 }
 
 /// Any suiteable GPU should result in a positive value, an unsuitable GPU might return a negative value
-fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !i32 {
+fn deviceHeuristic(
+    allocator: Allocator,
+    vki: dispatch.Instance,
+    device: vk.PhysicalDevice,
+    surface: vk.SurfaceKHR,
+    comptime panic_on_missing: bool,
+) !i32 {
     // TODO: rewrite function to have clearer distinction between required and bonus features
-    //       possible solutions:
-    //          - return error if missing feature and discard negative return value (use u32 instead)
-    //          - 2 bitmaps
+    //       also split function between one that will panic when we are missing required features and one that only scores the device ..
     const property_score = blk: {
-        const device_properties = vki.getPhysicalDeviceProperties(device);
-        const discrete = @as(i32, @intFromBool(device_properties.device_type == vk.PhysicalDeviceType.discrete_gpu)) + 5;
+        var device_properties = vk.PhysicalDeviceProperties2{
+            .properties = undefined,
+        };
+        vki.getPhysicalDeviceProperties2(device, &device_properties);
+        const discrete = @as(i32, @intFromBool(device_properties.properties.device_type == vk.PhysicalDeviceType.discrete_gpu)) + 5;
         break :blk discrete;
     };
 
     const feature_score = blk: {
-        const device_features = vki.getPhysicalDeviceFeatures(device);
-        const atomics = @as(i32, @intCast(device_features.fragment_stores_and_atomics)) * 5;
-        const anisotropy = @as(i32, @intCast(device_features.sampler_anisotropy)) * 5;
-        break :blk atomics + anisotropy;
+        var score: i32 = 0;
+
+        var float_atomics_features = vk.PhysicalDeviceShaderAtomicFloatFeaturesEXT{};
+        var features = vk.PhysicalDeviceFeatures2{
+            .p_next = &float_atomics_features,
+            .features = .{},
+        };
+        vki.getPhysicalDeviceFeatures2(device, &features);
+
+        // skip s_type and p_next which are always first
+        inline for (@typeInfo(vk.PhysicalDeviceShaderAtomicFloatFeaturesEXT).Struct.fields[2..]) |required_float_atomic_field| {
+            const required: *const vk.Bool32 = @ptrCast(@alignCast(required_float_atomic_field.default_value.?));
+            if (required.* != 0) {
+                if (@field(float_atomics_features, required_float_atomic_field.name) == 0) {
+                    if (panic_on_missing) {
+                        std.debug.panic("device missing {s}.{s}", .{ @typeName(vk.PhysicalDeviceShaderAtomicFloatFeaturesEXT), required_float_atomic_field.name });
+                    }
+                    score -= 1000;
+                } else {
+                    score += 1000;
+                }
+            }
+        }
+
+        break :blk score;
     };
 
     const queue_fam_score: i32 = blk: {
@@ -160,7 +201,7 @@ fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.Phys
 
     const extensions_score: i32 = blk: {
         const extension_slice = constants.logical_device_extensions[0..];
-        const extensions_available = try isDeviceExtensionsPresent(allocator, vki, device, extension_slice);
+        const extensions_available = try isDeviceExtensionsPresent(allocator, vki, device, extension_slice, panic_on_missing);
         if (!extensions_available) {
             break :blk -1000;
         }
@@ -208,7 +249,10 @@ pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
     const device_features = vk.PhysicalDeviceFeatures{};
     const validation_layer_info = try validation_layer.Info.init(allocator, ctx.vkb);
 
-    const features = vk.PhysicalDeviceVulkan12Features{};
+    var required_float_atomics = constants.required_float_atomics;
+    const features = vk.PhysicalDeviceVulkan12Features{
+        .p_next = @ptrCast(&required_float_atomics),
+    };
 
     const create_info = vk.DeviceCreateInfo{
         .p_next = @as(*const anyopaque, @ptrCast(&features)),

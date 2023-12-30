@@ -65,6 +65,18 @@ fn countBindings(comptime Enum: type) comptime_int {
     return count;
 }
 
+// count enum entries that contain "image"
+fn countImages(comptime Enum: type) comptime_int {
+    var count: comptime_int = 0;
+    const enum_info = @typeInfo(Enum).Enum;
+    inline for (enum_info.fields) |field| {
+        if (std.mem.indexOf(u8, field.name, "image")) |_| {
+            count += 1;
+        }
+    }
+    return count;
+}
+
 // TODO: We should definitly rework all this resource stuff ...
 /// Resources only accessible on device
 ///
@@ -87,6 +99,9 @@ pub const DeviceOnlyResources = enum(u32) {
     ray_shading_1_s,
     ray_hash_1_s, // TODO: hash might not need to be dupliacted
 
+    // draw image
+    draw_image_s,
+
     // brick buffer info
     bricks_set_s,
     brick_indices_b,
@@ -96,13 +111,10 @@ pub const DeviceOnlyResources = enum(u32) {
     materials_s,
     material_indices_b,
 
-    // draw image
-    draw_image_s,
-
     pub const ray_count = @intFromEnum(DeviceOnlyResources.ray_hash_1_s) + 1;
-    pub const brick_count = (@intFromEnum(DeviceOnlyResources.bricks_b) + 1) - ray_count;
-    pub const material_count = (@intFromEnum(DeviceOnlyResources.material_indices_b) + 1) - (ray_count + brick_count);
-    pub const image_count = (@intFromEnum(DeviceOnlyResources.draw_image_s) + 1) - (ray_count + brick_count + material_count);
+    pub const draw_count = (@intFromEnum(DeviceOnlyResources.draw_image_s) + 1) - ray_count;
+    pub const brick_count = (@intFromEnum(DeviceOnlyResources.bricks_b) + 1) - (ray_count + draw_count);
+    pub const material_count = (@intFromEnum(DeviceOnlyResources.material_indices_b) + 1) - (ray_count + brick_count + draw_count);
     pub const all_count = @typeInfo(DeviceOnlyResources).Enum.fields.len;
 };
 
@@ -129,8 +141,8 @@ pub const buffer_info_count = @typeInfo(DeviceOnlyResources).Enum.fields.len + @
 // we use one set per ray buffer type and one set for the brick grid data
 pub const descriptor_set_count = countDescriptorSets(DeviceOnlyResources) + countDescriptorSets(HostAndDeviceResources);
 
-pub const descriptor_buffer_count = buffer_info_count - DeviceOnlyResources.image_count;
-pub const descriptor_image_count = DeviceOnlyResources.image_count;
+pub const descriptor_image_count = countImages(HostAndDeviceResources) + countImages(DeviceOnlyResources);
+pub const descriptor_buffer_count = buffer_info_count - descriptor_image_count;
 
 const RayDeviceResources = @This();
 
@@ -199,7 +211,7 @@ pub fn init(
             .descriptor_count = descriptor_buffer_count,
         }, .{
             .type = .storage_image,
-            .descriptor_count = DeviceOnlyResources.image_count,
+            .descriptor_count = descriptor_image_count,
         } };
         const pool_info = vk.DescriptorPoolCreateInfo{
             .flags = .{},
@@ -315,6 +327,7 @@ pub fn init(
         // for image we use one set one binding, but storage image
         {
             const bindings = [_]vk.DescriptorSetLayoutBinding{
+                // target image
                 .{
                     .binding = 0,
                     .descriptor_type = .storage_image,
@@ -601,6 +614,21 @@ pub fn init(
                 };
             }
 
+            // write image descriptor set
+            {
+                const image_set_index = (Resource{ .device = .draw_image_s }).toDescriptorIndex();
+                writes[@intFromEnum(DeviceOnlyResources.draw_image_s)] = vk.WriteDescriptorSet{
+                    .dst_set = target_descriptor_sets[image_set_index],
+                    .dst_binding = 0,
+                    .dst_array_element = 0,
+                    .descriptor_count = 1,
+                    .descriptor_type = .storage_image,
+                    .p_image_info = @ptrCast(&image_info),
+                    .p_buffer_info = undefined,
+                    .p_texel_buffer_view = undefined,
+                };
+            }
+
             {
                 const brick_set_res = Resource{ .device = .bricks_set_s };
                 writes[@intFromEnum(DeviceOnlyResources.bricks_set_s)] = vk.WriteDescriptorSet{
@@ -656,21 +684,6 @@ pub fn init(
                     .descriptor_type = .storage_buffer,
                     .p_image_info = undefined,
                     .p_buffer_info = @ptrCast(&infos[(Resource{ .device = .material_indices_b }).toBufferIndex()]),
-                    .p_texel_buffer_view = undefined,
-                };
-            }
-
-            // write image descriptor set
-            {
-                const image_set_index = (Resource{ .device = .draw_image_s }).toDescriptorIndex();
-                writes[@intFromEnum(DeviceOnlyResources.draw_image_s)] = vk.WriteDescriptorSet{
-                    .dst_set = target_descriptor_sets[image_set_index],
-                    .dst_binding = 0,
-                    .dst_array_element = 0,
-                    .descriptor_count = 1,
-                    .descriptor_type = .storage_image,
-                    .p_image_info = @ptrCast(&image_info),
-                    .p_buffer_info = undefined,
                     .p_texel_buffer_view = undefined,
                 };
             }
@@ -865,9 +878,6 @@ pub const Resource = union(enum) {
     pub fn toBufferIndex(comptime resource: Resource) usize {
         // Preconditions
         comptime {
-            // Expect draw_image_s to be last entry
-            std.debug.assert(@intFromEnum(DeviceOnlyResources.draw_image_s) == DeviceOnlyResources.all_count - 1);
-
             switch (resource) {
                 Resource.device => |d_resource| {
                     if (d_resource == DeviceOnlyResources.draw_image_s) {
@@ -876,14 +886,26 @@ pub const Resource = union(enum) {
                 },
                 Resource.host_and_device => {},
             }
+
+            if (countImages(HostAndDeviceResources) != 0) {
+                @compileError("Resource.host_and_device case to check for image");
+            }
         }
 
         switch (resource) {
             Resource.device => |d_resource| {
-                return @intFromEnum(d_resource);
+                comptime var offset = 0;
+                inline for (0..@intFromEnum(d_resource)) |enum_value| {
+                    const enum_tag: DeviceOnlyResources = @enumFromInt(enum_value);
+                    const enum_name = @tagName(enum_tag);
+                    if (comptime std.mem.indexOf(u8, enum_name, "image")) |_| {
+                        offset += 1;
+                    }
+                }
+                return @intFromEnum(d_resource) - offset;
             },
             Resource.host_and_device => |hd_resource| {
-                return @intFromEnum(hd_resource) + DeviceOnlyResources.all_count - DeviceOnlyResources.image_count;
+                return @intFromEnum(hd_resource) + DeviceOnlyResources.all_count - countImages(DeviceOnlyResources);
             },
         }
     }

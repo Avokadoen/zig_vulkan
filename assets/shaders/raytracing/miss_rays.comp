@@ -30,5 +30,5 @@ void main() {
 
     // calculate some sky color in the event of a miss
     float y_factor = 0.5 * (ray.direction.y + 1.0);
-    ray_shadings[index].color += vec3(1.0 - y_factor) * start_value + y_factor * end_value;
+    ray_shadings[index].color *= vec3(1.0 - y_factor) * start_value + y_factor * end_value;
 }

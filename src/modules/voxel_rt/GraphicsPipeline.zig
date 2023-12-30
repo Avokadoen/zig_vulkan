@@ -10,6 +10,9 @@ const GpuBufferMemory = render.GpuBufferMemory;
 const Swapchain = render.swapchain.Data;
 const memory = render.memory;
 
+const RayDeviceResources = @import("RayDeviceResources.zig");
+const Resource = RayDeviceResources.Resource;
+
 const shaders = @import("shaders");
 
 const Vertex = extern struct {
@@ -28,17 +31,11 @@ pub const vertices = [_]Vertex{
 pub const indices = [_]u16{ 0, 1, 2, 2, 3, 0 };
 
 pub const PushConstant = extern struct {
-    samples: i32,
-    distribution_bias: f32,
-    pixel_multiplier: f32,
-    inverse_hue_tolerance: f32,
+    enable_tone_mapping: c_uint,
 };
 
 pub const Config = struct {
-    samples: i32 = 20, // HIGHER = NICER = SLOWER
-    distribution_bias: f32 = 0.6, // between 0. and 1.
-    pixel_multiplier: f32 = 1.5, // between 1. and 3. (keep low)
-    inverse_hue_tolerance: f32 = 20, // (2. - 30.)
+    enable_tone_mapping: bool = false,
 };
 
 /// Pipeline to draw a single texture to screen
@@ -99,10 +96,12 @@ pub fn init(
     }
 
     const descriptor_pool = blk: {
-        const pool_sizes = [_]vk.DescriptorPoolSize{.{
-            .type = .combined_image_sampler,
-            .descriptor_count = 1, // TODO: swap image size ?
-        }};
+        const pool_sizes = [_]vk.DescriptorPoolSize{
+            .{
+                .type = .combined_image_sampler,
+                .descriptor_count = 1, // TODO: swap image size ?
+            },
+        };
         const descriptor_pool_info = vk.DescriptorPoolCreateInfo{
             .flags = .{},
             .max_sets = @as(u32, @intCast(swapchain.images.len)),
@@ -114,15 +113,17 @@ pub fn init(
     errdefer ctx.vkd.destroyDescriptorPool(ctx.logical_device, descriptor_pool, null);
 
     const descriptor_set_layout = blk: {
-        const set_layout_bindings = [_]vk.DescriptorSetLayoutBinding{.{
-            .binding = 0,
-            .descriptor_type = .combined_image_sampler,
-            .descriptor_count = 1,
-            .stage_flags = .{
-                .fragment_bit = true,
+        const set_layout_bindings = [_]vk.DescriptorSetLayoutBinding{
+            .{
+                .binding = 0,
+                .descriptor_type = .combined_image_sampler,
+                .descriptor_count = 1,
+                .stage_flags = .{
+                    .fragment_bit = true,
+                },
+                .p_immutable_samplers = null,
             },
-            .p_immutable_samplers = null,
-        }};
+        };
         const set_layout_info = vk.DescriptorSetLayoutCreateInfo{
             .flags = .{},
             .binding_count = set_layout_bindings.len,
@@ -159,16 +160,18 @@ pub fn init(
             .image_view = draw_image_view,
             .image_layout = .shader_read_only_optimal,
         };
-        const write_descriptor_sets = [_]vk.WriteDescriptorSet{.{
-            .dst_set = descriptor_set,
-            .dst_binding = 0,
-            .dst_array_element = 0,
-            .descriptor_count = 1,
-            .descriptor_type = .combined_image_sampler,
-            .p_image_info = @as([*]const vk.DescriptorImageInfo, @ptrCast(&descriptor_info)),
-            .p_buffer_info = undefined,
-            .p_texel_buffer_view = undefined,
-        }};
+        const write_descriptor_sets = [_]vk.WriteDescriptorSet{
+            .{
+                .dst_set = descriptor_set,
+                .dst_binding = 0,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .combined_image_sampler,
+                .p_image_info = @ptrCast(&descriptor_info),
+                .p_buffer_info = undefined,
+                .p_texel_buffer_view = undefined,
+            },
+        };
         ctx.vkd.updateDescriptorSets(
             ctx.logical_device,
             write_descriptor_sets.len,
@@ -404,10 +407,7 @@ pub fn init(
 
     const shader_constants = try allocator.create(PushConstant);
     shader_constants.* = .{
-        .samples = config.samples,
-        .distribution_bias = config.distribution_bias,
-        .pixel_multiplier = config.pixel_multiplier,
-        .inverse_hue_tolerance = config.inverse_hue_tolerance,
+        .enable_tone_mapping = if (config.enable_tone_mapping) 1 else 0,
     };
 
     return GraphicsPipeline{

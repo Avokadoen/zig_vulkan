@@ -15,7 +15,7 @@ layout (push_constant) readonly uniform PushConstants {
 } push_constant;
 
 
-layout(Rgba8, set = 0, binding = 0) uniform writeonly image2D img_output;
+layout(rgba16f, set = 0, binding = 0) uniform writeonly image2D img_output;
 
 layout (std430, set = 1, binding = 0) readonly buffer HitLimitBuffer {
     HitLimits limits;
@@ -23,18 +23,6 @@ layout (std430, set = 1, binding = 0) readonly buffer HitLimitBuffer {
 layout (std430, set = 2, binding = 0) readonly buffer RayShadingBuffer {
     RayShading ray_shadings[];
 };
-
-// TODO: https://bruop.github.io/exposure/
-// source: https://www.shadertoy.com/view/WdjSW3
-vec3 Tonemap_ACES(vec3 x) {
-    // Narkowicz 2015, "ACES Filmic Tone Mapping Curve"
-    const vec3 a = vec3(2.51);
-    const vec3 b = vec3(0.03);
-    const vec3 c = vec3(2.43);
-    const vec3 d = vec3(0.59);
-    const vec3 e = vec3(0.14);
-    return (x * (a * x + b)) / (x * (c * x + d) + e);
-}
 
 void main() {
     uint index;
@@ -59,6 +47,7 @@ void main() {
         bitfieldExtract(ray_shading.pixel_coord, 16, 16),
         bitfieldExtract(ray_shading.pixel_coord, 0, 16)
     );
+
     imageStore(img_output, pixel_coord, vec4(ray_shading.color, 1.0));
 }
 

@@ -48,7 +48,7 @@ post_process_window_active: bool,
 sun_window_active: bool,
 grid_settings_window_active: bool,
 
-device_properties: vk.PhysicalDeviceProperties,
+device_name: [vk.MAX_PHYSICAL_DEVICE_NAME_SIZE]u8,
 
 metrics_state: MetricState,
 
@@ -71,6 +71,11 @@ pub fn init(ctx: Context, gui_width: f32, gui_height: f32, state_binding: StateB
     zgui.io.setDisplaySize(gui_width, gui_height);
     zgui.io.setDisplayFramebufferScale(1.0, 1.0);
 
+    var device_properties = vk.PhysicalDeviceProperties2{
+        .properties = undefined,
+    };
+    ctx.vki.getPhysicalDeviceProperties2(ctx.physical_device, &device_properties);
+
     return ImguiGui{
         .state_binding = state_binding,
         .camera_window_active = config.camera_window_active,
@@ -78,7 +83,7 @@ pub fn init(ctx: Context, gui_width: f32, gui_height: f32, state_binding: StateB
         .post_process_window_active = config.post_process_window_active,
         .sun_window_active = config.sun_window_active,
         .grid_settings_window_active = config.grid_settings_window_active,
-        .device_properties = ctx.getPhysicalDeviceProperties(),
+        .device_name = device_properties.properties.device_name,
         .metrics_state = .{
             .update_frame_timings = config.update_frame_timings,
             .frame_times = [_]f32{0} ** 128,
@@ -169,7 +174,7 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
         if (self.benchmark) |*b| {
             if (b.update(dt)) {
                 self.state_binding.camera_ptr.reset();
-                b.printReport(self.device_properties.device_name[0..]);
+                b.printReport(&self.device_name);
                 break :blk null;
             }
         }
@@ -241,8 +246,8 @@ inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
     defer zgui.end();
     if (metrics_open == false) return;
 
-    const zero_index = std.mem.indexOf(u8, &self.device_properties.device_name, &[_]u8{0});
-    zgui.textUnformatted(self.device_properties.device_name[0..zero_index.?]);
+    const zero_index = std.mem.indexOf(u8, &self.device_name, &[_]u8{0});
+    zgui.textUnformatted(self.device_name[0..zero_index.?]);
 
     if (zgui.plot.beginPlot("Frame times", .{})) {
         defer zgui.plot.endPlot();
@@ -308,25 +313,13 @@ inline fn drawPostProcessWindowIfEnabled(self: *ImguiGui) void {
     defer zgui.end();
     if (post_window_open == false) return;
 
-    _ = zgui.inputInt("Samples", .{ .v = &self.state_binding.gfx_pipeline_shader_constants.samples, .step_fast = 2 });
-    imguiToolTip("Higher sample count result in less noise\nThis comes at the cost of performance", .{});
-
-    _ = zgui.sliderFloat("Distribution bias", .{
-        .v = &self.state_binding.gfx_pipeline_shader_constants.distribution_bias,
-        .min = 0,
-        .max = 1,
-    });
-    _ = zgui.sliderFloat("Pixel Multiplier", .{
-        .v = &self.state_binding.gfx_pipeline_shader_constants.pixel_multiplier,
-        .min = 1,
-        .max = 3,
-    });
-    imguiToolTip("should be kept low", .{});
-    _ = zgui.sliderFloat("Inverse Hue Tolerance", .{
-        .v = &self.state_binding.gfx_pipeline_shader_constants.inverse_hue_tolerance,
-        .min = 2,
-        .max = 30,
-    });
+    // Toggle tone mapping
+    {
+        var enabled = (self.state_binding.gfx_pipeline_shader_constants.enable_tone_mapping > 0);
+        _ = zgui.checkbox("Enable tone mapping", .{ .v = &enabled });
+        self.state_binding.gfx_pipeline_shader_constants.enable_tone_mapping = if (enabled) 1 else 0;
+        imguiToolTip("Toggle lumenocity reinhard tone mapping", .{});
+    }
 }
 
 fn drawGridSettingsWindowIfEnabled(self: *ImguiGui, ctx: Context, pipeline: *Pipeline) void {

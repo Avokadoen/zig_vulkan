@@ -159,7 +159,11 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
     self.graphics_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.graphics, 0);
     self.present_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.present, 0);
 
-    self.physical_device_limits = self.getPhysicalDeviceProperties().limits;
+    var device_properties = vk.PhysicalDeviceProperties2{
+        .properties = undefined,
+    };
+    self.vki.getPhysicalDeviceProperties2(self.physical_device, &device_properties);
+    self.physical_device_limits = device_properties.properties.limits;
 
     // possibly a bit wasteful, but to get compile errors when forgetting to
     // init a variable the partial context variables are moved to a new context which we return
@@ -228,10 +232,6 @@ pub fn createComputePipeline(self: Context, create_info: vk.ComputePipelineCreat
 /// destroy pipeline from vulkan *not* from the application memory
 pub fn destroyPipeline(self: Context, pipeline: vk.Pipeline) void {
     self.vkd.destroyPipeline(self.logical_device, pipeline, null);
-}
-
-pub fn getPhysicalDeviceProperties(self: Context) vk.PhysicalDeviceProperties {
-    return self.vki.getPhysicalDeviceProperties(self.physical_device);
 }
 
 /// caller must destroy returned render pass

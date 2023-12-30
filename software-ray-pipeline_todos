@@ -19,8 +19,9 @@
     * [x] miss pipeline
     * [ ] scatter pipeline
         * [ ] material data lookup
-            * [ ] color
+            * [x] color
             * [ ] scatter behaviour (mat type)
+            * [ ] handle ray scatter abort signal (route ray to miss buffer)
         * [ ] activate scatter functions
     * [x] draw ray pipeline
         * [x] resolve RC (flickering) and bottom of image missing output
@@ -31,6 +32,8 @@
     * [x] unloading
     * [x] loading
     * [ ] remove allocs in pipeline draw used for streaming 
+* [ ] tone mapping
+* [ ] bayer noise (rand.comp): TODO: look at using bayer noise https://www.shadertoy.com/view/stfXWn
 * [ ] dynamic voxel scenes possible (can be as simple as single voxel on/off to start)
 * [x] only one atomicAdd pr warp, use shared memory to share start index with threads that use thread id + warp offset to grab rays
 * [ ] t_min + t_max limits in gui and camera
@@ -49,6 +52,8 @@
 * [ ] ~~Only do one vkQueueSubmit per bounce (submit all stages at once)~~ Since we plan different queue between each stage we cant do this :(
     * [ ] should be fine to do? Should use a single queue for all work except transfers (so potentially 2 vkQueueSubmits)
 * [x] Replace timeline semaphore syncing with normal memory barriers!
-
+* [ ] Make ticket on FSR
+    * [x] remove golden ration "denoising"
+* [ ] Find a elegant way of introducing emitted vs color
 
 

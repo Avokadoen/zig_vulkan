@@ -58,6 +58,12 @@ void main() {
     // TODO: random dir when multi samples
     // TODO: proper random (blue noise)
     // TODO: remove division
+
+    // also: "One way to do this is to read the texture at some fixed offset. 
+    // For instance, if you read the first value at (pixelX, pixelY) % textureSize, 
+    // you might read the second value at (pixelX+5, pixelY+7) % textureSize"
+    // https://developer.nvidia.com/blog/rendering-in-real-time-with-spatiotemporal-blue-noise-textures-part-2/
+
     const float u = float(pixel_coord.x) / float(push_constant.image_width - 1);
     const float v = float(pixel_coord.y) / float(push_constant.image_height - 1);
     
@@ -72,7 +78,7 @@ void main() {
 
     const uint pixel = (pixel_coord.x << 16) | pixel_coord.y;
     ray_shadings[index] = RayShading(
-        vec3(0),    // color
+        vec3(1),    // color
         pixel       // pixel_coord
     );
 }

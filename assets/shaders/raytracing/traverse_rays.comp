@@ -75,7 +75,7 @@ void main() {
 
     uint normal_index_3b_voxel_index_9b_brick_index_20b = 0;
     // TODO: configurable
-    float t_min = 0.0001;
+    float t_min = 0.001;
     float t_max = 1000 - ray.t_value;
     if (GridHit(ray, t_min, t_max, normal_index_3b_voxel_index_9b_brick_index_20b)) {
         const uint out_index = atomicAdd(limits.out_hit_count, 1);

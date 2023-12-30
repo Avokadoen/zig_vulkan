@@ -94,8 +94,7 @@ pub const Dispatch1D = extern struct {
     x: c_uint,
 
     pub fn init(ctx: Context) Dispatch1D {
-        const device_properties = ctx.getPhysicalDeviceProperties();
-        const dim_size = device_properties.limits.max_compute_work_group_invocations;
+        const dim_size = ctx.physical_device_limits.max_compute_work_group_invocations;
         return Dispatch1D{ .x = dim_size };
     }
 };
@@ -105,8 +104,7 @@ pub const Dispatch2D = extern struct {
     y: c_uint,
 
     pub fn init(ctx: Context) Dispatch2D {
-        const device_properties = ctx.getPhysicalDeviceProperties();
-        const dim_size = device_properties.limits.max_compute_work_group_invocations;
+        const dim_size = ctx.physical_device_limits.max_compute_work_group_invocations;
         const uniform_dim = @as(u32, @intFromFloat(@floor(@sqrt(@as(f64, @floatFromInt(dim_size))))));
         return Dispatch2D{
             .x = uniform_dim,

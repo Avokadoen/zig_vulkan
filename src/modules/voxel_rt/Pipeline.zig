@@ -18,6 +18,8 @@ const ray_pipeline_types = @import("ray_pipeline_types.zig");
 
 // TODO: move pipelines to ./internal/render/
 const RayDeviceResources = @import("RayDeviceResources.zig");
+const Resource = RayDeviceResources.Resource;
+
 const EmitRayPipeline = @import("EmitRayPipeline.zig");
 const TraverseRayPipeline = @import("TraverseRayPipeline.zig");
 const BubbleSortPipeline = @import("gpu_sort/BubbleSortPipeline.zig");
@@ -133,11 +135,12 @@ pub fn init(
     const indices = [_]u32{ ctx.queue_indices.graphics, ctx.queue_indices.compute };
     const indices_len: usize = if (ctx.queue_indices.graphics == ctx.queue_indices.compute) 1 else 2;
 
+    const compute_image_format = vk.Format.r16g16b16a16_sfloat;
     const compute_image = blk: {
         const image_info = vk.ImageCreateInfo{
             .flags = .{},
             .image_type = .@"2d",
-            .format = .r8g8b8a8_unorm,
+            .format = compute_image_format,
             .extent = vk.Extent3D{
                 .width = internal_render_resolution.width,
                 .height = internal_render_resolution.height,
@@ -185,7 +188,7 @@ pub fn init(
             .flags = .{},
             .image = compute_image,
             .view_type = .@"2d",
-            .format = .r8g8b8a8_unorm,
+            .format = compute_image_format,
             .components = .{
                 .r = .identity,
                 .g = .identity,
@@ -218,7 +221,7 @@ pub fn init(
             .anisotropy_enable = vk.FALSE,
             .max_anisotropy = 1.0,
             .compare_enable = vk.FALSE,
-            .compare_op = .always,
+            .compare_op = .never,
             .min_lod = 0.0,
             .max_lod = 0.0,
             .border_color = .int_opaque_black,
@@ -684,23 +687,27 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
         // TODO: brick load pipeline queue submit here on dedicated queue. Get semaphore and wait ray pipeline queue execution on brick load completion signal.
     }
 
-    // The pipeline has the following stages:
+    // The pipeline has the following stages: (WIP: not actually ground truth yet! missing stages is marked with "(x)")
     //
     //         emit
     //           |
     //           v
-    //       traverse<--\
-    //           |       |
-    //      sort_active  |
-    //          / \      |
-    //         v   v     |-([1] no)
-    //       miss  hit   |
-    //        |      x---|
-    //        \     / \- - - -([1] reached max bounce?)
-    //         \   /\
-    //           v   ([1] yes)
+    //       traverse <------\
+    //           |            \
+    //      sort_active (x)    |
+    //          / \_____       |
+    //         /        v      |
+    //        /         hit    |
+    //       |           x- - -|-([1] scatter abort signal?)
+    //       |          / \    |
+    //       | [1] yes-|   |- -| - - - - - - - - - - - -- - - ([1] no)
+    //       |         |   |   |
+    //       |     ___ |    x- -|-([2] reached max bounce?)
+    //        \   /       / \__|
+    //        miss       /      \-([2] no)
+    //          \ ______/- -([2] yes)
+    //           v
     //          draw
-    //
     //
     const ray_tracing_pipeline_complete_semaphore = blk: {
         const max_bounces = @as(u32, @intCast(self.camera.d_camera.max_bounce));
