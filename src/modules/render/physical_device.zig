@@ -237,12 +237,15 @@ pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
     var queue_create_infos = try allocator.alloc(vk.DeviceQueueCreateInfo, indices);
     defer allocator.free(queue_create_infos);
 
-    const queue_priority = [_]f32{1.0};
+    const queue_priority = [_]f32{1.0} ** 256;
     for (family_indices[0..indices], 0..) |family_index, i| {
+        const queue_count: u32 = if (family_index == ctx.queue_indices.compute) ctx.queue_indices.compute_queue_count else 1;
+        std.debug.assert(queue_count < queue_priority.len);
+
         queue_create_infos[i] = .{
             .flags = .{},
             .queue_family_index = family_index,
-            .queue_count = if (family_index == ctx.queue_indices.compute) ctx.queue_indices.compute_queue_count else 1,
+            .queue_count = queue_count,
             .p_queue_priorities = &queue_priority,
         };
     }
@@ -257,7 +260,7 @@ pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
     const create_info = vk.DeviceCreateInfo{
         .p_next = @as(*const anyopaque, @ptrCast(&features)),
         .flags = .{},
-        .queue_create_info_count = @as(u32, @intCast(queue_create_infos.len)),
+        .queue_create_info_count = @intCast(queue_create_infos.len),
         .p_queue_create_infos = queue_create_infos.ptr,
         .enabled_layer_count = validation_layer_info.enabled_layer_count,
         .pp_enabled_layer_names = validation_layer_info.enabled_layer_names,
