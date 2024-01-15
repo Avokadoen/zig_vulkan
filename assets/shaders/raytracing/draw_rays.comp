@@ -15,7 +15,7 @@ layout (push_constant) readonly uniform PushConstants {
 } push_constant;
 
 
-layout(rgba16f, set = 0, binding = 0) uniform writeonly image2D img_output;
+layout(rgba16f, set = 0, binding = 0) uniform image2D img_output;
 
 layout (std430, set = 1, binding = 0) readonly buffer HitLimitBuffer {
     HitLimits limits;
@@ -48,6 +48,7 @@ void main() {
         bitfieldExtract(ray_shading.pixel_coord, 0, 16)
     );
 
-    imageStore(img_output, pixel_coord, vec4(ray_shading.color, 1.0));
+    vec4 color = imageLoad(img_output, pixel_coord);
+    imageStore(img_output, pixel_coord, color + vec4(ray_shading.color, 1.0));
 }
 

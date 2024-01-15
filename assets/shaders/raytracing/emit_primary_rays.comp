@@ -14,9 +14,8 @@ layout (push_constant) readonly uniform PushConstants {
     vec3 vertical;
     uint image_height;
     vec3 lower_left_corner;
-    int samples_per_pixel;
+    uint current_sample; 
     vec3 origin;
-    int max_bounce;
 } push_constant;
 
 layout (std430, set = 0, binding = 0) writeonly buffer HitLimitBuffer {
@@ -32,6 +31,8 @@ layout (std430, set = 3, binding = 0) writeonly buffer RayShadingBuffer {
     RayShading ray_shadings[];
 };
 
+const uint sample_offset_x = 3;
+const uint sample_offset_y = 4;
 
 void main() {
     // TODO: sequential indices should map to tiles in the image instead of stripes for better coherency
@@ -41,9 +42,9 @@ void main() {
         0 // normal_4b_and_material_index_28b
     );
 
-    const uvec2 pixel_coord = uvec2(
-        index % push_constant.image_width,
-        index / push_constant.image_width
+    uvec2 pixel_coord = uvec2(
+        (index % push_constant.image_width),
+        (index / push_constant.image_width)
     );
 
     if (pixel_coord.y >= push_constant.image_height) {
@@ -55,7 +56,6 @@ void main() {
     // TODO: sorting might be a more effective way of getting this count, 
     atomicAdd(limits.in_hit_count, 1);
 
-    // TODO: random dir when multi samples
     // TODO: proper random (blue noise)
     // TODO: remove division
 
@@ -64,8 +64,14 @@ void main() {
     // you might read the second value at (pixelX+5, pixelY+7) % textureSize"
     // https://developer.nvidia.com/blog/rendering-in-real-time-with-spatiotemporal-blue-noise-textures-part-2/
 
-    const float u = float(pixel_coord.x) / float(push_constant.image_width - 1);
-    const float v = float(pixel_coord.y) / float(push_constant.image_height - 1);
+    // sample as if we were using blue noise (which is the plan)
+    const float uv_noise_u_offset = pixel_coord.x + sample_offset_x * push_constant.current_sample;
+    const float uv_noise_u = push_constant.current_sample > 0 ? Rand(vec2(uv_noise_u_offset, pixel_coord.y)) : 0;
+    const float u = float(pixel_coord.x + uv_noise_u) / float(push_constant.image_width - 1);
+
+    const float uv_noise_v_offset = pixel_coord.y + sample_offset_y * push_constant.current_sample;
+    const float uv_noise_v = push_constant.current_sample > 0 ? Rand(vec2(pixel_coord.x, uv_noise_v_offset)) : 0;
+    const float v = float(pixel_coord.y + uv_noise_v) / float(push_constant.image_height - 1);
     
     const vec3 ray_dir = fma(push_constant.horizontal, vec3(u), push_constant.lower_left_corner) + fma(vec3(v), push_constant.vertical, -push_constant.origin);
     rays[index] = Ray(

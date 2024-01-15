@@ -32,6 +32,7 @@ pub const indices = [_]u16{ 0, 1, 2, 2, 3, 0 };
 
 pub const PushConstant = extern struct {
     enable_tone_mapping: c_uint,
+    samples_per_pixel: c_uint,
 };
 
 pub const Config = struct {
@@ -408,6 +409,7 @@ pub fn init(
     const shader_constants = try allocator.create(PushConstant);
     shader_constants.* = .{
         .enable_tone_mapping = if (config.enable_tone_mapping) 1 else 0,
+        .samples_per_pixel = 0,
     };
 
     return GraphicsPipeline{

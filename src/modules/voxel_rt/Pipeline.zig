@@ -152,7 +152,11 @@ pub fn init(
                 .@"1_bit" = true,
             },
             .tiling = .optimal,
-            .usage = .{ .sampled_bit = true, .storage_bit = true },
+            .usage = .{
+                .sampled_bit = true,
+                .storage_bit = true,
+                .transfer_dst_bit = true,
+            },
             .sharing_mode = .exclusive,
             .queue_family_index_count = @as(u32, @intCast(indices_len)),
             .p_queue_family_indices = &indices,
@@ -274,19 +278,14 @@ pub fn init(
     var ray_device_resources = try allocator.create(RayDeviceResources);
     errdefer allocator.destroy(ray_device_resources);
 
-    const target_image_info = ray_pipeline_types.ImageInfo{
-        .width = @as(f32, @floatFromInt(internal_render_resolution.width)),
-        .height = @as(f32, @floatFromInt(internal_render_resolution.height)),
-        .image = compute_image,
-        .sampler = sampler,
-        .image_view = compute_image_view,
-    };
     ray_device_resources.* = try RayDeviceResources.init(
         allocator,
         ctx,
-        target_image_info,
+        sampler,
+        compute_image_view,
         init_command_pool,
         &staging_buffers,
+        camera,
         host_brick_state,
     );
     errdefer ray_device_resources.deinit(ctx);
@@ -710,8 +709,6 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
     //          draw
     //
     const ray_tracing_pipeline_complete_semaphore = blk: {
-        const max_bounces = @as(u32, @intCast(self.camera.d_camera.max_bounce));
-
         try ctx.vkd.resetCommandPool(ctx.logical_device, self.ray_command_pool, .{});
 
         const command_begin_info = vk.CommandBufferBeginInfo{
@@ -722,53 +719,114 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
         };
         try ctx.vkd.beginCommandBuffer(self.ray_command_buffers, &command_begin_info);
 
+        // clear compute image which is needed to support multiple rays per pixel
+        {
+            const sub_resource_range = [_]vk.ImageSubresourceRange{.{
+                .aspect_mask = .{ .color_bit = true },
+                .base_mip_level = 0,
+                .level_count = 1,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            }};
+            const image_barrier = [_]vk.ImageMemoryBarrier{.{
+                .src_access_mask = .{ .shader_read_bit = true },
+                .dst_access_mask = .{ .transfer_write_bit = true },
+                .old_layout = .shader_read_only_optimal,
+                .new_layout = .general,
+                .src_queue_family_index = ctx.queue_indices.graphics,
+                // TODO: transfer
+                .dst_queue_family_index = ctx.queue_indices.compute,
+                .image = self.compute_image,
+                .subresource_range = sub_resource_range[0],
+            }};
+            ctx.vkd.cmdPipelineBarrier(
+                self.ray_command_buffers,
+                .{ .fragment_shader_bit = true },
+                .{ .transfer_bit = true },
+                .{},
+                0,
+                undefined,
+                0,
+                undefined,
+                image_barrier.len,
+                &image_barrier,
+            );
+
+            const clear_color = vk.ClearColorValue{ .float_32 = [4]f32{ 0, 0, 0, 0 } };
+            ctx.vkd.cmdClearColorImage(
+                self.ray_command_buffers,
+                self.compute_image,
+                .general,
+                &clear_color,
+                1,
+                &sub_resource_range,
+            );
+        }
+
         // TODO: move to dedicated queue as per TODO above
         self.brick_load_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
 
-        // // putt all to all barrier i mellom hver pipeline
-        // TODO: pipeline barrier expressed here between the appends:
-        self.emit_ray_pipeline.appendPipelineCommands(ctx, self.camera.*, self.ray_command_buffers);
-        // TODO: specify read only vs write only buffer elements (maybe actually loop buffer infos ?)
-        const ray_buffer_memory_barrier = vk.BufferMemoryBarrier{
-            .src_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-            .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-            .src_queue_family_index = ctx.queue_indices.compute,
-            .dst_queue_family_index = ctx.queue_indices.compute,
-            .buffer = self.ray_device_resources.ray_buffer.buffer,
-            .offset = 0,
-            .size = vk.WHOLE_SIZE,
-        };
-        const frame_mem_barriers = [_]vk.BufferMemoryBarrier{ray_buffer_memory_barrier};
-        ctx.vkd.cmdPipelineBarrier(
-            self.ray_command_buffers,
-            .{ .compute_shader_bit = true },
-            .{ .compute_shader_bit = true },
-            .{},
-            0,
-            undefined,
-            frame_mem_barriers.len,
-            &frame_mem_barriers,
-            0,
-            undefined,
-        );
+        const samples_per_pixel = @as(u32, @intCast(self.camera.samples_per_pixel));
+        for (0..samples_per_pixel) |nth_ray_sample| {
 
-        for (0..max_bounces + 1) |bounce_index| {
-            if (bounce_index > 0) {
-                self.ray_device_resources.resetRayLimits(ctx, self.ray_command_buffers);
+            // TODO: specify read only vs write only buffer elements (maybe actually loop buffer infos ?)
+            const ray_buffer_memory_barrier = vk.BufferMemoryBarrier{
+                .src_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+                .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+                .src_queue_family_index = ctx.queue_indices.compute,
+                .dst_queue_family_index = ctx.queue_indices.compute,
+                .buffer = self.ray_device_resources.ray_buffer.buffer,
+                .offset = 0,
+                .size = vk.WHOLE_SIZE,
+            };
+
+            // TODO: this is a bit nasty, should just be argument to record fns
+            self.camera.d_camera.current_sample = @intCast(nth_ray_sample);
+
+            // // putt all to all barrier i mellom hver pipeline
+            // TODO: pipeline barrier expressed here between the appends:
+            self.emit_ray_pipeline.appendPipelineCommands(ctx, self.camera.*, self.ray_command_buffers);
+            const frame_mem_barriers = [_]vk.BufferMemoryBarrier{ray_buffer_memory_barrier};
+            ctx.vkd.cmdPipelineBarrier(
+                self.ray_command_buffers,
+                .{ .compute_shader_bit = true },
+                .{ .compute_shader_bit = true },
+                .{},
+                0,
+                undefined,
+                frame_mem_barriers.len,
+                &frame_mem_barriers,
+                0,
+                undefined,
+            );
+
+            const max_ray_bounces = @as(u32, @intCast(self.camera.max_ray_bounces));
+            for (0..max_ray_bounces + 1) |nth_ray_bounce| {
+                if (nth_ray_bounce > 0) {
+                    self.ray_device_resources.resetRayLimits(ctx, self.ray_command_buffers);
+                }
+                self.traverse_ray_pipeline.appendPipelineCommands(ctx, nth_ray_bounce, self.ray_command_buffers);
+                self.scatter_ray_pipeline.appendPipelineCommands(ctx, nth_ray_bounce, self.ray_command_buffers);
+
+                self.miss_ray_pipeline.appendPipelineCommands(ctx, nth_ray_bounce, self.ray_command_buffers);
+                self.draw_ray_pipeline.appendPipelineCommands(
+                    ctx,
+                    nth_ray_bounce,
+                    .draw_miss,
+                    nth_ray_bounce == 0,
+                    self.compute_image,
+                    self.ray_command_buffers,
+                );
             }
-            self.traverse_ray_pipeline.appendPipelineCommands(ctx, bounce_index, self.ray_command_buffers);
-            self.scatter_ray_pipeline.appendPipelineCommands(ctx, bounce_index, self.ray_command_buffers);
-
-            self.miss_ray_pipeline.appendPipelineCommands(ctx, bounce_index, self.ray_command_buffers);
-            self.draw_ray_pipeline.appendPipelineCommands(ctx, bounce_index, .draw_miss, bounce_index == 0, self.ray_command_buffers);
+            self.draw_ray_pipeline.appendPipelineCommands(
+                ctx,
+                max_ray_bounces,
+                .draw_hit,
+                false,
+                self.compute_image,
+                self.ray_command_buffers,
+            );
         }
-        self.draw_ray_pipeline.appendPipelineCommands(
-            ctx,
-            max_bounces,
-            .draw_hit,
-            false,
-            self.ray_command_buffers,
-        );
 
         self.brick_heartbeat_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
         self.brick_unload_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
@@ -1036,6 +1094,7 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
         ctx.vkd.cmdSetScissor(command_buffer, 0, 1, @as([*]const vk.Rect2D, @ptrCast(&scissor)));
     }
 
+    self.gfx_pipeline.shader_constants.samples_per_pixel = @intCast(self.camera.samples_per_pixel);
     ctx.vkd.cmdPushConstants(
         command_buffer,
         self.gfx_pipeline.pipeline_layout,

@@ -46,6 +46,7 @@ pub const Device = vk.DeviceWrapper(.{
     .cmdBindPipeline = true,
     .cmdBindVertexBuffers = true,
     .cmdBlitImage = true,
+    .cmdClearColorImage = true,
     .cmdCopyBuffer = true,
     .cmdCopyBufferToImage = true,
     .cmdCopyImageToBuffer = true,

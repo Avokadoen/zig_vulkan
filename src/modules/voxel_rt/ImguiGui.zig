@@ -209,13 +209,13 @@ inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
     if (camera_open == false) return;
 
     _ = zgui.sliderInt("max bounces", .{
-        .v = &self.state_binding.camera_ptr.d_camera.max_bounce,
+        .v = &self.state_binding.camera_ptr.max_ray_bounces,
         .min = 0,
         .max = 32,
     });
     imguiToolTip("how many times a ray is allowed to bounce before terminating", .{});
     _ = zgui.sliderInt("samples per pixel", .{
-        .v = &self.state_binding.camera_ptr.d_camera.samples_per_pixel,
+        .v = &self.state_binding.camera_ptr.samples_per_pixel,
         .min = 1,
         .max = 32,
     });

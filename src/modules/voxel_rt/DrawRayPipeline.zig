@@ -148,6 +148,7 @@ pub fn appendPipelineCommands(
     bounce_index: usize,
     draw_op: DrawOp,
     do_image_transition: bool,
+    render_image: vk.Image,
     command_buffer: vk.CommandBuffer,
 ) void {
     const zone = tracy.ZoneN(@src(), @typeName(DrawRayPipeline) ++ " " ++ @src().fn_name);
@@ -165,7 +166,6 @@ pub fn appendPipelineCommands(
             ctx.vkd.cmdEndDebugUtilsLabelEXT(command_buffer);
         }
     }
-
     // TODO: specify read only vs write only buffer elements (maybe actually loop buffer infos ?)
     const ray_buffer_memory_barrier = [_]vk.BufferMemoryBarrier{.{
         .src_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
@@ -224,13 +224,13 @@ pub fn appendPipelineCommands(
 
     if (do_image_transition) {
         const image_barrier = vk.ImageMemoryBarrier{
-            .src_access_mask = .{ .shader_read_bit = true },
+            .src_access_mask = .{ .transfer_write_bit = true },
             .dst_access_mask = .{ .shader_write_bit = true },
-            .old_layout = .shader_read_only_optimal,
+            .old_layout = .general,
             .new_layout = .general,
-            .src_queue_family_index = ctx.queue_indices.graphics,
+            .src_queue_family_index = ctx.queue_indices.compute,
             .dst_queue_family_index = ctx.queue_indices.compute,
-            .image = self.ray_device_resources.target_image_info.image,
+            .image = render_image,
             .subresource_range = .{
                 .aspect_mask = .{ .color_bit = true },
                 .base_mip_level = 0,
@@ -241,7 +241,7 @@ pub fn appendPipelineCommands(
         };
         ctx.vkd.cmdPipelineBarrier(
             command_buffer,
-            .{ .fragment_shader_bit = true },
+            .{ .transfer_bit = true },
             .{ .compute_shader_bit = true },
             .{},
             0,
@@ -253,8 +253,6 @@ pub fn appendPipelineCommands(
         );
     }
 
-    const x_dispatch = @ceil(self.ray_device_resources.target_image_info.width * self.ray_device_resources.target_image_info.height) /
-        @as(f32, @floatFromInt(self.work_group_dim.x)) + 1;
-
-    ctx.vkd.cmdDispatch(command_buffer, @as(u32, @intFromFloat(x_dispatch)), 1, 1);
+    const x_dispatch = self.ray_device_resources.rayDispatch1D(self.work_group_dim);
+    ctx.vkd.cmdDispatch(command_buffer, x_dispatch, 1, 1);
 }

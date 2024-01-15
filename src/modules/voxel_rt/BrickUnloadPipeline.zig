@@ -165,8 +165,6 @@ pub fn appendPipelineCommands(self: BrickUnloadPipeline, ctx: Context, command_b
         undefined,
     );
 
-    const x_dispatch = @ceil(self.ray_device_resources.target_image_info.width * self.ray_device_resources.target_image_info.height) /
-        @as(f32, @floatFromInt(self.work_group_dim.x)) + 1;
-
-    ctx.vkd.cmdDispatch(command_buffer, @intFromFloat(x_dispatch), 1, 1);
+    const x_dispatch = self.ray_device_resources.rayDispatch1D(self.work_group_dim);
+    ctx.vkd.cmdDispatch(command_buffer, x_dispatch, 1, 1);
 }

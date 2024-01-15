@@ -6,8 +6,8 @@ const Vec3 = @Vector(3, f32);
 pub const Config = struct {
     viewport_height: f32 = 2,
     origin: Vec3 = za.Vec3.zero().data,
-    samples_per_pixel: i32 = 2,
-    max_bounce: i32 = 0,
+    samples_per_pixel: u32 = 1,
+    max_ray_bounce: u32 = 0,
     turn_rate: f32 = 0.1,
     normal_speed: f32 = 1,
     sprint_speed: f32 = 2,
@@ -32,6 +32,9 @@ pitch: za.Quat,
 yaw: za.Quat,
 
 vertical_fov: f32,
+
+max_ray_bounces: i32,
+samples_per_pixel: i32,
 d_camera: Device,
 
 pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Config) Camera {
@@ -64,18 +67,19 @@ pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Conf
         .user_input_diabled = config.user_input_diabled,
         .viewport_width = viewport_width,
         .viewport_height = viewport_height,
-        .vertical_fov = vertical_fov,
         .pitch = za.Quat.identity(),
         .yaw = za.Quat.identity(),
+        .vertical_fov = vertical_fov,
+        .max_ray_bounces = @intCast(config.max_ray_bounce),
+        .samples_per_pixel = @intCast(config.samples_per_pixel),
         .d_camera = Device{
             .image_width = image_width,
             .image_height = image_height,
             .horizontal = horizontal.data,
             .vertical = vertical.data,
             .lower_left_corner = lower_left_corner,
+            .current_sample = 0,
             .origin = config.origin,
-            .samples_per_pixel = config.samples_per_pixel,
-            .max_bounce = config.max_bounce,
         },
     };
 }
@@ -188,14 +192,6 @@ pub inline fn orientation(self: Camera) za.Quat {
     return self.yaw.mul(self.pitch).norm();
 }
 
-/// Get byte size of Camera's GPU data
-pub inline fn getGpuSize() u64 {
-    const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
-    defer zone.End();
-
-    return @sizeOf(Device);
-}
-
 inline fn forwardDir(self: Camera) za.Vec3 {
     const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
     defer zone.End();
@@ -225,14 +221,22 @@ inline fn lowerLeftCorner(self: Camera) Vec3 {
     return self.d_camera.origin - self.d_camera.horizontal * @"0.5" - self.d_camera.vertical * @"0.5" - self.forwardDir().data;
 }
 
+pub inline fn totalRayCount(self: Camera) u64 {
+    return self.rayCountPerSampleIter() * @as(u64, @intCast(self.samples_per_pixel));
+}
+
+pub inline fn rayCountPerSampleIter(self: Camera) u64 {
+    const pixel_count: u64 = @intCast(self.d_camera.image_width * self.d_camera.image_height);
+    return pixel_count;
+}
+
 // uniform Camera, binding: 1
 pub const Device = extern struct {
     horizontal: [3]f32,
-    image_width: u32,
+    image_width: c_uint,
     vertical: [3]f32,
-    image_height: u32,
+    image_height: c_uint,
     lower_left_corner: [3]f32,
-    samples_per_pixel: i32,
+    current_sample: c_uint,
     origin: [3]f32,
-    max_bounce: i32,
 };

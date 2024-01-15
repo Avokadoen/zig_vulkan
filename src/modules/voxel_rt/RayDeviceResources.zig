@@ -23,6 +23,7 @@ const RayHash = ray_pipeline_types.RayHash;
 const BrickLoadRequest = ray_pipeline_types.BrickLoadRequest;
 
 const HostBrickState = @import("brick/HostBrickState.zig");
+const Camera = @import("Camera.zig");
 
 fn countDescriptorSets(comptime Enum: type) comptime_int {
     var count: comptime_int = 0;
@@ -152,22 +153,24 @@ target_descriptor_pool: vk.DescriptorPool,
 target_descriptor_layouts: [descriptor_set_count]vk.DescriptorSetLayout,
 target_descriptor_sets: [descriptor_set_count]vk.DescriptorSet,
 
-target_image_info: ImageInfo,
 buffer_infos: [descriptor_buffer_count]vk.DescriptorBufferInfo,
 ray_buffer: GpuBufferMemory,
 voxel_scene_buffer: GpuBufferMemory,
 
 request_buffer: GpuBufferMemory,
 
-// TODO: move
+// TODO: move these
+camera: *const Camera,
 host_brick_state: *const HostBrickState,
 
 pub fn init(
     allocator: Allocator,
     ctx: Context,
-    target_image_info: ImageInfo,
+    target_image_sampler: vk.Sampler,
+    target_image_view: vk.ImageView,
     init_command_pool: vk.CommandPool,
     staging_buffer: *StagingRamp,
+    camera: *const Camera,
     host_brick_state: *const HostBrickState,
 ) !RayDeviceResources {
     const zone = tracy.ZoneN(@src(), @typeName(RayDeviceResources) ++ " " ++ @src().fn_name);
@@ -488,7 +491,7 @@ pub fn init(
         var infos: [descriptor_buffer_count]vk.DescriptorBufferInfo = undefined;
 
         // TODO: when we convert this from enum to a struct we can bake some of the info into the struct.
-        const ray_count: u64 = @intFromFloat(target_image_info.width * target_image_info.height);
+        const ray_count: u64 = camera.rayCountPerSampleIter();
 
         // TODO: offset each entry by item alignment
         const ray_ranges = [DeviceOnlyResources.ray_count]vk.DeviceSize{
@@ -589,8 +592,8 @@ pub fn init(
         }
 
         const image_info = vk.DescriptorImageInfo{
-            .sampler = target_image_info.sampler,
-            .image_view = target_image_info.image_view,
+            .sampler = target_image_sampler,
+            .image_view = target_image_view,
             .image_layout = .general,
         };
         const write_descriptor_set = write_blk: {
@@ -768,10 +771,10 @@ pub fn init(
         .target_descriptor_pool = target_descriptor_pool,
         .target_descriptor_layouts = target_descriptor_layouts,
         .target_descriptor_sets = target_descriptor_sets,
-        .target_image_info = target_image_info,
         .ray_buffer = ray_buffer,
         .voxel_scene_buffer = voxel_scene_buffer,
         .request_buffer = request_buffer,
+        .camera = camera,
         .host_brick_state = host_brick_state,
     };
 }
@@ -1111,4 +1114,15 @@ pub fn mapBrickRequestData(self: *RayDeviceResources, ctx: Context) !void {
 pub inline fn getBufferInfo(self: RayDeviceResources, comptime resource: Resource) vk.DescriptorBufferInfo {
     const index = resource.toBufferIndex();
     return self.buffer_infos[index];
+}
+
+pub inline fn rayDispatch1D(self: RayDeviceResources, dispatch_1d: ray_pipeline_types.Dispatch1D) u32 {
+    const ray_count: f32 = @floatFromInt(self.camera.rayCountPerSampleIter());
+    const x_dispatch = std.math.divCeil(
+        f32,
+        ray_count,
+        @as(f32, @floatFromInt(dispatch_1d.x + 1)),
+    ) catch unreachable;
+
+    return @as(u32, @intFromFloat(x_dispatch));
 }

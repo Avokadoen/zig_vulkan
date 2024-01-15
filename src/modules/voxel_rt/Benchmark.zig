@@ -81,7 +81,7 @@ pub fn printReport(self: Benchmark, device_name: []const u8) void {
     const zone = tracy.ZoneN(@src(), @typeName(Benchmark) ++ " " ++ @src().fn_name);
     defer zone.End();
 
-    self.report.print(device_name, self.camera.d_camera, self.sun_enabled);
+    self.report.print(device_name, self.camera.*, self.sun_enabled);
 }
 
 pub const Report = struct {
@@ -112,7 +112,7 @@ pub const Report = struct {
         return self.delta_time_sum / @as(f32, @floatFromInt(self.delta_time_sum_samples));
     }
 
-    pub fn print(self: Report, device_name: []const u8, d_camera: Camera.Device, sun_enabled: bool) void {
+    pub fn print(self: Report, device_name: []const u8, camera: Camera, sun_enabled: bool) void {
         const zone = tracy.ZoneN(@src(), @typeName(Report) ++ " " ++ @src().fn_name);
         defer zone.End();
 
@@ -134,12 +134,12 @@ pub const Report = struct {
             "Sun enabled",
             sun_enabled,
             " > image dimensions",
-            d_camera.image_width,
-            d_camera.image_height,
+            camera.d_camera.image_width,
+            camera.d_camera.image_height,
             " > max bounce",
-            d_camera.max_bounce,
+            camera.max_ray_bounces,
             " > samples per pixel",
-            d_camera.samples_per_pixel,
+            camera.samples_per_pixel,
         });
     }
 };
