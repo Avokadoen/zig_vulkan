@@ -37,7 +37,7 @@ const vec3 normal_map[] = vec3[](
 );
 
 void scatterLambertian(inout Ray r_in, vec3 hit_point, vec3 hit_normal);
-bool scatterMetal(inout Ray r_in, float fuzz, vec3 hit_point, vec3 hit_normal);
+void scatterMetal(inout Ray r_in, float fuzz, vec3 hit_point, vec3 hit_normal);
 void scatterDielectric(inout Ray r_in, float ir, vec3 hit_point, vec3 hit_normal);
 
 void main() {
@@ -77,14 +77,11 @@ void main() {
 
         case MAT_T_METAL:
         // if ray is absorbed in material
-        if (scatterMetal(ray, material.type_value, hit_point, hit_normal) == false) {
-            // TODO: we need a way of moving the ray to the *post* miss ray buffer so that it will be drawn as is
-        }
+        scatterMetal(ray, material.type_value, hit_point, hit_normal);
         break;
 
         case MAT_T_DIELECTRIC: 
         scatterDielectric(ray, material.type_value, hit_point, hit_normal);
-
         break;
 
         default:
@@ -106,17 +103,20 @@ void scatterLambertian(inout Ray r_in, vec3 hit_point, vec3 hit_normal) {
     r_in.direction = normalize(hit_normal + RandVec3(hit_point.xy + hit_point.z, -0.6, 0.6));
     // HACK: scew origin by hit normal to avoid self intersections
     r_in.origin = hit_point;
-    r_in.internal_reflection = 1;
+
+    // TODO: buggy scenario: dielectric voxel refract straight to intersect with neighbouring voxel, we should not update internal relfection
+    r_in.internal_reflection_16b_padding_15b_abort_ray_1b = packHalf2x16(vec2(1, 0));
 }
 
-bool scatterMetal(inout Ray r_in, float fuzz, vec3 hit_point, vec3 hit_normal) {
+void scatterMetal(inout Ray r_in, float fuzz, vec3 hit_point, vec3 hit_normal) {
     vec3 reflected = reflect(r_in.direction, hit_normal);
     r_in.direction = normalize(reflected + RandVec3(hit_point.xy + hit_point.z, -fuzz, fuzz));
     // HACK: scew origin by hit normal to avoid self intersections
     r_in.origin = hit_point;
-    r_in.internal_reflection = 1;
 
-    return dot(r_in.direction, hit_normal) > 0;
+    // TODO: buggy scenario: dielectric voxel refract straight to intersect with neighbouring voxel, we should not update internal relfection
+    const uint abort_ray_traversal = uint(dot(r_in.direction, hit_normal) <= 0);
+    r_in.internal_reflection_16b_padding_15b_abort_ray_1b = packHalf2x16(vec2(1, uintBitsToFloat(abort_ray_traversal)));
 }
 
 // Source: Ray tracing gems 2 page 107 (one of Bec's methods)
@@ -142,18 +142,22 @@ bool transmissionDirection(float n1, float n2, vec3 ray_dir, vec3 normal, out ve
     return true;
 }
 
-void scatterDielectric(inout Ray r_in, float ir, vec3 hit_point, vec3 hit_normal) {
+void scatterDielectric(inout Ray r_in, float material_ir, vec3 hit_point, vec3 hit_normal) {
     // TODO: better noise (blue :))
     // TODO: add property to glass: roughness (0 should be no noise/rng)
     const vec3 normal = normalize(hit_normal + RandVec3(hit_point.xy + hit_point.z, -0.05, 0.05));
     vec3 direction;
-    const bool should_refract = transmissionDirection(ir, r_in.internal_reflection, r_in.direction, normal, direction);
+
+    float ray_ir = unpackHalf2x16(r_in.internal_reflection_16b_padding_15b_abort_ray_1b).x;
+
+    const bool should_refract = transmissionDirection(material_ir, ray_ir, r_in.direction, normal, direction);
     if (should_refract && Rand(hit_point) > 0.5) {
         r_in.direction = direction;
-        r_in.internal_reflection = ir;
+        r_in.internal_reflection_16b_padding_15b_abort_ray_1b = packHalf2x16(vec2(material_ir, 0));
     } else {
         r_in.direction = reflect(r_in.direction, normal);
-        r_in.internal_reflection = 1;
+        // TODO: buggy scenario: dielectric voxel refract straight to intersect with neighbouring voxel, we should not update internal relfection
+        r_in.internal_reflection_16b_padding_15b_abort_ray_1b = packHalf2x16(vec2(1, 0));
     }
 }
 

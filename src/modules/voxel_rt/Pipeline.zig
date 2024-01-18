@@ -686,27 +686,46 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
         // TODO: brick load pipeline queue submit here on dedicated queue. Get semaphore and wait ray pipeline queue execution on brick load completion signal.
     }
 
-    // The pipeline has the following stages: (WIP: not actually ground truth yet! missing stages is marked with "(x)")
+    // The pipeline has the following stages: (WIP: not actually ground truth yet! missing stages is marked with "(!)")
     //
-    //         emit
+    //      clear image
     //           |
     //           v
-    //       traverse <------\
-    //           |            \
-    //      sort_active (x)    |
-    //          / \_____       |
-    //         /        v      |
-    //        /         hit    |
-    //       |           x- - -|-([1] scatter abort signal?)
-    //       |          / \    |
-    //       | [1] yes-|   |- -| - - - - - - - - - - - -- - - ([1] no)
-    //       |         |   |   |
-    //       |     ___ |    x- -|-([2] reached max bounce?)
-    //        \   /       / \__|
-    //        miss       /      \-([2] no)
-    //          \ ______/- -([2] yes)
-    //           v
-    //          draw
+    //         emit <---------------------------------------\
+    //           |                                           \
+    //           v                                            \
+    //       traverse <------\                                 \
+    //           |            \                                 \
+    //      sort_active (!)    |                                 |
+    //          / \_____       |                                 |
+    //         /        \      |                                 |
+    //        /          v     |                                 |
+    //       |          hit    |                                 |
+    //       |           x- - -|-([1] scatter abort signal? (!)) |
+    //       |          / \    |                                 |
+    //       | [1] yes-|   |- -| - - - ([1] no)                  |
+    //       |     (!) |   |   |                                 |
+    //       |         |   x- -|-([2] reached max bounce?)       |
+    //        \        |  / \  |                                 |
+    //        miss     | |   \_|-([2] no)                        |
+    //          \ _____|_/                                       |- -([3] no)
+    //           v       \ - - ([2] yes)                        /
+    //          draw                                           /
+    //           |                                            /
+    //           x - - - - -([3] ray sample count reached)   /
+    //          / \_________________________________________/
+    //         |
+    //         |- -([3] yes)
+    //         |
+    //         v
+    //   present image
+    //
+    //
+    // Caveats:
+    //      - Abort ray is implemented a bit different than the graph, instead we:
+    //         1. Tag ray in the hit stage as aborted
+    //         2. Sent to travers where it is ignored and directly sent to miss
+    //         3. Arrive at draw
     //
     const ray_tracing_pipeline_complete_semaphore = blk: {
         try ctx.vkd.resetCommandPool(ctx.logical_device, self.ray_command_pool, .{});
@@ -783,7 +802,6 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
             // TODO: this is a bit nasty, should just be argument to record fns
             self.camera.d_camera.current_sample = @intCast(nth_ray_sample);
 
-            // // putt all to all barrier i mellom hver pipeline
             // TODO: pipeline barrier expressed here between the appends:
             self.emit_ray_pipeline.appendPipelineCommands(ctx, self.camera.*, self.ray_command_buffers);
             const frame_mem_barriers = [_]vk.BufferMemoryBarrier{ray_buffer_memory_barrier};

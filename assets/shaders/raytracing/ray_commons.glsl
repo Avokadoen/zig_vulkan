@@ -66,7 +66,7 @@ struct Brick {
 // Must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig Ray
 struct Ray {
     vec3 origin;
-    float internal_reflection;
+    uint internal_reflection_16b_padding_15b_abort_ray_1b;
     vec3 direction;
     float t_value; // TOOD: move it's own buffer and track total_t_value as well
 };

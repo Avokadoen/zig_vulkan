@@ -70,7 +70,11 @@ pub const BrickLoadRequest = extern struct {
 // must be kept in sync with assets/shaders/raytracing/ray_commons.glsl Ray
 pub const Ray = extern struct {
     origin: [3]f32,
-    internal_reflection: f32,
+    ir_and_abort_tag: packed struct {
+        ir: f16,
+        padding: u15,
+        abort_ray: u1,
+    },
     direction: [3]f32,
     t_value: f32,
 };

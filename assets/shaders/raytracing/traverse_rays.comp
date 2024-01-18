@@ -71,13 +71,23 @@ void main() {
     }
 
     Ray ray = in_rays[index];
-    RayShading ray_shading = in_ray_shadings[index];
 
+    // Check if ray has not been tagged as aborted
+    vec2 internal_reflection_16b_padding_15b_abort_ray_1b = unpackHalf2x16(ray.internal_reflection_16b_padding_15b_abort_ray_1b);
+    const uint abort_ray = floatBitsToUint(internal_reflection_16b_padding_15b_abort_ray_1b.y);
+    
+    bool ray_hit_grid = false;
+    RayShading ray_shading;
     uint normal_index_3b_voxel_index_9b_brick_index_20b = 0;
-    // TODO: configurable
-    float t_min = 0.001;
-    float t_max = 1000 - ray.t_value;
-    if (GridHit(ray, t_min, t_max, normal_index_3b_voxel_index_9b_brick_index_20b)) {
+    if (abort_ray != 1) {
+        ray_shading = in_ray_shadings[index];
+        // TODO: configurable
+        float t_min = 0.001;
+        float t_max = 1000 - ray.t_value;
+        ray_hit_grid = GridHit(ray, t_min, t_max, normal_index_3b_voxel_index_9b_brick_index_20b);
+    }
+
+    if (abort_ray != 1 && ray_hit_grid) {
         const uint out_index = atomicAdd(limits.out_hit_count, 1);
         out_ray_shadings[out_index] = ray_shading;
         out_rays[out_index] = ray;

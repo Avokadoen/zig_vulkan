@@ -17,11 +17,11 @@
         * [x] Brick buffer should be index to actual brick data stored in separate buffer 
         * [ ] fix bending cubes made apparent by larger grid scale (probably caused by incorrect t_value?)
     * [x] miss pipeline
-    * [ ] scatter pipeline
-        * [ ] material data lookup
+    * [x] scatter pipeline
+        * [x] material data lookup
             * [x] color
-            * [ ] scatter behaviour (mat type)
-            * [ ] handle ray scatter abort signal (route ray to miss buffer)
+            * [x] scatter behaviour (mat type)
+            * [x] handle ray scatter abort signal (route ray to miss buffer)
         * [ ] activate scatter functions
     * [x] draw ray pipeline
         * [x] resolve RC (flickering) and bottom of image missing output
@@ -32,6 +32,9 @@
     * [x] unloading
     * [x] loading
     * [ ] remove allocs in pipeline draw used for streaming 
+    * [ ] fix bug: material data seems to become invalid if camera is close to a single active brick
+* [ ] place holder terrain
+* [ ] model loading in scene
 * [ ] tone mapping
 * [ ] bayer noise (rand.comp): TODO: look at using bayer noise https://www.shadertoy.com/view/stfXWn
 * [ ] dynamic voxel scenes possible (can be as simple as single voxel on/off to start)
