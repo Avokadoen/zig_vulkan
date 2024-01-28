@@ -28,6 +28,13 @@ layout (std430, set = 3, binding = 0) buffer BrickIndexToBrickIndicesIndex {
     uint brick_index_to_brick_indices_index[];
 };
 
+layout (std430, set = 4, binding = 0) readonly buffer MaterialBuffer {
+    vec4 materials[]; // TODO: We dont need this binding
+};
+layout (std430, set = 4, binding = 1) buffer MaterialIndexBuffer {
+    uint material_indices_8b[];
+};
+
 void main() {
     const uint unload_request_index = gl_GlobalInvocationID.x;
     if (unload_request_index >= brick_limits.unload_request_count) {
@@ -71,6 +78,17 @@ void main() {
 
     // move the brick in delete slot to its new location
     bricks[inactive_brick_index] = bricks[removed_brick_index];
+
+    {
+        // TODO: not 512 if we have varying material indices size (buckets)
+        // move the material indices
+        const uint material_index_count = 512 / 4;
+        const uint inactive_start_index = inactive_brick_index * material_index_count;
+        const uint remove_start_index = removed_brick_index * material_index_count; 
+        for (uint voxel_index_4 = 0; voxel_index_4 < material_index_count; voxel_index_4++) {
+            material_indices_8b[inactive_start_index + voxel_index_4] = material_indices_8b[remove_start_index + voxel_index_4];
+        }
+    }
 
     // map a brick index to a index to the index buffer 
     const uint brick_index_index = brick_index_to_brick_indices_index[removed_brick_index];

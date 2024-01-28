@@ -26,6 +26,7 @@ const resources = [_]Resource{
     Resource.from(HostAndDeviceResources.brick_req_limits_s),
     Resource.from(HostAndDeviceResources.brick_unload_request_s),
     Resource.from(HostAndDeviceResources.brick_index_indices_s),
+    Resource.from(DeviceOnlyResources.materials_s),
 };
 
 const BrickUnloadPipeline = @This();
