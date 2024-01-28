@@ -76,7 +76,7 @@ void main() {
     const vec3 ray_dir = fma(push_constant.horizontal, vec3(u), push_constant.lower_left_corner) + fma(vec3(v), push_constant.vertical, -push_constant.origin);
     rays[index] = Ray(
         push_constant.origin,      // origin
-        packHalf2x16(vec2(1, 0)),  // internal_reflection_16b_padding_15b_abort_ray_1b
+        packHalf2x16(vec2(1, 0)),  // internal_reflection_16b_abort_ray_1b_skip_first_voxel_1b_padding_14b
         normalize(ray_dir),        // direction
         0                          // t_value
     );

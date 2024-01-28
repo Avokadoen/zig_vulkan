@@ -29,8 +29,11 @@ void main() {
     Ray ray = rays[index];
 
     // Check if ray has not been tagged as aborted
-    vec2 internal_reflection_16b_padding_15b_abort_ray_1b = unpackHalf2x16(ray.internal_reflection_16b_padding_15b_abort_ray_1b);
-    const uint abort_ray = floatBitsToUint(internal_reflection_16b_padding_15b_abort_ray_1b.y);
+    const uint abort_ray = bitfieldExtract(
+        ray.internal_reflection_16b_abort_ray_1b_skip_first_voxel_1b_padding_14b,
+        ABORT_RAY_OFFSET,
+        ABORT_RAY_SIZE
+    );
 
     if (abort_ray != 1) {
         // calculate some sky color in the event of a miss

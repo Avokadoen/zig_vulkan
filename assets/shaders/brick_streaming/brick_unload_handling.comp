@@ -29,7 +29,7 @@ layout (std430, set = 3, binding = 0) buffer BrickIndexToBrickIndicesIndex {
 };
 
 layout (std430, set = 4, binding = 0) readonly buffer MaterialBuffer {
-    vec4 materials[]; // TODO: We dont need this binding
+    Material materials[]; // TODO: We dont need this binding
 };
 layout (std430, set = 4, binding = 1) buffer MaterialIndexBuffer {
     uint material_indices_8b[];

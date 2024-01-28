@@ -169,6 +169,7 @@ fn deviceHeuristic(
     const feature_score = blk: {
         var score: i32 = 0;
 
+        // TODO: make this more configurable
         var float_atomics_features = vk.PhysicalDeviceShaderAtomicFloatFeaturesEXT{};
         var features = vk.PhysicalDeviceFeatures2{
             .p_next = &float_atomics_features,

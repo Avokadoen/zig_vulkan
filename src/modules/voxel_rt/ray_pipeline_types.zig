@@ -127,7 +127,7 @@ pub const ImageInfo = struct {
 };
 
 // must be kept in sync with assets/shaders/raytracing/ray_commons.glsl Material & Vec4ToMaterial
-pub const Material = packed struct {
+pub const Material = extern struct {
     pub const Type = enum(u16) {
         lambertian = 0,
         metal = 1,
@@ -138,7 +138,7 @@ pub const Material = packed struct {
     albedo_y: f32,
     albedo_z: f32,
     type: Type,
-    type_value: f16,
+    type_value: f32,
 
     pub fn lambertian(albedo: [3]f32) Material {
         return Material{
@@ -150,7 +150,7 @@ pub const Material = packed struct {
         };
     }
 
-    pub fn metal(albedo: [3]f32, fizz: f16) Material {
+    pub fn metal(albedo: [3]f32, fizz: f32) Material {
         return Material{
             .albedo_x = albedo[0],
             .albedo_y = albedo[1],
@@ -160,7 +160,7 @@ pub const Material = packed struct {
         };
     }
 
-    pub fn dielectric(albedo: [3]f32, internal_reflectance: f16) Material {
+    pub fn dielectric(albedo: [3]f32, internal_reflectance: f32) Material {
         return Material{
             .albedo_x = albedo[0],
             .albedo_y = albedo[1],

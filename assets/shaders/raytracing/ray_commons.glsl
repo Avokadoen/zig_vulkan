@@ -66,10 +66,16 @@ struct Brick {
 // Must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig Ray
 struct Ray {
     vec3 origin;
-    uint internal_reflection_16b_padding_15b_abort_ray_1b;
+    uint internal_reflection_16b_abort_ray_1b_skip_first_voxel_1b_padding_14b;
     vec3 direction;
     float t_value; // TOOD: move it's own buffer and track total_t_value as well
 };
+const int ABORT_RAY_OFFSET = 16;
+const int ABORT_RAY_SIZE = 1;
+const int SKIP_FIRST_VOXEL_OFFSET = 17;
+const int SKIP_FIRST_VOXEL_SIZE = 1;
+
+
 // Must be kept in sync with src/modules/voxel_rt/ray_pipeline_types.zig RayHit
 struct RayHit {
     // 3 bits for normal index MSB
@@ -106,22 +112,14 @@ const uint MAT_T_LAMBERTIAN = 0;
 const uint MAT_T_METAL = 1;
 const uint MAT_T_DIELECTRIC = 2;
 struct Material {
-    vec3 albedo;
+    float albedo_x;
+    float albedo_y;
+    float albedo_z;
+    
     uint type;
     /// Lambertian: ignored
     /// Metal:      fizz value
     /// Dielectric: interal reflection value
     float type_value;
 };
-Material Vec4ToMaterial(vec4 vec) {
-    const uint type_bits = floatBitsToUint(vec.w);
-    const uint type = bitfieldExtract(type_bits, 0, 16);
-    const uint type_value_bits = bitfieldExtract(type_bits, 16, 16);
-    const float type_value = uintBitsToFloat(type_value_bits);
 
-    return Material(
-        vec.xyz,
-        type,
-        type_value
-    );
-}

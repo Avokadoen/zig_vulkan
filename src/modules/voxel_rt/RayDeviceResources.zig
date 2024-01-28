@@ -761,7 +761,7 @@ pub fn init(
             &voxel_scene_buffer,
             buffer_infos[material_buffer_index].offset,
             ray_pipeline_types.Material,
-            &host_brick_state.grid_materials,
+            &comptime HostBrickState.DefinedMaterial.getValues(),
         );
     }
 

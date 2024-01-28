@@ -13,6 +13,29 @@ const Material = ray_pipeline_types.Material;
 pub const material_index = u8;
 pub const max_unique_materials = std.math.maxInt(material_index);
 
+pub const DefinedMaterial = enum(u32) {
+    dirt,
+    water,
+    glass,
+    bronze,
+
+    pub fn getValues() [material_count]ray_pipeline_types.Material {
+        // This will cause compile time error if we return any undefined value which is good :)
+        comptime {
+            var materials: [material_count]ray_pipeline_types.Material = undefined;
+
+            materials[@intFromEnum(DefinedMaterial.dirt)] = Material.lambertian([3]f32{ 0.490, 0.26667, 0.06667 });
+            materials[@intFromEnum(DefinedMaterial.water)] = Material.dielectric([3]f32{ 0.117, 0.45, 0.85 }, 1.333);
+            materials[@intFromEnum(DefinedMaterial.glass)] = Material.dielectric([3]f32{ 0.6, 0.63, 0.6 }, 1.52);
+            materials[@intFromEnum(DefinedMaterial.bronze)] = Material.metal([3]f32{ 0.804, 0.498, 0.196 }, 0.45);
+
+            return materials;
+        }
+    }
+};
+
+pub const material_count = @typeInfo(DefinedMaterial).Enum.fields.len;
+
 pub const Config = struct {
     brick_load_request_count: c_uint = 1024,
     brick_unload_request_count: c_uint = 1024,
@@ -28,16 +51,22 @@ brick_indices: []BrickIndex,
 bricks: []Brick,
 voxel_material_indices: []material_index,
 brick_set: []u8,
-grid_materials: [max_unique_materials]Material,
+dimensions: [3]u32,
+
+inchoherent_bricks: std.AutoHashMap(u32, void),
 
 pub fn init(
     allocator: Allocator,
     grid_metadata: BrickGridMetadata,
-    grid_materials: [max_unique_materials]Material,
     config: Config,
     comptime zero_out_mem: bool,
 ) !HostBrickState {
-    const grid_brick_count: usize = @intFromFloat(grid_metadata.dim[0] * grid_metadata.dim[1] * grid_metadata.dim[2]);
+    const dimensions = [3]u32{
+        @intFromFloat(@round(grid_metadata.dim[0])),
+        @intFromFloat(@round(grid_metadata.dim[1])),
+        @intFromFloat(@round(grid_metadata.dim[2])),
+    };
+    const grid_brick_count: usize = @intCast(dimensions[0] * dimensions[1] * dimensions[2]);
     std.debug.assert(grid_brick_count <= ray_pipeline_types.RayHit.max_global_brick_index);
 
     const brick_limits = BrickLimits{
@@ -88,86 +117,180 @@ pub fn init(
         .bricks = bricks,
         .voxel_material_indices = voxel_material_indices,
         .brick_set = brick_set,
-        .grid_materials = grid_materials,
+        .dimensions = dimensions,
+        .inchoherent_bricks = std.AutoHashMap(u32, void).init(allocator),
     };
 }
 
-pub fn deinit(self: HostBrickState) void {
+pub fn deinit(self: *HostBrickState) void {
     self.allocator.free(self.brick_set);
     self.allocator.free(self.voxel_material_indices);
     self.allocator.free(self.bricks);
     self.allocator.free(self.brick_indices);
+
+    self.inchoherent_bricks.deinit();
+}
+
+// TODO: Propagate changes to voxels in camera view, update brick set if needed
+pub fn setVoxel(self: *HostBrickState, pos: [3]u32, material: DefinedMaterial) !void {
+    const brick_pos = [3]u32{
+        pos[0] / 8,
+        pos[1] / 8,
+        pos[2] / 8,
+    };
+    const one_dim_brick_index = brick_pos[0] + self.dimensions[0] * (brick_pos[2] + self.dimensions[2] * brick_pos[1]);
+
+    const voxel_pos = [3]u32{
+        pos[0] % 8,
+        pos[1] % 8,
+        pos[2] % 8,
+    };
+    const one_dim_voxel_index = voxel_pos[0] + 8 * (voxel_pos[2] + 8 * voxel_pos[1]);
+    self.voxel_material_indices[one_dim_brick_index * 512 + one_dim_voxel_index] = @intCast(@intFromEnum(material));
+
+    {
+        // update brick
+        {
+            const bit_offset: u9 = @intCast(one_dim_voxel_index);
+            self.bricks[one_dim_brick_index].solid_mask |= @as(u512, 1) << bit_offset;
+        }
+
+        // update brick set
+        {
+            const bit_offset: u3 = @intCast(one_dim_brick_index % 8);
+            self.brick_set[one_dim_brick_index / 8] |= @as(u8, 1) << bit_offset;
+        }
+
+        self.brick_indices[one_dim_brick_index] = BrickIndex{ .status = .loading, .request_count = 100, .index = @intCast(one_dim_brick_index) };
+    }
+
+    // mark brick as device incoherent
+    try self.inchoherent_bricks.put(one_dim_brick_index, {});
+}
+
+// TODO: Propagate changes to voxels in camera view, update brick set if needed
+pub fn unsetVoxel(self: *HostBrickState, pos: [3]u32) !void {
+    const brick_pos = [3]u32{
+        pos[0] / 8,
+        pos[1] / 8,
+        pos[2] / 8,
+    };
+    const one_dim_brick_index = brick_pos[0] + self.dimensions[0] * (brick_pos[2] + self.dimensions[2] * brick_pos[1]);
+
+    const voxel_pos = [3]u32{
+        pos[0] % 8,
+        pos[1] % 8,
+        pos[2] % 8,
+    };
+    const one_dim_voxel_index = voxel_pos[0] + 8 * (voxel_pos[2] + 8 * voxel_pos[1]);
+
+    {
+        // update brick
+        {
+            const bit_offset: u9 = @intCast(one_dim_voxel_index);
+            self.bricks[one_dim_brick_index].solid_mask &= ~(@as(u512, 1) << bit_offset);
+        }
+
+        // update brick set
+        if (self.bricks[one_dim_brick_index].solid_mask == 0) {
+            const bit_offset: u3 = @intCast(one_dim_brick_index % 8);
+            self.brick_set[one_dim_brick_index / 8] &= ~(@as(u8, 1) << bit_offset);
+        }
+
+        self.brick_indices[one_dim_brick_index] = BrickIndex{ .status = .loading, .request_count = 100, .index = one_dim_brick_index };
+    }
+
+    // mark brick as device incoherent
+    self.inchoherent_bricks.put(one_dim_brick_index, {});
 }
 
 /// Temporary debug scene
-pub fn setupTestScene(self: *HostBrickState) void {
-    const grid_bricks = brick_blk: {
-        const test_brick_all = Brick{
-            .solid_mask = ~@as(u512, 0),
-        };
-        const test_brick_one = Brick{
-            .solid_mask = @as(u512, 1),
-        };
-        // row bitmasks
-        const test_brick_two = Brick{
-            .solid_mask = @as(u512, 0b11),
-        };
-        const test_brick_three = Brick{
-            .solid_mask = @as(u512, 0b111),
-        };
-        const test_brick_four = Brick{
-            .solid_mask = @as(u512, 0b1111),
-        };
-        const test_brick_five = Brick{
-            .solid_mask = @as(u512, 0b11111),
-        };
-        const test_brick_six = Brick{
-            .solid_mask = @as(u512, 0b111111),
-        };
-        const test_brick_seven = Brick{
-            .solid_mask = @as(u512, 0b1111111),
-        };
+pub fn setupTestScene(self: *HostBrickState) !void {
+    try self.setVoxel([_]u32{ 0, 0, 0 }, .bronze);
+    try self.setVoxel([_]u32{ 1, 0, 0 }, .bronze);
+    try self.setVoxel([_]u32{ 0, 1, 0 }, .bronze);
+    try self.setVoxel([_]u32{ 0, 0, 1 }, .bronze);
 
-        const bricks = [_]Brick{
-            test_brick_all,
-            test_brick_one,
-            test_brick_two,
-            test_brick_three,
-            test_brick_four,
-            test_brick_five,
-            test_brick_six,
-            test_brick_seven,
-        };
-        @memcpy(self.bricks[0..bricks.len], &bricks);
+    try self.setVoxel([_]u32{ 0, 8, 0 }, .glass);
+    try self.setVoxel([_]u32{ 1, 8, 0 }, .glass);
+    try self.setVoxel([_]u32{ 0, 9, 0 }, .glass);
+    try self.setVoxel([_]u32{ 0, 8, 1 }, .glass);
+    try self.setVoxel([_]u32{ 1, 9, 1 }, .glass);
+    try self.setVoxel([_]u32{ 2, 9, 1 }, .glass);
 
-        break :brick_blk bricks;
-    };
+    try self.setVoxel([_]u32{ 8, 8, 8 }, .water);
+    try self.setVoxel([_]u32{ 9, 8, 8 }, .water);
+    try self.setVoxel([_]u32{ 8, 9, 8 }, .water);
+    try self.setVoxel([_]u32{ 8, 8, 9 }, .water);
+    try self.setVoxel([_]u32{ 10, 10, 9 }, .water);
 
-    {
-        const brick_indices = [_]BrickIndex{
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 1 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 2 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 7 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 5 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 3 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 4 },
-            BrickIndex{ .status = .loaded, .request_count = 100, .index = 6 },
-        };
-        @memcpy(self.brick_indices[0..brick_indices.len], &brick_indices);
-    }
+    // const grid_bricks = brick_blk: {
+    //     const test_brick_all = Brick{
+    //         .solid_mask = ~@as(u512, 0),
+    //     };
+    //     const test_brick_one = Brick{
+    //         .solid_mask = @as(u512, 1),
+    //     };
+    //     // row bitmasks
+    //     const test_brick_two = Brick{
+    //         .solid_mask = @as(u512, 0b11),
+    //     };
+    //     const test_brick_three = Brick{
+    //         .solid_mask = @as(u512, 0b111),
+    //     };
+    //     const test_brick_four = Brick{
+    //         .solid_mask = @as(u512, 0b1111),
+    //     };
+    //     const test_brick_five = Brick{
+    //         .solid_mask = @as(u512, 0b11111),
+    //     };
+    //     const test_brick_six = Brick{
+    //         .solid_mask = @as(u512, 0b111111),
+    //     };
+    //     const test_brick_seven = Brick{
+    //         .solid_mask = @as(u512, 0b1111111),
+    //     };
 
-    {
-        self.brick_set[0] = 1 << 7 | 1 << 6 | 0 << 5 | 1 << 4 | 1 << 3 | 1 << 2 | 1 << 1 | 1 << 0;
-    }
+    //     const bricks = [_]Brick{
+    //         test_brick_all,
+    //         test_brick_one,
+    //         test_brick_two,
+    //         test_brick_three,
+    //         test_brick_four,
+    //         test_brick_five,
+    //         test_brick_six,
+    //         test_brick_seven,
+    //     };
+    //     @memcpy(self.bricks[0..bricks.len], &bricks);
 
-    {
-        // currently we only set 4 materials in main so lets just rotate material
-        for (grid_bricks, 0..) |brick, brick_index| {
-            // assumes all bits are sequential
-            for (0..@popCount(brick.solid_mask)) |voxel_index| {
-                self.voxel_material_indices[brick_index * 512 + voxel_index] = @intCast(voxel_index % 4);
-            }
-        }
-    }
+    //     break :brick_blk bricks;
+    // };
+
+    // {
+    //     const brick_indices = [_]BrickIndex{
+    //         BrickIndex{ .status = .loaded, .request_count = 100, .index = 0 },
+    //         BrickIndex{ .status = .loaded, .request_count = 100, .index = 1 },
+    //         BrickIndex{ .status = .loaded, .request_count = 100, .index = 2 },
+    //         BrickIndex{ .status = .loaded, .request_count = 100, .index = 3 },
+    //         BrickIndex{ .status = .loaded, .request_count = 100, .index = 4 },
+    //         BrickIndex{ .status = .loaded, .request_count = 100, .index = 5 },
+    //         BrickIndex{ .status = .loaded, .request_count = 100, .index = 6 },
+    //         BrickIndex{ .status = .loaded, .request_count = 100, .index = 7 },
+    //     };
+    //     @memcpy(self.brick_indices[0..brick_indices.len], &brick_indices);
+    // }
+
+    // {
+    //     self.brick_set[0] = 1 << 7 | 1 << 6 | 0 << 5 | 1 << 4 | 1 << 3 | 1 << 2 | 1 << 1 | 1 << 0;
+    // }
+
+    // {
+    //     // currently we only set 4 materials in main so lets just rotate material
+    //     for (grid_bricks, 0..) |brick, brick_index| {
+    //         // assumes all bits are sequential
+    //         for (0..@popCount(brick.solid_mask)) |voxel_index| {
+    //             self.voxel_material_indices[brick_index * 512 + voxel_index] = @intCast(voxel_index % 4);
+    //         }
+    //     }
+    // }
 }

@@ -78,20 +78,6 @@ pub fn main() anyerror!void {
     defer ctx.deinit();
 
     var host_brick_state = try init_grid_blk: {
-        const materials: [HostBrickState.max_unique_materials]VoxelRT.Material = [4]Material{
-            // water
-            Material.dielectric([3]f32{ 0.117, 0.45, 0.85 }, 1.333),
-            // glass
-            Material.dielectric([3]f32{ 0.6, 0.63, 0.6 }, 1.52),
-            // bronze
-            Material.metal([3]f32{ 0.804, 0.498, 0.196 }, 0.45),
-            // dirt
-            Material.lambertian([3]f32{ 0.490, 0.26667, 0.06667 }),
-        } ++ [_]Material{
-            // void
-            Material.lambertian([3]f32{ 0, 0, 0 }),
-        } ** 251;
-
         break :init_grid_blk HostBrickState.init(
             allocator,
             .{
@@ -100,14 +86,13 @@ pub fn main() anyerror!void {
                 .min_point = [_]f32{-1} ** 3,
                 .scale = 2,
             },
-            materials,
             .{},
             true,
         );
     };
     defer host_brick_state.deinit();
 
-    host_brick_state.setupTestScene();
+    try host_brick_state.setupTestScene();
 
     var voxel_rt = try VoxelRT.init(
         allocator,

@@ -17,11 +17,12 @@
         * [x] Brick buffer should be index to actual brick data stored in separate buffer 
         * [ ] fix bending cubes made apparent by larger grid scale (probably caused by incorrect t_value?)
     * [x] miss pipeline
-    * [x] scatter pipeline
+    * [ ] scatter pipeline
         * [x] material data lookup
             * [x] color
             * [x] scatter behaviour (mat type)
             * [x] handle ray scatter abort signal (route ray to miss buffer)
+        * [ ] refract origin is incorrect
         * [ ] activate scatter functions
     * [x] draw ray pipeline
         * [x] resolve RC (flickering) and bottom of image missing output
@@ -58,5 +59,6 @@
 * [ ] Make ticket on FSR
     * [x] remove golden ration "denoising"
 * [ ] Find a elegant way of introducing emitted vs color
-
+* [ ] Respect t_value
+* [ ] reimplement buckets with sieve cache?
 
