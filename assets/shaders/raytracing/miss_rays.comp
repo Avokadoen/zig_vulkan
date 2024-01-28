@@ -29,13 +29,13 @@ void main() {
     Ray ray = rays[index];
 
     // Check if ray has not been tagged as aborted
-    const uint abort_ray = bitfieldExtract(
+    const bool abort_ray = bitfieldExtract(
         ray.internal_reflection_16b_abort_ray_1b_skip_first_voxel_1b_padding_14b,
         ABORT_RAY_OFFSET,
         ABORT_RAY_SIZE
-    );
+    ) == 1;
 
-    if (abort_ray != 1) {
+    if (abort_ray == false) {
         // calculate some sky color in the event of a miss
         float y_factor = 0.5 * (ray.direction.y + 1.0);
         ray_shadings[index].color *= vec3(1.0 - y_factor) * start_value + y_factor * end_value;

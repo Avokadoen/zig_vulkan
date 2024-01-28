@@ -86,10 +86,9 @@ void main() {
     ) == 1;
 
     bool ray_hit_grid = false;
-    RayShading ray_shading;
+    RayShading ray_shading = in_ray_shadings[index];
     uint normal_index_3b_voxel_index_9b_brick_index_20b = 0;
     if (abort_ray == false) {
-        ray_shading = in_ray_shadings[index];
         float t_min = 0.0001;
         float t_max = 1000;
         ray_hit_grid = GridHit(ray, skip_next_voxel, t_min, t_max, normal_index_3b_voxel_index_9b_brick_index_20b);

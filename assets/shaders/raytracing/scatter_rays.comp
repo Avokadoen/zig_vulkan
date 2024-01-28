@@ -83,7 +83,6 @@ void main() {
         break;
 
         case MAT_T_METAL:
-        // if ray is absorbed in material
         scatterMetal(ray, material_value, hit_point, hit_normal);
         break;
 
