@@ -3,7 +3,9 @@ pub const Context = @import("render/Context.zig");
 /// Wrapper for vk buffer and memory to simplify handling of these in conjunction
 pub const GpuBufferMemory = @import("render/GpuBufferMemory.zig");
 /// Wrapper a collection GpuBufferMemory used to stage transfers to device local memory
-pub const StagingRamp = @import("render/StagingRamp.zig");
+pub const StagingRamp = @import("render/StagingRamp.zig"); // TODO: delete/replace this!
+/// Abstraction for a staging buffer
+pub const SimpleStagingBuffer = @import("render/SimpleStagingBuffer.zig");
 /// texture utils
 pub const texture = @import("render/texture.zig");
 

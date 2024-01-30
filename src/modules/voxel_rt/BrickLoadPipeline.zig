@@ -9,7 +9,10 @@ const shaders = @import("shaders");
 const render = @import("../render.zig");
 const Context = render.Context;
 const GpuBufferMemory = render.GpuBufferMemory;
-const StagingRamp = render.StagingRamp;
+const SimpleStagingBuffer = render.SimpleStagingBuffer;
+
+const HostBrickState = @import("brick/HostBrickState.zig");
+const DataFrameSnapshot = @import("brick/BrickStream.zig").DataFrameSnapshot;
 
 const ray_pipeline_types = @import("ray_pipeline_types.zig");
 const Dispatch1D = ray_pipeline_types.Dispatch1D;
@@ -29,6 +32,8 @@ const resources = [_]Resource{
 
 const BrickLoadPipeline = @This();
 
+allocator: Allocator,
+
 pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
 
@@ -36,9 +41,12 @@ work_group_dim: Dispatch1D,
 
 ray_device_resources: *const RayDeviceResources,
 
+brick_staging_buffer: SimpleStagingBuffer,
+command_record_should_flush: bool = false,
+
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
-pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !BrickLoadPipeline {
+pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources, allocator: Allocator) !BrickLoadPipeline {
     const zone = tracy.ZoneN(@src(), @typeName(BrickLoadPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
@@ -97,11 +105,16 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Bric
     };
     errdefer ctx.destroyPipeline(pipeline);
 
+    const brick_staging_buffer = try SimpleStagingBuffer.init(ctx, allocator);
+    errdefer brick_staging_buffer.deinit(ctx);
+
     return BrickLoadPipeline{
+        .allocator = allocator,
         .pipeline_layout = pipeline_layout,
         .pipeline = pipeline,
         .ray_device_resources = ray_device_resources,
         .work_group_dim = work_group_dim,
+        .brick_staging_buffer = brick_staging_buffer,
     };
 }
 
@@ -111,9 +124,157 @@ pub fn deinit(self: BrickLoadPipeline, ctx: Context) void {
 
     ctx.destroyPipelineLayout(self.pipeline_layout);
     ctx.destroyPipeline(self.pipeline);
+
+    self.brick_staging_buffer.deinit(ctx);
 }
 
-pub fn appendPipelineCommands(self: BrickLoadPipeline, ctx: Context, command_buffer: vk.CommandBuffer) void {
+pub fn prepareBrickTransfer(
+    self: *BrickLoadPipeline,
+    ctx: Context,
+    host_brick_state: *HostBrickState,
+    ray_device_resources: *RayDeviceResources,
+    snapshot: DataFrameSnapshot,
+) !void {
+    const zone = tracy.ZoneN(@src(), @typeName(BrickLoadPipeline) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
+    const active_bricks: u32 = @intCast(snapshot.brick_limits.active_bricks);
+
+    const load_req_count: usize = @intCast(@min(
+        snapshot.brick_limits.load_request_count,
+        snapshot.brick_limits.max_active_bricks - active_bricks,
+    ));
+
+    const unload_req_count: usize = @intCast(@max(
+        snapshot.brick_limits.unload_request_count,
+        0,
+    ));
+
+    // update host_brick_state brick limits
+    const active_bricks_before_load = @max(
+        host_brick_state.brick_limits.active_bricks - @as(c_int, @intCast(unload_req_count)),
+        0,
+    );
+
+    if (load_req_count > 0) {
+        // TODO: remove alloc, alloc on init
+        const new_bricks = try self.allocator.alloc(ray_pipeline_types.Brick, load_req_count);
+        defer self.allocator.free(new_bricks);
+        // TODO: remove alloc, alloc on init
+        const new_brick_indices = try self.allocator.alloc(ray_pipeline_types.BrickLoadRequest, load_req_count);
+        defer self.allocator.free(new_brick_indices);
+        // TODO: remove alloc, alloc on init
+        const new_material_indices = try self.allocator.alloc(HostBrickState.material_index, load_req_count * 512);
+        defer self.allocator.free(new_material_indices);
+
+        std.debug.assert(host_brick_state.brick_limits.max_active_bricks >= host_brick_state.brick_limits.active_bricks);
+
+        for (
+            snapshot.brick_load_requests[0..load_req_count],
+            new_bricks,
+            new_brick_indices,
+            active_bricks_before_load..,
+            0..,
+        ) |
+            load_index,
+            *new_brick,
+            *new_brick_index,
+            brick_buffer_index,
+            loop_iter,
+        | {
+            const brick_index = host_brick_state.brick_indices[load_index].index;
+            new_brick.* = host_brick_state.bricks[brick_index];
+
+            {
+                const mat_indices_dest = dest_blk: {
+                    const start = loop_iter * 512;
+                    const end = start + 512;
+                    break :dest_blk new_material_indices[start..end];
+                };
+
+                const mat_indices_src = src_blk: {
+                    const start = brick_index * 512;
+                    const end = start + 512;
+                    break :src_blk host_brick_state.voxel_material_indices[start..end];
+                };
+
+                @memcpy(mat_indices_dest, mat_indices_src);
+            }
+
+            new_brick_index.* = ray_pipeline_types.BrickLoadRequest{
+                .brick_index_index = load_index,
+                .brick_index_32b = @intCast(brick_buffer_index),
+            };
+        }
+
+        // Transfer bricks
+        {
+            const brick_buffer_index = (RayDeviceResources.Resource{ .device = .bricks_b }).toBufferIndex();
+            const new_bricks_offset: vk.DeviceSize = @intCast(host_brick_state.brick_limits.active_bricks * @sizeOf(ray_pipeline_types.Brick));
+            try self.brick_staging_buffer.transferToBuffer(
+                &ray_device_resources.voxel_scene_buffer,
+                ray_device_resources.buffer_infos[brick_buffer_index].offset + new_bricks_offset,
+                ray_pipeline_types.Brick,
+                new_bricks,
+            );
+        }
+
+        // Transfer material indices
+        {
+            const material_indices_index = (RayDeviceResources.Resource{ .device = .material_indices_b }).toBufferIndex();
+            const new_material_indices_offset: vk.DeviceSize = @intCast(
+                host_brick_state.brick_limits.active_bricks * 512 * @sizeOf(HostBrickState.material_index),
+            );
+
+            try self.brick_staging_buffer.transferToBuffer(
+                &ray_device_resources.voxel_scene_buffer,
+                ray_device_resources.buffer_infos[material_indices_index].offset + new_material_indices_offset,
+                HostBrickState.material_index,
+                new_material_indices,
+            );
+        }
+
+        // Transfer patch work required to set gpu indices
+        {
+            const brick_load_request_result_index = (RayDeviceResources.Resource{ .host_and_device = .brick_load_request_result_s }).toBufferIndex();
+
+            try self.brick_staging_buffer.transferToBuffer(
+                &ray_device_resources.request_buffer,
+                ray_device_resources.buffer_infos[brick_load_request_result_index].offset,
+                ray_pipeline_types.BrickLoadRequest,
+                new_brick_indices,
+            );
+        }
+    }
+
+    // Flush if needed
+    self.command_record_should_flush = sync_req_flush_blk: {
+        if (unload_req_count + load_req_count != 0) {
+            const brick_req_limits_buffer_index = (RayDeviceResources.Resource{ .host_and_device = .brick_req_limits_s }).toBufferIndex();
+
+            host_brick_state.brick_limits = snapshot.brick_limits;
+
+            host_brick_state.brick_limits.active_bricks = active_bricks_before_load + @as(c_int, @intCast(load_req_count));
+
+            host_brick_state.brick_limits.load_request_count = @intCast(load_req_count);
+            const limits_slice = [1]ray_pipeline_types.BrickLimits{host_brick_state.brick_limits};
+            try self.brick_staging_buffer.transferToBuffer(
+                &ray_device_resources.request_buffer,
+                ray_device_resources.buffer_infos[brick_req_limits_buffer_index].offset,
+                ray_pipeline_types.BrickLimits,
+                &limits_slice,
+            );
+
+            try self.brick_staging_buffer.sync(ctx);
+
+            break :sync_req_flush_blk true;
+        }
+
+        break :sync_req_flush_blk false;
+    };
+}
+
+pub fn appendPipelineCommands(self: *BrickLoadPipeline, ctx: Context, command_buffer: vk.CommandBuffer) void {
     const zone = tracy.ZoneN(@src(), @typeName(BrickLoadPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
@@ -131,27 +292,58 @@ pub fn appendPipelineCommands(self: BrickLoadPipeline, ctx: Context, command_buf
     }
 
     // TODO remove barrier when we move this to dedicated queue
-    const brick_buffer_memory_barrier = [_]vk.BufferMemoryBarrier{.{
-        .src_access_mask = .{ .shader_read_bit = true },
-        .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-        .src_queue_family_index = ctx.queue_indices.compute,
-        .dst_queue_family_index = ctx.queue_indices.compute,
-        .buffer = self.ray_device_resources.voxel_scene_buffer.buffer,
-        .offset = 0,
-        .size = vk.WHOLE_SIZE,
-    }};
-    ctx.vkd.cmdPipelineBarrier(
-        command_buffer,
-        .{ .compute_shader_bit = true },
-        .{ .compute_shader_bit = true },
-        .{},
-        0,
-        undefined,
-        brick_buffer_memory_barrier.len,
-        &brick_buffer_memory_barrier,
-        0,
-        undefined,
-    );
+    {
+        const brick_buffer_memory_barrier = [_]vk.BufferMemoryBarrier{.{
+            .src_access_mask = .{ .shader_read_bit = true },
+            .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+            .src_queue_family_index = ctx.queue_indices.compute,
+            .dst_queue_family_index = ctx.queue_indices.compute,
+            .buffer = self.ray_device_resources.voxel_scene_buffer.buffer,
+            .offset = 0,
+            .size = vk.WHOLE_SIZE,
+        }};
+        ctx.vkd.cmdPipelineBarrier(
+            command_buffer,
+            .{ .compute_shader_bit = true },
+            .{ .compute_shader_bit = true },
+            .{},
+            0,
+            undefined,
+            brick_buffer_memory_barrier.len,
+            &brick_buffer_memory_barrier,
+            0,
+            undefined,
+        );
+    }
+
+    if (self.command_record_should_flush) {
+        self.command_record_should_flush = false;
+
+        self.brick_staging_buffer.flush(ctx, command_buffer);
+
+        // TODO remove barrier when we move this to dedicated queue
+        const brick_buffer_memory_barrier = [_]vk.BufferMemoryBarrier{.{
+            .src_access_mask = .{ .shader_read_bit = true },
+            .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+            .src_queue_family_index = ctx.queue_indices.compute,
+            .dst_queue_family_index = ctx.queue_indices.compute,
+            .buffer = self.ray_device_resources.voxel_scene_buffer.buffer,
+            .offset = 0,
+            .size = vk.WHOLE_SIZE,
+        }};
+        ctx.vkd.cmdPipelineBarrier(
+            command_buffer,
+            .{ .compute_shader_bit = true },
+            .{ .compute_shader_bit = true },
+            .{},
+            0,
+            undefined,
+            brick_buffer_memory_barrier.len,
+            &brick_buffer_memory_barrier,
+            0,
+            undefined,
+        );
+    }
 
     ctx.vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
 

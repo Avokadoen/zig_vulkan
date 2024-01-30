@@ -315,7 +315,7 @@ pub fn init(
     const brick_unload_pipeline = try BrickUnloadPipeline.init(ctx, ray_device_resources);
     errdefer brick_heartbeat_pipeline.deinit(ctx);
 
-    const brick_load_pipeline = try BrickLoadPipeline.init(ctx, ray_device_resources);
+    const brick_load_pipeline = try BrickLoadPipeline.init(ctx, ray_device_resources, allocator);
     errdefer brick_load_pipeline.deinit(ctx);
 
     const brick_stream = try BrickStream.init(allocator, host_brick_state.brick_limits);
@@ -553,141 +553,12 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
             ctx,
             self.ray_device_resources,
         );
-
-        const active_bricks: u32 = @intCast(snapshot.brick_limits.active_bricks);
-
-        const load_req_count: usize = @intCast(@min(
-            snapshot.brick_limits.load_request_count,
-            snapshot.brick_limits.max_active_bricks - active_bricks,
-        ));
-
-        const unload_req_count: usize = @intCast(@max(
-            snapshot.brick_limits.unload_request_count,
-            0,
-        ));
-
-        // update host_brick_state brick limits
-        const active_bricks_before_load = @max(
-            host_brick_state.brick_limits.active_bricks - @as(c_int, @intCast(unload_req_count)),
-            0,
+        try self.brick_load_pipeline.prepareBrickTransfer(
+            ctx,
+            host_brick_state,
+            self.ray_device_resources,
+            snapshot,
         );
-
-        if (load_req_count > 0) {
-            // TODO: remove alloc, alloc on init
-            const new_bricks = try self.allocator.alloc(ray_pipeline_types.Brick, load_req_count);
-            defer self.allocator.free(new_bricks);
-            // TODO: remove alloc, alloc on init
-            const new_brick_indices = try self.allocator.alloc(ray_pipeline_types.BrickLoadRequest, load_req_count);
-            defer self.allocator.free(new_brick_indices);
-            // TODO: remove alloc, alloc on init
-            const new_material_indices = try self.allocator.alloc(HostBrickState.material_index, load_req_count * 512);
-            defer self.allocator.free(new_material_indices);
-
-            std.debug.assert(host_brick_state.brick_limits.max_active_bricks >= host_brick_state.brick_limits.active_bricks);
-
-            for (
-                snapshot.brick_load_requests[0..load_req_count],
-                new_bricks,
-                new_brick_indices,
-                active_bricks_before_load..,
-                0..,
-            ) |
-                load_index,
-                *new_brick,
-                *new_brick_index,
-                brick_buffer_index,
-                loop_iter,
-            | {
-                const brick_index = host_brick_state.brick_indices[load_index].index;
-                new_brick.* = host_brick_state.bricks[brick_index];
-
-                {
-                    const mat_indices_dest = dest_blk: {
-                        const start = loop_iter * 512;
-                        const end = start + 512;
-                        break :dest_blk new_material_indices[start..end];
-                    };
-
-                    const mat_indices_src = src_blk: {
-                        const start = brick_index * 512;
-                        const end = start + 512;
-                        break :src_blk host_brick_state.voxel_material_indices[start..end];
-                    };
-
-                    @memcpy(mat_indices_dest, mat_indices_src);
-                }
-
-                new_brick_index.* = ray_pipeline_types.BrickLoadRequest{
-                    .brick_index_index = load_index,
-                    .brick_index_32b = @intCast(brick_buffer_index),
-                };
-            }
-
-            // Transfer bricks
-            {
-                const brick_buffer_index = (RayDeviceResources.Resource{ .device = .bricks_b }).toBufferIndex();
-                const new_bricks_offset: vk.DeviceSize = @intCast(host_brick_state.brick_limits.active_bricks * @sizeOf(ray_pipeline_types.Brick));
-                try self.staging_buffers.transferToBuffer(
-                    ctx,
-                    &self.ray_device_resources.voxel_scene_buffer,
-                    self.ray_device_resources.buffer_infos[brick_buffer_index].offset + new_bricks_offset,
-                    ray_pipeline_types.Brick,
-                    new_bricks,
-                );
-            }
-
-            // Transfer material indices
-            {
-                const material_indices_index = (RayDeviceResources.Resource{ .device = .material_indices_b }).toBufferIndex();
-                const new_material_indices_offset: vk.DeviceSize = @intCast(
-                    host_brick_state.brick_limits.active_bricks * 512 * @sizeOf(HostBrickState.material_index),
-                );
-
-                try self.staging_buffers.transferToBuffer(
-                    ctx,
-                    &self.ray_device_resources.voxel_scene_buffer,
-                    self.ray_device_resources.buffer_infos[material_indices_index].offset + new_material_indices_offset,
-                    HostBrickState.material_index,
-                    new_material_indices,
-                );
-            }
-
-            // Transfer patch work required to set gpu indices
-            {
-                const brick_load_request_result_index = (RayDeviceResources.Resource{ .host_and_device = .brick_load_request_result_s }).toBufferIndex();
-
-                try self.staging_buffers.transferToBuffer(
-                    ctx,
-                    &self.ray_device_resources.request_buffer,
-                    self.ray_device_resources.buffer_infos[brick_load_request_result_index].offset,
-                    ray_pipeline_types.BrickLoadRequest,
-                    new_brick_indices,
-                );
-            }
-        }
-
-        // Flush if needed
-        if (unload_req_count + load_req_count != 0) {
-            const brick_req_limits_buffer_index = (RayDeviceResources.Resource{ .host_and_device = .brick_req_limits_s }).toBufferIndex();
-
-            host_brick_state.brick_limits = snapshot.brick_limits;
-
-            host_brick_state.brick_limits.active_bricks = active_bricks_before_load + @as(c_int, @intCast(load_req_count));
-
-            host_brick_state.brick_limits.load_request_count = @intCast(load_req_count);
-            const limits_slice = [1]ray_pipeline_types.BrickLimits{host_brick_state.brick_limits};
-            try self.staging_buffers.transferToBuffer(
-                ctx,
-                &self.ray_device_resources.request_buffer,
-                self.ray_device_resources.buffer_infos[brick_req_limits_buffer_index].offset,
-                ray_pipeline_types.BrickLimits,
-                &limits_slice,
-            );
-
-            try self.staging_buffers.flush(ctx);
-        }
-
-        // TODO: brick load pipeline queue submit here on dedicated queue. Get semaphore and wait ray pipeline queue execution on brick load completion signal.
     }
 
     // The pipeline has the following stages: (WIP: not actually ground truth yet! missing stages is marked with "(!)")
@@ -742,6 +613,11 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
         };
         try ctx.vkd.beginCommandBuffer(self.ray_command_buffers, &command_begin_info);
 
+        // TODO: brick load pipeline queue submit here on dedicated queue. Get semaphore and wait ray pipeline queue execution on brick load completion signal.
+        self.brick_heartbeat_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+        self.brick_unload_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+        self.brick_load_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+
         // clear compute image which is needed to support multiple rays per pixel
         {
             const sub_resource_range = [_]vk.ImageSubresourceRange{.{
@@ -785,9 +661,6 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
                 &sub_resource_range,
             );
         }
-
-        // TODO: move to dedicated queue as per TODO above
-        self.brick_load_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
 
         const samples_per_pixel = @as(u32, @intCast(self.camera.samples_per_pixel));
         for (0..samples_per_pixel) |nth_ray_sample| {
@@ -849,9 +722,6 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
                 self.ray_command_buffers,
             );
         }
-
-        self.brick_heartbeat_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
-        self.brick_unload_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
 
         try ctx.vkd.endCommandBuffer(self.ray_command_buffers);
 
