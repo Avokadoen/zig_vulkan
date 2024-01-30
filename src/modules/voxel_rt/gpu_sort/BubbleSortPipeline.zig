@@ -65,6 +65,8 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Bubb
         };
         break :blk try ctx.createPipelineLayout(pipeline_layout_info);
     };
+    errdefer ctx.destroyPipelineLayout(pipeline_layout);
+
     const pipeline = blk: {
         const spec_map = [_]vk.SpecializationMapEntry{
             .{

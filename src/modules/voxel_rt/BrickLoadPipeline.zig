@@ -2,7 +2,6 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const vk = @import("vulkan");
-const glfw = @import("mach-glfw");
 const tracy = @import("ztracy");
 
 const shaders = @import("shaders");
@@ -57,6 +56,8 @@ pub fn init(ctx: Context, ray_device_resources: *const RayDeviceResources) !Bric
         };
         break :blk try ctx.createPipelineLayout(pipeline_layout_info);
     };
+    errdefer ctx.destroyPipelineLayout(pipeline_layout);
+
     const pipeline = blk: {
         const spec_map = [_]vk.SpecializationMapEntry{.{
             .constant_id = 0,

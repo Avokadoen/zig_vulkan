@@ -129,6 +129,7 @@ pub fn init(
         .queue_family_index = ctx.queue_indices.graphics,
     };
     const init_command_pool = try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
+    errdefer ctx.vkd.destroyCommandPool(ctx.logical_device, init_command_pool, null);
 
     // use graphics and compute index
     // if they are the same, then we use that index
@@ -211,6 +212,7 @@ pub fn init(
         };
         break :blk try ctx.vkd.createImageView(ctx.logical_device, &image_view_info, null);
     };
+    errdefer ctx.vkd.destroyImageView(ctx.logical_device, compute_image_view, null);
 
     const sampler = blk: {
         const sampler_info = vk.SamplerCreateInfo{
@@ -233,6 +235,7 @@ pub fn init(
         };
         break :blk try ctx.vkd.createSampler(ctx.logical_device, &sampler_info, null);
     };
+    errdefer ctx.vkd.destroySampler(ctx.logical_device, sampler, null);
 
     const swapchain = try render.swapchain.Data.init(allocator, ctx, init_command_pool, null);
     errdefer swapchain.deinit(ctx);
@@ -254,6 +257,7 @@ pub fn init(
         },
     };
     const render_complete_fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
+    errdefer ctx.vkd.destroyFence(ctx.logical_device, render_complete_fence, null);
 
     var staging_buffers = try StagingRamp.init(ctx, allocator, config.staging_buffers);
     errdefer staging_buffers.deinit(ctx, allocator);
@@ -538,10 +542,10 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
         try ctx.vkd.resetFences(ctx.logical_device, 1, @as([*]const vk.Fence, @ptrCast(&self.render_complete_fence)));
     }
 
-    // TODO: this code should also handle any grid updates performed since last frame
-    // TODO: move most of login to snap shot
-    // handle brick streaming
     {
+        const prep_brick_stream_zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " prep brick stream");
+        defer prep_brick_stream_zone.End();
+
         try self.ray_device_resources.mapBrickRequestData(ctx);
         defer self.ray_device_resources.request_buffer.unmap(ctx);
 
