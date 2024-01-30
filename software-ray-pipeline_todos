@@ -16,14 +16,15 @@
         * [x] loop RayBufferInfo and BrickBufferInfo for descriptor creation
         * [x] Brick buffer should be index to actual brick data stored in separate buffer 
         * [ ] fix bending cubes made apparent by larger grid scale (probably caused by incorrect t_value?)
+            * [ ] OR file issue
     * [x] miss pipeline
-    * [ ] scatter pipeline
+    * [x] scatter pipeline
         * [x] material data lookup
             * [x] color
             * [x] scatter behaviour (mat type)
             * [x] handle ray scatter abort signal (route ray to miss buffer)
-        * [ ] refract origin is incorrect
-        * [ ] activate scatter functions
+        * [x] refract origin is incorrect
+        * [x] activate scatter functions
     * [x] draw ray pipeline
         * [x] resolve RC (flickering) and bottom of image missing output
         * [x] draw misses as well as hits ~~(requires another cursor) (just add some push constant)~~
@@ -33,7 +34,8 @@
     * [x] unloading
     * [x] loading
     * [ ] remove allocs in pipeline draw used for streaming 
-    * [ ] fix bug: material data seems to become invalid if camera is close to a single active brick
+    * [x] fix bug: material data seems to become invalid if camera is close to a single active brick
+    * [ ] deal with cpu updates of bricks currently being looked at
 * [ ] place holder terrain
 * [ ] model loading in scene
 * [ ] tone mapping
@@ -61,4 +63,7 @@
 * [ ] Find a elegant way of introducing emitted vs color
 * [ ] Respect t_value
 * [ ] reimplement buckets with sieve cache?
+* [ ] rewrite StagingRamp or file issue on it
+* [ ] Add ability to toggle load/unload brick in UI
+
 

@@ -128,6 +128,7 @@ pub fn deinit(self: BrickLoadPipeline, ctx: Context) void {
     self.brick_staging_buffer.deinit(ctx);
 }
 
+// TODO: move to BrickStream
 pub fn prepareBrickTransfer(
     self: *BrickLoadPipeline,
     ctx: Context,
@@ -156,6 +157,23 @@ pub fn prepareBrickTransfer(
         0,
     );
 
+    // TODO: upload brick_set as well!
+    // if a brick is incoherent, then we must ask the device to unload the brick
+    if (host_brick_state.inchoherent_bricks.count() > 0) {
+        const brick_unload_buffer_index = (RayDeviceResources.Resource{ .host_and_device = .brick_unload_request_s }).toBufferIndex();
+        const unload_request_offset: vk.DeviceSize = @intCast(host_brick_state.brick_limits.unload_request_count * @sizeOf(c_uint));
+        std.debug.assert(@sizeOf(c_uint) == @sizeOf(u32));
+
+        var brick_iter = host_brick_state.inchoherent_bricks.keyIterator();
+        try self.brick_staging_buffer.transferToBuffer(
+            &ray_device_resources.voxel_scene_buffer,
+            ray_device_resources.buffer_infos[brick_unload_buffer_index].offset + unload_request_offset,
+            u32,
+            brick_iter.items[0..brick_iter.len],
+        );
+    }
+
+    // if we need to deal we new bricks
     if (load_req_count > 0) {
         // TODO: remove alloc, alloc on init
         const new_bricks = try self.allocator.alloc(ray_pipeline_types.Brick, load_req_count);

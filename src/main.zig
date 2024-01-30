@@ -35,6 +35,8 @@ var call_pitch = false;
 var mouse_delta = za.Vec2.zero();
 var mouse_ignore_frames: u32 = 5;
 
+var hack: *HostBrickState = undefined;
+
 pub fn main() anyerror!void {
     tracy.SetThreadName("main thread");
     const zone = tracy.ZoneN(@src(), @src().fn_name);
@@ -91,6 +93,7 @@ pub fn main() anyerror!void {
         );
     };
     defer host_brick_state.deinit();
+    hack = &host_brick_state;
 
     try host_brick_state.setupTestScene();
 
@@ -190,6 +193,9 @@ fn gameKeyInputFn(event: Input.KeyEvent) void {
             Input.Key.a => {
                 call_translate += 1;
                 camera_translate.data[0] -= 1;
+            },
+            Input.Key.k => {
+                hack.setVoxel(.{ 10, 10, 10 }, .dirt) catch unreachable;
             },
             Input.Key.left_control => {
                 call_translate += 1;
