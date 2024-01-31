@@ -52,14 +52,15 @@ void main() {
     const uint req_count = bitfieldExtract(brick_index_bits, BRICK_REQUEST_COUNT_OFFSET, BRICK_REQUEST_COUNT_BITS);
     // Each frame we decrement the request count
     if (req_count > 0) {
-        new_brick_index_bits = bitfieldInsert(brick_index_bits, req_count - 1, BRICK_REQUEST_COUNT_OFFSET, BRICK_REQUEST_COUNT_BITS);
+        new_brick_index_bits = bitfieldInsert(new_brick_index_bits, req_count - 1, BRICK_REQUEST_COUNT_OFFSET, BRICK_REQUEST_COUNT_BITS);
     }
 
     // if req count - 1 is 0 and brick is loaded
     if (req_count <= 1 && brick_status == BRICK_STATUS_LOADED) {
         if (brick_limits.unload_request_count < brick_limits.max_unload_request_count) {
+
             // register that brick is unloading
-            new_brick_index_bits = bitfieldInsert(brick_index_bits, BRICK_STATUS_UNLOADING, BRICK_STATUS_OFFSET, BRICK_STATUS_BITS);
+            new_brick_index_bits = bitfieldInsert(new_brick_index_bits, BRICK_STATUS_UNLOADING, BRICK_STATUS_OFFSET, BRICK_STATUS_BITS);
             const uint index_of_request = atomicAdd(brick_limits.unload_request_count, 1);
             unload_request_brick_indices[index_of_request] = brick_index;
         }

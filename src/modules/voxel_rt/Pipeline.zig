@@ -614,9 +614,12 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
         try ctx.vkd.beginCommandBuffer(self.ray_command_buffers, &command_begin_info);
 
         // TODO: brick load pipeline queue submit here on dedicated queue. Get semaphore and wait ray pipeline queue execution on brick load completion signal.
-        self.brick_heartbeat_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
         self.brick_unload_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
         self.brick_load_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+
+        self.ray_device_resources.resetBrickReqLimitsBarrier(ctx, self.ray_command_buffers);
+        self.ray_device_resources.resetBrickReqLimits(ctx, self.ray_command_buffers);
+        self.ray_device_resources.resetBrickReqLimitsBarrier(ctx, self.ray_command_buffers);
 
         // clear compute image which is needed to support multiple rays per pixel
         {
@@ -713,6 +716,9 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
                     self.ray_command_buffers,
                 );
             }
+
+            self.brick_heartbeat_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+
             self.draw_ray_pipeline.appendPipelineCommands(
                 ctx,
                 max_ray_bounces,

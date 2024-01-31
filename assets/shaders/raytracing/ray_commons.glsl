@@ -28,14 +28,14 @@ struct HitLimits {
 
 // Must be kept in sync with  src/modules/voxel_rt/ray_pipeline_types.zig
 struct BrickLimits {
-    // Written by host 
-    uint max_load_request_count;
     // How many bricks have been requested so far
     uint load_request_count;
-    // Written by host 
-    uint max_unload_request_count;
     // How many bricks have been requested so far
     uint unload_request_count;
+    // Written by host 
+    uint max_load_request_count;
+    // Written by host 
+    uint max_unload_request_count;
     // How many active bricks can we have
     uint max_active_bricks;
     // How many active bricks do we have

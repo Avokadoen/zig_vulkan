@@ -265,16 +265,14 @@ pub fn prepareBrickTransfer(
         }
     }
 
+    host_brick_state.brick_limits = snapshot.brick_limits;
+    host_brick_state.brick_limits.active_bricks = active_bricks_before_load + @as(c_int, @intCast(load_req_count));
+    host_brick_state.brick_limits.load_request_count = @intCast(load_req_count);
+
     // Flush if needed
     self.command_record_should_flush = sync_req_flush_blk: {
         if (unload_req_count + load_req_count != 0) {
             const brick_req_limits_buffer_index = (RayDeviceResources.Resource{ .host_and_device = .brick_req_limits_s }).toBufferIndex();
-
-            host_brick_state.brick_limits = snapshot.brick_limits;
-
-            host_brick_state.brick_limits.active_bricks = active_bricks_before_load + @as(c_int, @intCast(load_req_count));
-
-            host_brick_state.brick_limits.load_request_count = @intCast(load_req_count);
             const limits_slice = [1]ray_pipeline_types.BrickLimits{host_brick_state.brick_limits};
             try self.brick_staging_buffer.transferToBuffer(
                 &ray_device_resources.request_buffer,

@@ -46,14 +46,14 @@ pub const BrickRequest = extern struct {
 };
 // must be kept in sync with assets/shaders/raytracing/ray_commons.glsl BrickLimits
 pub const BrickLimits = extern struct {
-    // Written by host
-    max_load_request_count: c_uint,
     // How many bricks have been requested so far
     load_request_count: c_uint,
-    // Written by host
-    max_unload_request_count: c_uint,
     // How many bricks have been requested so far
     unload_request_count: c_uint,
+    // Written by host
+    max_load_request_count: c_uint,
+    // Written by host
+    max_unload_request_count: c_uint,
     // How many active bricks can we have
     max_active_bricks: c_uint,
     // How many active bricks do we have

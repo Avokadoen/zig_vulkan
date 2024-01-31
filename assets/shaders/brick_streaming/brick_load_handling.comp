@@ -44,12 +44,10 @@ void main() {
     // Get data needed to update buffers
     LoadRequest load_request = load_requests[load_request_index];
 
-    // TODO: NOTE: This is extremly error prone code. If any value overflows, then it might assign bits outside 
-    //             of variable bits 
     // Create our new index
-    uint new_index_bits = (BRICK_STATUS_LOADED << BRICK_STATUS_OFFSET) |
-        (BRICK_REQUEST_COUNT_MAX_VALUE << BRICK_REQUEST_COUNT_OFFSET) |
-        (load_request.brick_index_32b << BRICK_INDEX_OFFSET); 
+    uint new_index_bits = bitfieldInsert(0, BRICK_STATUS_LOADED, BRICK_STATUS_OFFSET, BRICK_STATUS_BITS);
+    new_index_bits = bitfieldInsert(new_index_bits, BRICK_REQUEST_COUNT_MAX_VALUE - 1, BRICK_REQUEST_COUNT_OFFSET, BRICK_REQUEST_COUNT_BITS);
+    new_index_bits = bitfieldInsert(new_index_bits, load_request.brick_index_32b, BRICK_INDEX_OFFSET, BRICK_INDEX_BITS);
 
     brick_index_req_count_status[load_request.brick_index_index] = new_index_bits;
     brick_index_to_brick_indices_index[load_request.brick_index_32b] = load_request.brick_index_index;

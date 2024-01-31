@@ -136,30 +136,6 @@ pub fn appendPipelineCommands(self: BrickHeartbeatPipeline, ctx: Context, comman
         }
     }
 
-    self.ray_device_resources.resetBrickReqLimits(ctx, command_buffer);
-
-    const brick_buffer_memory_barrier = [_]vk.BufferMemoryBarrier{.{
-        .src_access_mask = .{ .shader_read_bit = true },
-        .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-        .src_queue_family_index = ctx.queue_indices.compute,
-        .dst_queue_family_index = ctx.queue_indices.compute,
-        .buffer = self.ray_device_resources.voxel_scene_buffer.buffer,
-        .offset = 0,
-        .size = vk.WHOLE_SIZE,
-    }};
-    ctx.vkd.cmdPipelineBarrier(
-        command_buffer,
-        .{ .compute_shader_bit = true },
-        .{ .compute_shader_bit = true },
-        .{},
-        0,
-        undefined,
-        brick_buffer_memory_barrier.len,
-        &brick_buffer_memory_barrier,
-        0,
-        undefined,
-    );
-
     {
         // reduce brick dimensions to brick count
         const grid_brick_dim = self.ray_device_resources.host_brick_state.grid_metadata.dim;

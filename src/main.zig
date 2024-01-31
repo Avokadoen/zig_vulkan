@@ -105,8 +105,8 @@ pub fn main() anyerror!void {
             .internal_resolution_width = internal_render_resolution.x(),
             .internal_resolution_height = internal_render_resolution.y(),
             .camera = .{
-                .samples_per_pixel = 2,
-                .max_bounce = 0,
+                .samples_per_pixel = 1,
+                .max_ray_bounce = 0,
                 .origin = @Vector(3, f32){ 0, 0, 4 },
             },
             .sun = .{
