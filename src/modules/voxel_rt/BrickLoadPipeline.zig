@@ -41,8 +41,8 @@ work_group_dim: Dispatch1D,
 
 ray_device_resources: *const RayDeviceResources,
 
+// TODO: move to BrickStream
 brick_staging_buffer: SimpleStagingBuffer,
-command_record_should_flush: bool = false,
 
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
