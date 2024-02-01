@@ -195,7 +195,7 @@ fn gameKeyInputFn(event: Input.KeyEvent) void {
                 camera_translate.data[0] -= 1;
             },
             Input.Key.k => {
-                hack.setVoxel(.{ 10, 10, 10 }, .dirt) catch unreachable;
+                hack.setVoxel(.{ 20, 20, 20 }, .dirt) catch unreachable;
             },
             Input.Key.left_control => {
                 call_translate += 1;

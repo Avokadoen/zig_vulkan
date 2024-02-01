@@ -261,6 +261,18 @@ pub fn prepareBrickTransfer(
             );
         }
 
+        // Transfer brick set
+        {
+            // TODO: For now we just send the full grid brick set bits since it is relatively small amount of data
+            const brick_set_buffer_index = (RayDeviceResources.Resource{ .device = .bricks_set_s }).toBufferIndex();
+            try self.brick_staging_buffer.transferToBuffer(
+                &ray_device_resources.voxel_scene_buffer,
+                ray_device_resources.buffer_infos[brick_set_buffer_index].offset,
+                u8,
+                host_brick_state.brick_set,
+            );
+        }
+
         // Transfer material indices
         {
             const material_indices_index = (RayDeviceResources.Resource{ .device = .material_indices_b }).toBufferIndex();
