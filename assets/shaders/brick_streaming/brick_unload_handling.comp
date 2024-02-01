@@ -18,7 +18,7 @@ layout (std430, set = 0, binding = 2) buffer BrickBuffer {
     Brick bricks[];
 };
 
-layout (std430, set = 1, binding = 0) readonly buffer BrickRequestLimits {
+layout (std430, set = 1, binding = 0) buffer BrickRequestLimits {
     BrickLimits brick_limits;
 };
 layout (std430, set = 2, binding = 0) readonly buffer BrickUnloadRequestIndices {
@@ -50,6 +50,19 @@ void main() {
     uint remove_index = unload_request_brick_indices[unload_request_index];
     
     const uint deleted_index_bits = brick_index_req_count_status[remove_index];
+    {
+        const uint deleted_index_status = bitfieldExtract(
+            deleted_index_bits,
+            BRICK_STATUS_OFFSET,
+            BRICK_STATUS_BITS
+        );
+
+        // In some scenarios the host might request a unloading of a unloaded brick.
+        // We should ignore these requests
+        if (deleted_index_status != BRICK_STATUS_UNLOADING && deleted_index_status != BRICK_STATUS_LOADED) {
+            return;
+        }
+    }
 
     // Index is no longer active
     brick_index_req_count_status[remove_index] = bitfieldInsert(
@@ -65,15 +78,9 @@ void main() {
         BRICK_INDEX_BITS
     );
 
-    const int removed_brick_index = brick_limits.active_bricks - int(unload_request_index + 1);
+    const int removed_brick_index = atomicAdd(brick_limits.active_bricks, -1) - 1;
     if (removed_brick_index <= 0) {
         return;
-    }
-
-    // Optimization: early exit here if we are working within the unload count index range
-    const int last_valid_index = (brick_limits.active_bricks - int(brick_limits.unload_request_count));
-    if (int(inactive_brick_index) > last_valid_index) {
-        return; 
     }
 
     // move the brick in delete slot to its new location

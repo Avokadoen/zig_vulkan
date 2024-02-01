@@ -129,106 +129,130 @@ pub fn deinit(self: BrickLoadPipeline, ctx: Context) void {
 }
 
 // TODO: move to BrickStream
+// Returns the amound of incoherent bricks
 pub fn prepareBrickTransfer(
     self: *BrickLoadPipeline,
     ctx: Context,
     host_brick_state: *HostBrickState,
     ray_device_resources: *RayDeviceResources,
     snapshot: DataFrameSnapshot,
-) !void {
+) !usize {
     const zone = tracy.ZoneN(@src(), @typeName(BrickLoadPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
-    const active_bricks: u32 = @intCast(snapshot.brick_limits.active_bricks);
-
-    const load_req_count: usize = @intCast(@min(
-        snapshot.brick_limits.load_request_count,
-        snapshot.brick_limits.max_active_bricks - active_bricks,
-    ));
-
-    const unload_req_count: usize = @intCast(@max(
-        snapshot.brick_limits.unload_request_count,
-        0,
-    ));
-
-    // update host_brick_state brick limits
-    const active_bricks_before_load = @max(
-        host_brick_state.brick_limits.active_bricks - @as(c_int, @intCast(unload_req_count)),
-        0,
-    );
-
     // TODO: upload brick_set as well!
-    // if a brick is incoherent, then we must ask the device to unload the brick
-    if (host_brick_state.inchoherent_bricks.count() > 0) {
+    // TODO: bug: incoherent brick also being brick requested by gpu will lead to corruption
+
+    const active_bricks: u32 = @intCast(snapshot.brick_limits.active_bricks);
+    const max_load_count = snapshot.brick_limits.max_active_bricks - active_bricks;
+
+    // If a brick is incoherent, then we must ask the device to unload the brick to reupload
+    const incoherent_brick_count: usize = @intCast(@min(
+        host_brick_state.inchoherent_bricks.count(),
+        max_load_count,
+    ));
+    defer host_brick_state.inchoherent_bricks.clearRetainingCapacity();
+
+    if (incoherent_brick_count > 0) {
         const brick_unload_buffer_index = (RayDeviceResources.Resource{ .host_and_device = .brick_unload_request_s }).toBufferIndex();
-        const unload_request_offset: vk.DeviceSize = @intCast(host_brick_state.brick_limits.unload_request_count * @sizeOf(c_uint));
         std.debug.assert(@sizeOf(c_uint) == @sizeOf(u32));
 
-        var brick_iter = host_brick_state.inchoherent_bricks.keyIterator();
         try self.brick_staging_buffer.transferToBuffer(
-            &ray_device_resources.voxel_scene_buffer,
-            ray_device_resources.buffer_infos[brick_unload_buffer_index].offset + unload_request_offset,
+            &ray_device_resources.request_buffer,
+            // We start at unload offset 0 since this will only occur next frame!
+            ray_device_resources.buffer_infos[brick_unload_buffer_index].offset,
             u32,
-            brick_iter.items[0..brick_iter.len],
+            host_brick_state.inchoherent_bricks.keys()[0..incoherent_brick_count],
         );
     }
 
+    const unload_request_count: usize = @intCast(@min(
+        snapshot.brick_limits.unload_request_count,
+        snapshot.brick_limits.max_unload_request_count,
+    ));
+    const load_request_count: usize = @intCast(@min(
+        snapshot.brick_limits.load_request_count,
+        max_load_count - incoherent_brick_count,
+    ));
+
+    const total_load_requests: usize = @intCast(@min(
+        load_request_count + incoherent_brick_count,
+        max_load_count,
+    ));
+
+    const active_bricks_before_load = @max(
+        snapshot.brick_limits.active_bricks,
+        0,
+    );
+
     // if we need to deal we new bricks
-    if (load_req_count > 0) {
+    if (total_load_requests > 0) {
         // TODO: remove alloc, alloc on init
-        const new_bricks = try self.allocator.alloc(ray_pipeline_types.Brick, load_req_count);
+        const new_bricks = try self.allocator.alloc(ray_pipeline_types.Brick, total_load_requests);
         defer self.allocator.free(new_bricks);
         // TODO: remove alloc, alloc on init
-        const new_brick_indices = try self.allocator.alloc(ray_pipeline_types.BrickLoadRequest, load_req_count);
+        const new_brick_indices = try self.allocator.alloc(ray_pipeline_types.BrickLoadRequest, total_load_requests);
         defer self.allocator.free(new_brick_indices);
         // TODO: remove alloc, alloc on init
-        const new_material_indices = try self.allocator.alloc(HostBrickState.material_index, load_req_count * 512);
+        const new_material_indices = try self.allocator.alloc(HostBrickState.material_index, total_load_requests * 512);
         defer self.allocator.free(new_material_indices);
 
-        std.debug.assert(host_brick_state.brick_limits.max_active_bricks >= host_brick_state.brick_limits.active_bricks);
+        std.debug.assert(host_brick_state.brick_limits.max_active_bricks >= snapshot.brick_limits.active_bricks);
 
-        for (
-            snapshot.brick_load_requests[0..load_req_count],
-            new_bricks,
-            new_brick_indices,
-            active_bricks_before_load..,
-            0..,
-        ) |
-            load_index,
-            *new_brick,
-            *new_brick_index,
-            brick_buffer_index,
-            loop_iter,
-        | {
-            const brick_index = host_brick_state.brick_indices[load_index].index;
-            new_brick.* = host_brick_state.bricks[brick_index];
+        const load_req_slices: [2][]const c_uint = .{
+            snapshot.brick_load_requests[0..load_request_count],
+            host_brick_state.inchoherent_bricks.keys()[0..incoherent_brick_count],
+        };
+        var load_req_initalized_count: usize = 0;
 
-            {
-                const mat_indices_dest = dest_blk: {
-                    const start = loop_iter * 512;
-                    const end = start + 512;
-                    break :dest_blk new_material_indices[start..end];
+        inline for (load_req_slices) |load_requests| {
+            const from = load_req_initalized_count;
+            const to = from + load_requests.len;
+            for (
+                load_requests,
+                new_bricks[from..to],
+                new_brick_indices[from..to],
+                active_bricks_before_load + from..,
+                from..,
+            ) |
+                load_index,
+                *new_brick,
+                *new_brick_index,
+                brick_buffer_index,
+                loop_iter,
+            | {
+                const brick_index = host_brick_state.brick_indices[load_index].index;
+                new_brick.* = host_brick_state.bricks[brick_index];
+
+                {
+                    const mat_indices_dest = dest_blk: {
+                        const start = loop_iter * 512;
+                        const end = start + 512;
+                        break :dest_blk new_material_indices[start..end];
+                    };
+
+                    const mat_indices_src = src_blk: {
+                        const start = brick_index * 512;
+                        const end = start + 512;
+                        break :src_blk host_brick_state.voxel_material_indices[start..end];
+                    };
+
+                    @memcpy(mat_indices_dest, mat_indices_src);
+                }
+
+                new_brick_index.* = ray_pipeline_types.BrickLoadRequest{
+                    .brick_index_index = load_index,
+                    .brick_index_32b = @intCast(brick_buffer_index),
                 };
-
-                const mat_indices_src = src_blk: {
-                    const start = brick_index * 512;
-                    const end = start + 512;
-                    break :src_blk host_brick_state.voxel_material_indices[start..end];
-                };
-
-                @memcpy(mat_indices_dest, mat_indices_src);
             }
 
-            new_brick_index.* = ray_pipeline_types.BrickLoadRequest{
-                .brick_index_index = load_index,
-                .brick_index_32b = @intCast(brick_buffer_index),
-            };
+            load_req_initalized_count += load_requests.len;
         }
 
         // Transfer bricks
         {
             const brick_buffer_index = (RayDeviceResources.Resource{ .device = .bricks_b }).toBufferIndex();
-            const new_bricks_offset: vk.DeviceSize = @intCast(host_brick_state.brick_limits.active_bricks * @sizeOf(ray_pipeline_types.Brick));
+            const new_bricks_offset: vk.DeviceSize = @intCast(snapshot.brick_limits.active_bricks * @sizeOf(ray_pipeline_types.Brick));
             try self.brick_staging_buffer.transferToBuffer(
                 &ray_device_resources.voxel_scene_buffer,
                 ray_device_resources.buffer_infos[brick_buffer_index].offset + new_bricks_offset,
@@ -241,7 +265,7 @@ pub fn prepareBrickTransfer(
         {
             const material_indices_index = (RayDeviceResources.Resource{ .device = .material_indices_b }).toBufferIndex();
             const new_material_indices_offset: vk.DeviceSize = @intCast(
-                host_brick_state.brick_limits.active_bricks * 512 * @sizeOf(HostBrickState.material_index),
+                snapshot.brick_limits.active_bricks * 512 * @sizeOf(HostBrickState.material_index),
             );
 
             try self.brick_staging_buffer.transferToBuffer(
@@ -266,28 +290,25 @@ pub fn prepareBrickTransfer(
     }
 
     host_brick_state.brick_limits = snapshot.brick_limits;
-    host_brick_state.brick_limits.active_bricks = active_bricks_before_load + @as(c_int, @intCast(load_req_count));
-    host_brick_state.brick_limits.load_request_count = @intCast(load_req_count);
+    host_brick_state.brick_limits.active_bricks = active_bricks_before_load + @as(c_int, @intCast(total_load_requests));
+    host_brick_state.brick_limits.load_request_count = @intCast(total_load_requests);
 
-    // Flush if needed
-    self.command_record_should_flush = sync_req_flush_blk: {
-        if (unload_req_count + load_req_count != 0) {
-            const brick_req_limits_buffer_index = (RayDeviceResources.Resource{ .host_and_device = .brick_req_limits_s }).toBufferIndex();
-            const limits_slice = [1]ray_pipeline_types.BrickLimits{host_brick_state.brick_limits};
-            try self.brick_staging_buffer.transferToBuffer(
-                &ray_device_resources.request_buffer,
-                ray_device_resources.buffer_infos[brick_req_limits_buffer_index].offset,
-                ray_pipeline_types.BrickLimits,
-                &limits_slice,
-            );
+    if (unload_request_count + total_load_requests != 0) {
+        const brick_req_limits_buffer_index = (RayDeviceResources.Resource{ .host_and_device = .brick_req_limits_s }).toBufferIndex();
+        const limits_slice = [1]ray_pipeline_types.BrickLimits{host_brick_state.brick_limits};
+        try self.brick_staging_buffer.transferToBuffer(
+            &ray_device_resources.request_buffer,
+            ray_device_resources.buffer_infos[brick_req_limits_buffer_index].offset,
+            ray_pipeline_types.BrickLimits,
+            &limits_slice,
+        );
+    }
 
-            try self.brick_staging_buffer.sync(ctx);
+    if (self.brick_staging_buffer.buffer_cursor != 0) {
+        try self.brick_staging_buffer.sync(ctx);
+    }
 
-            break :sync_req_flush_blk true;
-        }
-
-        break :sync_req_flush_blk false;
-    };
+    return incoherent_brick_count;
 }
 
 pub fn appendPipelineCommands(self: *BrickLoadPipeline, ctx: Context, command_buffer: vk.CommandBuffer) void {
@@ -332,9 +353,7 @@ pub fn appendPipelineCommands(self: *BrickLoadPipeline, ctx: Context, command_bu
         );
     }
 
-    if (self.command_record_should_flush) {
-        self.command_record_should_flush = false;
-
+    if (self.brick_staging_buffer.buffer_cursor != 0) {
         self.brick_staging_buffer.flush(ctx, command_buffer);
 
         // TODO remove barrier when we move this to dedicated queue

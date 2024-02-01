@@ -53,7 +53,7 @@ voxel_material_indices: []material_index,
 brick_set: []u8,
 dimensions: [3]u32,
 
-inchoherent_bricks: std.AutoHashMap(u32, void),
+inchoherent_bricks: std.AutoArrayHashMap(u32, void),
 
 pub fn init(
     allocator: Allocator,
@@ -118,7 +118,7 @@ pub fn init(
         .voxel_material_indices = voxel_material_indices,
         .brick_set = brick_set,
         .dimensions = dimensions,
-        .inchoherent_bricks = std.AutoHashMap(u32, void).init(allocator),
+        .inchoherent_bricks = std.AutoArrayHashMap(u32, void).init(allocator),
     };
 }
 

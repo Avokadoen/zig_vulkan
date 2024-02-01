@@ -181,7 +181,7 @@ bool GridHit(inout Ray r, inout bool skip_next_voxel, float t_min, float t_max, 
     }
 
     // HACK: workaround for precision issues with t being too low for "penetrating" grid 
-    float global_t_value = grid_t_min + 0.001 * g_scale.x;
+    float global_t_value = grid_t_min + 0.0001 * g_scale.x;
 
     // Perform 3DDDA, source: https://lodev.org/cgtutor/raycasting.html
    	const vec3 ray_delta = abs(inv_ray_dir);
