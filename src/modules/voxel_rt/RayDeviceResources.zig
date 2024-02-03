@@ -727,18 +727,6 @@ pub fn init(
         break :blk infos;
     };
 
-    // brick set bits transfer
-    {
-        const brick_set_buffer_index = (Resource{ .device = .bricks_set_s }).toBufferIndex();
-        try staging_buffer.transferToBuffer(
-            ctx,
-            &voxel_scene_buffer,
-            buffer_infos[brick_set_buffer_index].offset,
-            u8,
-            host_brick_state.brick_set,
-        );
-    }
-
     // brick limits transfer
     {
         const brick_req_limits_buffer_index = (Resource{ .host_and_device = .brick_req_limits_s }).toBufferIndex();

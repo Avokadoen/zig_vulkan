@@ -140,7 +140,9 @@ pub fn prepareBrickTransfer(
     const zone = tracy.ZoneN(@src(), @typeName(BrickLoadPipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
-    // TODO: upload brick_set as well!
+    std.debug.assert(snapshot.brick_limits.max_load_request_count > 0);
+    std.debug.assert(snapshot.brick_limits.max_unload_request_count > 0);
+
     // TODO: bug: incoherent brick also being brick requested by gpu will lead to corruption
 
     const active_bricks: u32 = @intCast(snapshot.brick_limits.active_bricks);
@@ -151,8 +153,6 @@ pub fn prepareBrickTransfer(
         host_brick_state.inchoherent_bricks.count(),
         max_load_count,
     ));
-    defer host_brick_state.inchoherent_bricks.clearRetainingCapacity();
-
     if (incoherent_brick_count > 0) {
         const brick_unload_buffer_index = (RayDeviceResources.Resource{ .host_and_device = .brick_unload_request_s }).toBufferIndex();
         std.debug.assert(@sizeOf(c_uint) == @sizeOf(u32));
@@ -164,7 +164,20 @@ pub fn prepareBrickTransfer(
             u32,
             host_brick_state.inchoherent_bricks.keys()[0..incoherent_brick_count],
         );
+
+        // Transfer brick set
+        {
+            // TODO: For now we just send the full grid brick set bits since it is relatively small amount of data
+            const brick_set_buffer_index = (RayDeviceResources.Resource{ .device = .bricks_set_s }).toBufferIndex();
+            try self.brick_staging_buffer.transferToBuffer(
+                &ray_device_resources.voxel_scene_buffer,
+                ray_device_resources.buffer_infos[brick_set_buffer_index].offset,
+                u8,
+                host_brick_state.brick_set,
+            );
+        }
     }
+    // TODO: find a way to load in same frame as we unload
 
     const unload_request_count: usize = @intCast(@min(
         snapshot.brick_limits.unload_request_count,
@@ -172,11 +185,11 @@ pub fn prepareBrickTransfer(
     ));
     const load_request_count: usize = @intCast(@min(
         snapshot.brick_limits.load_request_count,
-        max_load_count - incoherent_brick_count,
+        max_load_count,
     ));
 
     const total_load_requests: usize = @intCast(@min(
-        load_request_count + incoherent_brick_count,
+        load_request_count,
         max_load_count,
     ));
 
@@ -199,9 +212,9 @@ pub fn prepareBrickTransfer(
 
         std.debug.assert(host_brick_state.brick_limits.max_active_bricks >= snapshot.brick_limits.active_bricks);
 
-        const load_req_slices: [2][]const c_uint = .{
+        const load_req_slices: [1][]const c_uint = .{
             snapshot.brick_load_requests[0..load_request_count],
-            host_brick_state.inchoherent_bricks.keys()[0..incoherent_brick_count],
+            // host_brick_state.inchoherent_bricks.keys()[0..incoherent_brick_count],
         };
         var load_req_initalized_count: usize = 0;
 
@@ -261,18 +274,6 @@ pub fn prepareBrickTransfer(
             );
         }
 
-        // Transfer brick set
-        {
-            // TODO: For now we just send the full grid brick set bits since it is relatively small amount of data
-            const brick_set_buffer_index = (RayDeviceResources.Resource{ .device = .bricks_set_s }).toBufferIndex();
-            try self.brick_staging_buffer.transferToBuffer(
-                &ray_device_resources.voxel_scene_buffer,
-                ray_device_resources.buffer_infos[brick_set_buffer_index].offset,
-                u8,
-                host_brick_state.brick_set,
-            );
-        }
-
         // Transfer material indices
         {
             const material_indices_index = (RayDeviceResources.Resource{ .device = .material_indices_b }).toBufferIndex();
@@ -320,6 +321,7 @@ pub fn prepareBrickTransfer(
         try self.brick_staging_buffer.sync(ctx);
     }
 
+    host_brick_state.inchoherent_bricks.clearRetainingCapacity();
     return incoherent_brick_count;
 }
 

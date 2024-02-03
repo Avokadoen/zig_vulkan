@@ -61,6 +61,9 @@ pub fn init(
     config: Config,
     comptime zero_out_mem: bool,
 ) !HostBrickState {
+    std.debug.assert(config.brick_load_request_count != 0);
+    std.debug.assert(config.brick_unload_request_count != 0);
+
     const dimensions = [3]u32{
         @intFromFloat(@round(grid_metadata.dim[0])),
         @intFromFloat(@round(grid_metadata.dim[1])),
@@ -109,6 +112,11 @@ pub fn init(
         @memset(brick_set, 0);
     }
 
+    var inchoherent_bricks = std.AutoArrayHashMap(u32, void).init(allocator);
+    errdefer inchoherent_bricks.deinit();
+
+    try inchoherent_bricks.ensureTotalCapacity(config.brick_load_request_count);
+
     return HostBrickState{
         .allocator = allocator,
         .grid_metadata = grid_metadata,
@@ -118,7 +126,7 @@ pub fn init(
         .voxel_material_indices = voxel_material_indices,
         .brick_set = brick_set,
         .dimensions = dimensions,
-        .inchoherent_bricks = std.AutoArrayHashMap(u32, void).init(allocator),
+        .inchoherent_bricks = inchoherent_bricks,
     };
 }
 

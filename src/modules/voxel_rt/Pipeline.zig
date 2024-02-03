@@ -367,6 +367,8 @@ pub fn init(
         .{},
     );
 
+    try staging_buffers.flush(ctx);
+
     return Pipeline{
         .allocator = allocator,
         .image_memory_type_index = image_memory_type_index,
