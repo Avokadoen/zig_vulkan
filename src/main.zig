@@ -133,9 +133,14 @@ pub fn main() anyerror!void {
     input.setInputModeCursor(.disabled);
     input.setImguiWantInput(false);
 
+    var cursor_x: u32 = 0;
+
     var prev_frame = std.time.milliTimestamp();
     // Loop until the user closes the window
     while (!window.shouldClose()) {
+        try hack.setVoxel(.{ cursor_x % (hack.brick_dimensions[0] * 8), 0, 0 }, .dirt);
+        cursor_x += 1;
+
         const current_frame = std.time.milliTimestamp();
         delta_time = @as(f64, @floatFromInt(current_frame - prev_frame)) / @as(f64, std.time.ms_per_s);
         // f32 variant of delta_time
