@@ -37,6 +37,8 @@ max_ray_bounces: i32,
 samples_per_pixel: i32,
 d_camera: Device,
 
+freeze_ray_culling: bool = false,
+
 pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Config) Camera {
     const zone = tracy.ZoneN(@src(), @typeName(Camera) ++ " " ++ @src().fn_name);
     defer zone.End();

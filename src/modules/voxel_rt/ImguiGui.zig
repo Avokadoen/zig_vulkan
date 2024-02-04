@@ -214,6 +214,7 @@ inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
         .max = 32,
     });
     imguiToolTip("how many times a ray is allowed to bounce before terminating", .{});
+
     _ = zgui.sliderInt("samples per pixel", .{
         .v = &self.state_binding.camera_ptr.samples_per_pixel,
         .min = 1,
@@ -229,6 +230,9 @@ inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
     if (camera_origin_changed) {
         self.state_binding.camera_ptr.setOrigin(camera_origin);
     }
+
+    _ = zgui.checkbox("Freeze ray culling", .{ .v = &self.state_binding.camera_ptr.freeze_ray_culling });
+    imguiToolTip("Disable ray culling and brick streaming", .{});
 }
 
 inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
