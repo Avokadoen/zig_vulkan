@@ -7,11 +7,13 @@ const tracy = @import("ztracy");
 
 const render = @import("../../render.zig");
 const Context = render.Context;
-const GpuBufferMemory = render.GpuBufferMemory;
 const SimpleStagingBuffer = render.SimpleStagingBuffer;
 
 const ray_pipeline_types = @import("../ray_pipeline_types.zig");
 const BrickLimits = ray_pipeline_types.BrickLimits;
+const Brick = ray_pipeline_types.Brick;
+const BrickGridMetadata = ray_pipeline_types.BrickGridMetadata;
+const BrickLoadRequest = ray_pipeline_types.BrickLoadRequest;
 
 const RayDeviceResources = @import("../RayDeviceResources.zig");
 const Resource = RayDeviceResources.Resource;
@@ -25,6 +27,10 @@ frame_snapshot: FrameSnapshot,
 
 brick_staging_buffer: SimpleStagingBuffer,
 
+brick_load_requests: []BrickLoadRequest,
+new_bricks: []Brick,
+new_material_indices: []HostBrickState.material_index,
+
 pub fn init(allocator: Allocator, ctx: Context, brick_limits: BrickLimits) !BrickStream {
     const zone = tracy.ZoneN(@src(), @typeName(BrickStream) ++ " " ++ @src().fn_name);
     defer zone.End();
@@ -35,10 +41,22 @@ pub fn init(allocator: Allocator, ctx: Context, brick_limits: BrickLimits) !Bric
     const brick_staging_buffer = try SimpleStagingBuffer.init(ctx, allocator);
     errdefer brick_staging_buffer.deinit(ctx);
 
+    const brick_load_requests = try allocator.alloc(BrickLoadRequest, brick_limits.max_load_request_count);
+    errdefer allocator.free(brick_load_requests);
+
+    const new_bricks = try allocator.alloc(Brick, brick_limits.max_load_request_count);
+    errdefer allocator.free(new_bricks);
+
+    const new_material_indices = try allocator.alloc(HostBrickState.material_index, brick_limits.max_load_request_count * 512);
+    errdefer allocator.free(new_material_indices);
+
     return BrickStream{
         .allocator = allocator,
         .frame_snapshot = frame_snapshot,
         .brick_staging_buffer = brick_staging_buffer,
+        .brick_load_requests = brick_load_requests,
+        .new_bricks = new_bricks,
+        .new_material_indices = new_material_indices,
     };
 }
 
@@ -47,6 +65,9 @@ pub fn deinit(self: BrickStream, ctx: Context) void {
     mut_frame_snapshot.deinit(self.allocator);
 
     self.brick_staging_buffer.deinit(ctx);
+    self.allocator.free(self.brick_load_requests);
+    self.allocator.free(self.new_bricks);
+    self.allocator.free(self.new_material_indices);
 }
 
 // TODO: bug: incoherent brick also being brick requested by gpu will lead to corruption
@@ -123,15 +144,9 @@ pub fn prepareBrickTransfer(
 
     // if we need to deal we new bricks
     if (total_load_requests > 0) {
-        // TODO: remove alloc, alloc on init
-        const new_bricks = try self.allocator.alloc(ray_pipeline_types.Brick, total_load_requests);
-        defer self.allocator.free(new_bricks);
-        // TODO: remove alloc, alloc on init
-        const new_brick_indices = try self.allocator.alloc(ray_pipeline_types.BrickLoadRequest, total_load_requests);
-        defer self.allocator.free(new_brick_indices);
-        // TODO: remove alloc, alloc on init
-        const new_material_indices = try self.allocator.alloc(HostBrickState.material_index, total_load_requests * 512);
-        defer self.allocator.free(new_material_indices);
+        const new_bricks = self.new_bricks[0..total_load_requests];
+        const brick_load_requests = self.brick_load_requests[0..total_load_requests];
+        const new_material_indices = self.new_material_indices[0 .. total_load_requests * 512];
 
         std.debug.assert(host_brick_state.brick_limits.max_active_bricks >= data_snapshot.brick_limits.active_bricks);
 
@@ -147,13 +162,13 @@ pub fn prepareBrickTransfer(
             for (
                 load_requests,
                 new_bricks[from..to],
-                new_brick_indices[from..to],
+                brick_load_requests[from..to],
                 active_bricks_before_load + from..,
                 from..,
             ) |
                 load_index,
                 *new_brick,
-                *new_brick_index,
+                *brick_load_request,
                 brick_buffer_index,
                 loop_iter,
             | {
@@ -176,7 +191,7 @@ pub fn prepareBrickTransfer(
                     @memcpy(mat_indices_dest, mat_indices_src);
                 }
 
-                new_brick_index.* = ray_pipeline_types.BrickLoadRequest{
+                brick_load_request.* = ray_pipeline_types.BrickLoadRequest{
                     .brick_index_index = load_index,
                     .brick_index_32b = @intCast(brick_buffer_index),
                 };
@@ -220,7 +235,7 @@ pub fn prepareBrickTransfer(
                 &ray_device_resources.request_buffer,
                 ray_device_resources.buffer_infos[brick_load_request_result_index].offset,
                 ray_pipeline_types.BrickLoadRequest,
-                new_brick_indices,
+                brick_load_requests,
             );
         }
     }
