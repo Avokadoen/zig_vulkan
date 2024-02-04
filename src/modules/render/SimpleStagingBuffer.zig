@@ -139,6 +139,31 @@ pub fn sync(self: *SimpleStagingBuffer, ctx: Context) !void {
     try self.device_buffer_memory.sync(.flush, ctx, 0, self.buffer_cursor);
 }
 
+pub fn partialFlush(
+    self: SimpleStagingBuffer,
+    ctx: Context,
+    command_buffer: vk.CommandBuffer,
+    buffer: vk.Buffer,
+    inclusive_from: usize,
+    exclusive_to: usize,
+) void {
+    const zone = tracy.ZoneN(@src(), @typeName(SimpleStagingBuffer) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
+    if (self.buffer_cursor == 0) return;
+
+    const copy_job = self.buffer_copy.get(buffer) orelse return;
+    const len: u32 = @intCast(exclusive_to - inclusive_from);
+    std.debug.assert(len <= copy_job.len);
+
+    ctx.vkd.cmdCopyBuffer(command_buffer, self.device_buffer_memory.buffer, buffer, len, copy_job.regions[inclusive_from..exclusive_to].ptr);
+}
+
+pub fn empty(self: *SimpleStagingBuffer) void {
+    self.buffer_copy.clearRetainingCapacity();
+    self.buffer_cursor = 0;
+}
+
 pub fn flush(self: *SimpleStagingBuffer, ctx: Context, command_buffer: vk.CommandBuffer) void {
     const zone = tracy.ZoneN(@src(), @typeName(SimpleStagingBuffer) ++ " " ++ @src().fn_name);
     defer zone.End();
@@ -152,6 +177,5 @@ pub fn flush(self: *SimpleStagingBuffer, ctx: Context, command_buffer: vk.Comman
         }
     }
 
-    self.buffer_copy.clearRetainingCapacity();
-    self.buffer_cursor = 0;
+    self.empty();
 }

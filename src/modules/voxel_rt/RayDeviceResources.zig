@@ -922,11 +922,9 @@ pub inline fn getDescriptorSetLayouts(self: RayDeviceResources, comptime resourc
 /// Reset the brick request limit counters
 ///
 /// Caller should make sure reset is done by calling ``resetBrickReqLimitsBarrier()``
-pub fn resetBrickReqLimits(self: RayDeviceResources, ctx: Context, unload_request_count: usize, command_buffer: vk.CommandBuffer) void {
+pub fn resetBrickReqLimits(self: RayDeviceResources, ctx: Context, command_buffer: vk.CommandBuffer) void {
     std.debug.assert(@offsetOf(BrickLimits, "load_request_count") == 0);
     std.debug.assert(@offsetOf(BrickLimits, "unload_request_count") == @sizeOf(c_uint));
-
-    // TODO: if unload_request_count == 0 then we can do one fill 0
 
     const brick_req_limits_buffer_index = (Resource{ .host_and_device = .brick_req_limits_s }).toBufferIndex();
     {
@@ -935,18 +933,8 @@ pub fn resetBrickReqLimits(self: RayDeviceResources, ctx: Context, unload_reques
             command_buffer,
             self.request_buffer.buffer,
             load_request_count_offset,
-            @sizeOf(c_uint),
+            @sizeOf(c_uint) * 2,
             0,
-        );
-    }
-    {
-        const unload_request_count_offset = self.buffer_infos[brick_req_limits_buffer_index].offset + @offsetOf(BrickLimits, "unload_request_count");
-        ctx.vkd.cmdFillBuffer(
-            command_buffer,
-            self.request_buffer.buffer,
-            unload_request_count_offset,
-            @sizeOf(c_uint),
-            @as(c_uint, @intCast(unload_request_count)),
         );
     }
 }

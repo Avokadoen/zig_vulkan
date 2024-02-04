@@ -31,6 +31,15 @@ brick_load_requests: []BrickLoadRequest,
 new_bricks: []Brick,
 new_material_indices: []HostBrickState.material_index,
 
+unload_request_buf_flush_from: usize = 0,
+unload_request_buf_flush_to: usize = 0,
+
+load_request_buf_flush_from: usize = 0,
+load_request_buf_flush_to: usize = 0,
+
+load_voxel_buf_flush_from: usize = 0,
+load_voxel_buf_flush_to: usize = 0,
+
 pub fn init(allocator: Allocator, ctx: Context, brick_limits: BrickLimits) !BrickStream {
     const zone = tracy.ZoneN(@src(), @typeName(BrickStream) ++ " " ++ @src().fn_name);
     defer zone.End();
@@ -70,89 +79,185 @@ pub fn deinit(self: BrickStream, ctx: Context) void {
     self.allocator.free(self.new_material_indices);
 }
 
-// TODO: bug: incoherent brick also being brick requested by gpu will lead to corruption
-// Returns the amount of incoherent bricks
-pub fn prepareBrickTransfer(
-    self: *BrickStream,
-    ctx: Context,
-    host_brick_state: *HostBrickState,
-    ray_device_resources: *RayDeviceResources,
-) !usize {
-    const zone = tracy.ZoneN(@src(), @typeName(BrickStream) ++ " " ++ @src().fn_name);
-    defer zone.End();
-
+/// Fetch device state to host
+pub fn deviceToHostSync(self: *BrickStream, ctx: Context, ray_device_resources: *RayDeviceResources) !void {
     // sync brick request data on to the host
     try ray_device_resources.invalidateBrickRequestData(ctx);
     self.frame_snapshot.snapshot(ray_device_resources);
+}
 
+pub fn hostToDeviceSync(self: *BrickStream, ctx: Context) !void {
+    // If we have any transfers
+    if (self.brick_staging_buffer.buffer_cursor != 0) {
+        try self.brick_staging_buffer.sync(ctx);
+    }
+}
+
+/// In the event a brick was updated on host,
+/// the brick stream will request the device to unload invalid bricks
+pub fn prepareBrickUnloads(
+    self: *BrickStream,
+    host_brick_state: *HostBrickState,
+    ray_device_resources: *RayDeviceResources,
+) !void {
     const data_snapshot = self.frame_snapshot.asDataSnapshot();
-    std.debug.assert(data_snapshot.brick_limits.max_load_request_count > 0);
-    std.debug.assert(data_snapshot.brick_limits.max_unload_request_count > 0);
 
     const active_bricks: u32 = @intCast(data_snapshot.brick_limits.active_bricks);
-    const max_load_count = data_snapshot.brick_limits.max_active_bricks - active_bricks;
+    std.debug.assert(data_snapshot.brick_limits.max_active_bricks >= active_bricks);
 
     // If a brick is incoherent, then we must ask the device to unload the brick to reupload
-    const incoherent_brick_count: usize = @intCast(@min(
-        host_brick_state.inchoherent_bricks.count(),
-        max_load_count,
-    ));
+    const incoherent_brick_count: usize = @intCast(host_brick_state.inchoherent_bricks.count());
+
+    host_brick_state.brick_limits = data_snapshot.brick_limits;
+
     if (incoherent_brick_count > 0) {
         const brick_unload_buffer_index = (RayDeviceResources.Resource{ .host_and_device = .brick_unload_request_s }).toBufferIndex();
         std.debug.assert(@sizeOf(c_uint) == @sizeOf(u32));
 
+        const incoherent_unload_offset: vk.DeviceSize = @intCast(@sizeOf(u32) * host_brick_state.brick_limits.unload_request_count);
+
+        // chaning this call will affect appendUnloadCommands
         try self.brick_staging_buffer.transferToBuffer(
             &ray_device_resources.request_buffer,
             // We start at unload offset 0 since this will only occur next frame!
-            ray_device_resources.buffer_infos[brick_unload_buffer_index].offset,
+            ray_device_resources.buffer_infos[brick_unload_buffer_index].offset + incoherent_unload_offset,
             u32,
-            host_brick_state.inchoherent_bricks.keys()[0..incoherent_brick_count],
+            host_brick_state.inchoherent_bricks.keys(),
         );
 
-        // Transfer brick set
-        {
-            // TODO: For now we just send the full grid brick set bits since it is relatively small amount of data
-            const brick_set_buffer_index = (RayDeviceResources.Resource{ .device = .bricks_set_s }).toBufferIndex();
-            try self.brick_staging_buffer.transferToBuffer(
-                &ray_device_resources.voxel_scene_buffer,
-                ray_device_resources.buffer_infos[brick_set_buffer_index].offset,
-                u8,
-                host_brick_state.brick_set,
-            );
+        const brick_req_limits_buffer_index = (RayDeviceResources.Resource{ .host_and_device = .brick_req_limits_s }).toBufferIndex();
+        const limits_slice = [1]ray_pipeline_types.BrickLimits{host_brick_state.brick_limits};
+        // chaning this call will affect appendUnloadCommands
+        try self.brick_staging_buffer.transferToBuffer(
+            &ray_device_resources.request_buffer,
+            ray_device_resources.buffer_infos[brick_req_limits_buffer_index].offset,
+            ray_pipeline_types.BrickLimits,
+            &limits_slice,
+        );
+
+        self.unload_request_buf_flush_from = 0;
+        self.unload_request_buf_flush_to = 2;
+    } else {
+        self.unload_request_buf_flush_from = 0;
+        self.unload_request_buf_flush_to = 0;
+    }
+
+    host_brick_state.brick_limits.unload_request_count += @intCast(incoherent_brick_count);
+}
+
+pub fn appendUnloadCommands(
+    self: *BrickStream,
+    ctx: Context,
+    command_buffer: vk.CommandBuffer,
+    request_buffer: vk.Buffer,
+) void {
+    const zone = tracy.ZoneN(@src(), @typeName(BrickStream) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
+    if (render.consts.enable_validation_layers) {
+        const label_info = vk.DebugUtilsLabelEXT{
+            .p_label_name = @typeName(BrickStream) ++ " " ++ @src().fn_name,
+            .color = [_]f32{ 0.4, 0.8, 0.2, 0.5 },
+        };
+        ctx.vkd.cmdBeginDebugUtilsLabelEXT(command_buffer, &label_info);
+    }
+    defer {
+        if (render.consts.enable_validation_layers) {
+            ctx.vkd.cmdEndDebugUtilsLabelEXT(command_buffer);
         }
     }
-    // TODO: find a way to load in same frame as we unload
 
-    const unload_request_count: usize = @intCast(@min(
-        data_snapshot.brick_limits.unload_request_count,
-        data_snapshot.brick_limits.max_unload_request_count,
-    ));
+    // if we have staged the unloading
+    if (self.unload_request_buf_flush_to - self.unload_request_buf_flush_from != 0) {
+        const brick_buffer_memory_barrier = [_]vk.BufferMemoryBarrier{.{
+            .src_access_mask = .{ .shader_read_bit = true },
+            .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+            .src_queue_family_index = ctx.queue_indices.compute,
+            .dst_queue_family_index = ctx.queue_indices.compute,
+            .buffer = request_buffer,
+            .offset = 0,
+            .size = vk.WHOLE_SIZE,
+        }};
+        ctx.vkd.cmdPipelineBarrier(
+            command_buffer,
+            .{ .compute_shader_bit = true },
+            .{ .compute_shader_bit = true },
+            .{},
+            0,
+            undefined,
+            brick_buffer_memory_barrier.len,
+            &brick_buffer_memory_barrier,
+            0,
+            undefined,
+        );
+
+        self.brick_staging_buffer.partialFlush(
+            ctx,
+            command_buffer,
+            request_buffer,
+            self.unload_request_buf_flush_from,
+            self.unload_request_buf_flush_to,
+        );
+    }
+}
+
+// TODO: bug: incoherent brick also being brick requested by gpu will lead to corruption
+/// In the event a brick was updated on host or a new brick is ray casted on device:
+/// Upload new bricks to the device and signal to the loading shader where they are placed
+pub fn prepareBrickLoads(
+    self: *BrickStream,
+    host_brick_state: *HostBrickState,
+    ray_device_resources: *RayDeviceResources,
+) !void {
+    const zone = tracy.ZoneN(@src(), @typeName(BrickStream) ++ " " ++ @src().fn_name);
+    defer zone.End();
+
+    const data_snapshot = self.frame_snapshot.asDataSnapshot();
+    std.debug.assert(host_brick_state.brick_limits.max_load_request_count > 0);
+    std.debug.assert(host_brick_state.brick_limits.max_unload_request_count > 0);
+
+    // brick_limits is incorherent as we captured before the unloading
+    const active_bricks: u32 = @max(
+        host_brick_state.brick_limits.active_bricks,
+        0,
+    );
+    std.debug.assert(host_brick_state.brick_limits.max_active_bricks >= active_bricks);
+
+    const max_load_count = host_brick_state.brick_limits.max_active_bricks - active_bricks;
+
+    // If a brick is incoherent, then we must ask the device to load the brick to reupload
+    const incoherent_brick_count: usize = @intCast(host_brick_state.inchoherent_bricks.count());
+
+    // TODO: easy to deal with, just only empty the incoherent bricks that was updated
+    // TODO: we should also cache brick_load_requests that were not handled
+    std.debug.assert(incoherent_brick_count < max_load_count);
+
     const load_request_count: usize = @intCast(@min(
-        data_snapshot.brick_limits.load_request_count,
-        max_load_count,
+        host_brick_state.brick_limits.load_request_count,
+        max_load_count - incoherent_brick_count,
     ));
 
     const total_load_requests: usize = @intCast(@min(
-        load_request_count,
+        incoherent_brick_count + load_request_count,
         max_load_count,
     ));
 
-    const active_bricks_before_load = @max(
-        data_snapshot.brick_limits.active_bricks,
-        0,
-    );
+    self.load_request_buf_flush_from = self.unload_request_buf_flush_to;
+    self.load_request_buf_flush_to = self.load_request_buf_flush_from;
 
-    // if we need to deal we new bricks
+    self.load_voxel_buf_flush_from = 0;
+    self.load_voxel_buf_flush_to = 0;
+
     if (total_load_requests > 0) {
         const new_bricks = self.new_bricks[0..total_load_requests];
         const brick_load_requests = self.brick_load_requests[0..total_load_requests];
         const new_material_indices = self.new_material_indices[0 .. total_load_requests * 512];
 
-        std.debug.assert(host_brick_state.brick_limits.max_active_bricks >= data_snapshot.brick_limits.active_bricks);
+        std.debug.assert(host_brick_state.brick_limits.max_active_bricks >= host_brick_state.brick_limits.active_bricks);
 
-        const load_req_slices: [1][]const c_uint = .{
+        const load_req_slices: [2][]const c_uint = .{
             data_snapshot.brick_load_requests[0..load_request_count],
-            // host_brick_state.inchoherent_bricks.keys()[0..incoherent_brick_count],
+            host_brick_state.inchoherent_bricks.keys(),
         };
         var load_req_initalized_count: usize = 0;
 
@@ -163,7 +268,7 @@ pub fn prepareBrickTransfer(
                 load_requests,
                 new_bricks[from..to],
                 brick_load_requests[from..to],
-                active_bricks_before_load + from..,
+                active_bricks + from..,
                 from..,
             ) |
                 load_index,
@@ -200,23 +305,37 @@ pub fn prepareBrickTransfer(
             load_req_initalized_count += load_requests.len;
         }
 
+        if (incoherent_brick_count > 0) {
+            // Transfer brick set
+            // TODO: For now we just send the full grid brick set bits since it is relatively small amount of data
+            const brick_set_buffer_index = (RayDeviceResources.Resource{ .device = .bricks_set_s }).toBufferIndex();
+            try self.brick_staging_buffer.transferToBuffer(
+                &ray_device_resources.voxel_scene_buffer,
+                ray_device_resources.buffer_infos[brick_set_buffer_index].offset,
+                u8,
+                host_brick_state.brick_set,
+            );
+            self.load_voxel_buf_flush_to += 1;
+        }
+
         // Transfer bricks
         {
             const brick_buffer_index = (RayDeviceResources.Resource{ .device = .bricks_b }).toBufferIndex();
-            const new_bricks_offset: vk.DeviceSize = @intCast(data_snapshot.brick_limits.active_bricks * @sizeOf(ray_pipeline_types.Brick));
+            const new_bricks_offset: vk.DeviceSize = @intCast(host_brick_state.brick_limits.active_bricks * @sizeOf(ray_pipeline_types.Brick));
             try self.brick_staging_buffer.transferToBuffer(
                 &ray_device_resources.voxel_scene_buffer,
                 ray_device_resources.buffer_infos[brick_buffer_index].offset + new_bricks_offset,
                 ray_pipeline_types.Brick,
                 new_bricks,
             );
+            self.load_voxel_buf_flush_to += 1;
         }
 
         // Transfer material indices
         {
             const material_indices_index = (RayDeviceResources.Resource{ .device = .material_indices_b }).toBufferIndex();
             const new_material_indices_offset: vk.DeviceSize = @intCast(
-                data_snapshot.brick_limits.active_bricks * 512 * @sizeOf(HostBrickState.material_index),
+                host_brick_state.brick_limits.active_bricks * 512 * @sizeOf(HostBrickState.material_index),
             );
 
             try self.brick_staging_buffer.transferToBuffer(
@@ -225,6 +344,7 @@ pub fn prepareBrickTransfer(
                 HostBrickState.material_index,
                 new_material_indices,
             );
+            self.load_voxel_buf_flush_to += 1;
         }
 
         // Transfer patch work required to set gpu indices
@@ -237,14 +357,13 @@ pub fn prepareBrickTransfer(
                 ray_pipeline_types.BrickLoadRequest,
                 brick_load_requests,
             );
+            self.load_request_buf_flush_to += 1;
         }
-    }
 
-    host_brick_state.brick_limits = data_snapshot.brick_limits;
-    host_brick_state.brick_limits.active_bricks = active_bricks_before_load + @as(c_int, @intCast(total_load_requests));
-    host_brick_state.brick_limits.load_request_count = @intCast(total_load_requests);
+        host_brick_state.brick_limits = host_brick_state.brick_limits;
+        host_brick_state.brick_limits.active_bricks += @as(c_int, @intCast(total_load_requests));
+        host_brick_state.brick_limits.load_request_count = @intCast(total_load_requests);
 
-    if (unload_request_count + total_load_requests != 0) {
         const brick_req_limits_buffer_index = (RayDeviceResources.Resource{ .host_and_device = .brick_req_limits_s }).toBufferIndex();
         const limits_slice = [1]ray_pipeline_types.BrickLimits{host_brick_state.brick_limits};
         try self.brick_staging_buffer.transferToBuffer(
@@ -253,17 +372,19 @@ pub fn prepareBrickTransfer(
             ray_pipeline_types.BrickLimits,
             &limits_slice,
         );
+        self.load_request_buf_flush_to += 1;
     }
-
-    if (self.brick_staging_buffer.buffer_cursor != 0) {
-        try self.brick_staging_buffer.sync(ctx);
-    }
-
-    host_brick_state.inchoherent_bricks.clearRetainingCapacity();
-    return incoherent_brick_count;
 }
 
-pub fn appendCommandsIfLoadingBricks(self: *BrickStream, ctx: Context, command_buffer: vk.CommandBuffer, voxel_scene_buffer: vk.Buffer) void {
+pub fn appendLoadCommands(
+    self: *BrickStream,
+    ctx: Context,
+    host_brick_state: HostBrickState,
+    command_buffer: vk.CommandBuffer,
+    voxel_scene_buffer: vk.Buffer,
+    request_buffer: vk.Buffer,
+) void {
+    _ = host_brick_state;
     const zone = tracy.ZoneN(@src(), @typeName(BrickStream) ++ " " ++ @src().fn_name);
     defer zone.End();
 
@@ -280,8 +401,10 @@ pub fn appendCommandsIfLoadingBricks(self: *BrickStream, ctx: Context, command_b
         }
     }
 
-    if (self.brick_staging_buffer.buffer_cursor != 0) {
-        const brick_buffer_memory_barrier = [_]vk.BufferMemoryBarrier{.{
+    const has_request_pending = (self.load_request_buf_flush_to - self.load_request_buf_flush_from) != 0;
+    const has_voxel_pending = (self.load_voxel_buf_flush_to - self.load_voxel_buf_flush_from) != 0;
+    if (has_request_pending or has_voxel_pending) {
+        const brick_buffer_memory_barrier = [_]vk.BufferMemoryBarrier{ .{
             .src_access_mask = .{ .shader_read_bit = true },
             .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
             .src_queue_family_index = ctx.queue_indices.compute,
@@ -289,7 +412,15 @@ pub fn appendCommandsIfLoadingBricks(self: *BrickStream, ctx: Context, command_b
             .buffer = voxel_scene_buffer,
             .offset = 0,
             .size = vk.WHOLE_SIZE,
-        }};
+        }, .{
+            .src_access_mask = .{ .shader_read_bit = true },
+            .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+            .src_queue_family_index = ctx.queue_indices.compute,
+            .dst_queue_family_index = ctx.queue_indices.compute,
+            .buffer = request_buffer,
+            .offset = 0,
+            .size = vk.WHOLE_SIZE,
+        } };
         ctx.vkd.cmdPipelineBarrier(
             command_buffer,
             .{ .compute_shader_bit = true },
@@ -303,8 +434,28 @@ pub fn appendCommandsIfLoadingBricks(self: *BrickStream, ctx: Context, command_b
             undefined,
         );
 
-        self.brick_staging_buffer.flush(ctx, command_buffer);
+        if (has_request_pending) {
+            self.brick_staging_buffer.partialFlush(
+                ctx,
+                command_buffer,
+                request_buffer,
+                self.load_request_buf_flush_from,
+                self.load_request_buf_flush_to,
+            );
+        }
+
+        if (has_voxel_pending) {
+            self.brick_staging_buffer.partialFlush(
+                ctx,
+                command_buffer,
+                voxel_scene_buffer,
+                self.load_voxel_buf_flush_from,
+                self.load_voxel_buf_flush_to,
+            );
+        }
     }
+
+    self.brick_staging_buffer.empty();
 }
 
 pub const DataFrameSnapshot = struct {

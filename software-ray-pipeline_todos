@@ -4,6 +4,9 @@
     * [x] basic cpu integration as the rest of codebase
     * [ ] gpu using vulkan queries
 * [ ] static command buffers + handle of window rescale + changin rt settings (rerecord on demand)
+    * [ ] use command buffer baking, re-record only on setting changes
+    * [ ] use indirect dispatch
+    * [ ] potentially use a single command buffer? (only record it in individual buffers)
 * [ ] split ray commons (bad for shader compile times, ugly wall of defines)
 * [ ] implement all steps/stages
     * [x] emit
@@ -17,6 +20,7 @@
         * [x] Brick buffer should be index to actual brick data stored in separate buffer 
         * [ ] fix bending cubes made apparent by larger grid scale (probably caused by incorrect t_value?)
             * [ ] OR file issue
+        * [ ] (/scatter) fix gaps between continious voxels in brick borders
     * [x] miss pipeline
     * [x] scatter pipeline
         * [x] material data lookup
@@ -28,15 +32,17 @@
     * [x] draw ray pipeline
         * [x] resolve RC (flickering) and bottom of image missing output
         * [x] draw misses as well as hits ~~(requires another cursor) (just add some push constant)~~
-* [ ] potentially use a single command buffer? (only record it in individual buffers)
-    * [ ] use command buffer baking, re-record only on setting changes
 * [ ] brick streaming
     * [x] unloading
     * [x] loading
-    * [ ] remove allocs in pipeline draw used for streaming 
+    * [x] remove allocs in pipeline draw used for streaming 
+    * [ ] Fix bug todo:     // TODO: bug: incoherent brick also being brick requested by gpu will lead to corruption
+    * [x] Fix bug todo:     // TODO: move to BrickStream pub fn prepareBrickTransfer(
     * [x] fix bug: material data seems to become invalid if camera is close to a single active brick
-    * [ ] deal with cpu updates of bricks currently being looked at
-* [ ] place holder terrain
+    * [x] deal with cpu updates of bricks currently being looked at
+    * [ ] move brick streaming in dedicated transfer queue, will make baking easier since we only re-record transfers when needed without RT command buffer
+    * [x] reduce flicer: unload and load in same frame for updated bricks
+* [ ] placeholder terrain
 * [ ] model loading in scene
 * [ ] tone mapping
 * [ ] bayer noise (rand.comp): TODO: look at using bayer noise https://www.shadertoy.com/view/stfXWn
