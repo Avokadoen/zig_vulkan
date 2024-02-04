@@ -318,8 +318,8 @@ pub fn init(
     const brick_load_pipeline = try BrickLoadPipeline.init(ctx, ray_device_resources, allocator);
     errdefer brick_load_pipeline.deinit(ctx);
 
-    const brick_stream = try BrickStream.init(allocator, host_brick_state.brick_limits);
-    errdefer brick_stream.deinit();
+    const brick_stream = try BrickStream.init(allocator, ctx, host_brick_state.brick_limits);
+    errdefer brick_stream.deinit(ctx);
 
     var vertex_index_buffer = try GpuBufferMemory.init(
         ctx,
@@ -435,7 +435,7 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     self.brick_unload_pipeline.deinit(ctx);
     self.brick_load_pipeline.deinit(ctx);
 
-    self.brick_stream.deinit();
+    self.brick_stream.deinit(ctx);
 
     self.allocator.destroy(self.ray_device_resources);
 
@@ -551,16 +551,10 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
         try self.ray_device_resources.mapBrickRequestData(ctx);
         defer self.ray_device_resources.request_buffer.unmap(ctx);
 
-        const snapshot = try self.brick_stream.takeSnapshot(
-            ctx,
-            self.ray_device_resources,
-        );
-
-        break :pre_brick_stream self.brick_load_pipeline.prepareBrickTransfer(
+        break :pre_brick_stream self.brick_stream.prepareBrickTransfer(
             ctx,
             host_brick_state,
             self.ray_device_resources,
-            snapshot,
         );
     };
 
@@ -618,6 +612,8 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
 
         // TODO: brick load pipeline queue submit here on dedicated queue. Get semaphore and wait ray pipeline queue execution on brick load completion signal.
         self.brick_unload_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
+
+        self.brick_stream.appendCommandsIfLoadingBricks(ctx, self.ray_command_buffers, self.ray_device_resources.voxel_scene_buffer.buffer);
         self.brick_load_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
 
         self.ray_device_resources.resetBrickReqLimitsBarrier(ctx, self.ray_command_buffers);
