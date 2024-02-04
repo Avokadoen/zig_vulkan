@@ -18,7 +18,7 @@ layout (std430, set = 0, binding = 2) buffer BrickBuffer {
     Brick bricks[];
 };
 
-layout (std430, set = 1, binding = 0) buffer BrickRequestLimits {
+layout (std430, set = 1, binding = 0) readonly buffer BrickRequestLimits {
     BrickLimits brick_limits;
 };
 layout (std430, set = 2, binding = 0) readonly buffer BrickUnloadRequestIndices {
@@ -78,7 +78,7 @@ void main() {
         BRICK_INDEX_BITS
     );
 
-    const int removed_brick_index = atomicAdd(brick_limits.active_bricks, -1) - 1;
+    const int removed_brick_index = brick_limits.active_bricks - int(unload_request_index + 1);;
     if (removed_brick_index <= 0) {
         return;
     }
