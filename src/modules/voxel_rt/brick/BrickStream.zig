@@ -3,7 +3,6 @@ const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 
 const vk = @import("vulkan");
-const glfw = @import("mach-glfw");
 const tracy = @import("ztracy");
 
 const render = @import("../../render.zig");
