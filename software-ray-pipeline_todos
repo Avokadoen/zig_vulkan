@@ -71,5 +71,7 @@
 * [ ] reimplement buckets with sieve cache?
 * [ ] rewrite StagingRamp or file issue on it
 * [ ] Add ability to toggle load/unload brick in UI
+* [ ] CPU DDA solver for user voxel manipulation
+* [ ] Consider moving grid state to host visible buffer, removing cpu grid representation 
 
 

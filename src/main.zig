@@ -138,7 +138,8 @@ pub fn main() anyerror!void {
     var prev_frame = std.time.milliTimestamp();
     // Loop until the user closes the window
     while (!window.shouldClose()) {
-        try hack.setVoxel(.{ cursor_x % (hack.brick_dimensions[0] * 8), 0, 0 }, .dirt);
+        const material: HostBrickState.DefinedMaterial = @enumFromInt((cursor_x / (hack.brick_dimensions[0] * 8)) % (@intFromEnum(HostBrickState.DefinedMaterial.bronze) + 1));
+        try hack.setVoxel(.{ cursor_x % (hack.brick_dimensions[0] * 8), 0, 0 }, material);
         cursor_x += 1;
 
         const current_frame = std.time.milliTimestamp();
