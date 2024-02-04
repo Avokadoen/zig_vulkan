@@ -51,7 +51,7 @@ brick_indices: []BrickIndex,
 bricks: []Brick,
 voxel_material_indices: []material_index,
 brick_set: []u8,
-dimensions: [3]u32,
+brick_dimensions: [3]u32,
 
 inchoherent_bricks: std.AutoArrayHashMap(u32, void),
 
@@ -64,12 +64,12 @@ pub fn init(
     std.debug.assert(config.brick_load_request_count != 0);
     std.debug.assert(config.brick_unload_request_count != 0);
 
-    const dimensions = [3]u32{
+    const brick_dimensions = [3]u32{
         @intFromFloat(@round(grid_metadata.dim[0])),
         @intFromFloat(@round(grid_metadata.dim[1])),
         @intFromFloat(@round(grid_metadata.dim[2])),
     };
-    const grid_brick_count: usize = @intCast(dimensions[0] * dimensions[1] * dimensions[2]);
+    const grid_brick_count: usize = @intCast(brick_dimensions[0] * brick_dimensions[1] * brick_dimensions[2]);
     std.debug.assert(grid_brick_count <= ray_pipeline_types.RayHit.max_global_brick_index);
 
     const brick_limits = BrickLimits{
@@ -125,7 +125,7 @@ pub fn init(
         .bricks = bricks,
         .voxel_material_indices = voxel_material_indices,
         .brick_set = brick_set,
-        .dimensions = dimensions,
+        .brick_dimensions = brick_dimensions,
         .inchoherent_bricks = inchoherent_bricks,
     };
 }
@@ -146,7 +146,7 @@ pub fn setVoxel(self: *HostBrickState, pos: [3]u32, material: DefinedMaterial) !
         pos[1] / 8,
         pos[2] / 8,
     };
-    const one_dim_brick_index = brick_pos[0] + self.dimensions[0] * (brick_pos[2] + self.dimensions[2] * brick_pos[1]);
+    const one_dim_brick_index = brick_pos[0] + self.brick_dimensions[0] * (brick_pos[2] + self.brick_dimensions[2] * brick_pos[1]);
 
     const voxel_pos = [3]u32{
         pos[0] % 8,
@@ -183,7 +183,7 @@ pub fn unsetVoxel(self: *HostBrickState, pos: [3]u32) !void {
         pos[1] / 8,
         pos[2] / 8,
     };
-    const one_dim_brick_index = brick_pos[0] + self.dimensions[0] * (brick_pos[2] + self.dimensions[2] * brick_pos[1]);
+    const one_dim_brick_index = brick_pos[0] + self.brick_dimensions[0] * (brick_pos[2] + self.brick_dimensions[2] * brick_pos[1]);
 
     const voxel_pos = [3]u32{
         pos[0] % 8,
