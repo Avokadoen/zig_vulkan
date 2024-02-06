@@ -42,11 +42,12 @@
     * [x] deal with cpu updates of bricks currently being looked at
     * [ ] move brick streaming in dedicated transfer queue, will make baking easier since we only re-record transfers when needed without RT command buffer
     * [x] reduce flicer: unload and load in same frame for updated bricks
+    * [ ] Fix RC in unload. Example: removing index 0 with 500 active while also removing index 499 is a race hazard
 * [ ] placeholder terrain
 * [ ] model loading in scene
 * [ ] tone mapping
 * [ ] bayer noise (rand.comp): TODO: look at using bayer noise https://www.shadertoy.com/view/stfXWn
-* [ ] dynamic voxel scenes possible (can be as simple as single voxel on/off to start)
+* [x] dynamic voxel scenes possible (can be as simple as single voxel on/off to start)
 * [x] only one atomicAdd pr warp, use shared memory to share start index with threads that use thread id + warp offset to grab rays
 * [ ] t_min + t_max limits in gui and camera
 * [x] shared resources set up

@@ -462,44 +462,8 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     ctx.vkd.freeMemory(ctx.logical_device, self.image_memory, null);
 }
 
-// TODO: split these into multiple errors
-pub const DrawError = error{
-    DeviceLost,
-    FullScreenExclusiveModeLostEXT,
-    OutOfDateKHR,
-    OutOfDeviceMemory,
-    OutOfHostMemory,
-    SurfaceLostKHR,
-    UnhandledAcquireResult,
-    Unknown,
-    InsufficientMemory,
-    MemoryMapFailed,
-    FailedToMapGPUMem,
-    PlatformError,
-    APIUnavailable,
-    CursorUnavailable,
-    FeatureUnavailable,
-    FeatureUnimplemented,
-    FormatUnavailable,
-    InvalidEnum,
-    InvalidValue,
-    NoCurrentContext,
-    NoWindowContext,
-    NotInitialized,
-    OutOfMemory,
-    PlatformUnavailable,
-    VersionUnavailable,
-    InitializationFailed,
-    NativeWindowInUseKHR,
-    NoSurfaceFormatsSupported,
-    NoPresentModesSupported,
-    StagingBuffersFull,
-    DestOutOfDeviceMemory,
-    StageOutOfDeviceMemory,
-    OutOfRegions,
-};
 /// draw a new frame, delta time is only used by gui
-pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt: f32) DrawError!void {
+pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt: f32) !void {
     const zone = tracy.ZoneN(@src(), @typeName(Pipeline) ++ " " ++ @src().fn_name);
     defer zone.End();
 
@@ -612,14 +576,14 @@ pub fn draw(self: *Pipeline, ctx: Context, host_brick_state: *HostBrickState, dt
 
         if (self.camera.freeze_ray_culling == false) {
             // TODO: brick load pipeline queue submit here on dedicated queue. Get semaphore and wait ray pipeline queue execution on brick load completion signal.
-            self.brick_stream.appendUnloadCommands(
+            try self.brick_stream.appendUnloadCommands(
                 ctx,
                 self.ray_command_buffers,
-                self.ray_device_resources.voxel_scene_buffer.buffer,
+                self.ray_device_resources.request_buffer.buffer,
             );
             self.brick_unload_pipeline.appendPipelineCommands(ctx, self.ray_command_buffers);
 
-            self.brick_stream.appendLoadCommands(
+            try self.brick_stream.appendLoadCommands(
                 ctx,
                 host_brick_state.*,
                 self.ray_command_buffers,

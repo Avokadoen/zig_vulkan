@@ -146,13 +146,13 @@ pub fn partialFlush(
     buffer: vk.Buffer,
     inclusive_from: usize,
     exclusive_to: usize,
-) void {
+) !void {
     const zone = tracy.ZoneN(@src(), @typeName(SimpleStagingBuffer) ++ " " ++ @src().fn_name);
     defer zone.End();
 
     if (self.buffer_cursor == 0) return;
 
-    const copy_job = self.buffer_copy.get(buffer) orelse return;
+    const copy_job = self.buffer_copy.get(buffer) orelse return error.MissingBuffer;
     const len: u32 = @intCast(exclusive_to - inclusive_from);
     std.debug.assert(len <= copy_job.len);
 
