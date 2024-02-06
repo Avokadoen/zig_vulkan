@@ -85,7 +85,7 @@ pub fn main() anyerror!void {
             .{
                 .dim = [_]f32{ 32, 32, 32 },
                 .padding1 = 0,
-                .min_point = [_]f32{-1} ** 3,
+                .min_point = [_]f32{ 0, -32, 0 },
                 .scale = 2,
             },
             .{},

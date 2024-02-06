@@ -141,16 +141,18 @@ pub fn deinit(self: *HostBrickState) void {
 
 // TODO: Propagate changes to voxels in camera view, update brick set if needed
 pub fn setVoxel(self: *HostBrickState, pos: [3]u32, material: DefinedMaterial) !void {
+    const flipped_y = (self.brick_dimensions[1] * 8) - (pos[1] + 1);
+
     const brick_pos = [3]u32{
         pos[0] / 8,
-        pos[1] / 8,
+        flipped_y / 8,
         pos[2] / 8,
     };
     const one_dim_brick_index = brick_pos[0] + self.brick_dimensions[0] * (brick_pos[2] + self.brick_dimensions[2] * brick_pos[1]);
 
     const voxel_pos = [3]u32{
         pos[0] % 8,
-        pos[1] % 8,
+        flipped_y % 8,
         pos[2] % 8,
     };
     const one_dim_voxel_index = voxel_pos[0] + 8 * (voxel_pos[2] + 8 * voxel_pos[1]);
@@ -178,16 +180,18 @@ pub fn setVoxel(self: *HostBrickState, pos: [3]u32, material: DefinedMaterial) !
 
 // TODO: Propagate changes to voxels in camera view, update brick set if needed
 pub fn unsetVoxel(self: *HostBrickState, pos: [3]u32) !void {
+    const flipped_y = (self.brick_dimensions[1] * 8) - (pos[1] + 1);
+
     const brick_pos = [3]u32{
         pos[0] / 8,
-        pos[1] / 8,
+        flipped_y / 8,
         pos[2] / 8,
     };
     const one_dim_brick_index = brick_pos[0] + self.brick_dimensions[0] * (brick_pos[2] + self.brick_dimensions[2] * brick_pos[1]);
 
     const voxel_pos = [3]u32{
         pos[0] % 8,
-        pos[1] % 8,
+        flipped_y % 8,
         pos[2] % 8,
     };
     const one_dim_voxel_index = voxel_pos[0] + 8 * (voxel_pos[2] + 8 * voxel_pos[1]);
