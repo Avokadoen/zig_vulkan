@@ -46,7 +46,7 @@ void main() {
 
     // Create our new index
     uint new_index_bits = bitfieldInsert(0, BRICK_STATUS_LOADED, BRICK_STATUS_OFFSET, BRICK_STATUS_BITS);
-    new_index_bits = bitfieldInsert(new_index_bits, BRICK_REQUEST_COUNT_MAX_VALUE - 1, BRICK_REQUEST_COUNT_OFFSET, BRICK_REQUEST_COUNT_BITS);
+    new_index_bits = bitfieldInsert(new_index_bits, BRICK_REQUEST_COUNT_MAX_VALUE, BRICK_REQUEST_COUNT_OFFSET, BRICK_REQUEST_COUNT_BITS);
     new_index_bits = bitfieldInsert(new_index_bits, load_request.brick_index_32b, BRICK_INDEX_OFFSET, BRICK_INDEX_BITS);
 
     brick_index_req_count_status[load_request.brick_index_index] = new_index_bits;
