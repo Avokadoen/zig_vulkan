@@ -83,7 +83,7 @@ pub fn copy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, command
         .dst_offset = config.dst_offset,
         .size = config.size,
     };
-    ctx.vkd.cmdCopyBuffer(command_buffer, self.buffer, into.buffer, 1, @ptrCast([*]vk.BufferCopy, &copy_region));
+    ctx.vkd.cmdCopyBuffer(command_buffer, self.buffer, into.buffer, 1, @ptrCast(&copy_region));
     try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, command_buffer);
 }
 
@@ -102,24 +102,24 @@ pub fn manualCopy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, c
     };
 
     try ctx.vkd.beginCommandBuffer(command_buffer, &begin_info);
-    ctx.vkd.cmdCopyBuffer(command_buffer, self.buffer, into.buffer, 1, @ptrCast([*]vk.BufferCopy, &copy_region));
+    ctx.vkd.cmdCopyBuffer(command_buffer, self.buffer, into.buffer, 1, @ptrCast(&copy_region));
     try ctx.vkd.endCommandBuffer(command_buffer);
 
     {
         @setRuntimeSafety(false);
-        var semo_null_ptr: [*c]const vk.Semaphore = null;
-        var wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
+        const semo_null_ptr: [*c]const vk.Semaphore = null;
+        const wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
         // perform the compute ray tracing, draw to target texture
         const submit_info = vk.SubmitInfo{
             .wait_semaphore_count = 0,
             .p_wait_semaphores = semo_null_ptr,
             .p_wait_dst_stage_mask = wait_null_ptr,
             .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            .p_command_buffers = @ptrCast(&command_buffer),
             .signal_semaphore_count = 0,
             .p_signal_semaphores = semo_null_ptr,
         };
-        try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @ptrCast([*]const vk.SubmitInfo, &submit_info), fence);
+        try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @ptrCast(&submit_info), fence);
     }
 }
 
@@ -139,11 +139,12 @@ pub fn transferToDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type, 
     const map_size = memory_util.nonCoherentAtomSize(ctx, size);
     if (map_size + offset > self.size) return error.OutOfDeviceMemory; // size greater than buffer
 
-    var gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, offset, map_size, .{})) orelse return error.FailedToMapGPUMem;
-    var typed_gpu_mem = @ptrCast([*]T, @alignCast(@alignOf(T), gpu_mem));
-    std.mem.copy(T, typed_gpu_mem[0..data.len], data);
+    const gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, offset, map_size, .{})) orelse return error.FailedToMapGPUMem;
+    const gpu_mem_align: [*]align(1) T = @ptrCast(gpu_mem);
+    var typed_gpu_mem: [*]T = @alignCast(gpu_mem_align);
+    @memcpy(typed_gpu_mem[0..data.len], data);
     ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
-    self.len = @intCast(u32, data.len);
+    self.len = @intCast(data.len);
 }
 
 pub fn map(self: *GpuBufferMemory, ctx: Context, offset: vk.DeviceSize, size: vk.DeviceSize) !void {
@@ -178,7 +179,7 @@ pub fn flush(self: GpuBufferMemory, ctx: Context, offset: vk.DeviceSize, size: v
     try ctx.vkd.flushMappedMemoryRanges(
         ctx.logical_device,
         1,
-        @ptrCast([*]const vk.MappedMemoryRange, &map_range),
+        @ptrCast(&map_range),
     );
 }
 
@@ -192,7 +193,7 @@ pub fn transferFromDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type
     }
 
     const gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, self.size, .{})) orelse return error.FailedToMapGPUMem;
-    const gpu_mem_start = @ptrToInt(gpu_mem);
+    const gpu_mem_start = @intFromPtr(gpu_mem);
 
     var i: usize = 0;
     var offset: usize = 0;
@@ -200,7 +201,10 @@ pub fn transferFromDevice(self: *GpuBufferMemory, ctx: Context, comptime T: type
         @setRuntimeSafety(false);
         while (offset + @sizeOf(T) <= self.size and i < data.len) : (i += 1) {
             offset = @sizeOf(T) * i;
-            data[i] = @intToPtr(*T, gpu_mem_start + offset).*;
+            const address = gpu_mem_start + offset;
+            std.debug.assert(std.mem.alignForward(usize, address, @alignOf(T)) == address);
+
+            data[i] = @as(*T, @ptrFromInt(address)).*;
         }
     }
     ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
@@ -229,21 +233,21 @@ pub fn batchTransfer(self: *GpuBufferMemory, ctx: Context, comptime T: type, off
     }
 
     const gpu_mem = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, 0, self.size, .{})) orelse return error.FailedToMapGPUMem;
-    const gpu_mem_start = @ptrToInt(gpu_mem);
+    const gpu_mem_start = @intFromPtr(gpu_mem);
     {
         @setRuntimeSafety(false);
         for (offsets, 0..) |offset, i| {
             const byte_offset = offset * @sizeOf(T);
             for (datas[i], 0..) |element, j| {
                 const mem_location = gpu_mem_start + byte_offset + j * @sizeOf(T);
-                var ptr = @intToPtr(*T, mem_location);
+                const ptr: *T = @ptrFromInt(mem_location);
                 ptr.* = element;
             }
         }
     }
     ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
 
-    self.len = std.math.max(self.len, @intCast(u32, datas[datas.len - 1].len + offsets[offsets.len - 1]));
+    self.len = std.math.max(self.len, @intCast(datas[datas.len - 1].len + offsets[offsets.len - 1]));
 }
 
 /// destroy buffer and free memory

@@ -26,9 +26,11 @@ pub fn isInstanceExtensionsPresent(allocator: Allocator, vkb: dispatch.Base, tar
 
     var matches: u32 = 0;
     for (target_extensions) |target_extension| {
+        const t_str_len = std.mem.indexOfScalar(u8, target_extension[0..vk.MAX_EXTENSION_NAME_SIZE], 0) orelse continue;
         cmp: for (extensions.items) |existing| {
-            const existing_name = @ptrCast([*:0]const u8, &existing.extension_name);
-            if (std.cstr.cmp(target_extension, existing_name) == 0) {
+            const existing_name: [*:0]const u8 = @ptrCast(&existing.extension_name);
+            const e_str_len = std.mem.indexOfScalar(u8, existing_name[0..vk.MAX_EXTENSION_NAME_SIZE], 0) orelse continue;
+            if (std.mem.eql(u8, target_extension[0..t_str_len], existing_name[0..e_str_len])) {
                 matches += 1;
                 break :cmp;
             }
@@ -43,7 +45,8 @@ pub inline fn findMemoryTypeIndex(ctx: Context, type_filter: u32, memory_flags: 
     {
         var i: u32 = 0;
         while (i < properties.memory_type_count) : (i += 1) {
-            const correct_type: bool = (type_filter & (@as(u32, 1) << @intCast(u5, i))) != 0;
+            const left_shift: u5 = @intCast(i);
+            const correct_type: bool = (type_filter & (@as(u32, 1) << left_shift)) != 0;
             if (correct_type and (properties.memory_types[i].property_flags.toInt() & memory_flags.toInt()) == memory_flags.toInt()) {
                 return i;
             }
@@ -60,7 +63,7 @@ pub inline fn beginOneTimeCommandBuffer(ctx: Context, command_pool: vk.CommandPo
         .command_buffer_count = 1,
     };
     var command_buffer: vk.CommandBuffer = undefined;
-    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &allocate_info, @ptrCast([*]vk.CommandBuffer, &command_buffer));
+    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &allocate_info, @ptrCast(&command_buffer));
 
     const begin_info = vk.CommandBufferBeginInfo{
         .flags = .{
@@ -79,22 +82,22 @@ pub inline fn endOneTimeCommandBuffer(ctx: Context, command_pool: vk.CommandPool
 
     {
         @setRuntimeSafety(false);
-        var semo_null_ptr: [*c]const vk.Semaphore = null;
-        var wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
+        const semo_null_ptr: [*c]const vk.Semaphore = null;
+        const wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
         // perform the compute ray tracing, draw to target texture
         const submit_info = vk.SubmitInfo{
             .wait_semaphore_count = 0,
             .p_wait_semaphores = semo_null_ptr,
             .p_wait_dst_stage_mask = wait_null_ptr,
             .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            .p_command_buffers = @ptrCast(&command_buffer),
             .signal_semaphore_count = 0,
             .p_signal_semaphores = semo_null_ptr,
         };
-        try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @ptrCast([*]const vk.SubmitInfo, &submit_info), .null_handle);
+        try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @ptrCast(&submit_info), .null_handle);
     }
 
     try ctx.vkd.queueWaitIdle(ctx.graphics_queue);
 
-    ctx.vkd.freeCommandBuffers(ctx.logical_device, command_pool, 1, @ptrCast([*]const vk.CommandBuffer, &command_buffer));
+    ctx.vkd.freeCommandBuffers(ctx.logical_device, command_pool, 1, @ptrCast(&command_buffer));
 }

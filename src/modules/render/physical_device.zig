@@ -41,7 +41,7 @@ pub const QueueFamilyIndices = struct {
         var graphics_index: ?u32 = null;
         var present_index: ?u32 = null;
         for (queue_families, 0..) |queue_family, i| {
-            const index = @intCast(u32, i);
+            const index: u32 = @intCast(i);
             if (compute_index == null and queue_family.queue_flags.contains(compute_bit)) {
                 compute_index = index;
                 compute_queue_count = queue_family.queue_count;
@@ -89,9 +89,12 @@ pub fn isDeviceExtensionsPresent(allocator: Allocator, vki: dispatch.Instance, d
 
     var matches: u32 = 0;
     for (target_extensions) |target_extension| {
+        const t_str_len = std.mem.indexOfScalar(u8, target_extension[0..vk.MAX_EXTENSION_NAME_SIZE], 0) orelse continue;
+
         cmp: for (extensions.items) |existing| {
-            const existing_name = @ptrCast([*:0]const u8, &existing.extension_name);
-            if (std.cstr.cmp(target_extension, existing_name) == 0) {
+            const existing_name: [*:0]const u8 = @ptrCast(&existing.extension_name);
+            const e_str_len = std.mem.indexOfScalar(u8, existing_name[0..vk.MAX_EXTENSION_NAME_SIZE], 0) orelse continue;
+            if (std.mem.eql(u8, target_extension[0..t_str_len], existing_name[0..e_str_len])) {
                 matches += 1;
                 break :cmp;
             }
@@ -142,15 +145,25 @@ fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.Phys
     //          - 2 bitmaps
     const property_score = blk: {
         const device_properties = vki.getPhysicalDeviceProperties(device);
-        const discrete = @as(i32, @boolToInt(device_properties.device_type == vk.PhysicalDeviceType.discrete_gpu)) + 5;
+        const discrete = @as(i32, @intFromBool(device_properties.device_type == vk.PhysicalDeviceType.discrete_gpu)) + 5;
         break :blk discrete;
     };
 
-    const feature_score = blk: {
-        const device_features = vki.getPhysicalDeviceFeatures(device);
-        const atomics = @intCast(i32, device_features.fragment_stores_and_atomics) * 5;
-        const anisotropy = @intCast(i32, device_features.sampler_anisotropy) * 5;
-        break :blk atomics + anisotropy;
+    const feature_score: i32 = blk: {
+        var p_maintenance4_features = vk.PhysicalDeviceMaintenance4Features{};
+        var p_features: vk.PhysicalDeviceFeatures2 = .{
+            .p_next = @ptrCast(&p_maintenance4_features),
+            .features = .{},
+        };
+
+        // Silence validation by calling vkGetPhysicalDeviceFeatures
+        _ = vki.getPhysicalDeviceFeatures(device);
+
+        vki.getPhysicalDeviceFeatures2(device, &p_features);
+        if (p_maintenance4_features.maintenance_4 == vk.FALSE) {
+            break :blk -1000;
+        }
+        break :blk 10;
     };
 
     const queue_fam_score: i32 = blk: {
@@ -205,18 +218,24 @@ pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
             .p_queue_priorities = &queue_priority,
         };
     }
+
+    const maintenance_4_features = vk.PhysicalDeviceMaintenance4Features{
+        .maintenance_4 = vk.TRUE,
+    };
+
     const device_features = vk.PhysicalDeviceFeatures{};
     const validation_layer_info = try validation_layer.Info.init(allocator, ctx.vkb);
 
     const create_info = vk.DeviceCreateInfo{
+        .p_next = @ptrCast(&maintenance_4_features),
         .flags = .{},
-        .queue_create_info_count = @intCast(u32, queue_create_infos.len),
+        .queue_create_info_count = @intCast(queue_create_infos.len),
         .p_queue_create_infos = queue_create_infos.ptr,
         .enabled_layer_count = validation_layer_info.enabled_layer_count,
         .pp_enabled_layer_names = validation_layer_info.enabled_layer_names,
         .enabled_extension_count = constants.logical_device_extensions.len,
         .pp_enabled_extension_names = &constants.logical_device_extensions,
-        .p_enabled_features = @ptrCast(*const vk.PhysicalDeviceFeatures, &device_features),
+        .p_enabled_features = @ptrCast(&device_features),
     };
     return ctx.vki.createDevice(ctx.physical_device, &create_info, null);
 }

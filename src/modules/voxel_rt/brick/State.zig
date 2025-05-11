@@ -3,7 +3,7 @@ const Mutex = std.Thread.Mutex;
 
 const BucketStorage = @import("./BucketStorage.zig");
 
-pub const AtomicCount = std.atomic.Atomic(u32);
+pub const AtomicCount = std.atomic.Value(u32);
 
 /// type used to record changes in host/device buffers in order to only send changed data to the gpu
 pub const DeviceDataDelta = struct {
@@ -38,8 +38,8 @@ pub const DeviceDataDelta = struct {
         defer self.mutex.unlock();
 
         self.state = .active;
-        self.from = std.math.min(self.from, delta_index);
-        self.to = std.math.max(self.to, delta_index + 1);
+        self.from = @min(self.from, delta_index);
+        self.to = @max(self.to, delta_index + 1);
     }
 
     /// register a delta range
@@ -48,8 +48,8 @@ pub const DeviceDataDelta = struct {
         defer self.mutex.unlock();
 
         self.state = .active;
-        self.from = std.math.min(self.from, from);
-        self.to = std.math.max(self.to, to + 1);
+        self.from = @min(self.from, from);
+        self.to = @max(self.to, to + 1);
     }
 };
 
@@ -96,29 +96,32 @@ pub const BrickStatusMask = extern struct {
     pub fn write(self: *BrickStatusMask, state: Status, at: u5) void {
         // zero out bits
         self.bits &= ~(@as(u32, 0b1) << at);
-        self.bits |= @intCast(u32, @enumToInt(state)) << at;
+        const state_bit: u32 = @intCast(@intFromEnum(state));
+        self.bits |= state_bit << at;
     }
 
     pub fn read(self: BrickStatusMask, at: u5) Status {
         var bits = self.bits;
         bits &= @as(u32, 0b1) << at;
         bits = bits >> at;
-        return @intToEnum(Status, @intCast(u2, bits));
+        return @enumFromInt(@as(u2, @intCast(bits)));
     }
 };
 
 pub const BrickIndex = c_uint;
 
-pub const Brick = packed struct {
+pub const Brick = extern struct {
     const IndexType = enum(u1) {
         voxel_start_index,
         brick_lod_index,
     };
 
     /// maps to a voxel grid of 8x8x8
-    solid_mask: u512,
-    index: u31,
-    index_type: IndexType,
+    solid_mask: [64]u8,
+    index: packed struct {
+        value: u31,
+        index_type: IndexType,
+    },
 };
 
 const State = @This();

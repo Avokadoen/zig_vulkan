@@ -106,11 +106,15 @@ pub fn pushAlbedo(self: *VoxelRT, ctx: Context, albedos: []const gpu_types.Albed
 
 /// Push all terrain data to GPU
 pub fn debugUpdateTerrain(self: *VoxelRT, ctx: Context) !void {
-    try self.pipeline.transferHigherOrderGrid(ctx, 0, self.brick_grid.state.higher_order_grid);
-    try self.pipeline.transferBrickStatuses(ctx, 0, self.brick_grid.state.brick_statuses);
-    try self.pipeline.transferBrickIndices(ctx, 0, self.brick_grid.state.brick_indices);
-    try self.pipeline.transferBricks(ctx, 0, self.brick_grid.state.bricks);
-    try self.pipeline.transferMaterialIndices(ctx, 0, self.brick_grid.state.material_indices);
+    if (@import("builtin").mode != .Debug) {
+        @compileError("calling " ++ @src().fn_name ++ " in " ++ @tagName(@import("builtin").mode));
+    }
+
+    self.pipeline.transferHigherOrderGrid(ctx, 0, self.brick_grid.state.higher_order_grid) catch unreachable;
+    self.pipeline.transferBrickStatuses(ctx, 0, self.brick_grid.state.brick_statuses) catch unreachable;
+    self.pipeline.transferBrickIndices(ctx, 0, self.brick_grid.state.brick_indices) catch unreachable;
+    self.pipeline.transferBricks(ctx, 0, self.brick_grid.state.bricks) catch unreachable;
+    self.pipeline.transferMaterialIndices(ctx, 0, self.brick_grid.state.material_indices) catch unreachable;
 }
 
 /// update grid device data based on changes

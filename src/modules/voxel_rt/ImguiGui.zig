@@ -76,8 +76,8 @@ pub fn init(ctx: Context, gui_width: f32, gui_height: f32, state_binding: StateB
         .metrics_state = .{
             .update_frame_timings = config.update_frame_timings,
             .frame_times = [_]f32{0} ** 128,
-            .min_frame_time = std.math.f32_max,
-            .max_frame_time = std.math.f32_min,
+            .min_frame_time = std.math.floatMax(f32),
+            .max_frame_time = std.math.floatMin(f32),
         },
     };
 }
@@ -100,7 +100,7 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
 
     zgui.setNextWindowSize(
         .{
-            .w = @intToFloat(f32, pipeline.swapchain.extent.width),
+            .w = @floatFromInt(pipeline.swapchain.extent.width),
             .h = 0,
             .cond = .always,
         },
@@ -147,8 +147,8 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
         std.mem.rotate(f32, self.metrics_state.frame_times[0..], 1);
         const frame_time = dt * std.time.ms_per_s;
         self.metrics_state.frame_times[self.metrics_state.frame_times.len - 1] = frame_time;
-        self.metrics_state.min_frame_time = std.math.min(self.metrics_state.min_frame_time, frame_time);
-        self.metrics_state.max_frame_time = std.math.max(self.metrics_state.max_frame_time, frame_time);
+        self.metrics_state.min_frame_time = @min(self.metrics_state.min_frame_time, frame_time);
+        self.metrics_state.max_frame_time = @max(self.metrics_state.max_frame_time, frame_time);
     }
 
     self.benchmark = blk: {
@@ -232,7 +232,7 @@ inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
 
         // y axis
         zgui.plot.setupAxis(.y1, .{ .label = "time (ms)" });
-        zgui.plot.setupAxisLimits(.y1, .{ .min = 0, .max = @floatCast(f64, 30) });
+        zgui.plot.setupAxisLimits(.y1, .{ .min = 0, .max = @floatCast(30) });
 
         zgui.plot.setupFinish();
 

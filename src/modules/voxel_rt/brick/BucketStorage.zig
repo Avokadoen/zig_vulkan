@@ -5,7 +5,7 @@ const Allocator = std.mem.Allocator;
 const IndexMapContext = struct {
     pub fn hash(self: IndexMapContext, key: usize) u64 {
         _ = self;
-        return @intCast(u64, key);
+        return @intCast(key);
     }
     pub fn eql(self: IndexMapContext, a: usize, b: usize) bool {
         _ = self;
@@ -115,7 +115,7 @@ pub fn init(allocator: Allocator, start_index: u32, material_indices_len: usize,
 
     var index = IndexMap.init(allocator);
     errdefer index.deinit();
-    try index.ensureUnusedCapacity(@intCast(u32, brick_count));
+    try index.ensureUnusedCapacity(@intCast(brick_count));
 
     return BucketStorage{
         .allocator = allocator,
@@ -145,31 +145,32 @@ pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_count: usi
         // find a bucket with increased size that is free
         var i: usize = index.bucket_index + 1;
         while (i < self.buckets.len) : (i += 1) {
-            if (self.buckets[i].free.items.len > 0) {
+            if (self.buckets[i].free.pop()) |bucket| {
                 // do bucket stuff to rel
-                const bucket = self.buckets[i].free.pop();
                 const oc_index = try self.buckets[i].appendOccupied(bucket);
 
                 try self.index.put(brick_index, Index{
-                    .bucket_index = @intCast(u6, i),
-                    .element_index = @intCast(u26, oc_index),
+                    .bucket_index = @intCast(i),
+                    .element_index = @intCast(oc_index),
                 });
 
                 // copy material indices to new bucket
-                std.mem.copy(u8, material_indices[bucket.start_index..], material_indices[previous_bucket.start_index .. previous_bucket.start_index + bucket_size]);
+                @memcpy(
+                    material_indices[bucket.start_index .. bucket.start_index + bucket_size],
+                    material_indices[previous_bucket.start_index .. previous_bucket.start_index + bucket_size],
+                );
                 return bucket;
             }
         }
     } else {
         // fetch the smallest free bucket
         for (&self.buckets, 0..) |*bucket, i| {
-            if (bucket.free.items.len > 0) {
-                const take = bucket.free.pop();
+            if (bucket.free.pop()) |take| {
                 const oc_index = try bucket.appendOccupied(take);
 
                 try self.index.put(brick_index, Index{
-                    .bucket_index = @intCast(u6, i),
-                    .element_index = @intCast(u26, oc_index),
+                    .bucket_index = @intCast(i),
+                    .element_index = @intCast(oc_index),
                 });
 
                 return take;

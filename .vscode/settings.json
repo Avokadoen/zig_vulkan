@@ -1,16 +1,9 @@
 {
     "cmake.configureOnOpen": false,
     "debug.onTaskErrors": "abort",
-    "glsllint.glslangValidatorArgs": "--target-env vulkan1.2 -I${workspaceFolder}assets/shaders",
-
-    // run zig fmt when saving 
-    "emeraldwalk.runonsave": {
-        "commands": [
-            {
-                "match": ".zig",
-                "isAsync": true,
-                "cmd": "zig fmt ${file}"
-            },
-        ]
-    }
+    "glsllint.glslangValidatorArgs": [
+        "--target-env",
+        "vulkan1.3",
+        "-I${workspaceFolder}assets/shaders"
+    ],
 }

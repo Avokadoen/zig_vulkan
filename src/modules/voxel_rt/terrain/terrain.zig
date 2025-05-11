@@ -20,20 +20,20 @@ const Material = enum(u8) {
     dirt,
     rock,
 
-    pub fn getMaterialIndex(self: Material, rnd: std.rand.Random) u8 {
+    pub fn getMaterialIndex(self: Material, rnd: std.Random) u8 {
         switch (self) {
             .water => return 0,
             .grass => {
                 const roll = rnd.float(f32);
-                return 1 + @floatToInt(u8, @round(roll));
+                return 1 + @as(u8, @intFromFloat(@round(roll)));
             },
             .dirt => {
                 const roll = rnd.float(f32);
-                return 3 + @floatToInt(u8, @round(roll));
+                return 3 + @as(u8, @intFromFloat(@round(roll)));
             },
             .rock => {
                 const roll = rnd.float(f32);
-                return 5 + @floatToInt(u8, @round(roll));
+                return 5 + @as(u8, @intFromFloat(@round(roll)));
             },
         }
     }
@@ -45,16 +45,16 @@ pub fn generateCpu(comptime threads_count: usize, allocator: Allocator, seed: u6
     defer zone.End();
 
     const perlin = blk: {
-        var p = try allocator.create(Perlin);
+        const p = try allocator.create(Perlin);
         p.* = Perlin.init(seed);
         break :blk p;
     };
     defer allocator.destroy(perlin);
 
     const voxel_dim = [3]f32{
-        @intToFloat(f32, grid.state.device_state.dim_x * 8),
-        @intToFloat(f32, grid.state.device_state.dim_y * 8),
-        @intToFloat(f32, grid.state.device_state.dim_z * 8),
+        @floatFromInt(grid.state.device_state.dim_x * 8),
+        @floatFromInt(grid.state.device_state.dim_y * 8),
+        @floatFromInt(grid.state.device_state.dim_z * 8),
     };
     const point_mod = [3]f32{
         (1 / voxel_dim[0]) * scale,
@@ -69,33 +69,38 @@ pub fn generateCpu(comptime threads_count: usize, allocator: Allocator, seed: u6
             const gen_zone = tracy.ZoneN(@src(), "terrain gen");
             defer gen_zone.End();
 
-            const thread_segment_size: f32 = if (threads_count == 0) voxel_dim_[0] else @ceil(voxel_dim_[0] / @intToFloat(f32, threads_count));
+            const thread_segment_size: f32 = blk: {
+                if (threads_count == 0) {
+                    break :blk voxel_dim_[0];
+                } else {
+                    break :blk @ceil(voxel_dim_[0] / @as(f32, @floatFromInt(threads_count)));
+                }
+            };
 
             const terrain_max_height: f32 = voxel_dim_[1] * 0.5;
             const inv_terrain_max_height = 1.0 / terrain_max_height;
 
             var point: [3]f32 = undefined;
-            const thread_x_begin = thread_segment_size * @intToFloat(f32, thread_id);
-            const thread_x_end = std.math.min(thread_x_begin + thread_segment_size, voxel_dim_[0]);
+            const thread_x_begin = thread_segment_size * @as(f32, @floatFromInt(thread_id));
+            const thread_x_end = @min(thread_x_begin + thread_segment_size, voxel_dim_[0]);
             var x: f32 = thread_x_begin;
             while (x < thread_x_end) : (x += 1) {
-                const i_x = @floatToInt(usize, x);
-
+                const i_x: usize = @intFromFloat(x);
                 var z: f32 = 0;
                 while (z < voxel_dim_[2]) : (z += 1) {
-                    const i_z = @floatToInt(usize, z);
+                    const i_z: usize = @intFromFloat(z);
 
                     point[0] = x * point_mod_[0];
                     point[1] = 0;
                     point[2] = z * point_mod_[2];
 
-                    const height = @floatToInt(usize, std.math.min(perlin_.smoothNoise(f32, point), 1) * terrain_max_height);
-
+                    const height: usize = @intFromFloat(@min(perlin_.smoothNoise(f32, point), 1) * terrain_max_height);
                     var i_y: usize = height / 2;
                     while (i_y < height) : (i_y += 1) {
-                        const material_value = za.lerp(f32, 1, 3.4, @intToFloat(f32, i_y) * inv_terrain_max_height) + perlin_.rng.float(f32) * 0.5;
-                        const material_index = @intToEnum(Material, @floatToInt(u8, @floor(material_value))).getMaterialIndex(perlin_.rng);
-                        grid_.*.insert(i_x, i_y, i_z, material_index);
+                        const height_lerp = za.lerp(f32, 1, 3.4, @as(f32, @floatFromInt(i_y)) * inv_terrain_max_height);
+                        const material_value = height_lerp + perlin_.rng.float(f32) * 0.5;
+                        const material: Material = @enumFromInt(@as(u8, @intFromFloat(@floor(material_value))));
+                        grid_.*.insert(i_x, i_y, i_z, material.getMaterialIndex(perlin_.rng));
                     }
                     while (i_y < ocean_level_v) : (i_y += 1) {
                         grid_.*.insert(i_x, i_y, i_z, 0); // insert water

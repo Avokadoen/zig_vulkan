@@ -24,7 +24,7 @@ fn InfoType() type {
 
                 return Self{
                     .enabled_layer_count = validation_layers.len,
-                    .enabled_layer_names = @ptrCast([*]const [*:0]const u8, &validation_layers),
+                    .enabled_layer_names = @ptrCast(&validation_layers),
                 };
             }
         };
@@ -61,11 +61,14 @@ fn isLayersPresent(allocator: Allocator, vkb: dispatch.Base, target_layers: []co
     available_layers.items.len = layer_count;
 
     for (target_layers) |target_layer| {
+        const t_str_len = std.mem.indexOfScalar(u8, target_layer[0..vk.MAX_EXTENSION_NAME_SIZE], 0) orelse continue;
         // check if target layer exist in available_layers
         inner: for (available_layers.items) |available_layer| {
             const layer_name = available_layer.layer_name;
+            const l_str_len = std.mem.indexOfScalar(u8, layer_name[0..vk.MAX_EXTENSION_NAME_SIZE], 0) orelse continue;
+
             // if target_layer and available_layer is the same
-            if (std.cstr.cmp(target_layer, @ptrCast([*:0]const u8, &layer_name)) == 0) {
+            if (std.mem.eql(u8, target_layer[0..t_str_len], layer_name[0..l_str_len])) {
                 break :inner;
             }
         } else return false; // if our loop never break, then a requested layer is missing
@@ -91,9 +94,9 @@ pub fn messageCallback(
     };
     const is_severe = (error_mask.toInt() & message_severity.toInt()) > 0;
     const writer = if (is_severe) std.io.getStdErr().writer() else std.io.getStdOut().writer();
-
     if (p_callback_data) |data| {
-        writer.print("validation layer: {s}\n", .{data.p_message}) catch {
+        const msg = data.p_message orelse "";
+        writer.print("validation layer: {s}\n", .{msg}) catch {
             std.debug.print("error from stdout print in message callback", .{});
         };
     }

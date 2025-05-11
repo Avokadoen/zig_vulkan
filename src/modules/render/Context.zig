@@ -3,12 +3,12 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
 const vk = @import("vulkan");
-const glfw = @import("glfw");
+const zglfw = @import("zglfw");
+const c = @import("c.zig");
 
 const consts = @import("consts.zig");
 const dispatch = @import("dispatch.zig");
-const physical_device = @import("physical_device.zig");
-const QueueFamilyIndices = physical_device.QueueFamilyIndices;
+const QueueFamilyIndices = @import("physical_device.zig").QueueFamilyIndices;
 const validation_layer = @import("validation_layer.zig");
 const vk_utils = @import("vk_utils.zig");
 
@@ -40,35 +40,40 @@ queue_indices: QueueFamilyIndices,
 messenger: ?vk.DebugUtilsMessengerEXT,
 
 /// pointer to the window handle. Caution is adviced when using this pointer ...
-window_ptr: *glfw.Window,
+window_ptr: *zglfw.Window,
 
 // Caller should make sure to call deinit
-pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Window) !Context {
-    const app_name = try std.cstr.addNullByte(allocator, application_name);
+pub fn init(allocator: Allocator, application_name: []const u8, window: *zglfw.Window) !Context {
+    const app_name: [:0]const u8 = app_name_blk: {
+        var c_str = try allocator.allocSentinel(u8, application_name.len, 0);
+        @memcpy(c_str[0..application_name.len], application_name);
+        c_str[c_str.len - 1] = 0;
+        break :app_name_blk @ptrCast(c_str);
+    };
     defer allocator.free(app_name);
 
     const app_info = vk.ApplicationInfo{
         .p_next = null,
         .p_application_name = app_name,
-        .application_version = consts.application_version,
+        .application_version = @bitCast(consts.application_version),
         .p_engine_name = consts.engine_name,
-        .engine_version = consts.engine_version,
-        .api_version = vk.API_VERSION_1_2,
+        .engine_version = @bitCast(consts.engine_version),
+        .api_version = @bitCast(vk.API_VERSION_1_4),
     };
 
     // TODO: move to global scope (currently crashes the zig compiler :') )
-    const common_extensions = [_][*:0]const u8{vk.extension_info.khr_surface.name};
+    const common_extensions = [_][*:0]const u8{vk.extensions.khr_surface.name};
     const application_extensions = blk: {
         if (consts.enable_validation_layers) {
             const debug_extensions = [_][*:0]const u8{
-                vk.extension_info.ext_debug_utils.name,
+                vk.extensions.ext_debug_utils.name,
             } ++ common_extensions;
             break :blk debug_extensions[0..];
         }
         break :blk common_extensions[0..];
     };
 
-    const glfw_extensions_slice = glfw.getRequiredInstanceExtensions() orelse unreachable;
+    const glfw_extensions_slice = try zglfw.getRequiredInstanceExtensions();
     // Due to a zig bug we need arraylist to append instead of preallocate slice
     // in release it fail and length turns out to be 1
     var extensions = try ArrayList([*:0]const u8).initCapacity(allocator, glfw_extensions_slice.len + application_extensions.len);
@@ -86,11 +91,7 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
     self.allocator = allocator;
 
     // load base dispatch wrapper
-    const vk_proc = @ptrCast(
-        *const fn (instance: vk.Instance, procname: [*:0]const u8) callconv(.C) vk.PfnVoidFunction,
-        &glfw.getInstanceProcAddress,
-    );
-    self.vkb = try dispatch.Base.load(vk_proc);
+    self.vkb = dispatch.Base.load(c.glfwGetInstanceProcAddress);
     if (!(try vk_utils.isInstanceExtensionsPresent(allocator, self.vkb, extensions.items))) {
         return error.InstanceExtensionNotPresent;
     }
@@ -111,7 +112,7 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
     const features: ?*const vk.ValidationFeaturesEXT = blk: {
         if (consts.enable_validation_layers) {
             break :blk &vk.ValidationFeaturesEXT{
-                .p_next = @ptrCast(?*const anyopaque, debug_create_info),
+                .p_next = @ptrCast(debug_create_info),
                 .enabled_validation_feature_count = debug_features.len,
                 .p_enabled_validation_features = &debug_features,
                 .disabled_validation_feature_count = 0,
@@ -123,27 +124,27 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
 
     self.instance = blk: {
         const instance_info = vk.InstanceCreateInfo{
-            .p_next = @ptrCast(?*const anyopaque, features),
+            .p_next = @ptrCast(features),
             .flags = .{},
             .p_application_info = &app_info,
             .enabled_layer_count = validation_layer_info.enabled_layer_count,
             .pp_enabled_layer_names = validation_layer_info.enabled_layer_names,
-            .enabled_extension_count = @intCast(u32, extensions.items.len),
-            .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, extensions.items.ptr),
+            .enabled_extension_count = @intCast(extensions.items.len),
+            .pp_enabled_extension_names = @ptrCast(extensions.items.ptr),
         };
         break :blk try self.vkb.createInstance(&instance_info, null);
     };
 
-    self.vki = try dispatch.Instance.load(self.instance, vk_proc);
+    self.vki = dispatch.Instance.load(self.instance, self.vkb.dispatch.vkGetInstanceProcAddr.?);
     errdefer self.vki.destroyInstance(self.instance, null);
 
-    const result = @intToEnum(vk.Result, glfw.createWindowSurface(self.instance, window.*, null, &self.surface));
+    const result: vk.Result = c.glfwCreateWindowSurface(self.instance, window, null, &self.surface);
     if (result != .success) {
         return error.FailedToCreateSurface;
     }
     errdefer self.vki.destroySurfaceKHR(self.instance, self.surface, null);
 
-    self.physical_device = try physical_device.selectPrimary(allocator, self.vki, self.instance, self.surface);
+    self.physical_device = try @import("physical_device.zig").selectPrimary(allocator, self.vki, self.instance, self.surface);
     self.queue_indices = try QueueFamilyIndices.init(allocator, self.vki, self.physical_device, self.surface);
 
     self.messenger = blk: {
@@ -152,9 +153,9 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *glfw.Wi
             std.debug.panic("failed to create debug messenger", .{});
         };
     };
-    self.logical_device = try physical_device.createLogicalDevice(allocator, self);
+    self.logical_device = try @import("physical_device.zig").createLogicalDevice(allocator, self);
 
-    self.vkd = try dispatch.Device.load(self.logical_device, self.vki.dispatch.vkGetDeviceProcAddr);
+    self.vkd = dispatch.Device.load(self.logical_device, self.vki.dispatch.vkGetDeviceProcAddr.?);
     self.compute_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.compute, 0);
     self.graphics_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.graphics, 0);
     self.present_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.present, 0);
@@ -197,11 +198,15 @@ pub fn destroyPipelineLayout(self: Context, pipeline_layout: vk.PipelineLayout) 
 
 /// caller must destroy pipeline from vulkan
 pub inline fn createGraphicsPipeline(self: Context, create_info: vk.GraphicsPipelineCreateInfo) !vk.Pipeline {
-    const create_infos = [_]vk.GraphicsPipelineCreateInfo{
-        create_info,
-    };
     var pipeline: vk.Pipeline = undefined;
-    const result = try self.vkd.createGraphicsPipelines(self.logical_device, .null_handle, create_infos.len, @ptrCast([*]const vk.GraphicsPipelineCreateInfo, &create_infos), null, @ptrCast([*]vk.Pipeline, &pipeline));
+    const result = try self.vkd.createGraphicsPipelines(
+        self.logical_device,
+        .null_handle,
+        1,
+        @ptrCast(&create_info),
+        null,
+        @ptrCast(&pipeline),
+    );
     if (result != vk.Result.success) {
         // TODO: not panic?
         std.debug.panic("failed to initialize pipeline!", .{});
@@ -210,14 +215,16 @@ pub inline fn createGraphicsPipeline(self: Context, create_info: vk.GraphicsPipe
 }
 
 /// caller must both destroy pipeline from the heap and in vulkan
-pub fn createComputePipeline(self: Context, allocator: Allocator, create_info: vk.ComputePipelineCreateInfo) !*vk.Pipeline {
-    var pipeline = try allocator.create(vk.Pipeline);
-    errdefer allocator.destroy(pipeline);
-
-    const create_infos = [_]vk.ComputePipelineCreateInfo{
-        create_info,
-    };
-    const result = try self.vkd.createComputePipelines(self.logical_device, .null_handle, create_infos.len, @ptrCast([*]const vk.ComputePipelineCreateInfo, &create_infos), null, @ptrCast([*]vk.Pipeline, pipeline));
+pub fn createComputePipeline(self: Context, create_info: vk.ComputePipelineCreateInfo) !vk.Pipeline {
+    var pipeline: vk.Pipeline = undefined;
+    const result = try self.vkd.createComputePipelines(
+        self.logical_device,
+        .null_handle,
+        1,
+        @ptrCast(&create_info),
+        null,
+        @ptrCast(&pipeline),
+    );
     if (result != vk.Result.success) {
         // TODO: not panic?
         std.debug.panic("failed to initialize pipeline!", .{});
@@ -294,7 +301,7 @@ pub fn createRenderPass(self: Context, format: vk.Format) !vk.RenderPass {
         .subpass_count = subpass.len,
         .p_subpasses = &subpass,
         .dependency_count = 1,
-        .p_dependencies = @ptrCast([*]const vk.SubpassDependency, &subpass_dependency),
+        .p_dependencies = @ptrCast(&subpass_dependency),
     };
     return try self.vkd.createRenderPass(self.logical_device, &render_pass_info, null);
 }

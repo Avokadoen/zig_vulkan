@@ -17,17 +17,17 @@ pub fn PerlinNoiseGenerator(comptime point_count: u32) type {
         perm_x: [point_count]PermInt,
         perm_y: [point_count]PermInt,
         perm_z: [point_count]PermInt,
-        rng: std.rand.Random,
+        rng: std.Random,
 
         pub fn init(seed: u64) Perlin {
-            var prng = std.rand.DefaultPrng.init(seed);
+            var prng = std.Random.DefaultPrng.init(seed);
             const rng = prng.random();
             const generate_perm_fn = struct {
-                inline fn generate_perm(random: std.rand.Random) [point_count]PermInt {
+                inline fn generate_perm(random: std.Random) [point_count]PermInt {
                     var perm: [point_count]PermInt = undefined;
                     // TODO: replace for with while to avoid casting in loop
                     for (&perm, 0..) |*p, i| {
-                        p.* = @intCast(PermInt, i);
+                        p.* = @intCast(i);
                     }
 
                     {
@@ -70,18 +70,18 @@ pub fn PerlinNoiseGenerator(comptime point_count: u32) type {
             }
 
             const and_value = point_count - 1;
-            const i = @floatToInt(usize, 4 * point[0]) & and_value;
-            const j = @floatToInt(usize, 4 * point[2]) & and_value;
-            const k = @floatToInt(usize, 4 * point[1]) & and_value;
+            const i = @as(usize, @intFromFloat(4 * point[0])) & and_value;
+            const j = @as(usize, @intFromFloat(4 * point[2])) & and_value;
+            const k = @as(usize, @intFromFloat(4 * point[1])) & and_value;
 
-            return self.rand_float[@intCast(usize, self.perm_x[i] ^ self.perm_y[j] ^ self.perm_z[k])];
+            return self.rand_float[@intCast(self.perm_x[i] ^ self.perm_y[j] ^ self.perm_z[k])];
         }
 
         pub fn smoothNoise(self: Perlin, comptime PointType: type, point: [3]PointType) NoiseFloat {
             comptime {
                 const info = @typeInfo(PointType);
                 switch (info) {
-                    .Float => {},
+                    .float => {},
                     else => @compileError("PointType must be a float type"),
                 }
             }
@@ -90,9 +90,9 @@ pub fn PerlinNoiseGenerator(comptime point_count: u32) type {
             {
                 const and_value = point_count - 1;
 
-                const i = @floatToInt(usize, @floor(point[0]));
-                const j = @floatToInt(usize, @floor(point[1]));
-                const k = @floatToInt(usize, @floor(point[2]));
+                const i: usize = @intFromFloat(@floor(point[0]));
+                const j: usize = @intFromFloat(@floor(point[1]));
+                const k: usize = @intFromFloat(@floor(point[2]));
                 var di: usize = 0;
                 while (di < 2) : (di += 1) {
                     var dj: usize = 0;
@@ -101,7 +101,6 @@ pub fn PerlinNoiseGenerator(comptime point_count: u32) type {
                         while (dk < 2) : (dk += 1) {
                             c[di][dj][dk] = self.rand_float[
                                 @intCast(
-                                    usize,
                                     self.perm_x[(i + di) & and_value] ^
                                         self.perm_y[(j + dj) & and_value] ^
                                         self.perm_z[(k + dk) & and_value],
@@ -130,13 +129,13 @@ pub fn PerlinNoiseGenerator(comptime point_count: u32) type {
             {
                 var i: usize = 0;
                 while (i < 2) : (i += 1) {
-                    const fi = @intToFloat(NoiseFloat, i);
+                    const fi: NoiseFloat = @floatFromInt(i);
                     var j: usize = 0;
                     while (j < 2) : (j += 1) {
-                        const fj = @intToFloat(NoiseFloat, j);
+                        const fj: NoiseFloat = @floatFromInt(j);
                         var k: usize = 0;
                         while (k < 2) : (k += 1) {
-                            const fk = @intToFloat(NoiseFloat, k);
+                            const fk: NoiseFloat = @floatFromInt(k);
                             accum += (fi * u + (1 - fi) * (1 - u)) *
                                 (fj * v + (1 - fj) * (1 - v)) *
                                 (fk * w + (1 - fk) * (1 - w)) * c[i][j][k];

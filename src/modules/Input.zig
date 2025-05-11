@@ -1,15 +1,14 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const glfw = @import("glfw");
+const zglfw = @import("zglfw");
 const zgui = @import("zgui");
 
-pub const WindowHandle = glfw.Window.Handle;
-pub const Key = glfw.Key;
-pub const Action = glfw.Action;
-pub const Mods = glfw.Mods;
-pub const MouseButton = glfw.mouse_button.MouseButton;
-pub const InputModeCursor = glfw.Window.InputModeCursor;
+pub const WindowHandle = zglfw.Window;
+pub const Key = zglfw.Key;
+pub const Action = zglfw.Action;
+pub const Mods = zglfw.Mods;
+pub const MouseButton = zglfw.MouseButton;
 
 // TODO: use callbacks for easier key binding
 // const int scancode = glfwGetKeyScancode(GLFW_KEY_X);
@@ -49,20 +48,20 @@ const WindowContext = struct {
 };
 
 const ImguiContext = struct {
-    pointing_hand: glfw.Cursor,
-    arrow: glfw.Cursor,
-    ibeam: glfw.Cursor,
-    crosshair: glfw.Cursor,
-    resize_ns: glfw.Cursor,
-    resize_ew: glfw.Cursor,
-    resize_nesw: glfw.Cursor,
-    resize_nwse: glfw.Cursor,
-    not_allowed: glfw.Cursor,
+    hand: *zglfw.Cursor,
+    arrow: *zglfw.Cursor,
+    ibeam: *zglfw.Cursor,
+    crosshair: *zglfw.Cursor,
+    resize_ns: *zglfw.Cursor,
+    resize_ew: *zglfw.Cursor,
+    resize_nesw: *zglfw.Cursor,
+    resize_nwse: *zglfw.Cursor,
+    not_allowed: *zglfw.Cursor,
 };
 
 const Input = @This();
 
-window: glfw.Window,
+window: *zglfw.Window,
 window_context: *WindowContext,
 imgui_context: ImguiContext,
 
@@ -70,7 +69,7 @@ imgui_context: ImguiContext,
 /// create a input module.
 pub fn init(
     allocator: Allocator,
-    input_window: glfw.Window,
+    input_window: *zglfw.Window,
     input_handle_fn: KeyHandleFn,
     input_mouse_btn_handle_fn: MouseButtonHandleFn,
     input_cursor_pos_handle_fn: CursorPosHandleFn,
@@ -85,14 +84,14 @@ pub fn init(
         .cursor_pos_handle_fn = input_cursor_pos_handle_fn,
     };
 
-    window.setInputMode(glfw.Window.InputMode.cursor, InputModeCursor.normal);
+    try window.setInputMode(.cursor, .normal);
 
     _ = window.setKeyCallback(keyCallback);
     _ = window.setCharCallback(charCallback);
     _ = window.setMouseButtonCallback(mouseBtnCallback);
     _ = window.setCursorPosCallback(cursorPosCallback);
     _ = window.setScrollCallback(scrollCallback);
-    window.setUserPointer(@ptrCast(?*anyopaque, window_context));
+    window.setUserPointer(@ptrCast(window_context));
 
     const imgui_context = try linkImguiCodes();
 
@@ -120,8 +119,8 @@ pub fn setImguiWantInput(self: Input, want_input: bool) void {
     self.window_context.imgui_want_input = want_input;
 }
 
-pub fn setInputModeCursor(self: Input, mode: InputModeCursor) void {
-    self.window.setInputModeCursor(mode);
+pub fn setInputModeCursor(self: Input, mode: zglfw.Cursor.Mode) !void {
+    try self.window.setInputMode(.cursor, mode);
 }
 
 pub fn setCursorPosCallback(self: Input, input_cursor_pos_handle_fn: CursorPosHandleFn) void {
@@ -139,9 +138,9 @@ pub fn updateCursor(self: *Input) !void {
         return;
     }
 
-    self.window.setInputModeCursor(.normal);
+    try self.window.setInputMode(.cursor, .normal);
     switch (zgui.getMouseCursor()) {
-        .none => self.window.setInputModeCursor(.hidden),
+        .none => try self.window.setInputMode(.cursor, .hidden),
         .arrow => self.window.setCursor(self.imgui_context.arrow),
         .text_input => self.window.setCursor(self.imgui_context.ibeam),
         .resize_all => self.window.setCursor(self.imgui_context.crosshair),
@@ -149,17 +148,17 @@ pub fn updateCursor(self: *Input) !void {
         .resize_ew => self.window.setCursor(self.imgui_context.resize_ew),
         .resize_nesw => self.window.setCursor(self.imgui_context.resize_nesw),
         .resize_nwse => self.window.setCursor(self.imgui_context.resize_nwse),
-        .hand => self.window.setCursor(self.imgui_context.pointing_hand),
+        .hand => self.window.setCursor(self.imgui_context.hand),
         .not_allowed => self.window.setCursor(self.imgui_context.not_allowed),
         .count => self.window.setCursor(self.imgui_context.ibeam),
     }
 }
 
-fn keyCallback(window: glfw.Window, key: Key, scan_code: i32, action: Action, mods: Mods) void {
+fn keyCallback(window: *zglfw.Window, key: Key, scan_code: c_int, action: Action, mods: Mods) callconv(.c) void {
     _ = scan_code;
 
     var owned_mods = mods;
-    var parsed_mods = @ptrCast(*Mods, &owned_mods);
+    const parsed_mods: *Mods = @ptrCast(&owned_mods);
     const event = KeyEvent{
         .key = key,
         .action = action,
@@ -180,20 +179,21 @@ fn keyCallback(window: glfw.Window, key: Key, scan_code: i32, action: Action, mo
     }
 }
 
-fn charCallback(window: glfw.Window, codepoint: u21) void {
+fn charCallback(window: *zglfw.Window, codepoint: u32) callconv(.c) void {
     const context = if (window.getUserPointer(WindowContext)) |some| some else return;
     if (context.imgui_want_input) {
         var buffer: [8]u8 = undefined;
-        const len = std.unicode.utf8Encode(codepoint, buffer[0..]) catch return;
+        const code: u21 = @intCast(codepoint);
+        const len = std.unicode.utf8Encode(code, buffer[0..]) catch return;
         const cstr = buffer[0 .. len + 1];
         cstr[len] = 0; // null terminator
-        zgui.io.addInputCharactersUTF8(@ptrCast([*:0]const u8, cstr.ptr));
+        zgui.io.addInputCharactersUTF8(@ptrCast(cstr.ptr));
     }
 }
 
-fn mouseBtnCallback(window: glfw.Window, button: MouseButton, action: Action, mods: Mods) void {
+fn mouseBtnCallback(window: *zglfw.Window, button: MouseButton, action: Action, mods: Mods) callconv(.c) void {
     var owned_mods = mods;
-    var parsed_mods = @ptrCast(*Mods, &owned_mods);
+    const parsed_mods: *Mods = @ptrCast(&owned_mods);
     const event = MouseButtonEvent{
         .button = button,
         .action = action,
@@ -220,7 +220,7 @@ fn mouseBtnCallback(window: glfw.Window, button: MouseButton, action: Action, mo
     }
 }
 
-fn cursorPosCallback(window: glfw.Window, x_pos: f64, y_pos: f64) void {
+fn cursorPosCallback(window: *zglfw.Window, x_pos: f64, y_pos: f64) callconv(.c) void {
     const event = CursorPosEvent{
         .x = x_pos,
         .y = y_pos,
@@ -229,57 +229,56 @@ fn cursorPosCallback(window: glfw.Window, x_pos: f64, y_pos: f64) void {
     context.cursor_pos_handle_fn(event);
 
     if (context.imgui_want_input) {
-        zgui.io.addMousePositionEvent(@floatCast(f32, x_pos), @floatCast(f32, y_pos));
+        zgui.io.addMousePositionEvent(@floatCast(x_pos), @floatCast(y_pos));
     }
 }
 
-fn scrollCallback(window: glfw.Window, xoffset: f64, yoffset: f64) void {
+fn scrollCallback(window: *zglfw.Window, xoffset: f64, yoffset: f64) callconv(.c) void {
     const context = if (window.getUserPointer(WindowContext)) |some| some else return;
 
     if (context.imgui_want_input) {
-        zgui.io.addMouseWheelEvent(@floatCast(f32, xoffset), @floatCast(f32, yoffset));
+        zgui.io.addMouseWheelEvent(@floatCast(xoffset), @floatCast(yoffset));
     }
 }
 
 /// link imgui and glfw codes
 fn linkImguiCodes() !ImguiContext {
-    var self = ImguiContext{
-        .pointing_hand = undefined,
-        .arrow = undefined,
-        .ibeam = undefined,
-        .crosshair = undefined,
-        .resize_ns = undefined,
-        .resize_ew = undefined,
-        .resize_nesw = undefined,
-        .resize_nwse = undefined,
-        .not_allowed = undefined,
-    };
-    self.pointing_hand = glfw.Cursor.createStandard(.pointing_hand) orelse return error.CreateCursorFailed;
-    errdefer self.pointing_hand.destroy();
-    self.arrow = glfw.Cursor.createStandard(.arrow) orelse return error.CreateCursorFailed;
-    errdefer self.arrow.destroy();
-    self.ibeam = glfw.Cursor.createStandard(.ibeam) orelse return error.CreateCursorFailed;
-    errdefer self.ibeam.destroy();
-    self.crosshair = glfw.Cursor.createStandard(.crosshair) orelse return error.CreateCursorFailed;
-    errdefer self.crosshair.destroy();
-    self.resize_ns = glfw.Cursor.createStandard(.resize_ns) orelse return error.CreateCursorFailed;
-    errdefer self.resize_ns.destroy();
-    self.resize_ew = glfw.Cursor.createStandard(.resize_ew) orelse return error.CreateCursorFailed;
-    errdefer self.resize_ew.destroy();
-    self.resize_nesw = glfw.Cursor.createStandard(.resize_nesw) orelse return error.CreateCursorFailed;
-    errdefer self.resize_nesw.destroy();
-    self.resize_nwse = glfw.Cursor.createStandard(.resize_nwse) orelse return error.CreateCursorFailed;
-    errdefer self.resize_nwse.destroy();
-    self.not_allowed = glfw.Cursor.createStandard(.not_allowed) orelse return error.CreateCursorFailed;
-    errdefer self.not_allowed.destroy();
+    const hand = try zglfw.Cursor.createStandard(.hand);
+    errdefer hand.destroy();
+    const arrow = try zglfw.Cursor.createStandard(.arrow);
+    errdefer arrow.destroy();
+    const ibeam = try zglfw.Cursor.createStandard(.ibeam);
+    errdefer ibeam.destroy();
+    const crosshair = try zglfw.Cursor.createStandard(.crosshair);
+    errdefer crosshair.destroy();
+    const resize_ns = try zglfw.Cursor.createStandard(.resize_ns);
+    errdefer resize_ns.destroy();
+    const resize_ew = try zglfw.Cursor.createStandard(.resize_ew);
+    errdefer resize_ew.destroy();
+    const resize_nesw = try zglfw.Cursor.createStandard(.resize_nesw);
+    errdefer resize_nesw.destroy();
+    const resize_nwse = try zglfw.Cursor.createStandard(.resize_nwse);
+    errdefer resize_nwse.destroy();
+    const not_allowed = try zglfw.Cursor.createStandard(.not_allowed);
+    errdefer not_allowed.destroy();
 
-    return self;
+    return ImguiContext{
+        .hand = hand,
+        .arrow = arrow,
+        .ibeam = ibeam,
+        .crosshair = crosshair,
+        .resize_ns = resize_ns,
+        .resize_ew = resize_ew,
+        .resize_nesw = resize_nesw,
+        .resize_nwse = resize_nwse,
+        .not_allowed = not_allowed,
+    };
 }
 
 fn getClipboardTextFn(ctx: ?*anyopaque) callconv(.C) [*c]const u8 {
     _ = ctx;
 
-    const clipboard_string = glfw.getClipboardString() catch blk: {
+    const clipboard_string = zglfw.getClipboardString() catch blk: {
         break :blk "";
     };
     return clipboard_string;
@@ -287,10 +286,10 @@ fn getClipboardTextFn(ctx: ?*anyopaque) callconv(.C) [*c]const u8 {
 
 fn setClipboardTextFn(ctx: ?*anyopaque, text: [*c]const u8) callconv(.C) void {
     _ = ctx;
-    glfw.setClipboardString(text) catch {};
+    zglfw.setClipboardString(text) catch {};
 }
 
-inline fn mapGlfwKeyToImgui(key: glfw.Key) zgui.Key {
+inline fn mapGlfwKeyToImgui(key: zglfw.Key) zgui.Key {
     return switch (key) {
         .unknown => zgui.Key.none,
         .space => zgui.Key.space,

@@ -1,0 +1,46 @@
+.{
+    .name = .zig_vulkan,
+    .version = "0.0.0",
+    .fingerprint = 0xf2458184bc70e71c, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.14.0",
+
+    .dependencies = .{
+        .ztracy = .{
+            .url = "git+https://github.com/zig-gamedev/ztracy?ref=main#be3d003f29d59d72e68e493ab531374ab474a795",
+            .hash = "ztracy-0.14.0-dev-zHJSq1oQFwCAq2LhbqsBUmZAipMzsD8UfKL5Etc_OJMb",
+        },
+        .zgui = .{
+            .url = "git+https://github.com/zig-gamedev/zgui.git/?ref=HEAD#7ac0630658ee2d285893603aca3945461d181beb",
+            .hash = "zgui-0.6.0-dev--L6sZG-baABjJ9Gcf2XU_VpTLmn4nNwq7alHKDRT_BW9",
+        },
+        .zglfw = .{
+            .url = "git+https://github.com/zig-gamedev/zglfw.git/?ref=HEAD#fa12b57541976561358c850337af8d08647879d6",
+            .hash = "zglfw-0.10.0-dev-zgVDNJKcIQDR2-i-qz-FlR6uUdODN0DNPQA9X1G034qr",
+        },
+        .zalgebra = .{
+            .url = "git+https://github.com/kooparse/zalgebra.git/?ref=HEAD#7cf3b90edc28a138d666deab5dfde9dce89dff56",
+            .hash = "zalgebra-0.0.0-aaiVSh1nAQDYYHlXEm3nm7G7r7utN4aObxs43TLdjEuc",
+        },
+        .zstbi = .{
+            .url = "git+https://github.com/zig-gamedev/zstbi#094c4bba5cdbec167d3f6aaa98cccccd5c99145f",
+            .hash = "zstbi-0.11.0-dev-L0Ea_-eVBwCl8RYA98PhLDw3Fhw5k7FJOHSMDKWDOvqx",
+        },
+        .vulkan_zig = .{
+            .url = "git+https://github.com/Snektron/vulkan-zig#42e7a8409b8150e1cbd57a8ff8cec219114bac74",
+            .hash = "vulkan-0.0.0-r7Ytx2dUAwDhoUvuIqliqPUbyDZZi0bl_CQIwspUpHs_",
+        },
+        .shader_compiler = .{
+            .url = "git+https://github.com/Games-by-Mason/shader_compiler#7a28b4dbab429ebf17ac5b26aac4d660a97052b1",
+            .hash = "shader_compiler-1.0.0-bOVsasuGAADsqQPvVDRD-bSkQCwDBQx06dVyrQws0EFK",
+        },
+    },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        // For example...
+        //"LICENSE",
+        //"README.md",
+    },
+}

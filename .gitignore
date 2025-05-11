@@ -1,5 +1,5 @@
 # Zig generated files
-zig-cache
+.zig-cache
 zig-out
 
 # Dependency based documentation 

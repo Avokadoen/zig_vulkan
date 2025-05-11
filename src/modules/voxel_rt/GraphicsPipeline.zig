@@ -9,8 +9,6 @@ const GpuBufferMemory = render.GpuBufferMemory;
 const Swapchain = render.swapchain.Data;
 const memory = render.memory;
 
-const shaders = @import("shaders");
-
 const Vertex = extern struct {
     pos: [3]f32,
     uv: [2]f32,
@@ -88,7 +86,7 @@ pub fn init(
         }};
         const descriptor_pool_info = vk.DescriptorPoolCreateInfo{
             .flags = .{},
-            .max_sets = @intCast(u32, swapchain.images.len),
+            .max_sets = @intCast(swapchain.images.len),
             .pool_size_count = pool_sizes.len,
             .p_pool_sizes = &pool_sizes,
         };
@@ -119,13 +117,13 @@ pub fn init(
         const alloc_info = vk.DescriptorSetAllocateInfo{
             .descriptor_pool = descriptor_pool,
             .descriptor_set_count = 1,
-            .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &descriptor_set_layout),
+            .p_set_layouts = @ptrCast(&descriptor_set_layout),
         };
         var descriptor_set_tmp: vk.DescriptorSet = undefined;
         try ctx.vkd.allocateDescriptorSets(
             ctx.logical_device,
             &alloc_info,
-            @ptrCast([*]vk.DescriptorSet, &descriptor_set_tmp),
+            @ptrCast(&descriptor_set_tmp),
         );
         break :blk descriptor_set_tmp;
     };
@@ -133,7 +131,7 @@ pub fn init(
         ctx.logical_device,
         descriptor_pool,
         1,
-        @ptrCast([*]const vk.DescriptorSet, &descriptor_set),
+        @ptrCast(&descriptor_set),
     ) catch {};
 
     {
@@ -148,14 +146,14 @@ pub fn init(
             .dst_array_element = 0,
             .descriptor_count = 1,
             .descriptor_type = .combined_image_sampler,
-            .p_image_info = @ptrCast([*]const vk.DescriptorImageInfo, &descriptor_info),
+            .p_image_info = @ptrCast(&descriptor_info),
             .p_buffer_info = undefined,
             .p_texel_buffer_view = undefined,
         }};
         ctx.vkd.updateDescriptorSets(
             ctx.logical_device,
             write_descriptor_sets.len,
-            @ptrCast([*]const vk.WriteDescriptorSet, &write_descriptor_sets),
+            @ptrCast(&write_descriptor_sets),
             0,
             undefined,
         );
@@ -170,9 +168,9 @@ pub fn init(
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
             .set_layout_count = 1,
-            .p_set_layouts = @ptrCast([*]const vk.DescriptorSetLayout, &descriptor_set_layout),
+            .p_set_layouts = @ptrCast(&descriptor_set_layout),
             .push_constant_range_count = 1,
-            .p_push_constant_ranges = @ptrCast([*]const vk.PushConstantRange, &push_constant_range),
+            .p_push_constant_ranges = @ptrCast(&push_constant_range),
         };
         break :blk try ctx.vkd.createPipelineLayout(ctx.logical_device, &pipeline_layout_info, null);
     };
@@ -216,7 +214,7 @@ pub fn init(
         .logic_op_enable = vk.FALSE,
         .logic_op = .clear,
         .attachment_count = 1,
-        .p_attachments = @ptrCast([*]const vk.PipelineColorBlendAttachmentState, &blend_attachment_state),
+        .p_attachments = @ptrCast(&blend_attachment_state),
         .blend_constants = [4]f32{ 0, 0, 0, 0 },
     };
     // TODO: deviation from guide. Validate that still valid!
@@ -249,10 +247,12 @@ pub fn init(
     };
 
     const vert = blk: {
+        const image_vert_spv align(@alignOf(u32)) = @embedFile("image_vert_spv").*;
+
         const create_info = vk.ShaderModuleCreateInfo{
             .flags = .{},
-            .p_code = @ptrCast([*]const u32, &shaders.image_vert_spv),
-            .code_size = shaders.image_vert_spv.len,
+            .p_code = @ptrCast(&image_vert_spv),
+            .code_size = image_vert_spv.len,
         };
         const module = try ctx.vkd.createShaderModule(ctx.logical_device, &create_info, null);
 
@@ -266,10 +266,12 @@ pub fn init(
     };
     errdefer ctx.vkd.destroyShaderModule(ctx.logical_device, vert.module, null);
     const frag = blk: {
+        const image_frag_spv align(@alignOf(u32)) = @embedFile("image_frag_spv").*;
+
         const create_info = vk.ShaderModuleCreateInfo{
             .flags = .{},
-            .p_code = @ptrCast([*]const u32, &shaders.image_frag_spv),
-            .code_size = shaders.image_frag_spv.len,
+            .p_code = @ptrCast(&image_frag_spv),
+            .code_size = image_frag_spv.len,
         };
         const module = try ctx.vkd.createShaderModule(ctx.logical_device, &create_info, null);
 
@@ -341,9 +343,9 @@ pub fn init(
         ctx.logical_device,
         pipeline_cache,
         1,
-        @ptrCast([*]const vk.GraphicsPipelineCreateInfo, &pipeline_create_info),
+        @ptrCast(&pipeline_create_info),
         null,
-        @ptrCast([*]vk.Pipeline, &pipeline),
+        @ptrCast(&pipeline),
     );
     errdefer ctx.vkd.destroyPipeline(ctx.logical_device, pipeline, null);
 
@@ -370,7 +372,7 @@ pub fn init(
                 ctx.logical_device,
                 command_pools[i],
                 1,
-                @ptrCast([*]const vk.CommandBuffer, &command_buffers[i]),
+                @ptrCast(&command_buffers[i]),
             );
         }
         i = 0;
@@ -423,7 +425,7 @@ pub fn deinit(self: GraphicsPipeline, allocator: Allocator, ctx: Context) void {
             ctx.logical_device,
             self.command_pools[i],
             1,
-            @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            @ptrCast(&command_buffer),
         );
     }
     for (self.command_pools) |command_pool| {

@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
 const vk = @import("vulkan");
-const glfw = @import("glfw");
+const zglfw = @import("zglfw");
 
 const dispatch = @import("dispatch.zig");
 const physical_device = @import("physical_device.zig");
@@ -22,7 +22,14 @@ pub const ViewportScissor = struct {
         const height = extent.height;
         return .{
             .viewport = [1]vk.Viewport{
-                .{ .x = 0, .y = 0, .width = @intToFloat(f32, width), .height = @intToFloat(f32, height), .min_depth = 0.0, .max_depth = 1.0 },
+                .{
+                    .x = 0,
+                    .y = 0,
+                    .width = @floatFromInt(width),
+                    .height = @floatFromInt(height),
+                    .min_depth = 0.0,
+                    .max_depth = 1.0,
+                },
             },
             .scissor = [1]vk.Rect2D{
                 .{ .offset = .{
@@ -54,10 +61,10 @@ pub const Data = struct {
         const sc_create_info = blk1: {
             const format = support_details.selectSwapChainFormat();
             const present_mode = support_details.selectSwapchainPresentMode();
-            const extent = try support_details.constructSwapChainExtent(ctx.window_ptr.*);
+            const extent = try support_details.constructSwapChainExtent(ctx.window_ptr);
 
             const max_images = if (support_details.capabilities.max_image_count == 0) std.math.maxInt(u32) else support_details.capabilities.max_image_count;
-            const image_count = std.math.min(support_details.capabilities.min_image_count + 1, max_images);
+            const image_count = @min(support_details.capabilities.min_image_count + 1, max_images);
 
             const Config = struct {
                 sharing_mode: vk.SharingMode,
@@ -70,14 +77,14 @@ pub const Data = struct {
                     break :blk2 Config{
                         .sharing_mode = .concurrent, // TODO: read up on ownership in this context
                         .index_count = indices_arr.len,
-                        .p_indices = @ptrCast([*]const u32, &indices_arr[0..indices_arr.len]),
+                        .p_indices = @ptrCast(&indices_arr[0..indices_arr.len]),
                     };
                 } else {
                     const indices_arr = [_]u32{ ctx.queue_indices.graphics, ctx.queue_indices.present };
                     break :blk2 Config{
                         .sharing_mode = .exclusive,
                         .index_count = 1,
-                        .p_indices = @ptrCast([*]const u32, &indices_arr[0..1]),
+                        .p_indices = @ptrCast(&indices_arr[0..1]),
                     };
                 }
             };
@@ -107,7 +114,7 @@ pub const Data = struct {
             var image_count: u32 = 0;
             _ = try ctx.vkd.getSwapchainImagesKHR(ctx.logical_device, swapchain_khr, &image_count, null);
 
-            var images = try allocator.alloc(vk.Image, image_count);
+            const images = try allocator.alloc(vk.Image, image_count);
             errdefer allocator.free(images);
 
             // TODO: handle incomplete
@@ -245,13 +252,16 @@ pub const SupportDetails = struct {
         return .fifo_khr;
     }
 
-    pub fn constructSwapChainExtent(self: Self, window: glfw.Window) !vk.Extent2D {
+    pub fn constructSwapChainExtent(self: Self, window: *zglfw.Window) !vk.Extent2D {
         if (self.capabilities.current_extent.width != std.math.maxInt(u32)) {
             return self.capabilities.current_extent;
         } else {
-            var window_size = blk: {
+            const window_size = blk: {
                 const size = window.getFramebufferSize();
-                break :blk vk.Extent2D{ .width = @intCast(u32, size.width), .height = @intCast(u32, size.height) };
+                break :blk vk.Extent2D{
+                    .width = @intCast(size[0]),
+                    .height = @intCast(size[1]),
+                };
             };
 
             const clamp = std.math.clamp;

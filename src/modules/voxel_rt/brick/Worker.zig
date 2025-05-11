@@ -14,7 +14,7 @@ const Worker = @This();
 
 /// a FIFO queue of jobs for a given worker
 const JobQueue = std.fifo.LinearFifo(Job, .Dynamic);
-const Signal = std.atomic.Atomic(bool);
+const Signal = std.atomic.Value(bool);
 
 pub const Insert = struct { x: usize, y: usize, z: usize, material_index: u8 };
 pub const JobTag = enum {
@@ -59,7 +59,7 @@ pub fn init(id: usize, worker_count: usize, grid: *State, allocator: Allocator, 
     const bucket_storage = blk: {
         var brick_count = std.math.divFloor(usize, grid.bricks.len, worker_count) catch unreachable; // assert(worker_count != 0)
         var material_count = std.math.divFloor(usize, grid.material_indices.len, worker_count) catch unreachable;
-        const start_index = @intCast(u32, material_count * id);
+        const start_index: u32 = @intCast(material_count * id);
         if (id == worker_count - 1) {
             brick_count += std.math.rem(usize, grid.bricks.len, worker_count) catch unreachable;
             material_count += std.math.rem(usize, grid.material_indices.len, worker_count) catch unreachable;
@@ -87,7 +87,7 @@ pub fn registerJob(self: *Worker, job: Job) void {
     self.job_queue.writeItem(job) catch {}; // TODO: report error somehow?
     self.job_mutex.unlock();
 
-    if (self.sleep.load(.SeqCst) == false) {
+    if (self.sleep.load(.seq_cst) == false) {
         self.wake_event.signal();
     }
 }
@@ -110,9 +110,9 @@ pub fn work(self: *Worker) void {
     const worker_zone = tracy.ZoneN(@src(), "grid work");
     defer worker_zone.End();
 
-    life_loop: while (self.shutdown.load(.SeqCst) == false) {
+    life_loop: while (self.shutdown.load(.seq_cst) == false) {
         self.job_mutex.lock();
-        if (self.sleep.load(.SeqCst) == false) {
+        if (self.sleep.load(.seq_cst) == false) {
             var i: usize = 0;
             work_loop: while (self.job_queue.*.readItem()) |job| {
                 self.job_mutex.unlock();
@@ -124,8 +124,8 @@ pub fn work(self: *Worker) void {
                 self.job_mutex.lock();
                 i += 1;
 
-                if (self.shutdown.load(.SeqCst)) break :life_loop;
-                if (self.sleep.load(.SeqCst)) break :work_loop;
+                if (self.shutdown.load(.seq_cst)) break :life_loop;
+                if (self.sleep.load(.seq_cst)) break :work_loop;
             }
         }
         defer self.job_mutex.unlock();
@@ -143,7 +143,7 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
 
     const grid_index = gridAt(self.grid.*.device_state, insert_job.x, actual_y, insert_job.z);
     const brick_status_index = grid_index / 32;
-    const brick_status_offset = @intCast(u5, (grid_index % 32));
+    const brick_status_offset: u5 = @intCast(grid_index % 32);
     const brick_status = self.grid.brick_statuses[brick_status_index].read(brick_status_offset);
     const brick_index = blk: {
         if (brick_status == .loaded) {
@@ -158,7 +158,7 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
         self.grid.higher_order_grid_delta.registerDelta(higher_grid_index);
 
         // atomically fetch previous brick count and then add 1 to count
-        break :blk self.grid.*.active_bricks.fetchAdd(1, .Monotonic);
+        break :blk self.grid.*.active_bricks.fetchAdd(1, .monotonic);
     };
 
     var brick = self.grid.bricks[brick_index];
@@ -169,18 +169,18 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
     // set the color information for the given voxel
     {
         // shift material position voxels that are after this voxel
-        const voxels_in_brick = countBits(brick.solid_mask, 512);
+        const voxels_in_brick = countBits(@bitCast(brick.solid_mask), 512);
         // TODO: error
         const bucket = self.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.grid.*.material_indices) catch {
             std.debug.panic("at {d} {d} {d} no more buckets", .{ insert_job.x, insert_job.y, insert_job.z });
         };
         // set the brick's material index
-        brick.index = @intCast(u31, bucket.start_index);
+        brick.index.value = @intCast(bucket.start_index);
 
         // move all color data
         const bits_before = countBits(brick.solid_mask, nth_bit);
         const new_voxel_material_index = bucket.start_index + bits_before;
-        const voxel_was_set: bool = (brick.solid_mask & @as(u512, 1) << nth_bit) != 0;
+        const voxel_was_set: bool = (@as(u512, @bitCast(brick.solid_mask)) & @as(u512, 1) << nth_bit) != 0;
         if (voxel_was_set == false) {
             var i: u32 = voxels_in_brick;
             while (i > bits_before) {
@@ -197,13 +197,15 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
         const delta_to = if (voxel_was_set) new_voxel_material_index else new_voxel_material_index + (voxels_in_brick - bits_before);
         self.grid.material_indices_deltas[self.id].registerDeltaRange(delta_from, delta_to);
 
-        // material indices is stored as 31bit on GPU and 8bit on CPU
-        // we divide by for to store the correct *GPU* index
-        brick.index /= 4;
+        // material indices are packed in 32bit on GPU and 8bit on CPU
+        // we divide by four to store the correct *GPU* index
+        brick.index.value /= 4;
     }
 
     // set voxel
-    brick.solid_mask |= @as(u512, 1) << nth_bit;
+    const mask_index = nth_bit / @bitSizeOf(u8);
+    const mask_bit: u3 = @intCast(@rem(nth_bit, @bitSizeOf(u8)));
+    brick.solid_mask[mask_index] |= @as(u8, 1) << mask_bit;
 
     // store brick changes
     self.grid.*.bricks[brick_index] = brick;
@@ -224,33 +226,33 @@ inline fn voxelAt(x: usize, y: usize, z: usize) u9 {
     const brick_x: usize = @rem(x, 8);
     const brick_y: usize = @rem(y, 8);
     const brick_z: usize = @rem(z, 8);
-    return @intCast(u9, brick_x + 8 * (brick_z + 8 * brick_y));
+    return @intCast(brick_x + 8 * (brick_z + 8 * brick_y));
 }
 
 /// get grid index from global index coordinates
 inline fn gridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize {
-    const grid_x: u32 = @intCast(u32, x / 8);
-    const grid_y: u32 = @intCast(u32, y / 8);
-    const grid_z: u32 = @intCast(u32, z / 8);
-    return @intCast(usize, grid_x + device_state.dim_x * (grid_z + device_state.dim_z * grid_y));
+    const grid_x: u32 = @intCast(x / 8);
+    const grid_y: u32 = @intCast(y / 8);
+    const grid_z: u32 = @intCast(z / 8);
+    return @intCast(grid_x + device_state.dim_x * (grid_z + device_state.dim_z * grid_y));
 }
 
 /// get higher grid index from global index coordinates
 inline fn higherGridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize {
-    const higher_grid_x: u32 = @intCast(u32, x / (8 * 4));
-    const higher_grid_y: u32 = @intCast(u32, y / (8 * 4));
-    const higher_grid_z: u32 = @intCast(u32, z / (8 * 4));
-    return @intCast(usize, higher_grid_x + device_state.higher_dim_x * (higher_grid_z + device_state.higher_dim_z * higher_grid_y));
+    const higher_grid_x: u32 = @intCast(x / (8 * 4));
+    const higher_grid_y: u32 = @intCast(y / (8 * 4));
+    const higher_grid_z: u32 = @intCast(z / (8 * 4));
+    return @intCast(higher_grid_x + device_state.higher_dim_x * (higher_grid_z + device_state.higher_dim_z * higher_grid_y));
 }
 
 /// count the set bits of a u512, up to range_to (exclusive)
-inline fn countBits(bits: u512, range_to: u32) u32 {
-    var bit = bits;
+inline fn countBits(bits: [64]u8, range_to: u32) u32 {
+    var bit: u512 = @bitCast(bits);
     var count: u512 = 0;
     var i: u32 = 0;
     while (i < range_to and bit != 0) : (i += 1) {
         count += bit & 1;
         bit = bit >> 1;
     }
-    return @intCast(u32, count);
+    return @intCast(count);
 }

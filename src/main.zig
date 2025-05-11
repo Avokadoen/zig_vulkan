@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const glfw = @import("glfw");
+const zglfw = @import("zglfw");
 const za = @import("zalgebra");
 const ztracy = @import("ztracy");
 
@@ -11,7 +11,6 @@ const render = @import("modules/render.zig");
 const consts = render.consts;
 
 const Input = @import("modules/Input.zig");
-const InputModeCursor = Input.InputModeCursor;
 
 // TODO: API topology
 const VoxelRT = @import("modules/VoxelRT.zig");
@@ -48,7 +47,7 @@ pub fn main() anyerror!void {
     defer {
         if (consts.enable_validation_layers) {
             const leak = alloc.deinit();
-            if (leak) {
+            if (leak == .leak) {
                 stderr.print("leak detected in gpa!", .{}) catch unreachable;
             }
         }
@@ -56,28 +55,23 @@ pub fn main() anyerror!void {
     const allocator = if (consts.enable_validation_layers) alloc.allocator() else alloc;
 
     // Initialize the library *
-    if (glfw.init(.{}) == false) {
-        return error.GlfwFailedToInitialize;
-    }
-    defer glfw.terminate();
+    try zglfw.init();
+    defer zglfw.terminate();
 
-    if (!glfw.vulkanSupported()) {
+    if (!zglfw.isVulkanSupported()) {
         std.debug.panic("vulkan not supported on device (glfw)", .{});
     }
 
     // Create a windowed mode window
-    var window = glfw.Window.create(3840, 2160, application_name, null, null, .{
-        .center_cursor = true,
-        .client_api = .no_api,
-        .maximized = true,
-        .scale_to_monitor = true,
-        .focused = true,
-    }) orelse {
-        return error.GlfwCreateWindowFailed;
-    };
+    zglfw.windowHint(.client_api, .no_api);
+    zglfw.windowHint(.center_cursor, true);
+    zglfw.windowHint(.maximized, true);
+    zglfw.windowHint(.scale_to_monitor, true);
+    zglfw.windowHint(.focused, true);
+    var window = try zglfw.Window.create(3840, 2160, application_name, null);
     defer window.destroy();
 
-    const ctx = try render.Context.init(allocator, application_name, &window);
+    const ctx = try render.Context.init(allocator, application_name, window);
     defer ctx.deinit();
 
     var grid = try BrickGrid.init(allocator, 64, 32, 64, .{
@@ -108,23 +102,32 @@ pub fn main() anyerror!void {
         const albedo_index = i + terrain.color_data.len;
         albedo_color[albedo_index] = .{
             .color = za.Vec4.new(
-                @intToFloat(f32, rgba.r) / 255,
-                @intToFloat(f32, rgba.g) / 255,
-                @intToFloat(f32, rgba.b) / 255,
-                @intToFloat(f32, rgba.a) / 255,
+                @as(f32, @floatFromInt(rgba.r)) / 255.0,
+                @as(f32, @floatFromInt(rgba.g)) / 255.0,
+                @as(f32, @floatFromInt(rgba.b)) / 255.0,
+                @as(f32, @floatFromInt(rgba.a)) / 255.0,
             ).data,
         };
         const material_index = i + terrain.material_data.len;
-        materials[material_index] = .{ .type = .metal, .type_index = 0, .albedo_index = @intCast(u8, albedo_index) };
+        materials[material_index] = .{
+            .type = .metal,
+            .type_index = 0,
+            .albedo_index = @intCast(albedo_index),
+        };
     }
 
     // Test what we are loading
     for (model.xyzi_chunks[0]) |xyzi| {
-        grid.insert(@intCast(usize, xyzi.x) + 200, @intCast(usize, xyzi.z) + 50, @intCast(usize, xyzi.y) + 150, xyzi.color_index);
+        grid.insert(
+            @as(usize, @intCast(xyzi.x)) + 200,
+            @as(usize, @intCast(xyzi.z)) + 50,
+            @as(usize, @intCast(xyzi.y)) + 150,
+            xyzi.color_index,
+        );
     }
 
-    // generate terrain on CPU
-    try terrain.generateCpu(4, allocator, 420, 4, 20, &grid);
+    // // generate terrain on CPU
+    try terrain.generateCpu(8, allocator, 420, 4, 20, &grid);
 
     var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, .{
         .internal_resolution_width = internal_render_resolution.x(),
@@ -145,7 +148,7 @@ pub fn main() anyerror!void {
     try voxel_rt.pushAlbedo(ctx, albedo_color[0..]);
     try voxel_rt.pushMaterials(ctx, materials[0..]);
 
-    window.setInputMode(glfw.Window.InputMode.cursor, glfw.Window.InputModeCursor.disabled);
+    try window.setInputMode(zglfw.InputMode.cursor, zglfw.Cursor.Mode.disabled);
 
     // init input module with default input handler functions
     input = try Input.init(
@@ -156,7 +159,7 @@ pub fn main() anyerror!void {
         gameCursorPosInputFn,
     );
     defer input.deinit(allocator);
-    input.setInputModeCursor(.disabled);
+    try input.setInputModeCursor(.disabled);
     input.setImguiWantInput(false);
 
     voxel_rt.brick_grid.wakeWorkers();
@@ -165,9 +168,9 @@ pub fn main() anyerror!void {
     // Loop until the user closes the window
     while (!window.shouldClose()) {
         const current_frame = std.time.milliTimestamp();
-        delta_time = @intToFloat(f64, current_frame - prev_frame) / @as(f64, std.time.ms_per_s);
+        delta_time = @as(f64, @floatFromInt(current_frame - prev_frame)) / @as(f64, std.time.ms_per_s);
         // f32 variant of delta_time
-        const dt = @floatCast(f32, delta_time);
+        const dt: f32 = @floatCast(delta_time);
 
         if (call_translate > 0) {
             if (activate_sprint) {
@@ -196,7 +199,7 @@ pub fn main() anyerror!void {
         try voxel_rt.draw(ctx, dt);
 
         // Poll for and process events
-        glfw.pollEvents();
+        zglfw.pollEvents();
         prev_frame = current_frame;
 
         input.updateCursor() catch {};
@@ -236,7 +239,7 @@ fn gameKeyInputFn(event: Input.KeyEvent) void {
             Input.Key.escape => {
                 input.setCursorPosCallback(menuCursorPosInputFn);
                 input.setKeyCallback(menuKeyInputFn);
-                input.setInputModeCursor(.normal);
+                input.setInputModeCursor(.normal) catch std.debug.panic("failed to set input mode cursor", .{});
                 input.setImguiWantInput(true);
             },
             else => {},
@@ -282,7 +285,7 @@ fn menuKeyInputFn(event: Input.KeyEvent) void {
                 input.setCursorPosCallback(gameCursorPosInputFn);
                 input.setKeyCallback(gameKeyInputFn);
                 input.setImguiWantInput(false);
-                input.setInputModeCursor(.disabled);
+                input.setInputModeCursor(.disabled) catch std.debug.panic("failed to set input mode cursor", .{});
 
                 // ignore first 5 frames of input after
                 mouse_ignore_frames = 5;
@@ -310,8 +313,8 @@ fn gameCursorPosInputFn(event: Input.CursorPosEvent) void {
     if (mouse_ignore_frames == 0) {
         // let prev_event be defined before processing Input
         if (State.prev_event) |p_event| {
-            mouse_delta.data[0] += @floatCast(f32, event.x - p_event.x);
-            mouse_delta.data[1] += @floatCast(f32, event.y - p_event.y);
+            mouse_delta.data[0] += @floatCast(event.x - p_event.x);
+            mouse_delta.data[1] += @floatCast(event.y - p_event.y);
         }
         call_yaw = call_yaw or mouse_delta.x() < -0.00001 or mouse_delta.x() > 0.00001;
         call_pitch = call_pitch or mouse_delta.y() < -0.00001 or mouse_delta.y() > 0.00001;

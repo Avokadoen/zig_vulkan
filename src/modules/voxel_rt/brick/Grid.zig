@@ -42,47 +42,50 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 
     const brick_count = dim_x * dim_y * dim_z;
 
-    const higher_dim_x = @intToFloat(f64, dim_x) * 0.25;
-    const higher_dim_y = @intToFloat(f64, dim_y) * 0.25;
-    const higher_dim_z = @intToFloat(f64, dim_z) * 0.25;
-    const higher_order_grid = try allocator.alloc(u8, @floatToInt(usize, @ceil(higher_dim_x * higher_dim_y * higher_dim_z)));
+    const higher_dim_x = @as(f64, @floatFromInt(dim_x)) * 0.25;
+    const higher_dim_y = @as(f64, @floatFromInt(dim_y)) * 0.25;
+    const higher_dim_z = @as(f64, @floatFromInt(dim_z)) * 0.25;
+    const higher_order_grid = try allocator.alloc(u8, @intFromFloat(@ceil(higher_dim_x * higher_dim_y * higher_dim_z)));
     errdefer allocator.free(higher_order_grid);
-    std.mem.set(u8, higher_order_grid, 0);
+    @memset(higher_order_grid, 0);
 
     // each mask has 32 entries
     const brick_statuses = try allocator.alloc(State.BrickStatusMask, (std.math.divCeil(u32, brick_count, 32) catch unreachable));
     errdefer allocator.free(brick_statuses);
-    std.mem.set(State.BrickStatusMask, brick_statuses, .{ .bits = 0 });
+    @memset(brick_statuses, .{ .bits = 0 });
 
     const brick_indices = try allocator.alloc(State.BrickIndex, brick_count);
     errdefer allocator.free(brick_indices);
-    std.mem.set(State.BrickIndex, brick_indices, 0);
+    @memset(brick_indices, 0);
 
     const brick_alloc = config.brick_alloc orelse brick_count;
     const bricks = try allocator.alloc(State.Brick, brick_alloc);
     errdefer allocator.free(bricks);
-    std.mem.set(State.Brick, bricks, .{ .solid_mask = 0, .index_type = .voxel_start_index, .index = 0 });
+    @memset(bricks, .{
+        .solid_mask = [_]u8{0} ** 64,
+        .index = .{
+            .value = 0,
+            .index_type = .voxel_start_index,
+        },
+    });
 
-    const material_indices = try allocator.alloc(u8, bricks.len * math.min(512, config.material_indices_per_brick));
+    const material_indices = try allocator.alloc(u8, bricks.len * @min(512, config.material_indices_per_brick));
     errdefer allocator.free(material_indices);
-    std.mem.set(u8, material_indices, 0);
+    @memset(material_indices, 0);
 
     const min_point_base_t = blk: {
         const min_point = config.min_point;
         const base_t = config.base_t;
         var result: [4]f32 = undefined;
-        std.mem.copy(f32, &result, &min_point);
+        @memcpy(result[0..3], &min_point);
         result[3] = base_t;
         break :blk result;
     };
-    const max_point_scale = blk: {
-        var result = [4]f32{
-            min_point_base_t[0] + @intToFloat(f32, dim_x) * config.scale,
-            min_point_base_t[1] + @intToFloat(f32, dim_y) * config.scale,
-            min_point_base_t[2] + @intToFloat(f32, dim_z) * config.scale,
-            config.scale,
-        };
-        break :blk result;
+    const max_point_scale = [4]f32{
+        min_point_base_t[0] + @as(f32, @floatFromInt(dim_x)) * config.scale,
+        min_point_base_t[1] + @as(f32, @floatFromInt(dim_y)) * config.scale,
+        min_point_base_t[2] + @as(f32, @floatFromInt(dim_z)) * config.scale,
+        config.scale,
     };
 
     const state = try allocator.create(State);
@@ -90,25 +93,25 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 
     // initialize all delta structures
     // these are used to track changes that should be pushed to GPU
-    var higher_order_grid_delta = try allocator.create(State.DeviceDataDelta);
+    const higher_order_grid_delta = try allocator.create(State.DeviceDataDelta);
     errdefer allocator.destroy(higher_order_grid_delta);
     higher_order_grid_delta.* = State.DeviceDataDelta.init();
 
-    var brick_statuses_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
+    const brick_statuses_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
     errdefer allocator.free(brick_statuses_deltas);
-    std.mem.set(State.DeviceDataDelta, brick_statuses_deltas, State.DeviceDataDelta.init());
+    @memset(brick_statuses_deltas, State.DeviceDataDelta.init());
 
-    var brick_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
+    const brick_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
     errdefer allocator.free(brick_indices_deltas);
-    std.mem.set(State.DeviceDataDelta, brick_indices_deltas, State.DeviceDataDelta.init());
+    @memset(brick_indices_deltas, State.DeviceDataDelta.init());
 
     const bricks_delta = State.DeviceDataDelta.init();
 
-    var material_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
+    const material_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
     errdefer allocator.free(material_indices_deltas);
-    std.mem.set(State.DeviceDataDelta, material_indices_deltas, State.DeviceDataDelta.init());
+    @memset(material_indices_deltas, State.DeviceDataDelta.init());
 
-    const work_segment_size = try std.math.divCeil(u32, dim_x, @intCast(u32, config.workers_count));
+    const work_segment_size = try std.math.divCeil(u32, dim_x, @intCast(config.workers_count));
 
     state.* = .{
         .higher_order_grid_delta = higher_order_grid_delta,
@@ -131,9 +134,9 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
             .dim_x = dim_x,
             .dim_y = dim_y,
             .dim_z = dim_z,
-            .higher_dim_x = @floatToInt(u32, higher_dim_x),
-            .higher_dim_y = @floatToInt(u32, higher_dim_y),
-            .higher_dim_z = @floatToInt(u32, higher_dim_z),
+            .higher_dim_x = @intFromFloat(higher_dim_x),
+            .higher_dim_y = @intFromFloat(higher_dim_y),
+            .higher_dim_z = @intFromFloat(higher_dim_z),
             .min_point_base_t = min_point_base_t,
             .max_point_scale = max_point_scale,
         },
@@ -142,7 +145,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     var workers = try allocator.alloc(Worker, config.workers_count);
     errdefer allocator.free(workers);
 
-    var worker_threads = try allocator.alloc(std.Thread, config.workers_count);
+    const worker_threads = try allocator.alloc(std.Thread, config.workers_count);
     errdefer allocator.free(worker_threads);
     for (worker_threads, 0..) |*thread, i| {
         workers[i] = try Worker.init(i, config.workers_count, state, allocator, 4096);
@@ -162,7 +165,7 @@ pub fn deinit(self: BrickGrid) void {
     // signal each worker to finish
     for (self.workers) |*worker| {
         // signal shutdown
-        worker.*.shutdown.store(true, .SeqCst);
+        worker.*.shutdown.store(true, .seq_cst);
         // signal worker to wake up from idle state
         worker.wake_event.signal();
     }
@@ -192,14 +195,14 @@ pub fn deinit(self: BrickGrid) void {
 /// Can be useful if spurvious changes to the grid cause thread contention
 pub fn sleepWorkers(self: *BrickGrid) void {
     for (self.workers) |*worker| {
-        worker.*.sleep.store(true, .SeqCst);
+        worker.*.sleep.store(true, .seq_cst);
     }
 }
 
 /// Wake workers after forcing sleep.
 pub fn wakeWorkers(self: *BrickGrid) void {
     for (self.workers) |*worker| {
-        worker.*.sleep.store(false, .SeqCst);
+        worker.*.sleep.store(false, .seq_cst);
         worker.*.wake_event.signal();
     }
 }

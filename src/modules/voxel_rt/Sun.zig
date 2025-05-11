@@ -47,7 +47,7 @@ pub fn init(config: Config) Sun {
 
     return Sun{
         .device_data = .{
-            .enabled = @intCast(u32, @boolToInt(config.enabled)),
+            .enabled = @intCast(@intFromBool(config.enabled)),
             .position = static_pos_vec.data,
             .color = config.color,
             .radius = config.radius,

@@ -81,7 +81,7 @@ pub fn parseBuffer(comptime strict: bool, allocator: Allocator, buffer: []const 
         .index = 0,
     });
 
-    const num_models = @intCast(usize, vox.pack_chunk.num_models);
+    const num_models: usize = @intCast(vox.pack_chunk.num_models);
     // allocate voxel data according to pack information
     vox.size_chunks = try allocator.alloc(Chunk.Size, num_models);
     vox.xyzi_chunks = try allocator.alloc([]Chunk.XyziElement, num_models);
@@ -129,7 +129,7 @@ pub fn parseBuffer(comptime strict: bool, allocator: Allocator, buffer: []const 
 
             const voxel_count = parseI32(buffer[pos..]);
             pos += 4;
-            const xyzis = try allocator.alloc(Chunk.XyziElement, @intCast(usize, voxel_count));
+            const xyzis = try allocator.alloc(Chunk.XyziElement, @intCast(voxel_count));
             {
                 var i: usize = 0;
                 while (i < voxel_count) : (i += 1) {
@@ -190,15 +190,16 @@ pub fn parseBuffer(comptime strict: bool, allocator: Allocator, buffer: []const 
     }
 
     if (rgba_set == false) {
-        const default = @ptrCast(*const [256]Chunk.RgbaElement, &default_rgba);
-        std.mem.copy(Chunk.RgbaElement, vox.rgba_chunk[0..], default[0..]);
+        const default: *const [256]Chunk.RgbaElement = @ptrCast(&default_rgba);
+        @memcpy(vox.rgba_chunk[0..], default[0..]);
     }
 
     return vox;
 }
 
 inline fn parseI32(buffer: []const u8) i32 {
-    return @ptrCast(*const i32, @alignCast(4, &buffer[0])).*;
+    const i32_ptr: *const i32 = @ptrCast(@alignCast(&buffer[0]));
+    return i32_ptr.*;
 }
 
 /// Parse a buffer into a chunk, buffer *has* to start with the first character in the id
@@ -228,11 +229,11 @@ inline fn validateHeader(buffer: []const u8) ParseError!void {
 }
 
 inline fn buildPath(allocator: Allocator, path: []const u8) ![]const u8 {
-    var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
     const exe_path = try std.fs.selfExeDirPath(buf[0..]);
     const path_segments = [_][]const u8{ exe_path, path };
 
-    var zig_use_path = try std.fs.path.join(allocator, path_segments[0..]);
+    const zig_use_path = try std.fs.path.join(allocator, path_segments[0..]);
     errdefer allocator.destroy(zig_use_path.ptr);
 
     const sep = [_]u8{std.fs.path.sep};

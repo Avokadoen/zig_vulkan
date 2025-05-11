@@ -39,7 +39,7 @@ pub fn loadShaderStage(
 ) !vk.PipelineShaderStageCreateInfo {
     const create_info = vk.ShaderModuleCreateInfo{
         .flags = .{},
-        .p_code = @ptrCast([*]const u32, &shader_code),
+        .p_code = @ptrCast(&shader_code),
         .code_size = shader_code.len,
     };
     const module = try ctx.vkd.createShaderModule(ctx.logical_device, &create_info, null);
@@ -53,13 +53,13 @@ pub fn loadShaderStage(
     };
 }
 
-/// create a command buffers with sizeof buffer_count, caller must deinit returned list
+/// create command buffers with length of buffer_count, caller must deinit returned list
 pub fn createCmdBuffers(allocator: Allocator, ctx: Context, command_pool: vk.CommandPool, buffer_count: usize, prev_buffer: ?[]vk.CommandBuffer) ![]vk.CommandBuffer {
     var command_buffers = prev_buffer orelse try allocator.alloc(vk.CommandBuffer, buffer_count);
     const alloc_info = vk.CommandBufferAllocateInfo{
         .command_pool = command_pool,
         .level = vk.CommandBufferLevel.primary,
-        .command_buffer_count = @intCast(u32, buffer_count),
+        .command_buffer_count = @intCast(buffer_count),
     };
     try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &alloc_info, command_buffers.ptr);
     command_buffers.len = buffer_count;
@@ -67,15 +67,15 @@ pub fn createCmdBuffers(allocator: Allocator, ctx: Context, command_pool: vk.Com
     return command_buffers;
 }
 
-/// create a command buffers with sizeof buffer_count, caller must destroy returned buffer with allocator
+/// create a command buffers, caller must destroy returned buffer with allocator
 pub fn createCmdBuffer(ctx: Context, command_pool: vk.CommandPool) !vk.CommandBuffer {
     const alloc_info = vk.CommandBufferAllocateInfo{
         .command_pool = command_pool,
         .level = vk.CommandBufferLevel.primary,
-        .command_buffer_count = @intCast(u32, 1),
+        .command_buffer_count = @intCast(1),
     };
     var command_buffer: vk.CommandBuffer = undefined;
-    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &alloc_info, @ptrCast([*]vk.CommandBuffer, &command_buffer));
+    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &alloc_info, @ptrCast(&command_buffer));
 
     return command_buffer;
 }

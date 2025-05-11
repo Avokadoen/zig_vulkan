@@ -124,7 +124,7 @@ pub fn waitIdle(self: StagingRamp, ctx: Context) !void {
     }
     _ = try ctx.vkd.waitForFences(
         ctx.logical_device,
-        @intCast(u32, self.wait_all_fences.len),
+        @intCast(self.wait_all_fences.len),
         self.wait_all_fences.ptr,
         vk.TRUE,
         std.math.maxInt(u64),
@@ -143,7 +143,7 @@ pub fn deinit(self: StagingRamp, ctx: Context, allocator: Allocator) void {
 inline fn getIdleRamp(self: *StagingRamp, ctx: Context, size: vk.DeviceSize) !usize {
     var full_ramps: usize = 0;
     // get a idle buffer
-    var index: usize = blk: {
+    const index: usize = blk: {
         for (self.staging_buffers, 0..) |ramp, i| {
             // if ramp is out of memory
             if (ramp.buffer_cursor + size >= buffer_size) {
@@ -166,7 +166,7 @@ inline fn getIdleRamp(self: *StagingRamp, ctx: Context, size: vk.DeviceSize) !us
     _ = try ctx.vkd.waitForFences(
         ctx.logical_device,
         1,
-        @ptrCast([*]const vk.Fence, &self.staging_buffers[index].fence),
+        @ptrCast(&self.staging_buffers[index].fence),
         vk.TRUE,
         std.math.maxInt(u64),
     );
@@ -195,10 +195,10 @@ const BufferImageCopy = struct {
 const BufferCopyMapContext = struct {
     pub fn hash(self: BufferCopyMapContext, key: vk.Buffer) u32 {
         _ = self;
-        const v: u64 = @enumToInt(key);
+        const v: u64 = @intFromEnum(key);
         const left_value = (v >> 32) / 4;
         const right_value = ((v << 32) >> 32) / 2;
-        return @intCast(u32, left_value + right_value);
+        return @intCast(left_value + right_value);
     }
 
     pub fn eql(self: BufferCopyMapContext, a: vk.Buffer, b: vk.Buffer, i: usize) bool {
@@ -245,8 +245,8 @@ const StagingBuffer = struct {
         errdefer ctx.vkd.freeCommandBuffers(
             ctx.logical_device,
             command_pool,
-            @intCast(u32, 1),
-            @ptrCast([*]const vk.CommandBuffer, &command_buffer),
+            @intCast(1),
+            @ptrCast(&command_buffer),
         );
 
         const fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
@@ -279,8 +279,9 @@ const StagingBuffer = struct {
         try self.device_buffer_memory.map(ctx, self.buffer_cursor, data_size);
         defer self.device_buffer_memory.unmap(ctx);
 
-        var dest_location = @ptrCast([*]T, @alignCast(@alignOf(T), self.device_buffer_memory.mapped) orelse unreachable);
-        std.mem.copy(T, dest_location[0..data.len], data);
+        const dest_loc_align: [*]align(1) T = @ptrCast(self.device_buffer_memory.mapped);
+        var dest_location: [*]T = @alignCast(dest_loc_align);
+        @memcpy(dest_location[0..data.len], data);
 
         const region = vk.BufferImageCopy{
             .buffer_offset = self.buffer_cursor,
@@ -326,15 +327,9 @@ const StagingBuffer = struct {
         try self.device_buffer_memory.map(ctx, self.buffer_cursor, data_size);
         defer self.device_buffer_memory.unmap(ctx);
 
-        // TODO: here we align as u8 and later we reinterpret data as a byte array.
-        //       This is because we get runtime errors from using T and data directly.
-        //       It *SEEMS* like alignment error is a zig bug, but might as well be an application bug.
-        //       If the bug is an application bug, then we need to find a way to fix it instead of disabling safety ...
-        var dest_location = @ptrCast([*]u8, @alignCast(@alignOf(u8), self.device_buffer_memory.mapped) orelse unreachable);
+        var dest_location: [*]u8 = @ptrCast(self.device_buffer_memory.mapped);
         {
-            // runtime safety is turned off for performance
             const byte_data = std.mem.sliceAsBytes(data);
-            @setRuntimeSafety(false);
             for (byte_data, 0..) |elem, i| {
                 dest_location[i] = elem;
             }
@@ -371,12 +366,12 @@ const StagingBuffer = struct {
         _ = try ctx.vkd.waitForFences(
             ctx.logical_device,
             1,
-            @ptrCast([*]const vk.Fence, &self.fence),
+            @ptrCast(&self.fence),
             vk.TRUE,
             std.math.maxInt(u64),
         );
         // lock ramp
-        try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast([*]const vk.Fence, &self.fence));
+        try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast(&self.fence));
 
         try self.device_buffer_memory.map(ctx, 0, self.buffer_cursor);
         try self.device_buffer_memory.flush(ctx, 0, self.buffer_cursor);
@@ -428,7 +423,7 @@ const StagingBuffer = struct {
                         0,
                         undefined,
                         1,
-                        @ptrCast([*]const vk.ImageMemoryBarrier, &transfer_barrier),
+                        @ptrCast(&transfer_barrier),
                     );
                 }
 
@@ -438,7 +433,7 @@ const StagingBuffer = struct {
                     copy.image,
                     .transfer_dst_optimal,
                     1,
-                    @ptrCast([*]const vk.BufferImageCopy, &copy.region),
+                    @ptrCast(&copy.region),
                 );
 
                 {
@@ -471,7 +466,7 @@ const StagingBuffer = struct {
                         0,
                         undefined,
                         1,
-                        @ptrCast([*]const vk.ImageMemoryBarrier, &read_only_barrier),
+                        @ptrCast(&read_only_barrier),
                     );
                 }
             }
@@ -479,20 +474,19 @@ const StagingBuffer = struct {
         try ctx.vkd.endCommandBuffer(self.command_buffer);
 
         {
-            @setRuntimeSafety(false);
-            var semo_null_ptr: [*c]const vk.Semaphore = null;
-            var wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
+            const semo_null_ptr: [*c]const vk.Semaphore = null;
+            const wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
             // perform the compute ray tracing, draw to target texture
             const submit_info = vk.SubmitInfo{
                 .wait_semaphore_count = 0,
                 .p_wait_semaphores = semo_null_ptr,
                 .p_wait_dst_stage_mask = wait_null_ptr,
                 .command_buffer_count = 1,
-                .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
+                .p_command_buffers = @ptrCast(&self.command_buffer),
                 .signal_semaphore_count = 0,
                 .p_signal_semaphores = semo_null_ptr,
             };
-            try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @ptrCast([*]const vk.SubmitInfo, &submit_info), self.fence);
+            try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @ptrCast(&submit_info), self.fence);
         }
 
         self.buffer_copy.clearRetainingCapacity();
@@ -504,8 +498,8 @@ const StagingBuffer = struct {
         ctx.vkd.freeCommandBuffers(
             ctx.logical_device,
             self.command_pool,
-            @intCast(u32, 1),
-            @ptrCast([*]const vk.CommandBuffer, &self.command_buffer),
+            1,
+            @ptrCast(&self.command_buffer),
         );
         ctx.vkd.destroyCommandPool(ctx.logical_device, self.command_pool, null);
         self.device_buffer_memory.deinit(ctx);

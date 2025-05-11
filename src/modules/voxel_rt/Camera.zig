@@ -34,7 +34,7 @@ vertical_fov: f32,
 d_camera: Device,
 
 pub fn init(vertical_fov: f32, image_width: u32, image_height: u32, config: Config) Camera {
-    const aspect_ratio = @intToFloat(f32, image_width) / @intToFloat(f32, image_height);
+    const aspect_ratio: f32 = @as(f32, @floatFromInt(image_width)) / @as(f32, @floatFromInt(image_height));
 
     const a: comptime_float = std.math.pi * (1.0 / 180.0);
     const viewport_height = blk: {
@@ -133,7 +133,7 @@ pub fn turnPitch(self: *Camera, angle: f32) void {
 
     // arbitrary restrict rotation so that camera does not become inversed
     const euler_x_rotation = self.pitch.extractEulerAngles().x();
-    if (@fabs(euler_x_rotation) >= 90) {
+    if (@abs(euler_x_rotation) >= 90) {
         self.pitch = prev_pitch;
     }
 
@@ -175,7 +175,7 @@ pub inline fn propogatePitchChange(self: *Camera) void {
 }
 
 inline fn lowerLeftCorner(self: Camera) Vec3 {
-    const @"0.5" = @splat(3, @as(f32, 0.5));
+    const @"0.5": Vec3 = @splat(0.5);
     return self.d_camera.origin - self.d_camera.horizontal * @"0.5" - self.d_camera.vertical * @"0.5" - self.forwardDir().data;
 }
 
