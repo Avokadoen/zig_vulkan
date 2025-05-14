@@ -17,17 +17,8 @@ Make sure you download Vulkan 1.4 or up
 
 Do the following steps 
 ```bash
-$ git clone --recurse-submodules -j4 <repo>
-$ cd <folder>
-$ zig build run
-```
-
-Or
-
-```bash
 $ git clone <repo>
 $ cd <folder>
-$ git submodule update --init --recursive
 $ zig build run
 ```
 
