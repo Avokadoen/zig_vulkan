@@ -68,6 +68,7 @@ present_complete_semaphores: []vk.Semaphore,
 render_complete_semaphores: []vk.Semaphore,
 render_complete_fence: vk.Fence,
 
+compute_workgroup_size: ComputePipeline.WorkgroupSize,
 compute_pipeline: ComputePipeline,
 // TODO: rename pipeline
 gfx_pipeline: GraphicsPipeline,
@@ -249,6 +250,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         }
     };
 
+    const compute_workgroup_size = ComputePipeline.calculateDefaultWorkgroupSize(ctx);
     var compute_pipeline = blk: {
         const uniform_sizes = [_]u64{
             // use storage min size for last uniform entry
@@ -279,11 +281,12 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
             ctx,
             target_image_info,
             state_configs,
+            compute_workgroup_size,
         );
     };
     errdefer compute_pipeline.deinit(ctx);
 
-    try compute_pipeline.recordCommandBuffer(ctx, camera.*, sun.*);
+    try compute_pipeline.recordCommandBuffer(ctx, compute_workgroup_size, camera.*, sun.*);
 
     var staging_buffers = try StagingRamp.init(ctx, allocator, config.staging_buffers);
     errdefer staging_buffers.deinit(ctx, allocator);
@@ -349,6 +352,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .present_complete_semaphores = present_complete_semaphores,
         .render_complete_semaphores = render_complete_semaphores,
         .render_complete_fence = render_complete_fence,
+        .compute_workgroup_size = compute_workgroup_size,
         .compute_pipeline = compute_pipeline,
         .gfx_pipeline = gfx_pipeline,
         .imgui_pipeline = imgui_pipeline,
@@ -407,7 +411,12 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) !void {
         self.present_complete_semaphore_index = @mod(self.present_complete_semaphore_index, self.present_complete_semaphores.len);
     }
 
-    const compute_semaphore = try self.compute_pipeline.dispatch(ctx, self.camera.*, self.sun.*);
+    const compute_semaphore = try self.compute_pipeline.dispatch(
+        ctx,
+        self.compute_workgroup_size,
+        self.camera.*,
+        self.sun.*,
+    );
 
     const image_index = blk: {
         const aquired = ctx.vkd.acquireNextImageKHR(

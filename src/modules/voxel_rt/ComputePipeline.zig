@@ -31,6 +31,11 @@ pub const ImageInfo = struct {
     image_view: vk.ImageView,
 };
 
+pub const WorkgroupSize = struct {
+    x: u32,
+    y: u32,
+};
+
 allocator: Allocator,
 
 pipeline_layout: vk.PipelineLayout,
@@ -53,32 +58,22 @@ uniform_offsets: []vk.DeviceSize,
 storage_offsets: []vk.DeviceSize,
 buffers: GpuBufferMemory,
 
-work_group_dim: extern struct {
-    x: u32,
-    y: u32,
-},
-
 // TODO: descriptor has a lot of duplicate code with init ...
 // TODO: refactor descriptor stuff to be configurable (loop array of config objects for buffer stuff)
 // TODO: correctness if init fail, clean up resources created with errdefer
 
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
-pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, state_config: StateConfigs) !ComputePipeline {
+pub fn init(
+    allocator: Allocator,
+    ctx: Context,
+    target_image_info: ImageInfo,
+    state_config: StateConfigs,
+    specialization_constants: anytype,
+) !ComputePipeline {
     var self: ComputePipeline = undefined;
     self.allocator = allocator;
     self.target_image_info = target_image_info;
-
-    self.work_group_dim = blk: {
-        const device_properties = ctx.getPhysicalDeviceProperties();
-        const dim_size = device_properties.limits.max_compute_work_group_invocations;
-        const sqrt_dim_size = @sqrt(@as(f64, @floatFromInt(dim_size)));
-        const uniform_dim: u32 = @intFromFloat(@floor(sqrt_dim_size));
-        break :blk .{
-            .x = uniform_dim,
-            .y = uniform_dim / 2,
-        };
-    };
 
     // TODO: grab a dedicated compute queue if available https://github.com/Avokadoen/zig_vulkan/issues/163
     self.queue = ctx.vkd.getDeviceQueue(ctx.logical_device, ctx.queue_indices.compute, 0);
@@ -277,21 +272,29 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
     };
 
     self.pipeline = blk: {
-        const SpecType = @TypeOf(self.work_group_dim);
-        const spec_map = [_]vk.SpecializationMapEntry{ .{
-            .constant_id = 0,
-            .offset = @offsetOf(SpecType, "x"),
-            .size = @sizeOf(u32),
-        }, .{
-            .constant_id = 1,
-            .offset = @offsetOf(SpecType, "y"),
-            .size = @sizeOf(u32),
-        } };
+        const SpecializationConsts = @TypeOf(specialization_constants);
+        if (@typeInfo(SpecializationConsts) != .@"struct") {
+            @compileError("specialization_constants must be a struct of specializations constants");
+        }
+
+        const fields = std.meta.fields(SpecializationConsts);
+        const spec_map = comptime generate_spec_map_blk: {
+            var map: [fields.len]vk.SpecializationMapEntry = undefined;
+            for (&map, fields, 0..) |*entry, field, id| {
+                entry.* = .{
+                    .constant_id = id,
+                    .offset = @offsetOf(SpecializationConsts, field.name),
+                    .size = @sizeOf(field.type),
+                };
+            }
+            break :generate_spec_map_blk map;
+        };
+
         const specialization = vk.SpecializationInfo{
             .map_entry_count = spec_map.len,
             .p_map_entries = &spec_map,
-            .data_size = @sizeOf(SpecType),
-            .p_data = @ptrCast(&self.work_group_dim),
+            .data_size = @sizeOf(SpecializationConsts),
+            .p_data = @ptrCast(&specialization_constants),
         };
 
         const brick_raytracer_comp_spv align(@alignOf(u32)) = @embedFile("brick_raytracer_comp_spv").*;
@@ -371,7 +374,6 @@ pub fn init(allocator: Allocator, ctx: Context, target_image_info: ImageInfo, st
         .uniform_offsets = self.uniform_offsets,
         .storage_offsets = self.storage_offsets,
         .buffers = self.buffers,
-        .work_group_dim = self.work_group_dim,
     };
 }
 
@@ -407,7 +409,7 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
     ctx.vkd.destroyPipeline(ctx.logical_device, self.pipeline, null);
 }
 
-pub inline fn dispatch(self: *ComputePipeline, ctx: Context, camera: Camera, sun: Sun) !vk.Semaphore {
+pub inline fn dispatch(self: *ComputePipeline, ctx: Context, workgroup_size: WorkgroupSize, camera: Camera, sun: Sun) !vk.Semaphore {
     {
         const wait_compute_zone = tracy.ZoneN(@src(), "idle wait compute");
         defer wait_compute_zone.End();
@@ -428,7 +430,7 @@ pub inline fn dispatch(self: *ComputePipeline, ctx: Context, camera: Camera, sun
     }
 
     try ctx.vkd.resetCommandPool(ctx.logical_device, self.command_pool, .{});
-    try self.recordCommandBuffer(ctx, camera, sun);
+    try self.recordCommandBuffer(ctx, workgroup_size, camera, sun);
 
     {
         @setRuntimeSafety(false);
@@ -455,7 +457,7 @@ pub inline fn dispatch(self: *ComputePipeline, ctx: Context, camera: Camera, sun
     return self.complete_semaphore;
 }
 
-pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, camera: Camera, sun: Sun) !void {
+pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, workgroup_size: WorkgroupSize, camera: Camera, sun: Sun) !void {
     const draw_zone = tracy.ZoneN(@src(), "compute record");
     defer draw_zone.End();
 
@@ -528,9 +530,20 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, camera: Camera, 
         0,
         undefined,
     );
-    const x_dispatch = @ceil(self.target_image_info.width / @as(f32, @floatFromInt(self.work_group_dim.x)));
-    const y_dispatch = @ceil(self.target_image_info.height / @as(f32, @floatFromInt(self.work_group_dim.y)));
+    const x_dispatch = @ceil(self.target_image_info.width / @as(f32, @floatFromInt(workgroup_size.x)));
+    const y_dispatch = @ceil(self.target_image_info.height / @as(f32, @floatFromInt(workgroup_size.y)));
 
     ctx.vkd.cmdDispatch(self.command_buffer, @intFromFloat(x_dispatch), @intFromFloat(y_dispatch), 1);
     try ctx.vkd.endCommandBuffer(self.command_buffer);
+}
+
+pub fn calculateDefaultWorkgroupSize(ctx: Context) WorkgroupSize {
+    const device_properties = ctx.getPhysicalDeviceProperties();
+    const dim_size = device_properties.limits.max_compute_work_group_invocations;
+    const sqrt_dim_size = @sqrt(@as(f64, @floatFromInt(dim_size)));
+    const uniform_dim: u32 = @intFromFloat(@floor(sqrt_dim_size));
+    return WorkgroupSize{
+        .x = uniform_dim,
+        .y = uniform_dim,
+    };
 }
