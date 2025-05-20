@@ -4,17 +4,10 @@ const Allocator = std.mem.Allocator;
 
 const State = @import("State.zig");
 
-const IndexMapContext = struct {
-    pub fn hash(self: IndexMapContext, key: usize) u64 {
-        _ = self;
-        return @intCast(key);
-    }
-    pub fn eql(self: IndexMapContext, a: usize, b: usize) bool {
-        _ = self;
-        return a == b;
-    }
-};
-const IndexMap = std.HashMap(usize, Index, IndexMapContext, 80);
+const IndexMap = std.AutoArrayHashMapUnmanaged(
+    usize,
+    Index,
+);
 
 /// used by the brick grid to pack brick material data closer to eachother
 pub const Bucket = struct {
@@ -116,9 +109,9 @@ pub fn init(allocator: Allocator, start_index: u32, material_indices_len: usize,
         }
     }
 
-    var index = IndexMap.init(allocator);
-    errdefer index.deinit();
-    try index.ensureUnusedCapacity(@intCast(brick_count));
+    var index = IndexMap.empty;
+    errdefer index.deinit(allocator);
+    try index.ensureUnusedCapacity(allocator, @intCast(brick_count));
 
     return BucketStorage{
         .allocator = allocator,
@@ -152,10 +145,14 @@ pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_count: usi
                 // do bucket stuff to rel
                 const oc_index = try self.buckets[i].appendOccupied(bucket);
 
-                try self.index.put(brick_index, Index{
-                    .bucket_index = @intCast(i),
-                    .element_index = @intCast(oc_index),
-                });
+                try self.index.put(
+                    self.allocator,
+                    brick_index,
+                    Index{
+                        .bucket_index = @intCast(i),
+                        .element_index = @intCast(oc_index),
+                    },
+                );
 
                 // copy material indices to new bucket
                 @memcpy(
@@ -171,10 +168,14 @@ pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_count: usi
             if (bucket.free.pop()) |take| {
                 const oc_index = try bucket.appendOccupied(take);
 
-                try self.index.put(brick_index, Index{
-                    .bucket_index = @intCast(i),
-                    .element_index = @intCast(oc_index),
-                });
+                try self.index.put(
+                    self.allocator,
+                    brick_index,
+                    Index{
+                        .bucket_index = @intCast(i),
+                        .element_index = @intCast(oc_index),
+                    },
+                );
 
                 return take;
             }
@@ -184,7 +185,7 @@ pub fn getBrickBucket(self: *BucketStorage, brick_index: usize, voxel_count: usi
 }
 
 pub inline fn deinit(self: *BucketStorage) void {
-    self.index.deinit();
+    self.index.deinit(self.allocator);
     for (self.buckets) |bucket| {
         bucket.free.deinit();
         bucket.occupied.deinit();
