@@ -52,9 +52,9 @@ pub fn generateCpu(comptime threads_count: usize, allocator: Allocator, seed: u6
     defer allocator.destroy(perlin);
 
     const voxel_dim = [3]f32{
-        @floatFromInt(grid.state.device_state.dim_x * 8),
-        @floatFromInt(grid.state.device_state.dim_y * 8),
-        @floatFromInt(grid.state.device_state.dim_z * 8),
+        @floatFromInt(grid.state.device_state.voxel_dim_x),
+        @floatFromInt(grid.state.device_state.voxel_dim_y),
+        @floatFromInt(grid.state.device_state.voxel_dim_z),
     };
     const point_mod = [3]f32{
         (1 / voxel_dim[0]) * scale,

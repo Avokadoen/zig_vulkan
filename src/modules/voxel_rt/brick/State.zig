@@ -4,6 +4,13 @@ const Mutex = std.Thread.Mutex;
 const BucketStorage = @import("./BucketStorage.zig");
 
 pub const AtomicCount = std.atomic.Value(u32);
+pub const brick_dimension: u32 = 4;
+pub const brick_bits: u32 = brick_dimension * brick_dimension * brick_dimension;
+pub const brick_bytes: u32 = brick_bits / 8;
+pub const brick_words: u32 = brick_bytes / 4;
+pub const brick_log2: u32 = std.math.log2_int(u32, brick_bits);
+pub const BrickMap = std.meta.Int(.unsigned, State.brick_bits);
+pub const BrickMapLog2 = std.meta.Int(.unsigned, State.brick_log2);
 
 /// type used to record changes in host/device buffers in order to only send changed data to the gpu
 pub const DeviceDataDelta = struct {
@@ -117,7 +124,7 @@ pub const Brick = extern struct {
     };
 
     /// maps to a voxel grid of 8x8x8
-    solid_mask: [64]u8,
+    solid_mask: [brick_bytes]u8,
     index: packed struct {
         value: u31,
         index_type: IndexType,

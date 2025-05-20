@@ -276,12 +276,28 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
             .sampler = sampler,
             .image_view = compute_image_view,
         };
+        const ComputeSpecialization = extern struct {
+            workgroup_size_x: c_uint,
+            workgroup_size_y: c_uint,
+            brick_bits: c_uint,
+            brick_words: c_uint,
+            brick_dimensions: c_int,
+            brick_voxel_scale: f32,
+        };
+        std.debug.assert(GridState.brick_words == 2); // TODO: issue #176: currently this must be manually adjusted if brick_dimensions is changed
         break :blk try ComputePipeline.init(
             allocator,
             ctx,
             target_image_info,
             state_configs,
-            compute_workgroup_size,
+            ComputeSpecialization{
+                .workgroup_size_x = @intCast(compute_workgroup_size.x),
+                .workgroup_size_y = @intCast(compute_workgroup_size.y),
+                .brick_bits = @intCast(GridState.brick_bits),
+                .brick_words = @intCast(GridState.brick_words),
+                .brick_dimensions = @intCast(GridState.brick_dimension),
+                .brick_voxel_scale = 1.0 / @as(f32, @floatFromInt(GridState.brick_dimension)),
+            },
         );
     };
     errdefer compute_pipeline.deinit(ctx);

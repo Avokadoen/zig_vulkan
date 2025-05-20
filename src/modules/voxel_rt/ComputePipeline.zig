@@ -273,8 +273,13 @@ pub fn init(
 
     self.pipeline = blk: {
         const SpecializationConsts = @TypeOf(specialization_constants);
-        if (@typeInfo(SpecializationConsts) != .@"struct") {
-            @compileError("specialization_constants must be a struct of specializations constants");
+        switch (@typeInfo(SpecializationConsts)) {
+            .@"struct" => |struct_info| {
+                if (struct_info.layout != .@"extern") {
+                    @compileError("specialization_constants must be a extern struct");
+                }
+            },
+            else => @compileError("specialization_constants must be a struct of specializations constants"),
         }
 
         const fields = std.meta.fields(SpecializationConsts);

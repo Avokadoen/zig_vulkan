@@ -42,6 +42,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 
     const brick_count = dim_x * dim_y * dim_z;
 
+    // TODO: configure higher order brick count
     const higher_dim_x = @as(f64, @floatFromInt(dim_x)) * 0.25;
     const higher_dim_y = @as(f64, @floatFromInt(dim_y)) * 0.25;
     const higher_dim_z = @as(f64, @floatFromInt(dim_z)) * 0.25;
@@ -62,14 +63,14 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     const bricks = try allocator.alloc(State.Brick, brick_alloc);
     errdefer allocator.free(bricks);
     @memset(bricks, .{
-        .solid_mask = [_]u8{0} ** 64,
+        .solid_mask = [_]u8{0} ** State.brick_bytes,
         .index = .{
             .value = 0,
             .index_type = .voxel_start_index,
         },
     });
 
-    const material_indices = try allocator.alloc(u8, bricks.len * @min(512, config.material_indices_per_brick));
+    const material_indices = try allocator.alloc(u8, bricks.len * @min(State.brick_bits, config.material_indices_per_brick));
     errdefer allocator.free(material_indices);
     @memset(material_indices, 0);
 
@@ -128,9 +129,9 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         .active_bricks = AtomicCount.init(0),
         .work_segment_size = work_segment_size,
         .device_state = State.Device{
-            .voxel_dim_x = dim_x * 8,
-            .voxel_dim_y = dim_y * 8,
-            .voxel_dim_z = dim_z * 8,
+            .voxel_dim_x = dim_x * State.brick_dimension,
+            .voxel_dim_y = dim_y * State.brick_dimension,
+            .voxel_dim_z = dim_z * State.brick_dimension,
             .dim_x = dim_x,
             .dim_y = dim_y,
             .dim_z = dim_z,

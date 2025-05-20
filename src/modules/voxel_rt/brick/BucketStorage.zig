@@ -2,6 +2,8 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 
+const State = @import("State.zig");
+
 const IndexMapContext = struct {
     pub fn hash(self: IndexMapContext, key: usize) u64 {
         _ = self;
@@ -45,8 +47,8 @@ pub const BucketRequestError = error{
 const BucketStorage = @This();
 
 const bucket_count = 4;
-// max bucket is always the size of brick which is 2^9 = 512
-const min_2_pow_size = 9 - (bucket_count - 1);
+// max bucket is always the size of brick
+const min_2_pow_size = State.brick_log2 - (bucket_count - 1);
 
 pub const Index = packed struct {
     bucket_index: u6,
@@ -61,8 +63,9 @@ buckets: [bucket_count]Bucket,
 /// init a bucket storage.
 /// caller must make sure to call deinit
 pub fn init(allocator: Allocator, start_index: u32, material_indices_len: usize, brick_count: usize) !BucketStorage {
-    std.debug.assert(material_indices_len > 2048);
-    const segments_2048 = std.math.divFloor(usize, material_indices_len, 2048) catch unreachable;
+    const four_bucket_segment_size = State.brick_bits * 4;
+    std.debug.assert(material_indices_len > four_bucket_segment_size);
+    const segments = std.math.divFloor(usize, material_indices_len, four_bucket_segment_size) catch unreachable;
 
     var buckets: [bucket_count]Bucket = undefined;
 
@@ -70,15 +73,15 @@ pub fn init(allocator: Allocator, start_index: u32, material_indices_len: usize,
     { // init first bucket
         const inital_index = cursor;
         buckets[0] = Bucket{
-            .free = try ArrayList(Bucket.Entry).initCapacity(allocator, 2 * segments_2048),
-            .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048),
+            .free = try ArrayList(Bucket.Entry).initCapacity(allocator, 2 * segments),
+            .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments),
         };
         const bucket_size = try std.math.powi(u32, 2, min_2_pow_size);
         var j: usize = 0;
-        while (j < segments_2048) : (j += 1) {
+        while (j < segments) : (j += 1) {
             buckets[0].free.appendAssumeCapacity(.{ .start_index = cursor });
             buckets[0].free.appendAssumeCapacity(.{ .start_index = cursor + bucket_size });
-            cursor += 2048;
+            cursor += four_bucket_segment_size;
         }
         cursor = inital_index + bucket_size * 2;
     }
@@ -87,29 +90,29 @@ pub fn init(allocator: Allocator, start_index: u32, material_indices_len: usize,
         inline while (i < buckets.len - 1) : (i += 1) {
             const inital_index = cursor;
             buckets[i] = Bucket{
-                .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments_2048),
-                .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048 / 2),
+                .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments),
+                .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments / 2),
             };
             const bucket_size = try std.math.powi(u32, 2, min_2_pow_size + i);
             var j: usize = 0;
-            while (j < segments_2048) : (j += 1) {
+            while (j < segments) : (j += 1) {
                 buckets[i].free.appendAssumeCapacity(.{ .start_index = cursor });
-                cursor += 2048;
+                cursor += four_bucket_segment_size;
             }
             cursor = inital_index + bucket_size;
         }
 
         buckets[buckets.len - 1] = Bucket{
-            .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments_2048 * 3),
-            .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments_2048),
+            .free = try ArrayList(Bucket.Entry).initCapacity(allocator, segments * 3),
+            .occupied = try ArrayList(?Bucket.Entry).initCapacity(allocator, segments),
         };
-        const bucket_size = 512;
+        const bucket_size = State.brick_bits;
         var j: usize = 0;
-        while (j < segments_2048) : (j += 1) {
+        while (j < segments) : (j += 1) {
             buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = cursor });
             buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = cursor + bucket_size });
             buckets[buckets.len - 1].free.appendAssumeCapacity(.{ .start_index = cursor + bucket_size * 2 });
-            cursor += 2048;
+            cursor += four_bucket_segment_size;
         }
     }
 

@@ -139,6 +139,10 @@ pub fn work(self: *Worker) void {
 
 // perform a insert in the grid
 fn performInsert(self: *Worker, insert_job: Insert) void {
+    std.debug.assert(insert_job.x < self.grid.device_state.voxel_dim_x);
+    std.debug.assert(insert_job.y < self.grid.device_state.voxel_dim_y);
+    std.debug.assert(insert_job.z < self.grid.device_state.voxel_dim_z);
+
     const actual_y = self.grid.device_state.voxel_dim_y - 1 - insert_job.y;
 
     const grid_index = gridAt(self.grid.*.device_state, insert_job.x, actual_y, insert_job.z);
@@ -169,10 +173,10 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
     // set the color information for the given voxel
     {
         // shift material position voxels that are after this voxel
-        const voxels_in_brick = countBits(@bitCast(brick.solid_mask), 512);
+        const voxels_in_brick = countBits(@bitCast(brick.solid_mask), State.brick_bits);
         // TODO: error
         const bucket = self.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.grid.*.material_indices) catch {
-            std.debug.panic("at {d} {d} {d} no more buckets", .{ insert_job.x, insert_job.y, insert_job.z });
+            std.debug.panic("at {d} {d} {d} no more buckets", .{ insert_job.x, actual_y, insert_job.z });
         };
         // set the brick's material index
         brick.index.value = @intCast(bucket.start_index);
@@ -180,7 +184,7 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
         // move all color data
         const bits_before = countBits(brick.solid_mask, nth_bit);
         const new_voxel_material_index = bucket.start_index + bits_before;
-        const voxel_was_set: bool = (@as(u512, @bitCast(brick.solid_mask)) & @as(u512, 1) << nth_bit) != 0;
+        const voxel_was_set: bool = (@as(State.BrickMap, @bitCast(brick.solid_mask)) & @as(State.BrickMap, 1) << nth_bit) != 0;
         if (voxel_was_set == false) {
             var i: u32 = voxels_in_brick;
             while (i > bits_before) {
@@ -222,33 +226,35 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
 
 // TODO: test
 /// get brick index from global index coordinates
-inline fn voxelAt(x: usize, y: usize, z: usize) u9 {
-    const brick_x: usize = @rem(x, 8);
-    const brick_y: usize = @rem(y, 8);
-    const brick_z: usize = @rem(z, 8);
-    return @intCast(brick_x + 8 * (brick_z + 8 * brick_y));
+fn voxelAt(x: usize, y: usize, z: usize) State.BrickMapLog2 {
+    const brick_x: usize = @rem(x, State.brick_dimension);
+    const brick_y: usize = @rem(y, State.brick_dimension);
+    const brick_z: usize = @rem(z, State.brick_dimension);
+    return @intCast(brick_x + State.brick_dimension * (brick_z + State.brick_dimension * brick_y));
 }
 
 /// get grid index from global index coordinates
-inline fn gridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize {
-    const grid_x: u32 = @intCast(x / 8);
-    const grid_y: u32 = @intCast(y / 8);
-    const grid_z: u32 = @intCast(z / 8);
+fn gridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize {
+    const grid_x: u32 = @intCast(x / State.brick_dimension);
+    const grid_y: u32 = @intCast(y / State.brick_dimension);
+    const grid_z: u32 = @intCast(z / State.brick_dimension);
     return @intCast(grid_x + device_state.dim_x * (grid_z + device_state.dim_z * grid_y));
 }
 
 /// get higher grid index from global index coordinates
-inline fn higherGridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize {
-    const higher_grid_x: u32 = @intCast(x / (8 * 4));
-    const higher_grid_y: u32 = @intCast(y / (8 * 4));
-    const higher_grid_z: u32 = @intCast(z / (8 * 4));
+fn higherGridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize {
+    // TODO: allow configuration of higher order grid
+    const higher_order_size = State.brick_dimension * 4; // 4 bricks per higher order
+    const higher_grid_x: u32 = @intCast(x / higher_order_size);
+    const higher_grid_y: u32 = @intCast(y / higher_order_size);
+    const higher_grid_z: u32 = @intCast(z / higher_order_size);
     return @intCast(higher_grid_x + device_state.higher_dim_x * (higher_grid_z + device_state.higher_dim_z * higher_grid_y));
 }
 
-/// count the set bits of a u512, up to range_to (exclusive)
-inline fn countBits(bits: [64]u8, range_to: u32) u32 {
-    var bit: u512 = @bitCast(bits);
-    var count: u512 = 0;
+/// count the set bits up to range_to (exclusive)
+fn countBits(bits: [State.brick_bytes]u8, range_to: u32) u32 {
+    var bit: State.BrickMap = @bitCast(bits);
+    var count: State.BrickMap = 0;
     var i: u32 = 0;
     while (i < range_to and bit != 0) : (i += 1) {
         count += bit & 1;

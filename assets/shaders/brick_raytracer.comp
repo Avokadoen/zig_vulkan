@@ -53,6 +53,11 @@ struct HitRecord {
     uint index; 
 };
 
+layout (constant_id = 2) const uint brick_bits = 0U;
+layout (constant_id = 3) const uint brick_words = 2U;
+layout (constant_id = 4) const int brick_dimensions = 0;
+layout (constant_id = 5) const float brick_voxel_scale = 0.;
+
 layout (push_constant) uniform PushConstants {
     // Camera
     uint image_width;
@@ -153,8 +158,7 @@ layout (binding = 8) buffer GridBufferIndex {
 const uint VOXEL_START_INDEX = 0x0;
 const uint BRICK_LOD_INDEX = 0x1;
 struct Brick {
-    // 512 bit voxel set mask
-    uint solid_mask[16];
+    uint solid_mask[brick_words];
     // left-most bit is the index type (VOXEL_START_INDEX, or BRICK_LOD_INDEX) 
     uint type_and_index;
 };
@@ -426,7 +430,7 @@ bool BrickHit(
     inout vec3 brick_position,
     inout HitRecord hit
 ) {
-    vec3 voxel_scale = g_scale * vec3(0.125);
+    const vec3 voxel_scale = g_scale * vec3(brick_voxel_scale);
 
     /// get position in brick space from global position
     const vec3 fposition = (RayAt(r, hit.t) - brick_position) / voxel_scale;
@@ -445,10 +449,10 @@ bool BrickHit(
     float t_value = 0;
     while (
         all(greaterThanEqual(local_position, ivec3(0)))
-        && all(lessThan(local_position, ivec3(8)))
+        && all(lessThan(local_position, ivec3(brick_dimensions)))
         && t_value <= local_t_max
     ) {
-        const int voxel_index = local_position.x + 8 * (local_position.z + 8 * local_position.y);
+        const int voxel_index = local_position.x + brick_dimensions * (local_position.z + brick_dimensions * local_position.y);
         const int mask_index = voxel_index / 32;
         const int mask_offset = voxel_index % 32;
         const uint bitfield_final_entry = bitfieldExtract(brick.solid_mask[mask_index], 0, mask_offset + 1);
