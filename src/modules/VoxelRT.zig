@@ -104,8 +104,8 @@ pub fn pushAlbedo(self: *VoxelRT, ctx: Context, albedos: []const gpu_types.Albed
     try self.pipeline.transferAlbedos(ctx, 0, albedos);
 }
 
-/// Push all terrain data to GPU
-pub fn debugUpdateTerrain(self: *VoxelRT, ctx: Context) !void {
+/// flush all grid data to GPU
+pub fn debugFlushGrid(self: *VoxelRT, ctx: Context) void {
     if (@import("builtin").mode != .Debug) {
         @compileError("calling " ++ @src().fn_name ++ " in " ++ @tagName(@import("builtin").mode));
     }

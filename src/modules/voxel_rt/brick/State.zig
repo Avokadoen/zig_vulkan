@@ -1,8 +1,6 @@
 const std = @import("std");
 const Mutex = std.Thread.Mutex;
 
-const BucketStorage = @import("./BucketStorage.zig");
-
 pub const AtomicCount = std.atomic.Value(u32);
 pub const brick_dimension: u32 = 4;
 pub const brick_bits: u32 = brick_dimension * brick_dimension * brick_dimension;
@@ -118,18 +116,32 @@ pub const BrickStatusMask = extern struct {
 pub const BrickIndex = c_uint;
 
 pub const Brick = extern struct {
-    const IndexType = enum(u1) {
+    pub const IndexType = enum(u1) {
         voxel_start_index,
         brick_lod_index,
     };
 
+    pub const Index = packed struct(u32) {
+        value: u31,
+        type: IndexType,
+    };
+
+    const unset_bits: u32 = std.math.maxInt(u32);
+    pub const unset_index: Index = @bitCast(unset_bits);
+
+    pub const empty = Brick{
+        .solid_mask = [_]u8{0} ** brick_bytes,
+        .index = unset_index,
+    };
+
     /// maps to a voxel grid of 8x8x8
     solid_mask: [brick_bytes]u8,
-    index: packed struct {
-        value: u31,
-        index_type: IndexType,
-    },
+    index: Index,
 };
+
+// 4 indices per word (u8)
+pub const PackedMaterialIndices = u32;
+pub const PackedMaterialIndicesLog2 = std.math.Log2Int(u32);
 
 const State = @This();
 
@@ -151,7 +163,7 @@ bricks: []Brick,
 
 material_indices_deltas: []DeviceDataDelta,
 // assigned through a bucket
-material_indices: []u8,
+material_indices: []PackedMaterialIndices,
 
 /// how many bricks are used in the grid, keep in mind that this is used in a multithread context
 active_bricks: AtomicCount,

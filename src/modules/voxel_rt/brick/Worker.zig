@@ -6,7 +6,7 @@ const Condition = std.Thread.Condition;
 const tracy = @import("ztracy");
 
 const State = @import("State.zig");
-const BucketStorage = @import("BucketStorage.zig");
+const MaterialAllocator = @import("MaterialAllocator.zig");
 
 /// Parallel workers that does insert and remove work on the grid
 /// each worker get one kernel thread
@@ -36,7 +36,7 @@ id: usize,
 grid: *State,
 
 // used to assign material index to a given brick
-bucket_storage: BucketStorage,
+material_allocator: *MaterialAllocator,
 
 wake_mutex: Mutex,
 wake_event: Condition,
@@ -47,32 +47,23 @@ job_queue: *JobQueue,
 sleep: Signal,
 shutdown: Signal,
 
-pub fn init(id: usize, worker_count: usize, grid: *State, allocator: Allocator, initial_queue_capacity: usize) !Worker {
-    std.debug.assert(worker_count != 0);
-
+pub fn init(
+    allocator: Allocator,
+    id: usize,
+    grid: *State,
+    material_allocator: *MaterialAllocator,
+    initial_queue_capacity: usize,
+) !Worker {
     var job_queue = try allocator.create(JobQueue);
     job_queue.* = JobQueue.init(allocator);
     errdefer job_queue.deinit();
     try job_queue.ensureTotalCapacity(initial_queue_capacity);
 
-    // calculate bricks in this worker's bucket
-    const bucket_storage = blk: {
-        var brick_count = std.math.divFloor(usize, grid.bricks.len, worker_count) catch unreachable; // assert(worker_count != 0)
-        var material_count = std.math.divFloor(usize, grid.material_indices.len, worker_count) catch unreachable;
-        const start_index: u32 = @intCast(material_count * id);
-        if (id == worker_count - 1) {
-            brick_count += std.math.rem(usize, grid.bricks.len, worker_count) catch unreachable;
-            material_count += std.math.rem(usize, grid.material_indices.len, worker_count) catch unreachable;
-        }
-        break :blk try BucketStorage.init(allocator, start_index, material_count, brick_count);
-    };
-    errdefer bucket_storage.deinit();
-
     return Worker{
         .allocator = allocator,
         .id = id,
         .grid = grid,
-        .bucket_storage = bucket_storage,
+        .material_allocator = material_allocator,
         .wake_mutex = .{},
         .wake_event = .{},
         .job_mutex = .{},
@@ -134,7 +125,7 @@ pub fn work(self: *Worker) void {
 
     self.job_queue.deinit();
     self.allocator.destroy(self.job_queue);
-    self.bucket_storage.deinit();
+    self.material_allocator.deinit(self.allocator);
 }
 
 // perform a insert in the grid
@@ -172,38 +163,25 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
 
     // set the color information for the given voxel
     {
-        // shift material position voxels that are after this voxel
-        const voxels_in_brick = countBits(@bitCast(brick.solid_mask), State.brick_bits);
-        // TODO: error
-        const bucket = self.bucket_storage.getBrickBucket(brick_index, voxels_in_brick, self.grid.*.material_indices) catch {
-            std.debug.panic("at {d} {d} {d} no more buckets", .{ insert_job.x, actual_y, insert_job.z });
-        };
-        // set the brick's material index
-        brick.index.value = @intCast(bucket.start_index);
-
-        // move all color data
-        const bits_before = countBits(brick.solid_mask, nth_bit);
-        const new_voxel_material_index = bucket.start_index + bits_before;
-        const voxel_was_set: bool = (@as(State.BrickMap, @bitCast(brick.solid_mask)) & @as(State.BrickMap, 1) << nth_bit) != 0;
-        if (voxel_was_set == false) {
-            var i: u32 = voxels_in_brick;
-            while (i > bits_before) {
-                const base_index = bucket.start_index + i;
-                self.grid.*.material_indices[base_index] = self.grid.material_indices[base_index - 1];
-                i -= 1;
-            }
+        // set the brick's material index if unset
+        if (brick.index == State.Brick.unset_index) {
+            // We store 4 material indices per word (1 byte per material)
+            const material_entry = self.material_allocator.nextEntry();
+            brick.index.value = @intCast(material_entry);
+            brick.index.type = .voxel_start_index;
         }
-        self.grid.*.material_indices[new_voxel_material_index] = insert_job.material_index;
 
-        // always register that the current voxel material has changed
-        const delta_from = new_voxel_material_index;
-        // we need to sync all of the voxel material data between current and last brick voxel since it has been shifted
-        const delta_to = if (voxel_was_set) new_voxel_material_index else new_voxel_material_index + (voxels_in_brick - bits_before);
-        self.grid.material_indices_deltas[self.id].registerDeltaRange(delta_from, delta_to);
+        std.debug.assert(brick.index.type == .voxel_start_index);
+        std.debug.assert(brick.index.value == std.mem.alignForward(u31, brick.index.value, 16));
+
+        const new_voxel_material_index = brick.index.value * 4 + nth_bit;
+        const material_indices_unpacked = std.mem.sliceAsBytes(self.grid.*.material_indices);
+        material_indices_unpacked[new_voxel_material_index] = insert_job.material_index;
 
         // material indices are packed in 32bit on GPU and 8bit on CPU
-        // we divide by four to store the correct *GPU* index
-        brick.index.value /= 4;
+        // we divide by four to store the correct *GPU* index.
+        // Example: index 8 point to *byte* 8 on host, 8 points to *word* 8 on gpu.
+        self.grid.material_indices_deltas[0].registerDelta(new_voxel_material_index / 4);
     }
 
     // set voxel

@@ -463,25 +463,15 @@ bool BrickHit(
         if (hit_voxel) {
             bool ignore_brick = false;
             { // calculate material data
-                int bits_before = 0;
-                // find and assign material index
-                for (int i = 0; i < mask_index; i++) {
-                    bits_before += bitCount(brick.solid_mask[i]);
-                }
-
-                // remove bit that is current voxel (& ~(1 << mask_offset))
-                // shift any rogue bits to the left in order to remove them
-                // shift all bits to the right to reset
-                bits_before += bitCount(bitfield_final_entry) - 1;
-
-                const int material_index_index = (bits_before * 8) / 32;
-                const int material_index_bit_offset = (bits_before * 8) % 32;
+                const int material_index_index = voxel_index / 4;
+                const int material_index_bit_offset = (voxel_index % 4) * 8;
                 
                 // get the material index from brick 
                 const uint brick_material_index = bitfieldExtract(brick.type_and_index, 0, 31);
+                const uint material_word = material_indices[brick_material_index + material_index_index];
 
                 // perform material lookup
-                hit.index = bitfieldExtract(material_indices[material_index_index + brick_material_index], material_index_bit_offset, 8);
+                hit.index = bitfieldExtract(material_word, material_index_bit_offset, 8);
                 const int material_bits = materials[hit.index];
                 ignore_brick = (material_bits & 3) == r.material_ignore;
             }

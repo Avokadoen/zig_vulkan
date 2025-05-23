@@ -9,6 +9,7 @@ const ArrayList = std.ArrayList;
 const State = @import("State.zig");
 const AtomicCount = State.AtomicCount;
 const Worker = @import("Worker.zig");
+const MaterialAllocator = @import("MaterialAllocator.zig");
 
 pub const Config = struct {
     // Default value is all bricks
@@ -16,7 +17,6 @@ pub const Config = struct {
     base_t: f32 = 0.01,
     min_point: [3]f32 = [_]f32{ 0.0, 0.0, 0.0 },
     scale: f32 = 1.0,
-    material_indices_per_brick: usize = 256,
     workers_count: usize = 4,
 };
 
@@ -25,6 +25,7 @@ const BrickGrid = @This();
 allocator: Allocator,
 // grid state that is shared with the workers
 state: *State,
+material_allocator: *MaterialAllocator,
 
 worker_threads: []std.Thread,
 workers: []Worker,
@@ -62,15 +63,10 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     const brick_alloc = config.brick_alloc orelse brick_count;
     const bricks = try allocator.alloc(State.Brick, brick_alloc);
     errdefer allocator.free(bricks);
-    @memset(bricks, .{
-        .solid_mask = [_]u8{0} ** State.brick_bytes,
-        .index = .{
-            .value = 0,
-            .index_type = .voxel_start_index,
-        },
-    });
+    @memset(bricks, .empty);
 
-    const material_indices = try allocator.alloc(u8, bricks.len * @min(State.brick_bits, config.material_indices_per_brick));
+    const packed_material_index_count = (bricks.len * State.brick_bits) / @sizeOf(State.PackedMaterialIndices);
+    const material_indices = try allocator.alloc(State.PackedMaterialIndices, packed_material_index_count);
     errdefer allocator.free(material_indices);
     @memset(material_indices, 0);
 
@@ -88,9 +84,6 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         min_point_base_t[2] + @as(f32, @floatFromInt(dim_z)) * config.scale,
         config.scale,
     };
-
-    const state = try allocator.create(State);
-    errdefer allocator.destroy(state);
 
     // initialize all delta structures
     // these are used to track changes that should be pushed to GPU
@@ -114,6 +107,8 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 
     const work_segment_size = try std.math.divCeil(u32, dim_x, @intCast(config.workers_count));
 
+    const state = try allocator.create(State);
+    errdefer allocator.destroy(state);
     state.* = .{
         .higher_order_grid_delta = higher_order_grid_delta,
         .material_indices_deltas = material_indices_deltas,
@@ -143,19 +138,24 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         },
     };
 
-    var workers = try allocator.alloc(Worker, config.workers_count);
+    const material_allocator = try allocator.create(MaterialAllocator);
+    errdefer allocator.destroy(material_allocator);
+    material_allocator.* = .init(material_indices.len);
+
+    const workers = try allocator.alloc(Worker, config.workers_count);
     errdefer allocator.free(workers);
 
     const worker_threads = try allocator.alloc(std.Thread, config.workers_count);
     errdefer allocator.free(worker_threads);
-    for (worker_threads, 0..) |*thread, i| {
-        workers[i] = try Worker.init(i, config.workers_count, state, allocator, 4096);
-        thread.* = try std.Thread.spawn(.{}, Worker.work, .{&workers[i]});
+    for (workers, worker_threads, 0..) |*worker, *thread, id| {
+        worker.* = try Worker.init(allocator, id, state, material_allocator, 4096);
+        thread.* = try std.Thread.spawn(.{}, Worker.work, .{worker});
     }
 
     return BrickGrid{
         .allocator = allocator,
         .state = state,
+        .material_allocator = material_allocator,
         .worker_threads = worker_threads,
         .workers = workers,
     };
@@ -189,6 +189,7 @@ pub fn deinit(self: BrickGrid) void {
     self.allocator.free(self.worker_threads);
     self.allocator.free(self.workers);
 
+    self.allocator.destroy(self.material_allocator);
     self.allocator.destroy(self.state);
 }
 

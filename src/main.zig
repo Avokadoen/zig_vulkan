@@ -77,7 +77,6 @@ pub fn main() anyerror!void {
     var grid = try BrickGrid.init(allocator, 128, 64, 128, .{
         .min_point = [3]f32{ -32, -16, -32 },
         .scale = 0.5,
-        .material_indices_per_brick = 32,
         .workers_count = 4,
     });
     defer grid.deinit();
@@ -129,7 +128,7 @@ pub fn main() anyerror!void {
     }
 
     // generate terrain on CPU
-    try terrain.generateCpu(8, allocator, 420, 4, 20, &grid);
+    try terrain.generateCpu(2, allocator, 420, 4, 20, &grid);
 
     var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, .{
         .internal_resolution_width = internal_render_resolution.x(),
