@@ -99,7 +99,7 @@ pub fn main() anyerror!void {
         materials[i] = material;
     }
 
-    for (model.rgba_chunk[terrain.color_data.len..], 0..) |rgba, i| {
+    for (model.rgba_chunk[0 .. model.rgba_chunk.len - terrain.color_data.len], 0..) |rgba, i| {
         const albedo_index = i + terrain.color_data.len;
         albedo_color[albedo_index] = .{
             .color = za.Vec4.new(
@@ -119,11 +119,12 @@ pub fn main() anyerror!void {
 
     // Test what we are loading
     for (model.xyzi_chunks[0]) |xyzi| {
+        const material_index: u8 = xyzi.color_index + @as(u8, @intCast(terrain.material_data.len));
         grid.insert(
             @as(usize, @intCast(xyzi.x)) + 200,
             @as(usize, @intCast(xyzi.z)) + 50,
             @as(usize, @intCast(xyzi.y)) + 150,
-            xyzi.color_index,
+            material_index,
         );
     }
 
