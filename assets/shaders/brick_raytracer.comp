@@ -293,6 +293,8 @@ vec3 RayColor(Ray r) {
             if (!GridHit(shadow_ray, 0.00001, infinity, hit_v_min, shadow_hit)) {
                 color += attenuation * push_constant.sun_color;
             }
+        } else {
+            color += attenuation;
         }
 
         // if the material scatter function report that the ray failed to scatter
