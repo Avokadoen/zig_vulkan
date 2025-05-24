@@ -127,42 +127,70 @@ pub fn generateCpu(comptime threads_count: usize, allocator: Allocator, seed: u6
     }
 }
 
-/// color information expect by terrain to exist from 0.. in the albedo buffer
-pub const color_data = [_]gpu_types.Albedo{
-    // water
-    .{ .color = za.Vec4.new(0.117, 0.45, 0.85, 1.0).data },
-    // grass 1
-    .{ .color = za.Vec4.new(0.0, 0.6, 0.0, 1.0).data },
-    // grass 2
-    .{ .color = za.Vec4.new(0.0, 0.5019, 0.0, 1.0).data },
-    // dirt 1
-    .{ .color = za.Vec4.new(0.3019, 0.149, 0, 1.0).data },
-    // dirt 2
-    .{ .color = za.Vec4.new(0.4, 0.2, 0, 1.0).data },
-    // rock 1
-    .{ .color = za.Vec4.new(0.275, 0.275, 0.275, 1.0).data },
-    // rock 2
-    .{ .color = za.Vec4.new(0.225, 0.225, 0.225, 1.0).data },
-    // iron
-    .{ .color = za.Vec4.new(0.6, 0.337, 0.282, 1.0).data },
-};
-
-/// material information expect by terrain to exist from 0.. in the material buffer
-pub const material_data = [_]gpu_types.Material{
-    // water
-    .{ .type = .dielectric, .type_index = 0, .albedo_index = 0 },
-    // grass 1
-    .{ .type = .lambertian, .type_index = 0, .albedo_index = 1 },
-    // grass 2
-    .{ .type = .lambertian, .type_index = 0, .albedo_index = 2 },
-    // dirt 1
-    .{ .type = .lambertian, .type_index = 0, .albedo_index = 3 },
-    // dirt 2
-    .{ .type = .lambertian, .type_index = 0, .albedo_index = 4 },
-    // rock
-    .{ .type = .lambertian, .type_index = 0, .albedo_index = 5 },
-    // rock
-    .{ .type = .lambertian, .type_index = 0, .albedo_index = 6 },
-    // iron
-    .{ .type = .metal, .type_index = 0, .albedo_index = 4 },
+pub const materials = [_]gpu_types.Material{
+    // Water
+    .{
+        .type = .dielectric,
+        // Water is 1.3333... glass is 1.52
+        .albedo_r = 0.117,
+        .albedo_g = 0.45,
+        .albedo_b = 0.85,
+        .type_data = 1.333,
+    },
+    // Grass 1
+    .{
+        .type = .lambertian,
+        .albedo_r = 0.0,
+        .albedo_g = 0.6,
+        .albedo_b = 0.0,
+        .type_data = 0.0,
+    },
+    // Grass 2
+    .{
+        .type = .lambertian,
+        .albedo_r = 0.0,
+        .albedo_g = 0.5019,
+        .albedo_b = 0.0,
+        .type_data = 0.0,
+    },
+    // Dirt 1
+    .{
+        .type = .lambertian,
+        .albedo_r = 0.301,
+        .albedo_g = 0.149,
+        .albedo_b = 0.0,
+        .type_data = 0.0,
+    },
+    // Dirt 2
+    .{
+        .type = .lambertian,
+        .albedo_r = 0.4,
+        .albedo_g = 0.2,
+        .albedo_b = 0.0,
+        .type_data = 0.0,
+    },
+    // Rock 1
+    .{
+        .type = .lambertian,
+        .albedo_r = 0.275,
+        .albedo_g = 0.275,
+        .albedo_b = 0.275,
+        .type_data = 0.0,
+    },
+    // Rock 2
+    .{
+        .type = .lambertian,
+        .albedo_r = 0.225,
+        .albedo_g = 0.225,
+        .albedo_b = 0.225,
+        .type_data = 0.0,
+    },
+    // Iron
+    .{
+        .type = .metal,
+        .albedo_r = 0.6,
+        .albedo_g = 0.337,
+        .albedo_b = 0.282,
+        .type_data = 0.45,
+    },
 };

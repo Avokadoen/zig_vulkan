@@ -13,9 +13,9 @@ const MapValue = struct {
 // Camera uniform is defined in Camera.zig
 
 /// Materials define how a ray should interact with a given voxel
-pub const Material = packed struct {
+pub const Material = extern struct {
     /// Type is the main attribute of a material and define reflection and refraction behaviour
-    pub const Type = enum(u2) {
+    pub const Type = enum(u32) {
         /// normal diffuse material
         lambertian = 0,
         /// shiny material with fuzz
@@ -25,23 +25,10 @@ pub const Material = packed struct {
     };
 
     type: Type,
-    /// index in the type array
-    /// i.e: type = material, type_index = 0 points to index 0 in metal array
-    type_index: u6,
-    /// index to the color of the voxel
-    albedo_index: u8,
-};
-
-pub const Albedo = extern struct {
-    color: [4]f32,
-};
-
-pub const Metal = extern struct {
-    fuzz: f32,
-};
-
-pub const Dielectric = extern struct {
-    internal_reflection: f32,
+    albedo_r: f32,
+    albedo_g: f32,
+    albedo_b: f32,
+    type_data: f32,
 };
 
 pub const Node = extern struct {

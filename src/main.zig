@@ -87,38 +87,30 @@ pub fn main() anyerror!void {
     const model = try vox.load(false, allocator, "../assets/models/doom.vox");
     defer model.deinit();
 
-    var albedo_color: [256]gpu_types.Albedo = undefined;
     var materials: [256]gpu_types.Material = undefined;
-    // insert terrain color
-    for (terrain.color_data, 0..) |color, i| {
-        albedo_color[i] = color;
-    }
     // insert terrain materials
-    for (terrain.material_data, 0..) |material, i| {
+    for (terrain.materials, 0..) |material, i| {
         materials[i] = material;
     }
 
-    for (model.rgba_chunk[0 .. model.rgba_chunk.len - terrain.color_data.len], 0..) |rgba, i| {
-        const albedo_index = i + terrain.color_data.len;
-        albedo_color[albedo_index] = .{
-            .color = za.Vec4.new(
-                @as(f32, @floatFromInt(rgba.r)) / 255.0,
-                @as(f32, @floatFromInt(rgba.g)) / 255.0,
-                @as(f32, @floatFromInt(rgba.b)) / 255.0,
-                @as(f32, @floatFromInt(rgba.a)) / 255.0,
-            ).data,
-        };
-        const material_index = i + terrain.material_data.len;
-        materials[material_index] = .{
-            .type = .metal,
-            .type_index = 0,
-            .albedo_index = @intCast(albedo_index),
+    for (
+        model.rgba_chunk[0 .. model.rgba_chunk.len - terrain.materials.len],
+        materials[terrain.materials.len..],
+    ) |rgba, *material| {
+        const material_type: gpu_types.Material.Type = if (@as(f32, @floatFromInt(rgba.a)) / 255.0 < 0.8) .dielectric else .metal;
+        const material_data: f32 = if (material_type == .dielectric) 1.52 else 0.45;
+        material.* = .{
+            .type = material_type,
+            .albedo_r = @as(f32, @floatFromInt(rgba.r)) / 255.0,
+            .albedo_g = @as(f32, @floatFromInt(rgba.g)) / 255.0,
+            .albedo_b = @as(f32, @floatFromInt(rgba.b)) / 255.0,
+            .type_data = material_data,
         };
     }
 
     // Test what we are loading
     for (model.xyzi_chunks[0]) |xyzi| {
-        const material_index: u8 = xyzi.color_index + @as(u8, @intCast(terrain.material_data.len));
+        const material_index: u8 = xyzi.color_index + @as(u8, @intCast(terrain.materials.len));
         grid.insert(
             @as(usize, @intCast(xyzi.x)) + 200,
             @as(usize, @intCast(xyzi.z)) + 50,
@@ -146,7 +138,6 @@ pub fn main() anyerror!void {
     });
     defer voxel_rt.deinit(allocator, ctx);
 
-    try voxel_rt.pushAlbedo(ctx, albedo_color[0..]);
     try voxel_rt.pushMaterials(ctx, materials[0..]);
 
     try window.setInputMode(zglfw.InputMode.cursor, zglfw.Cursor.Mode.disabled);

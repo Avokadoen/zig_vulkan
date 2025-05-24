@@ -60,19 +60,6 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, config: 
     errdefer pipeline.deinit(ctx);
 
     try pipeline.transferGridState(ctx, brick_grid.state.*);
-    const metals = [_]gpu_types.Metal{.{
-        .fuzz = 0.45,
-    }};
-    try pipeline.transferMetals(ctx, 0, metals[0..]);
-    const dielectrics = [_]gpu_types.Dielectric{
-        .{
-            .internal_reflection = 1.333, // water
-        },
-        .{
-            .internal_reflection = 1.52, // glass
-        },
-    };
-    try pipeline.transferDielectrics(ctx, 0, dielectrics[0..]);
 
     return VoxelRT{
         .camera = camera,
