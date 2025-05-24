@@ -311,9 +311,9 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
     uint brick_bits;
 
     const vec3 normal_axis = vec3(
-        (ray_step.x < 0) ? -1 : 1,
-        (ray_step.y < 0) ? -1 : 1,
-        (ray_step.z < 0) ? -1 : 1
+        (ray_step.x < 0) ? 1 : -1,
+        (ray_step.y < 0) ? 1 : -1,
+        (ray_step.z < 0) ? 1 : -1
     );
 
     float t_value = 0;
@@ -403,9 +403,9 @@ bool BrickHit(
     vec3 side_dist = fma(ray_step, intersection_delta, ray_step * 0.5 + 0.5) * ray_delta;
 
     const vec3 normal_axis = vec3(
-        (ray_step.x < 0) ? -1 : 1,
-        (ray_step.y < 0) ? -1 : 1,
-        (ray_step.z < 0) ? -1 : 1
+        (ray_step.x < 0) ? 1 : -1,
+        (ray_step.y < 0) ? 1 : -1,
+        (ray_step.z < 0) ? 1 : -1
     );
 
     ivec3 local_position = ivec3(floor(fposition + 0.));
@@ -434,12 +434,14 @@ bool BrickHit(
 
                 // perform material lookup
                 hit.index = bitfieldExtract(material_indices[material_index_index + brick_material_index], material_index_bit_offset, 8);
-                ignore_brick = materials[hit.index].type == r.ignore_type_material;
+                // ignore brick if we are hitting the same brick type 
+                ignore_brick = materials[hit.index].type == r.ignore_type_material && r.internal_reflection == materials[hit.index].type_data;
             }
 
             if (!ignore_brick) {
-                hit.t += t_value;
-                hit.point = RayAt(r, hit.t);
+                const float t_offset = voxel_scale.x * 0.05;
+                hit.t += t_value - t_offset;
+                hit.point = RayAt(r, hit.t) + hit.normal * t_offset;
                 brick_position = local_position * voxel_scale + brick_position;
                 return true;
             }
