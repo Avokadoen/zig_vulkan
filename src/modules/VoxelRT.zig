@@ -110,7 +110,7 @@ pub fn updateGridDelta(self: *VoxelRT, ctx: Context) !void {
         const transfer_zone = tracy.ZoneN(@src(), "higher order transfer");
         defer transfer_zone.End();
 
-        var delta = self.brick_grid.state.higher_order_grid_delta;
+        var delta = &self.brick_grid.state.higher_order_grid_delta;
         delta.mutex.lock();
         defer delta.mutex.unlock();
 
@@ -146,15 +146,28 @@ pub fn updateGridDelta(self: *VoxelRT, ctx: Context) !void {
         }
     }
     {
-        const transfer_zone = tracy.ZoneN(@src(), "bricks transfer");
+        const transfer_zone = tracy.ZoneN(@src(), "bricks occupancy transfer");
         defer transfer_zone.End();
 
-        const delta = &self.brick_grid.state.bricks_delta;
+        const delta = &self.brick_grid.state.bricks_occupancy_delta;
         delta.mutex.lock();
         defer delta.mutex.unlock();
 
         if (delta.state == .active) {
-            try self.pipeline.transferBricks(ctx, delta.from, self.brick_grid.state.bricks[delta.from..delta.to]);
+            try self.pipeline.transferBrickOccupancy(ctx, delta.from, self.brick_grid.state.brick_occupancy[delta.from..delta.to]);
+            delta.resetDelta();
+        }
+    }
+    {
+        const transfer_zone = tracy.ZoneN(@src(), "bricks start indices transfer");
+        defer transfer_zone.End();
+
+        const delta = &self.brick_grid.state.bricks_start_indices_delta;
+        delta.mutex.lock();
+        defer delta.mutex.unlock();
+
+        if (delta.state == .active) {
+            try self.pipeline.transferBrickStartIndex(ctx, delta.from, self.brick_grid.state.brick_start_indices[delta.from..delta.to]);
             delta.resetDelta();
         }
     }

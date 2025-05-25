@@ -56,16 +56,23 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     errdefer allocator.free(brick_statuses);
     @memset(brick_statuses, .{ .bits = 0 });
 
-    const brick_indices = try allocator.alloc(State.BrickIndex, brick_count);
+    const brick_indices = try allocator.alloc(State.IndexToBrick, brick_count);
     errdefer allocator.free(brick_indices);
     @memset(brick_indices, 0);
 
     const brick_alloc = config.brick_alloc orelse brick_count;
-    const bricks = try allocator.alloc(State.Brick, brick_alloc);
-    errdefer allocator.free(bricks);
-    @memset(bricks, .empty);
 
-    const packed_material_index_count = (bricks.len * State.brick_bits) / @sizeOf(State.PackedMaterialIndices);
+    const bricks_occupancy_delta = State.DeviceDataDelta.init();
+    const brick_occupancy = try allocator.alloc(u8, brick_alloc * State.brick_bytes);
+    errdefer allocator.free(brick_occupancy);
+    @memset(brick_occupancy, 0);
+
+    const bricks_start_indices_delta = State.DeviceDataDelta.init();
+    const brick_start_indices = try allocator.alloc(State.Brick.StartIndex, brick_alloc);
+    errdefer allocator.free(brick_start_indices);
+    @memset(brick_start_indices, State.Brick.unset_index);
+
+    const packed_material_index_count = (brick_alloc * State.brick_bits) / @sizeOf(State.PackedMaterialIndices);
     const material_indices = try allocator.alloc(State.PackedMaterialIndices, packed_material_index_count);
     errdefer allocator.free(material_indices);
     @memset(material_indices, 0);
@@ -87,9 +94,7 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 
     // initialize all delta structures
     // these are used to track changes that should be pushed to GPU
-    const higher_order_grid_delta = try allocator.create(State.DeviceDataDelta);
-    errdefer allocator.destroy(higher_order_grid_delta);
-    higher_order_grid_delta.* = State.DeviceDataDelta.init();
+    const higher_order_grid_delta = State.DeviceDataDelta.init();
 
     const brick_statuses_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
     errdefer allocator.free(brick_statuses_deltas);
@@ -98,8 +103,6 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     const brick_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
     errdefer allocator.free(brick_indices_deltas);
     @memset(brick_indices_deltas, State.DeviceDataDelta.init());
-
-    const bricks_delta = State.DeviceDataDelta.init();
 
     const material_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
     errdefer allocator.free(material_indices_deltas);
@@ -118,8 +121,10 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         .brick_indices = brick_indices,
         .brick_statuses_deltas = brick_statuses_deltas,
         .brick_indices_deltas = brick_indices_deltas,
-        .bricks_delta = bricks_delta,
-        .bricks = bricks,
+        .bricks_occupancy_delta = bricks_occupancy_delta,
+        .brick_occupancy = brick_occupancy,
+        .bricks_start_indices_delta = bricks_start_indices_delta,
+        .brick_start_indices = brick_start_indices,
         .material_indices = material_indices,
         .active_bricks = AtomicCount.init(0),
         .work_segment_size = work_segment_size,
@@ -178,10 +183,10 @@ pub fn deinit(self: BrickGrid) void {
     self.allocator.free(self.state.higher_order_grid);
     self.allocator.free(self.state.brick_statuses);
     self.allocator.free(self.state.brick_indices);
-    self.allocator.free(self.state.bricks);
+    self.allocator.free(self.state.brick_occupancy);
+    self.allocator.free(self.state.brick_start_indices);
     self.allocator.free(self.state.material_indices);
 
-    self.allocator.destroy(self.state.higher_order_grid_delta);
     self.allocator.free(self.state.brick_statuses_deltas);
     self.allocator.free(self.state.brick_indices_deltas);
     self.allocator.free(self.state.material_indices_deltas);

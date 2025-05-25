@@ -113,30 +113,24 @@ pub const BrickStatusMask = extern struct {
     }
 };
 
-pub const BrickIndex = c_uint;
+pub const IndexToBrick = c_uint;
 
-pub const Brick = extern struct {
+pub const Brick = struct {
     pub const IndexType = enum(u1) {
         voxel_start_index,
         brick_lod_index,
     };
 
-    pub const Index = packed struct(u32) {
+    pub const StartIndex = packed struct(u32) {
         value: u31,
         type: IndexType,
     };
 
     const unset_bits: u32 = std.math.maxInt(u32);
-    pub const unset_index: Index = @bitCast(unset_bits);
+    pub const unset_index: StartIndex = @bitCast(unset_bits);
 
-    pub const empty = Brick{
-        .solid_mask = [_]u8{0} ** brick_bytes,
-        .index = unset_index,
-    };
-
-    /// maps to a voxel grid of 8x8x8
-    solid_mask: [brick_bytes]u8,
-    index: Index,
+    pub const empty: Occupancy = [_]u8{0} ** brick_bytes;
+    pub const Occupancy = [brick_bytes]u8;
 };
 
 // 4 indices per word (u8)
@@ -147,19 +141,22 @@ const State = @This();
 
 higher_order_grid_mutex: Mutex,
 
-higher_order_grid_delta: *DeviceDataDelta,
+higher_order_grid_delta: DeviceDataDelta,
 /// used to accelerate ray traversal over large empty distances
 /// a entry is used to check if any brick in a 4x4x4 segment should be checked for hits or if nothing is set
 higher_order_grid: []u8,
 
 brick_statuses: []BrickStatusMask,
 brick_statuses_deltas: []DeviceDataDelta,
-brick_indices: []BrickIndex,
+brick_indices: []IndexToBrick,
 brick_indices_deltas: []DeviceDataDelta,
 
 // we keep a single bricks delta structure since active_bricks is shared
-bricks_delta: DeviceDataDelta,
-bricks: []Brick,
+bricks_occupancy_delta: DeviceDataDelta,
+brick_occupancy: []u8,
+
+bricks_start_indices_delta: DeviceDataDelta,
+brick_start_indices: []Brick.StartIndex,
 
 material_indices_deltas: []DeviceDataDelta,
 // assigned through a bucket

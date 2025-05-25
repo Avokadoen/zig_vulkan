@@ -134,9 +134,10 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
     std.debug.assert(insert_job.y < self.grid.device_state.voxel_dim_y);
     std.debug.assert(insert_job.z < self.grid.device_state.voxel_dim_z);
 
-    const actual_y = self.grid.device_state.voxel_dim_y - 1 - insert_job.y;
+    // Flip Y for more intutive coordinates
+    const flipped_y = self.grid.device_state.voxel_dim_y - 1 - insert_job.y;
 
-    const grid_index = gridAt(self.grid.*.device_state, insert_job.x, actual_y, insert_job.z);
+    const grid_index = gridAt(self.grid.*.device_state, insert_job.x, flipped_y, insert_job.z);
     const brick_status_index = grid_index / 32;
     const brick_status_offset: u5 = @intCast(grid_index % 32);
     const brick_status = self.grid.brick_statuses[brick_status_index].read(brick_status_offset);
@@ -146,7 +147,7 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
         }
 
         // if entry is empty we need to populate the entry first
-        const higher_grid_index = higherGridAt(self.grid.*.device_state, insert_job.x, actual_y, insert_job.z);
+        const higher_grid_index = higherGridAt(self.grid.*.device_state, insert_job.x, flipped_y, insert_job.z);
         self.grid.higher_order_grid_mutex.lock();
         self.grid.*.higher_order_grid[higher_grid_index] += 1;
         self.grid.higher_order_grid_mutex.unlock();
@@ -156,25 +157,31 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
         break :blk self.grid.*.active_bricks.fetchAdd(1, .monotonic);
     };
 
-    var brick = self.grid.bricks[brick_index];
+    const occupancy_from = brick_index * State.brick_bytes;
+    const occupancy_to = brick_index * State.brick_bytes + State.brick_bytes;
+    const brick_occupancy = self.grid.brick_occupancy[occupancy_from..occupancy_to];
+    var brick_material_index = &self.grid.brick_start_indices[brick_index];
 
     // set the voxel to exist
-    const nth_bit = voxelAt(insert_job.x, actual_y, insert_job.z);
+    const nth_bit = voxelAt(insert_job.x, flipped_y, insert_job.z);
 
     // set the color information for the given voxel
     {
         // set the brick's material index if unset
-        if (brick.index == State.Brick.unset_index) {
+        if (brick_material_index.* == State.Brick.unset_index) {
             // We store 4 material indices per word (1 byte per material)
             const material_entry = self.material_allocator.nextEntry();
-            brick.index.value = @intCast(material_entry);
-            brick.index.type = .voxel_start_index;
+            brick_material_index.value = @intCast(material_entry);
+            brick_material_index.type = .voxel_start_index;
+
+            // store brick material start index
+            self.grid.bricks_start_indices_delta.registerDelta(brick_index);
         }
 
-        std.debug.assert(brick.index.type == .voxel_start_index);
-        std.debug.assert(brick.index.value == std.mem.alignForward(u31, brick.index.value, 16));
+        std.debug.assert(brick_material_index.type == .voxel_start_index);
+        std.debug.assert(brick_material_index.value == std.mem.alignForward(u31, brick_material_index.value, 16));
 
-        const new_voxel_material_index = brick.index.value * 4 + nth_bit;
+        const new_voxel_material_index = brick_material_index.value * 4 + nth_bit;
         const material_indices_unpacked = std.mem.sliceAsBytes(self.grid.*.material_indices);
         material_indices_unpacked[new_voxel_material_index] = insert_job.material_index;
 
@@ -187,11 +194,10 @@ fn performInsert(self: *Worker, insert_job: Insert) void {
     // set voxel
     const mask_index = nth_bit / @bitSizeOf(u8);
     const mask_bit: u3 = @intCast(@rem(nth_bit, @bitSizeOf(u8)));
-    brick.solid_mask[mask_index] |= @as(u8, 1) << mask_bit;
+    brick_occupancy[mask_index] |= @as(u8, 1) << mask_bit;
 
     // store brick changes
-    self.grid.*.bricks[brick_index] = brick;
-    self.grid.bricks_delta.registerDelta(brick_index);
+    self.grid.bricks_occupancy_delta.registerDelta(occupancy_from + mask_index);
 
     // set the brick as loaded
     self.grid.brick_statuses[brick_status_index].write(.loaded, brick_status_offset);

@@ -9,6 +9,8 @@ pub const engine_name = "nop";
 pub const engine_version = vk.makeApiVersion(0, 0, 1, 0);
 pub const application_version = vk.makeApiVersion(0, 0, 1, 0);
 
+pub const vulkan_version = vk.API_VERSION_1_4;
+
 const release_logical_device_extensions = [_][*:0]const u8{
     vk.extensions.khr_swapchain.name,
 };

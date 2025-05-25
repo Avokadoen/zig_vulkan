@@ -58,7 +58,7 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *zglfw.W
         .application_version = @bitCast(consts.application_version),
         .p_engine_name = consts.engine_name,
         .engine_version = @bitCast(consts.engine_version),
-        .api_version = @bitCast(vk.API_VERSION_1_4),
+        .api_version = @bitCast(consts.vulkan_version),
     };
 
     // TODO: move to global scope (currently crashes the zig compiler :') )

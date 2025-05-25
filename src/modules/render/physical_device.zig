@@ -150,9 +150,15 @@ fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.Phys
     };
 
     const feature_score: i32 = blk: {
-        var p_maintenance4_features = vk.PhysicalDeviceMaintenance4Features{};
+        // required by vulkan 1.4
+        // var eigth_bit_storage_feature = vk.PhysicalDevice8BitStorageFeatures{};
+
+        var maintenance4_feature = vk.PhysicalDeviceMaintenance4Features{
+            .p_next = null, // @ptrCast(&eigth_bit_storage_feature),
+        };
+
         var p_features: vk.PhysicalDeviceFeatures2 = .{
-            .p_next = @ptrCast(&p_maintenance4_features),
+            .p_next = @ptrCast(&maintenance4_feature),
             .features = .{},
         };
 
@@ -160,7 +166,7 @@ fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.Phys
         _ = vki.getPhysicalDeviceFeatures(device);
 
         vki.getPhysicalDeviceFeatures2(device, &p_features);
-        if (p_maintenance4_features.maintenance_4 == vk.FALSE) {
+        if (maintenance4_feature.maintenance_4 == vk.FALSE) {
             break :blk -1000;
         }
         break :blk 10;
@@ -219,15 +225,23 @@ pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
         };
     }
 
-    const maintenance_4_features = vk.PhysicalDeviceMaintenance4Features{
+    var maintenance_4_features = vk.PhysicalDeviceMaintenance4Features{
+        .p_next = null,
         .maintenance_4 = vk.TRUE,
     };
-
-    const device_features = vk.PhysicalDeviceFeatures{};
+    var device_feature_1_2 = vk.PhysicalDeviceVulkan12Features{
+        .p_next = @ptrCast(&maintenance_4_features),
+        .shader_int_8 = vk.TRUE,
+        .storage_buffer_8_bit_access = vk.TRUE,
+    };
+    const device_features = vk.PhysicalDeviceFeatures2{
+        .p_next = @ptrCast(&device_feature_1_2),
+        .features = .{},
+    };
     const validation_layer_info = try validation_layer.Info.init(allocator, ctx.vkb);
 
     const create_info = vk.DeviceCreateInfo{
-        .p_next = @ptrCast(&maintenance_4_features),
+        .p_next = @ptrCast(&device_features),
         .flags = .{},
         .queue_create_info_count = @intCast(queue_create_infos.len),
         .p_queue_create_infos = queue_create_infos.ptr,
@@ -235,7 +249,7 @@ pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
         .pp_enabled_layer_names = validation_layer_info.enabled_layer_names,
         .enabled_extension_count = constants.logical_device_extensions.len,
         .pp_enabled_extension_names = &constants.logical_device_extensions,
-        .p_enabled_features = @ptrCast(&device_features),
+        .p_enabled_features = null,
     };
     return ctx.vki.createDevice(ctx.physical_device, &create_info, null);
 }

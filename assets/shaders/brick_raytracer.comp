@@ -3,6 +3,9 @@
 #extension GL_EXT_debug_printf : disable
 // debugPrintfEXT("hello world %f", 1.0);
 
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_8bit_storage : require
+
 // This extension is strictly not required for vulkan 1.2 target, but is used to silence validator...
 #extension GL_GOOGLE_include_directive : enable
 #include "rand.comp"
@@ -48,7 +51,7 @@ struct HitRecord {
 };
 
 layout (constant_id = 2) const uint brick_bits = 0U;
-layout (constant_id = 3) const uint brick_words = 2U;
+layout (constant_id = 3) const uint brick_bytes = 0U;
 layout (constant_id = 4) const int brick_dimensions = 0;
 layout (constant_id = 5) const float brick_voxel_scale = 0.;
 
@@ -128,23 +131,23 @@ layout (binding = 5) buffer GridBufferIndex {
 
 const uint VOXEL_START_INDEX = 0x0;
 const uint BRICK_LOD_INDEX = 0x1;
-struct Brick {
-    uint solid_mask[brick_words];
-    // left-most bit is the index type (VOXEL_START_INDEX, or BRICK_LOD_INDEX) 
-    uint type_and_index;
-};
-layout (binding = 6) buffer BrickBuffer {
-    readonly Brick bricks[];
+
+layout (binding = 6) buffer BrickOccupancyBuffer {
+    readonly uint8_t brick_solid_mask[];
 };
 
-layout (binding = 7) buffer MaterialIndicesBuffer {
+layout (binding = 7) buffer BrickMaterialIndexBuffer {
+    readonly uint brick_type_and_index[];
+};
+
+layout (binding = 8) buffer MaterialIndicesBuffer {
     // one entry hold 4 indices
     readonly uint material_indices[];
 };
 
 bool HigherGridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit);
 bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit);
-bool BrickHit(Ray r, float t_min, float t_max, vec3 ray_delta, ivec3 ray_step, vec3 g_scale, Brick brick, inout vec3 brick_position, inout HitRecord hit);
+bool BrickHit(Ray r, float t_min, float t_max, vec3 ray_delta, ivec3 ray_step, vec3 g_scale, uint brick_index, inout vec3 brick_position, inout HitRecord hit);
 
 // slab hit tests
 bool FastInstersect(vec3 p0, vec3 p1, Ray r);
@@ -324,7 +327,7 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
         && all(lessThan(local_position, brick_dim))
         && global_t_value <= t_max
     ) {
-        const uint grid_index = uint(floor(local_position.x + brick_dim.x * (local_position.z + brick_dim.z * local_position.y)));
+        const uint grid_index = uint(local_position.x + brick_dim.x * (local_position.z + brick_dim.z * local_position.y));
 
         // 1 bit pr type, so we divide 32 bit int
         const uint new_brick_type_index = grid_index / 32;
@@ -344,7 +347,7 @@ bool GridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hi
 
             // check if ray hits any voxel in the brick
             const uint brick_index = brick_indices[grid_index];
-            if (BrickHit(r, t_min, grid_t_max, ray_delta, ray_step, g_scale, bricks[brick_index], brick_min, hit)) {
+            if (BrickHit(r, t_min, grid_t_max, ray_delta, ray_step, g_scale, brick_index, brick_min, hit)) {
                 hit_min = brick_min;
                 return true;
             }
@@ -391,11 +394,12 @@ bool BrickHit(
     vec3 ray_delta,
     ivec3 ray_step,
     vec3 g_scale,
-    Brick brick,
+    uint brick_index,
     inout vec3 brick_position,
     inout HitRecord hit
 ) {
     const vec3 voxel_scale = g_scale * vec3(brick_voxel_scale);
+    const uint solid_mask_base_index = brick_index * brick_bytes;
 
     /// get position in brick space from global position
     const vec3 fposition = (RayAt(r, hit.t) - brick_position) / voxel_scale;
@@ -418,9 +422,9 @@ bool BrickHit(
         && t_value <= local_t_max
     ) {
         const int voxel_index = local_position.x + brick_dimensions * (local_position.z + brick_dimensions * local_position.y);
-        const int mask_index = voxel_index / 32;
-        const int mask_offset = voxel_index % 32;
-        const uint bitfield_final_entry = bitfieldExtract(brick.solid_mask[mask_index], 0, mask_offset + 1);
+        const uint8_t mask_index = uint8_t(voxel_index / 8);
+        const uint8_t mask_offset = uint8_t(voxel_index % 8);
+        const uint8_t bitfield_final_entry = brick_solid_mask[solid_mask_base_index + mask_index];
 
         const bool hit_voxel = (bitfieldExtract(bitfield_final_entry, mask_offset, 1) != 0);
         if (hit_voxel) {
@@ -430,7 +434,7 @@ bool BrickHit(
                 const int material_index_bit_offset = (voxel_index % 4) * 8;
                 
                 // get the material index from brick 
-                const uint brick_material_index = bitfieldExtract(brick.type_and_index, 0, 31);
+                const uint brick_material_index = bitfieldExtract(brick_type_and_index[brick_index], 0, 31);
 
                 // perform material lookup
                 hit.index = bitfieldExtract(material_indices[material_index_index + brick_material_index], material_index_bit_offset, 8);
@@ -594,15 +598,8 @@ bool ScatterDielectric(Material material, Ray r_in, vec3 hit_c_min, HitRecord hi
     const bool should_refract = transmissionDirection(ir, r_in.internal_reflection, r_in.direction, normal, direction);
     if (should_refract && Rand(hit.point) > 0.5) {
         scattered = CreateRay(hit.point, direction);
-        // TODO: we can remove this if we find the correct t_min for GridHit in calculate raycolor
-        // HACK: move scattered ray out of current cube explicitly
-        {
-            float t_max = 9999.0;
-            hit.t = 0;
-            const vec3 inv_ray_dir = 1 / r_in.direction;
-            AdvIntersect(hit_c_min - vec3(0.001), hit_c_min + vec3(0.126), scattered, inv_ray_dir, hit.t, t_max);
-            scattered = CreateRay(RayAt(scattered, t_max), scattered.direction);
-        }
+
+        scattered.ignore_type_material = MAT_DIELECTRIC;
         // ray is traveling through non air medium
         scattered.internal_reflection = ir;
     } else {

@@ -97,8 +97,8 @@ pub fn main() anyerror!void {
         model.rgba_chunk[0 .. model.rgba_chunk.len - terrain.materials.len],
         materials[terrain.materials.len..],
     ) |rgba, *material| {
-        const material_type: gpu_types.Material.Type = if (@as(f32, @floatFromInt(rgba.a)) / 255.0 < 0.8) .dielectric else .metal;
-        const material_data: f32 = if (material_type == .dielectric) 1.52 else 0.45;
+        const material_type: gpu_types.Material.Type = if (@as(f32, @floatFromInt(rgba.a)) / 255.0 < 0.8) .dielectric else .lambertian;
+        const material_data: f32 = if (material_type == .dielectric) 1.52 else 0.0;
         material.* = .{
             .type = material_type,
             .albedo_r = @as(f32, @floatFromInt(rgba.r)) / 255.0,
