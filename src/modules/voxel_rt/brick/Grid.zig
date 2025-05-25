@@ -8,7 +8,6 @@ const ArrayList = std.ArrayList;
 
 const State = @import("State.zig");
 const AtomicCount = State.AtomicCount;
-const Worker = @import("Worker.zig");
 const MaterialAllocator = @import("MaterialAllocator.zig");
 
 pub const Config = struct {
@@ -26,9 +25,6 @@ allocator: Allocator,
 // grid state that is shared with the workers
 state: *State,
 material_allocator: *MaterialAllocator,
-
-worker_threads: []std.Thread,
-workers: []Worker,
 
 /// Initialize a BrickGrid that can be raytraced
 /// @param:
@@ -62,12 +58,10 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 
     const brick_alloc = config.brick_alloc orelse brick_count;
 
-    const bricks_occupancy_delta = State.DeviceDataDelta.init();
     const brick_occupancy = try allocator.alloc(u8, brick_alloc * State.brick_bytes);
     errdefer allocator.free(brick_occupancy);
     @memset(brick_occupancy, 0);
 
-    const bricks_start_indices_delta = State.DeviceDataDelta.init();
     const brick_start_indices = try allocator.alloc(State.Brick.StartIndex, brick_alloc);
     errdefer allocator.free(brick_start_indices);
     @memset(brick_start_indices, State.Brick.unset_index);
@@ -92,38 +86,16 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
         config.scale,
     };
 
-    // initialize all delta structures
-    // these are used to track changes that should be pushed to GPU
-    const higher_order_grid_delta = State.DeviceDataDelta.init();
-
-    const brick_statuses_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
-    errdefer allocator.free(brick_statuses_deltas);
-    @memset(brick_statuses_deltas, State.DeviceDataDelta.init());
-
-    const brick_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
-    errdefer allocator.free(brick_indices_deltas);
-    @memset(brick_indices_deltas, State.DeviceDataDelta.init());
-
-    const material_indices_deltas = try allocator.alloc(State.DeviceDataDelta, config.workers_count);
-    errdefer allocator.free(material_indices_deltas);
-    @memset(material_indices_deltas, State.DeviceDataDelta.init());
-
     const work_segment_size = try std.math.divCeil(u32, dim_x, @intCast(config.workers_count));
 
     const state = try allocator.create(State);
     errdefer allocator.destroy(state);
     state.* = .{
-        .higher_order_grid_delta = higher_order_grid_delta,
-        .material_indices_deltas = material_indices_deltas,
         .higher_order_grid_mutex = .{},
         .higher_order_grid = higher_order_grid,
         .brick_statuses = brick_statuses,
         .brick_indices = brick_indices,
-        .brick_statuses_deltas = brick_statuses_deltas,
-        .brick_indices_deltas = brick_indices_deltas,
-        .bricks_occupancy_delta = bricks_occupancy_delta,
         .brick_occupancy = brick_occupancy,
-        .bricks_start_indices_delta = bricks_start_indices_delta,
         .brick_start_indices = brick_start_indices,
         .material_indices = material_indices,
         .active_bricks = AtomicCount.init(0),
@@ -147,39 +119,15 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     errdefer allocator.destroy(material_allocator);
     material_allocator.* = .init(material_indices.len);
 
-    const workers = try allocator.alloc(Worker, config.workers_count);
-    errdefer allocator.free(workers);
-
-    const worker_threads = try allocator.alloc(std.Thread, config.workers_count);
-    errdefer allocator.free(worker_threads);
-    for (workers, worker_threads, 0..) |*worker, *thread, id| {
-        worker.* = try Worker.init(allocator, id, state, material_allocator, 4096);
-        thread.* = try std.Thread.spawn(.{}, Worker.work, .{worker});
-    }
-
     return BrickGrid{
         .allocator = allocator,
         .state = state,
         .material_allocator = material_allocator,
-        .worker_threads = worker_threads,
-        .workers = workers,
     };
 }
 
 /// Clean up host memory, does not account for device
 pub fn deinit(self: BrickGrid) void {
-    // signal each worker to finish
-    for (self.workers) |*worker| {
-        // signal shutdown
-        worker.*.shutdown.store(true, .seq_cst);
-        // signal worker to wake up from idle state
-        worker.wake_event.signal();
-    }
-    // wait for each worker thread to finish
-    for (self.worker_threads) |thread| {
-        thread.join();
-    }
-
     self.allocator.free(self.state.higher_order_grid);
     self.allocator.free(self.state.brick_statuses);
     self.allocator.free(self.state.brick_indices);
@@ -187,47 +135,125 @@ pub fn deinit(self: BrickGrid) void {
     self.allocator.free(self.state.brick_start_indices);
     self.allocator.free(self.state.material_indices);
 
-    self.allocator.free(self.state.brick_statuses_deltas);
-    self.allocator.free(self.state.brick_indices_deltas);
-    self.allocator.free(self.state.material_indices_deltas);
-
-    self.allocator.free(self.worker_threads);
-    self.allocator.free(self.workers);
-
     self.allocator.destroy(self.material_allocator);
     self.allocator.destroy(self.state);
 }
 
-/// Force workers to sleep.
-/// Can be useful if spurvious changes to the grid cause thread contention
-pub fn sleepWorkers(self: *BrickGrid) void {
-    for (self.workers) |*worker| {
-        worker.*.sleep.store(true, .seq_cst);
-    }
-}
-
-/// Wake workers after forcing sleep.
-pub fn wakeWorkers(self: *BrickGrid) void {
-    for (self.workers) |*worker| {
-        worker.*.sleep.store(false, .seq_cst);
-        worker.*.wake_event.signal();
-    }
-}
-
-/// Asynchrounsly (thread safe) insert a brick at coordinate x y z
-/// this function will cause panics if you insert out of bounds
-/// currently no way of checking if insert completes
+// perform a insert in the grid
 pub fn insert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u8) void {
-    // find a workers that should be assigned insert
-    const worker_index = blk: {
-        const grid_x = x / 8;
-        break :blk @min(grid_x / self.state.work_segment_size, self.workers.len - 1);
+    std.debug.assert(x < self.state.device_state.voxel_dim_x);
+    std.debug.assert(y < self.state.device_state.voxel_dim_y);
+    std.debug.assert(z < self.state.device_state.voxel_dim_z);
+
+    // Flip Y for more intutive coordinates
+    const flipped_y = self.state.device_state.voxel_dim_y - 1 - y;
+
+    const grid_index = gridAt(self.state.*.device_state, x, flipped_y, z);
+    const brick_status_index = grid_index / 32;
+    const brick_status_offset: u5 = @intCast(grid_index % 32);
+    const brick_status = self.state.brick_statuses[brick_status_index].read(brick_status_offset);
+    const brick_index = blk: {
+        if (brick_status == .loaded) {
+            break :blk self.state.brick_indices[grid_index];
+        }
+
+        // if entry is empty we need to populate the entry first
+        const higher_grid_index = higherGridAt(self.state.*.device_state, x, flipped_y, z);
+        self.state.higher_order_grid_mutex.lock();
+        self.state.*.higher_order_grid[higher_grid_index] += 1;
+        self.state.higher_order_grid_mutex.unlock();
+        self.state.higher_order_grid_delta.registerDelta(higher_grid_index);
+
+        // atomically fetch previous brick count and then add 1 to count
+        break :blk self.state.*.active_bricks.fetchAdd(1, .monotonic);
     };
 
-    self.workers[worker_index].registerJob(Worker.Job{ .insert = .{
-        .x = x,
-        .y = y,
-        .z = z,
-        .material_index = material_index,
-    } });
+    const occupancy_from = brick_index * State.brick_bytes;
+    const occupancy_to = brick_index * State.brick_bytes + State.brick_bytes;
+    const brick_occupancy = self.state.brick_occupancy[occupancy_from..occupancy_to];
+    var brick_material_index = &self.state.brick_start_indices[brick_index];
+
+    // set the voxel to exist
+    const nth_bit = voxelAt(x, flipped_y, z);
+
+    // set the color information for the given voxel
+    {
+        // set the brick's material index if unset
+        if (brick_material_index.* == State.Brick.unset_index) {
+            // We store 4 material indices per word (1 byte per material)
+            const material_entry = self.material_allocator.nextEntry();
+            brick_material_index.value = @intCast(material_entry);
+            brick_material_index.type = .voxel_start_index;
+
+            // store brick material start index
+            self.state.bricks_start_indices_delta.registerDelta(brick_index);
+        }
+
+        std.debug.assert(brick_material_index.type == .voxel_start_index);
+        std.debug.assert(brick_material_index.value == std.mem.alignForward(u31, brick_material_index.value, 16));
+
+        const new_voxel_material_index = brick_material_index.value * 4 + nth_bit;
+        const material_indices_unpacked = std.mem.sliceAsBytes(self.state.*.material_indices);
+        material_indices_unpacked[new_voxel_material_index] = material_index;
+
+        // material indices are packed in 32bit on GPU and 8bit on CPU
+        // we divide by four to store the correct *GPU* index.
+        // Example: index 8 point to *byte* 8 on host, 8 points to *word* 8 on gpu.
+        self.state.material_indices_delta.registerDelta(new_voxel_material_index / 4);
+    }
+
+    // set voxel
+    const mask_index = nth_bit / @bitSizeOf(u8);
+    const mask_bit: u3 = @intCast(@rem(nth_bit, @bitSizeOf(u8)));
+    brick_occupancy[mask_index] |= @as(u8, 1) << mask_bit;
+
+    // store brick changes
+    self.state.bricks_occupancy_delta.registerDelta(occupancy_from + mask_index);
+
+    // set the brick as loaded
+    self.state.brick_statuses[brick_status_index].write(.loaded, brick_status_offset);
+    self.state.brick_statuses_delta.registerDelta(brick_status_index);
+
+    // register brick index
+    self.state.brick_indices[grid_index] = brick_index;
+    self.state.brick_indices_delta.registerDelta(grid_index);
+}
+
+// TODO: test
+/// get brick index from global index coordinates
+fn voxelAt(x: usize, y: usize, z: usize) State.BrickMapLog2 {
+    const brick_x: usize = @rem(x, State.brick_dimension);
+    const brick_y: usize = @rem(y, State.brick_dimension);
+    const brick_z: usize = @rem(z, State.brick_dimension);
+    return @intCast(brick_x + State.brick_dimension * (brick_z + State.brick_dimension * brick_y));
+}
+
+/// get grid index from global index coordinates
+fn gridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize {
+    const grid_x: u32 = @intCast(x / State.brick_dimension);
+    const grid_y: u32 = @intCast(y / State.brick_dimension);
+    const grid_z: u32 = @intCast(z / State.brick_dimension);
+    return @intCast(grid_x + device_state.dim_x * (grid_z + device_state.dim_z * grid_y));
+}
+
+/// get higher grid index from global index coordinates
+fn higherGridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize {
+    // TODO: allow configuration of higher order grid
+    const higher_order_size = State.brick_dimension * 4; // 4 bricks per higher order
+    const higher_grid_x: u32 = @intCast(x / higher_order_size);
+    const higher_grid_y: u32 = @intCast(y / higher_order_size);
+    const higher_grid_z: u32 = @intCast(z / higher_order_size);
+    return @intCast(higher_grid_x + device_state.higher_dim_x * (higher_grid_z + device_state.higher_dim_z * higher_grid_y));
+}
+
+/// count the set bits up to range_to (exclusive)
+fn countBits(bits: [State.brick_bytes]u8, range_to: u32) u32 {
+    var bit: State.BrickMap = @bitCast(bits);
+    var count: State.BrickMap = 0;
+    var i: u32 = 0;
+    while (i < range_to and bit != 0) : (i += 1) {
+        count += bit & 1;
+        bit = bit >> 1;
+    }
+    return @intCast(count);
 }

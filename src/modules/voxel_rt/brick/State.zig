@@ -12,6 +12,13 @@ pub const BrickMapLog2 = std.meta.Int(.unsigned, State.brick_log2);
 
 /// type used to record changes in host/device buffers in order to only send changed data to the gpu
 pub const DeviceDataDelta = struct {
+    pub const empty = DeviceDataDelta{
+        .mutex = .{},
+        .state = .inactive,
+        .from = 0,
+        .to = 0,
+    };
+
     const DeltaState = enum {
         invalid,
         inactive,
@@ -22,15 +29,6 @@ pub const DeviceDataDelta = struct {
     state: DeltaState,
     from: usize,
     to: usize,
-
-    pub fn init() DeviceDataDelta {
-        return DeviceDataDelta{
-            .mutex = .{},
-            .state = .inactive,
-            .from = 0,
-            .to = 0,
-        };
-    }
 
     pub fn resetDelta(self: *DeviceDataDelta) void {
         self.state = .inactive;
@@ -141,24 +139,24 @@ const State = @This();
 
 higher_order_grid_mutex: Mutex,
 
-higher_order_grid_delta: DeviceDataDelta,
+higher_order_grid_delta: DeviceDataDelta = .empty,
 /// used to accelerate ray traversal over large empty distances
 /// a entry is used to check if any brick in a 4x4x4 segment should be checked for hits or if nothing is set
 higher_order_grid: []u8,
 
 brick_statuses: []BrickStatusMask,
-brick_statuses_deltas: []DeviceDataDelta,
+brick_statuses_delta: DeviceDataDelta = .empty,
 brick_indices: []IndexToBrick,
-brick_indices_deltas: []DeviceDataDelta,
+brick_indices_delta: DeviceDataDelta = .empty,
 
 // we keep a single bricks delta structure since active_bricks is shared
-bricks_occupancy_delta: DeviceDataDelta,
+bricks_occupancy_delta: DeviceDataDelta = .empty,
 brick_occupancy: []u8,
 
-bricks_start_indices_delta: DeviceDataDelta,
+bricks_start_indices_delta: DeviceDataDelta = .empty,
 brick_start_indices: []Brick.StartIndex,
 
-material_indices_deltas: []DeviceDataDelta,
+material_indices_delta: DeviceDataDelta = .empty,
 // assigned through a bucket
 material_indices: []PackedMaterialIndices,
 

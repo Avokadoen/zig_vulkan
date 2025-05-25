@@ -122,27 +122,27 @@ pub fn updateGridDelta(self: *VoxelRT, ctx: Context) !void {
     {
         const transfer_zone = tracy.ZoneN(@src(), "grid type transfer");
         defer transfer_zone.End();
-        for (self.brick_grid.state.brick_statuses_deltas) |*delta| {
-            delta.mutex.lock();
-            defer delta.mutex.unlock();
 
-            if (delta.state == .active) {
-                try self.pipeline.transferBrickStatuses(ctx, delta.from, self.brick_grid.state.brick_statuses[delta.from..delta.to]);
-                delta.resetDelta();
-            }
+        const delta = &self.brick_grid.state.brick_statuses_delta;
+        delta.mutex.lock();
+        defer delta.mutex.unlock();
+
+        if (delta.state == .active) {
+            try self.pipeline.transferBrickStatuses(ctx, delta.from, self.brick_grid.state.brick_statuses[delta.from..delta.to]);
+            delta.resetDelta();
         }
     }
     {
         const transfer_zone = tracy.ZoneN(@src(), "grid index transfer");
         defer transfer_zone.End();
-        for (self.brick_grid.state.brick_indices_deltas) |*delta| {
-            delta.mutex.lock();
-            defer delta.mutex.unlock();
 
-            if (delta.state == .active) {
-                try self.pipeline.transferBrickIndices(ctx, delta.from, self.brick_grid.state.brick_indices[delta.from..delta.to]);
-                delta.resetDelta();
-            }
+        const delta = &self.brick_grid.state.brick_indices_delta;
+        delta.mutex.lock();
+        defer delta.mutex.unlock();
+
+        if (delta.state == .active) {
+            try self.pipeline.transferBrickIndices(ctx, delta.from, self.brick_grid.state.brick_indices[delta.from..delta.to]);
+            delta.resetDelta();
         }
     }
     {
@@ -174,14 +174,13 @@ pub fn updateGridDelta(self: *VoxelRT, ctx: Context) !void {
     {
         const transfer_zone = tracy.ZoneN(@src(), "material indices transfer");
         defer transfer_zone.End();
-        for (self.brick_grid.state.material_indices_deltas) |*delta| {
-            delta.mutex.lock();
-            defer delta.mutex.unlock();
+        const delta = &self.brick_grid.state.material_indices_delta;
+        delta.mutex.lock();
+        defer delta.mutex.unlock();
 
-            if (delta.state == .active) {
-                try self.pipeline.transferMaterialIndices(ctx, delta.from, self.brick_grid.state.material_indices[delta.from..delta.to]);
-                delta.resetDelta();
-            }
+        if (delta.state == .active) {
+            try self.pipeline.transferMaterialIndices(ctx, delta.from, self.brick_grid.state.material_indices[delta.from..delta.to]);
+            delta.resetDelta();
         }
     }
 }

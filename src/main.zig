@@ -81,9 +81,6 @@ pub fn main() anyerror!void {
     });
     defer grid.deinit();
 
-    // force workers to sleep while terrain generate
-    grid.sleepWorkers();
-
     const model = try vox.load(false, allocator, "../assets/models/doom.vox");
     defer model.deinit();
 
@@ -153,8 +150,6 @@ pub fn main() anyerror!void {
     defer input.deinit(allocator);
     try input.setInputModeCursor(.disabled);
     input.setImguiWantInput(false);
-
-    voxel_rt.brick_grid.wakeWorkers();
 
     var prev_frame = std.time.milliTimestamp();
     // Loop until the user closes the window
