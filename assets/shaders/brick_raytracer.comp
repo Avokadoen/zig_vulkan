@@ -99,7 +99,6 @@ layout (binding = 1) uniform BrickGridState {
     vec4 max_point_scale;
 } brick_grid;
 
-// material is represented by 32 bits:
 struct Material {
     uint type;          
     float albedo_r;
