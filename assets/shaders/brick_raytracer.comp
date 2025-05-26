@@ -85,14 +85,9 @@ layout (binding = 1) uniform BrickGridState {
     uint dim_x;
     uint dim_y;
     uint dim_z;
-    // how many higher order entries in each axis
-    uint higher_dim_x;
-    uint higher_dim_y;
-    uint higher_dim_z;
 
     uint padding1; // not in use
     uint padding2; // not in use
-    uint padding3; // not in use
 
     // min point *and* base t value
     vec4 min_point_base_t;
@@ -114,32 +109,27 @@ bool ScatterLambertian(Material material, Ray r_in, HitRecord hit, out Ray scatt
 bool ScatterMetal(Material material, Ray r_in, HitRecord hit, out Ray scattered);
 bool ScatterDielectric(Material material, Ray r_in, vec3 hit_c_min, HitRecord hit, out Ray scattered);
 
-layout (binding = 3) buffer HigherGridBuffer {
-    // one entry hold 4 entries
-    readonly uint higher_grid_entries[];
-};
-
-layout (binding = 4) buffer GridBufferType {
+layout (binding = 3) buffer GridBufferType {
     // each entry is 2 bits
     readonly uint brick_type_bits[];
 };
 
-layout (binding = 5) buffer GridBufferIndex {
+layout (binding = 4) buffer GridBufferIndex {
     readonly uint brick_indices[];
 };
 
 const uint VOXEL_START_INDEX = 0x0;
 const uint BRICK_LOD_INDEX = 0x1;
 
-layout (binding = 6) buffer BrickOccupancyBuffer {
+layout (binding = 5) buffer BrickOccupancyBuffer {
     readonly uint8_t brick_solid_mask[];
 };
 
-layout (binding = 7) buffer BrickMaterialIndexBuffer {
+layout (binding = 6) buffer BrickMaterialIndexBuffer {
     readonly uint brick_type_and_index[];
 };
 
-layout (binding = 8) buffer MaterialIndicesBuffer {
+layout (binding = 7) buffer MaterialIndicesBuffer {
     readonly uint8_t material_indices[];
 };
 

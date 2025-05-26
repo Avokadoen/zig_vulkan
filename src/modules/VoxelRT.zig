@@ -97,7 +97,6 @@ pub fn debugFlushGrid(self: *VoxelRT, ctx: Context) void {
         @compileError("calling " ++ @src().fn_name ++ " in " ++ @tagName(@import("builtin").mode));
     }
 
-    self.pipeline.transferHigherOrderGrid(ctx, 0, self.brick_grid.state.higher_order_grid) catch unreachable;
     self.pipeline.transferBrickStatuses(ctx, 0, self.brick_grid.state.brick_statuses) catch unreachable;
     self.pipeline.transferBrickIndices(ctx, 0, self.brick_grid.state.brick_indices) catch unreachable;
     self.pipeline.transferBricks(ctx, 0, self.brick_grid.state.bricks) catch unreachable;
@@ -106,19 +105,6 @@ pub fn debugFlushGrid(self: *VoxelRT, ctx: Context) void {
 
 /// update grid device data based on changes
 pub fn updateGridDelta(self: *VoxelRT, ctx: Context) !void {
-    {
-        const transfer_zone = tracy.ZoneN(@src(), "higher order transfer");
-        defer transfer_zone.End();
-
-        var delta = &self.brick_grid.state.higher_order_grid_delta;
-        delta.mutex.lock();
-        defer delta.mutex.unlock();
-
-        if (delta.state == .active) {
-            try self.pipeline.transferHigherOrderGrid(ctx, delta.from, self.brick_grid.state.higher_order_grid[delta.from..delta.to]);
-            delta.resetDelta();
-        }
-    }
     {
         const transfer_zone = tracy.ZoneN(@src(), "grid type transfer");
         defer transfer_zone.End();

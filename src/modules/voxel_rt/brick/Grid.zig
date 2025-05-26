@@ -39,14 +39,6 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 
     const brick_count = dim_x * dim_y * dim_z;
 
-    // TODO: configure higher order brick count
-    const higher_dim_x = @as(f64, @floatFromInt(dim_x)) * 0.25;
-    const higher_dim_y = @as(f64, @floatFromInt(dim_y)) * 0.25;
-    const higher_dim_z = @as(f64, @floatFromInt(dim_z)) * 0.25;
-    const higher_order_grid = try allocator.alloc(u8, @intFromFloat(@ceil(higher_dim_x * higher_dim_y * higher_dim_z)));
-    errdefer allocator.free(higher_order_grid);
-    @memset(higher_order_grid, 0);
-
     // each mask has 32 entries
     const brick_statuses = try allocator.alloc(State.BrickStatusMask, (std.math.divCeil(u32, brick_count, 32) catch unreachable));
     errdefer allocator.free(brick_statuses);
@@ -91,8 +83,6 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     const state = try allocator.create(State);
     errdefer allocator.destroy(state);
     state.* = .{
-        .higher_order_grid_mutex = .{},
-        .higher_order_grid = higher_order_grid,
         .brick_statuses = brick_statuses,
         .brick_indices = brick_indices,
         .brick_occupancy = brick_occupancy,
@@ -107,9 +97,6 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
             .dim_x = dim_x,
             .dim_y = dim_y,
             .dim_z = dim_z,
-            .higher_dim_x = @intFromFloat(higher_dim_x),
-            .higher_dim_y = @intFromFloat(higher_dim_y),
-            .higher_dim_z = @intFromFloat(higher_dim_z),
             .min_point_base_t = min_point_base_t,
             .max_point_scale = max_point_scale,
         },
@@ -128,7 +115,6 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
 
 /// Clean up host memory, does not account for device
 pub fn deinit(self: BrickGrid) void {
-    self.allocator.free(self.state.higher_order_grid);
     self.allocator.free(self.state.brick_statuses);
     self.allocator.free(self.state.brick_indices);
     self.allocator.free(self.state.brick_occupancy);
@@ -156,13 +142,6 @@ pub fn insert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u8
         if (brick_status == .loaded) {
             break :blk self.state.brick_indices[grid_index];
         }
-
-        // if entry is empty we need to populate the entry first
-        const higher_grid_index = higherGridAt(self.state.*.device_state, x, flipped_y, z);
-        self.state.higher_order_grid_mutex.lock();
-        self.state.*.higher_order_grid[higher_grid_index] += 1;
-        self.state.higher_order_grid_mutex.unlock();
-        self.state.higher_order_grid_delta.registerDelta(higher_grid_index);
 
         // atomically fetch previous brick count and then add 1 to count
         break :blk self.state.*.active_bricks.fetchAdd(1, .monotonic);
@@ -229,16 +208,6 @@ fn gridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize {
     const grid_y: u32 = @intCast(y / State.brick_dimension);
     const grid_z: u32 = @intCast(z / State.brick_dimension);
     return @intCast(grid_x + device_state.dim_x * (grid_z + device_state.dim_z * grid_y));
-}
-
-/// get higher grid index from global index coordinates
-fn higherGridAt(device_state: State.Device, x: usize, y: usize, z: usize) usize {
-    // TODO: allow configuration of higher order grid
-    const higher_order_size = State.brick_dimension * 4; // 4 bricks per higher order
-    const higher_grid_x: u32 = @intCast(x / higher_order_size);
-    const higher_grid_y: u32 = @intCast(y / higher_order_size);
-    const higher_grid_z: u32 = @intCast(z / higher_order_size);
-    return @intCast(higher_grid_x + device_state.higher_dim_x * (higher_grid_z + device_state.higher_dim_z * higher_grid_y));
 }
 
 /// count the set bits up to range_to (exclusive)

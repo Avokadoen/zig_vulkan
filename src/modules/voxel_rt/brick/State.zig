@@ -66,14 +66,9 @@ pub const Device = extern struct {
     dim_x: u32,
     dim_y: u32,
     dim_z: u32,
-    // how many higher order entries in each axis
-    higher_dim_x: u32,
-    higher_dim_y: u32,
-    higher_dim_z: u32,
 
     padding1: u32 = 0,
     padding2: u32 = 0,
-    padding3: u32 = 0,
 
     // holds the min point, and the base t advance
     // base t advance dictate the minimum stretch of distance a ray can go for each iteration
@@ -134,13 +129,6 @@ pub const Brick = struct {
 pub const MaterialIndices = u8;
 
 const State = @This();
-
-higher_order_grid_mutex: Mutex,
-
-higher_order_grid_delta: DeviceDataDelta = .empty,
-/// used to accelerate ray traversal over large empty distances
-/// a entry is used to check if any brick in a 4x4x4 segment should be checked for hits or if nothing is set
-higher_order_grid: []u8,
 
 brick_statuses: []BrickStatusMask,
 brick_statuses_delta: DeviceDataDelta = .empty,
