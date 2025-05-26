@@ -263,7 +263,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
             MinSize.storage(ctx, @sizeOf(GridState.IndexToBrick) * grid_state.brick_indices.len),
             MinSize.storage(ctx, @sizeOf(GridState.Brick.Occupancy) * grid_state.brick_occupancy.len),
             MinSize.storage(ctx, @sizeOf(GridState.Brick.StartIndex) * grid_state.brick_start_indices.len),
-            MinSize.storage(ctx, @sizeOf(GridState.PackedMaterialIndices) * grid_state.material_indices.len),
+            MinSize.storage(ctx, @sizeOf(GridState.MaterialIndices) * grid_state.material_indices.len),
         };
         const state_configs = ComputePipeline.StateConfigs{ .uniform_sizes = uniform_sizes[0..], .storage_sizes = storage_sizes[0..] };
 
@@ -639,13 +639,13 @@ pub fn transferBrickStartIndex(
 }
 
 /// Transfer material index data to GPU
-pub fn transferMaterialIndices(self: *Pipeline, ctx: Context, offset: usize, material_indices: []const GridState.PackedMaterialIndices) !void {
+pub fn transferMaterialIndices(self: *Pipeline, ctx: Context, offset: usize, material_indices: []const GridState.MaterialIndices) !void {
     const buffer_offset = self.compute_pipeline.storage_offsets[6];
     try self.staging_buffers.transferToBuffer(
         ctx,
         &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(GridState.PackedMaterialIndices),
-        GridState.PackedMaterialIndices,
+        buffer_offset + offset * @sizeOf(GridState.MaterialIndices),
+        GridState.MaterialIndices,
         material_indices,
     );
 }

@@ -36,7 +36,7 @@ pub fn nextEntry(self: *MaterialAllocator) Entry {
     //     return free;
     // }
 
-    const next_entry = self.next_index.fetchAdd(brick_bits / 4, .monotonic);
+    const next_entry = self.next_index.fetchAdd(brick_bits, .monotonic);
     std.debug.assert(next_entry < self.capacity); // no more material data, should not occur
 
     return next_entry;

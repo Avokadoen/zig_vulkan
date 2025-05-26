@@ -131,9 +131,7 @@ pub const Brick = struct {
     pub const Occupancy = [brick_bytes]u8;
 };
 
-// 4 indices per word (u8)
-pub const PackedMaterialIndices = u32;
-pub const PackedMaterialIndicesLog2 = std.math.Log2Int(u32);
+pub const MaterialIndices = u8;
 
 const State = @This();
 
@@ -158,7 +156,7 @@ brick_start_indices: []Brick.StartIndex,
 
 material_indices_delta: DeviceDataDelta = .empty,
 // assigned through a bucket
-material_indices: []PackedMaterialIndices,
+material_indices: []MaterialIndices,
 
 /// how many bricks are used in the grid, keep in mind that this is used in a multithread context
 active_bricks: AtomicCount,

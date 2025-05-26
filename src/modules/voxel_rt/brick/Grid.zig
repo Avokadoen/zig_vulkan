@@ -66,8 +66,8 @@ pub fn init(allocator: Allocator, dim_x: u32, dim_y: u32, dim_z: u32, config: Co
     errdefer allocator.free(brick_start_indices);
     @memset(brick_start_indices, State.Brick.unset_index);
 
-    const packed_material_index_count = (brick_alloc * State.brick_bits) / @sizeOf(State.PackedMaterialIndices);
-    const material_indices = try allocator.alloc(State.PackedMaterialIndices, packed_material_index_count);
+    const material_index_count = brick_alloc * State.brick_bits;
+    const material_indices = try allocator.alloc(State.MaterialIndices, material_index_count);
     errdefer allocator.free(material_indices);
     @memset(material_indices, 0);
 
@@ -180,7 +180,6 @@ pub fn insert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u8
     {
         // set the brick's material index if unset
         if (brick_material_index.* == State.Brick.unset_index) {
-            // We store 4 material indices per word (1 byte per material)
             const material_entry = self.material_allocator.nextEntry();
             brick_material_index.value = @intCast(material_entry);
             brick_material_index.type = .voxel_start_index;
@@ -192,14 +191,10 @@ pub fn insert(self: *BrickGrid, x: usize, y: usize, z: usize, material_index: u8
         std.debug.assert(brick_material_index.type == .voxel_start_index);
         std.debug.assert(brick_material_index.value == std.mem.alignForward(u31, brick_material_index.value, 16));
 
-        const new_voxel_material_index = brick_material_index.value * 4 + nth_bit;
-        const material_indices_unpacked = std.mem.sliceAsBytes(self.state.*.material_indices);
-        material_indices_unpacked[new_voxel_material_index] = material_index;
+        const new_voxel_material_index = brick_material_index.value + nth_bit;
+        self.state.*.material_indices[new_voxel_material_index] = material_index;
 
-        // material indices are packed in 32bit on GPU and 8bit on CPU
-        // we divide by four to store the correct *GPU* index.
-        // Example: index 8 point to *byte* 8 on host, 8 points to *word* 8 on gpu.
-        self.state.material_indices_delta.registerDelta(new_voxel_material_index / 4);
+        self.state.material_indices_delta.registerDelta(new_voxel_material_index);
     }
 
     // set voxel

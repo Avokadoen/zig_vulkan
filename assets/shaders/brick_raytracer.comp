@@ -141,8 +141,7 @@ layout (binding = 7) buffer BrickMaterialIndexBuffer {
 };
 
 layout (binding = 8) buffer MaterialIndicesBuffer {
-    // one entry hold 4 indices
-    readonly uint material_indices[];
+    readonly uint8_t material_indices[];
 };
 
 bool HigherGridHit(Ray r, float t_min, float t_max, out vec3 hit_min, out HitRecord hit);
@@ -430,14 +429,11 @@ bool BrickHit(
         if (hit_voxel) {
             bool ignore_brick = false;
             { // calculate material data
-                const int material_index_index = voxel_index / 4;
-                const int material_index_bit_offset = (voxel_index % 4) * 8;
-                
                 // get the material index from brick 
                 const uint brick_material_index = bitfieldExtract(brick_type_and_index[brick_index], 0, 31);
 
                 // perform material lookup
-                hit.index = bitfieldExtract(material_indices[material_index_index + brick_material_index], material_index_bit_offset, 8);
+                hit.index = material_indices[brick_material_index + voxel_index];
                 // ignore brick if we are hitting the same brick type 
                 ignore_brick = materials[hit.index].type == r.ignore_type_material && r.internal_reflection == materials[hit.index].type_data;
             }
