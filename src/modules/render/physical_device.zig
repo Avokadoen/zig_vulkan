@@ -42,15 +42,23 @@ pub const QueueFamilyIndices = struct {
         var present_index: ?u32 = null;
         for (queue_families, 0..) |queue_family, i| {
             const index: u32 = @intCast(i);
-            if (compute_index == null and queue_family.queue_flags.contains(compute_bit)) {
-                compute_index = index;
-                compute_queue_count = queue_family.queue_count;
-            }
-            if (graphics_index == null and queue_family.queue_flags.contains(graphics_bit)) {
+
+            const is_graphics = graphics_index == null and queue_family.queue_flags.contains(graphics_bit);
+            if (is_graphics) {
                 graphics_index = index;
             }
-            if (present_index == null and (try vki.getPhysicalDeviceSurfaceSupportKHR(physical_device, index, surface)) == vk.TRUE) {
+
+            const is_present = present_index == null and (try vki.getPhysicalDeviceSurfaceSupportKHR(physical_device, index, surface)) == vk.TRUE;
+            if (is_present) {
                 present_index = index;
+            }
+
+            const is_compute = queue_family.queue_flags.contains(compute_bit);
+            const id_first_compute = is_compute and compute_index == null;
+            const is_discrete_compute = is_compute and !is_graphics and !is_present;
+            if (id_first_compute or is_discrete_compute) {
+                compute_index = index;
+                compute_queue_count = queue_family.queue_count;
             }
         }
 
@@ -225,8 +233,11 @@ pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
         };
     }
 
+    var synchronization2 = vk.PhysicalDeviceSynchronization2FeaturesKHR{
+        .synchronization_2 = vk.TRUE,
+    };
     var maintenance_4_features = vk.PhysicalDeviceMaintenance4Features{
-        .p_next = null,
+        .p_next = @ptrCast(&synchronization2),
         .maintenance_4 = vk.TRUE,
     };
     var device_feature_1_2 = vk.PhysicalDeviceVulkan12Features{

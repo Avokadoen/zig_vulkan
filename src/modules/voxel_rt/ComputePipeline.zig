@@ -414,7 +414,7 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
     ctx.vkd.destroyPipeline(ctx.logical_device, self.pipeline, null);
 }
 
-pub inline fn dispatch(self: *ComputePipeline, ctx: Context, workgroup_size: WorkgroupSize, camera: Camera, sun: Sun) !vk.Semaphore {
+pub fn dispatch(self: *ComputePipeline, ctx: Context, workgroup_size: WorkgroupSize, camera: Camera, sun: Sun) !vk.Semaphore {
     {
         const wait_compute_zone = tracy.ZoneN(@src(), "idle wait compute");
         defer wait_compute_zone.End();
@@ -504,8 +504,8 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, workgroup_size: 
         &sun.device_data,
     );
 
-    const image_barrier = vk.ImageMemoryBarrier{
-        .src_access_mask = .{ .shader_read_bit = true },
+    const acquire_image_barrier = vk.ImageMemoryBarrier{
+        .src_access_mask = .{},
         .dst_access_mask = .{ .shader_write_bit = true },
         .old_layout = .shader_read_only_optimal,
         .new_layout = .general,
@@ -522,7 +522,7 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, workgroup_size: 
     };
     ctx.vkd.cmdPipelineBarrier(
         self.command_buffer,
-        .{ .fragment_shader_bit = true },
+        .{},
         .{ .compute_shader_bit = true },
         .{},
         0,
@@ -530,7 +530,7 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, workgroup_size: 
         0,
         undefined,
         1,
-        @ptrCast(&image_barrier),
+        @ptrCast(&acquire_image_barrier),
     );
 
     // bind target texture
@@ -548,6 +548,35 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, workgroup_size: 
     const y_dispatch = @ceil(self.target_image_info.height / @as(f32, @floatFromInt(workgroup_size.y)));
 
     ctx.vkd.cmdDispatch(self.command_buffer, @intFromFloat(x_dispatch), @intFromFloat(y_dispatch), 1);
+
+    const release_image_barrier = vk.ImageMemoryBarrier{
+        .src_access_mask = .{ .shader_write_bit = true },
+        .dst_access_mask = .{},
+        .old_layout = .general,
+        .new_layout = .shader_read_only_optimal,
+        .src_queue_family_index = ctx.queue_indices.compute,
+        .dst_queue_family_index = ctx.queue_indices.graphics,
+        .image = self.target_image_info.image,
+        .subresource_range = .{
+            .aspect_mask = .{ .color_bit = true },
+            .base_mip_level = 0,
+            .level_count = 1,
+            .base_array_layer = 0,
+            .layer_count = 1,
+        },
+    };
+    ctx.vkd.cmdPipelineBarrier(
+        self.command_buffer,
+        .{ .compute_shader_bit = true },
+        .{},
+        .{},
+        0,
+        undefined,
+        0,
+        undefined,
+        1,
+        @ptrCast(&release_image_barrier),
+    );
 
     if (render.consts.enable_debug_markers) {
         ctx.vkd.cmdEndDebugUtilsLabelEXT(self.command_buffer);

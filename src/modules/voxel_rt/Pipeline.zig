@@ -117,7 +117,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
             },
             .tiling = .optimal,
             .usage = .{ .sampled_bit = true, .storage_bit = true },
-            .sharing_mode = .exclusive,
+            .sharing_mode = .concurrent,
             .queue_family_index_count = @intCast(indices_len),
             .p_queue_family_indices = &indices,
             .initial_layout = .undefined,
@@ -142,10 +142,28 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     try ctx.vkd.bindImageMemory(ctx.logical_device, compute_image, image_memory, 0);
     var image_memory_size = memory_requirements.size;
 
-    // transition from undefined -> general -> shader_read_only_optimal
-    // general is need to silence validation
-    try Texture.transitionImageLayout(ctx, init_command_pool, compute_image, .undefined, .general);
-    try Texture.transitionImageLayout(ctx, init_command_pool, compute_image, .general, .shader_read_only_optimal);
+    // transition from undefined -> general -> shader_read_only_optimal -> general
+    // with queue ownership transfer is needed to silence validation
+    const transitions = [_]Texture.TransitionConfig{ .{
+        .image = compute_image,
+        .old_layout = .undefined,
+        .new_layout = .general,
+        .src_queue_family_index = ctx.queue_indices.graphics,
+        .dst_queue_family_index = ctx.queue_indices.graphics,
+    }, .{
+        .image = compute_image,
+        .old_layout = .general,
+        .new_layout = .shader_read_only_optimal,
+        .src_queue_family_index = ctx.queue_indices.graphics,
+        .dst_queue_family_index = ctx.queue_indices.graphics,
+    }, .{
+        .image = compute_image,
+        .old_layout = .shader_read_only_optimal,
+        .new_layout = .general,
+        .src_queue_family_index = ctx.queue_indices.graphics,
+        .dst_queue_family_index = ctx.queue_indices.compute,
+    } };
+    try Texture.transitionImageLayouts(ctx, init_command_pool, &transitions);
 
     const compute_image_view = blk: {
         const image_view_info = vk.ImageViewCreateInfo{
@@ -711,7 +729,7 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
     const command_buffer = self.gfx_pipeline.command_buffers[index];
     try ctx.vkd.beginCommandBuffer(command_buffer, &command_buffer_info);
 
-    if (render.consts.enable_validation_layers) {
+    if (render.consts.enable_debug_markers) {
         const debug_label = vk.DebugUtilsLabelEXT{
             .p_label_name = "GFX Pipeline",
             .color = [4]f32{ 0.1, 0.1, 0.8, 1.0 },
@@ -719,9 +737,8 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
         ctx.vkd.cmdBeginDebugUtilsLabelEXT(command_buffer, &debug_label);
     }
 
-    // make sure that compute shader writes are finished before sampling from the texture
-    const image_barrier = vk.ImageMemoryBarrier{
-        .src_access_mask = .{ .shader_write_bit = true },
+    const acquire_image_barrier = vk.ImageMemoryBarrier{
+        .src_access_mask = .{},
         .dst_access_mask = .{ .shader_read_bit = true },
         .old_layout = .general,
         .new_layout = .shader_read_only_optimal,
@@ -738,7 +755,7 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
     };
     ctx.vkd.cmdPipelineBarrier(
         command_buffer,
-        .{ .compute_shader_bit = true },
+        .{},
         .{ .fragment_shader_bit = true },
         .{},
         0,
@@ -746,7 +763,7 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
         0,
         undefined,
         1,
-        @ptrCast(&image_barrier),
+        @ptrCast(&acquire_image_barrier),
     );
 
     const render_pass_begin_info = vk.RenderPassBeginInfo{
@@ -828,7 +845,36 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
 
     ctx.vkd.cmdEndRenderPass(command_buffer);
 
-    if (render.consts.enable_validation_layers) {
+    const release_image_barrier = vk.ImageMemoryBarrier{
+        .src_access_mask = .{ .shader_read_bit = true },
+        .dst_access_mask = .{},
+        .old_layout = .shader_read_only_optimal,
+        .new_layout = .general,
+        .src_queue_family_index = ctx.queue_indices.graphics,
+        .dst_queue_family_index = ctx.queue_indices.compute,
+        .image = self.compute_image,
+        .subresource_range = .{
+            .aspect_mask = .{ .color_bit = true },
+            .base_mip_level = 0,
+            .level_count = 1,
+            .base_array_layer = 0,
+            .layer_count = 1,
+        },
+    };
+    ctx.vkd.cmdPipelineBarrier(
+        command_buffer,
+        .{ .fragment_shader_bit = true },
+        .{},
+        .{},
+        0,
+        undefined,
+        0,
+        undefined,
+        1,
+        @ptrCast(&release_image_barrier),
+    );
+
+    if (render.consts.enable_debug_markers) {
         ctx.vkd.cmdEndDebugUtilsLabelEXT(command_buffer);
     }
 

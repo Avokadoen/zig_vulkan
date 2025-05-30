@@ -495,7 +495,7 @@ pub fn recordCommandBuffer(
     const record_zone = tracy.ZoneN(@src(), "imgui commands");
     defer record_zone.End();
 
-    if (render.consts.enable_validation_layers) {
+    if (render.consts.enable_debug_markers) {
         const debug_label = vk.DebugUtilsLabelEXT{
             .p_label_name = "Imgui UI",
             .color = [4]f32{ 0.1, 0.5, 0.2, 1.0 },

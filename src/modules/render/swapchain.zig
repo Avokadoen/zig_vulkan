@@ -123,9 +123,19 @@ pub const Data = struct {
         };
         errdefer allocator.free(swapchain_images);
 
-        for (swapchain_images) |image| {
-            try Texture.transitionImageLayout(ctx, command_pool, image, .undefined, .present_src_khr);
+        // Assumption: you will never have more than 16 swapchain images..
+        const max_swapchain_size = 16;
+        std.debug.assert(swapchain_images.len <= max_swapchain_size);
+
+        var transition_configs: [max_swapchain_size]Texture.TransitionConfig = undefined;
+        for (transition_configs[0..swapchain_images.len], swapchain_images) |*transition_config, image| {
+            transition_config.* = .{
+                .image = image,
+                .old_layout = .undefined,
+                .new_layout = .present_src_khr,
+            };
         }
+        try Texture.transitionImageLayouts(ctx, command_pool, transition_configs[0..swapchain_images.len]);
 
         const image_views = blk: {
             var views = try allocator.alloc(vk.ImageView, swapchain_images.len);
