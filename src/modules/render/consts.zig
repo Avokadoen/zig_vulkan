@@ -4,6 +4,7 @@ const builtin = @import("builtin");
 const vk = @import("vulkan");
 
 // enable validation layer in debug
+pub const enable_debug_markers = builtin.mode == .Debug;
 pub const enable_validation_layers = builtin.mode == .Debug;
 pub const engine_name = "nop";
 pub const engine_version = vk.makeApiVersion(0, 0, 1, 0);

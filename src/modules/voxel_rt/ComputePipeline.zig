@@ -473,6 +473,15 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, workgroup_size: 
         .p_inheritance_info = null,
     };
     try ctx.vkd.beginCommandBuffer(self.command_buffer, &command_begin_info);
+
+    if (render.consts.enable_debug_markers) {
+        const debug_label = vk.DebugUtilsLabelEXT{
+            .p_label_name = "Voxel Raytracing Cmds",
+            .color = [4]f32{ 0.5, 0.0, 0.3, 1.0 },
+        };
+        ctx.vkd.cmdBeginDebugUtilsLabelEXT(self.command_buffer, &debug_label);
+    }
+
     ctx.vkd.cmdBindPipeline(self.command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
 
     // push camera data as a push constant
@@ -539,6 +548,11 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, workgroup_size: 
     const y_dispatch = @ceil(self.target_image_info.height / @as(f32, @floatFromInt(workgroup_size.y)));
 
     ctx.vkd.cmdDispatch(self.command_buffer, @intFromFloat(x_dispatch), @intFromFloat(y_dispatch), 1);
+
+    if (render.consts.enable_debug_markers) {
+        ctx.vkd.cmdEndDebugUtilsLabelEXT(self.command_buffer);
+    }
+
     try ctx.vkd.endCommandBuffer(self.command_buffer);
 }
 

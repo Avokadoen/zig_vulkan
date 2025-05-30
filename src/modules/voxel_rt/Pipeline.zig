@@ -711,6 +711,14 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
     const command_buffer = self.gfx_pipeline.command_buffers[index];
     try ctx.vkd.beginCommandBuffer(command_buffer, &command_buffer_info);
 
+    if (render.consts.enable_validation_layers) {
+        const debug_label = vk.DebugUtilsLabelEXT{
+            .p_label_name = "GFX Pipeline",
+            .color = [4]f32{ 0.1, 0.1, 0.8, 1.0 },
+        };
+        ctx.vkd.cmdBeginDebugUtilsLabelEXT(command_buffer, &debug_label);
+    }
+
     // make sure that compute shader writes are finished before sampling from the texture
     const image_barrier = vk.ImageMemoryBarrier{
         .src_access_mask = .{ .shader_write_bit = true },
@@ -819,6 +827,10 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
     );
 
     ctx.vkd.cmdEndRenderPass(command_buffer);
+
+    if (render.consts.enable_validation_layers) {
+        ctx.vkd.cmdEndDebugUtilsLabelEXT(command_buffer);
+    }
 
     try ctx.vkd.endCommandBuffer(command_buffer);
 }
