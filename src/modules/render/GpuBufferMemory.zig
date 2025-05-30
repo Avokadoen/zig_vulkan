@@ -106,7 +106,9 @@ pub fn map(self: *GpuBufferMemory, ctx: Context, offset: vk.DeviceSize, size: vk
             break :blk vk.WHOLE_SIZE;
         }
         const atom_size = memory_util.nonCoherentAtomSize(ctx, size);
-        if (atom_size + offset > self.size) return error.InsufficientMemory; // size greater than buffer
+        if (atom_size + offset > self.size) {
+            return error.InsufficientMemory;
+        }
         break :blk atom_size;
     };
 
