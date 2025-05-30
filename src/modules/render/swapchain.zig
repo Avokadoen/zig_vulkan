@@ -71,22 +71,10 @@ pub const Data = struct {
                 index_count: u32,
                 p_indices: [*]const u32,
             };
-            const sharing_config = blk2: {
-                if (ctx.queue_indices.graphics != ctx.queue_indices.present) {
-                    const indices_arr = [_]u32{ ctx.queue_indices.graphics, ctx.queue_indices.present };
-                    break :blk2 Config{
-                        .sharing_mode = .concurrent, // TODO: read up on ownership in this context
-                        .index_count = indices_arr.len,
-                        .p_indices = @ptrCast(&indices_arr[0..indices_arr.len]),
-                    };
-                } else {
-                    const indices_arr = [_]u32{ ctx.queue_indices.graphics, ctx.queue_indices.present };
-                    break :blk2 Config{
-                        .sharing_mode = .exclusive,
-                        .index_count = 1,
-                        .p_indices = @ptrCast(&indices_arr[0..1]),
-                    };
-                }
+            const sharing_config = Config{
+                .sharing_mode = .exclusive,
+                .index_count = 1,
+                .p_indices = @ptrCast(&ctx.queue_indices.graphics),
             };
 
             break :blk1 vk.SwapchainCreateInfoKHR{

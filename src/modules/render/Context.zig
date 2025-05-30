@@ -31,7 +31,6 @@ logical_device: vk.Device,
 
 compute_queue: vk.Queue,
 graphics_queue: vk.Queue,
-present_queue: vk.Queue,
 
 surface: vk.SurfaceKHR,
 queue_indices: QueueFamilyIndices,
@@ -158,7 +157,6 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *zglfw.W
     self.vkd = dispatch.Device.load(self.logical_device, self.vki.dispatch.vkGetDeviceProcAddr.?);
     self.compute_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.compute, 0);
     self.graphics_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.graphics, 0);
-    self.present_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.present, 0);
 
     self.physical_device_limits = self.getPhysicalDeviceProperties().limits;
 
@@ -174,7 +172,6 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *zglfw.W
         .logical_device = self.logical_device,
         .compute_queue = self.compute_queue,
         .graphics_queue = self.graphics_queue,
-        .present_queue = self.present_queue,
         .physical_device_limits = self.physical_device_limits,
         .surface = self.surface,
         .queue_indices = self.queue_indices,

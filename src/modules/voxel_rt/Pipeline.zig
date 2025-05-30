@@ -395,7 +395,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
 pub fn deinit(self: Pipeline, ctx: Context) void {
     ctx.vkd.queueWaitIdle(ctx.compute_queue) catch {};
     ctx.vkd.queueWaitIdle(ctx.graphics_queue) catch {};
-    ctx.vkd.queueWaitIdle(ctx.present_queue) catch {};
 
     for (self.render_complete_semaphores) |semaphore| {
         ctx.vkd.destroySemaphore(ctx.logical_device, semaphore, null);

@@ -15,7 +15,6 @@ pub const QueueFamilyIndices = struct {
     compute: u32,
     compute_queue_count: u32,
     graphics: u32,
-    present: u32,
 
     // TODO: use internal allocator that is suitable
     /// Initialize a QueueFamilyIndices instance, internal allocation is handled by QueueFamilyIndices (no manuall cleanup)
@@ -44,12 +43,9 @@ pub const QueueFamilyIndices = struct {
             const index: u32 = @intCast(i);
 
             const is_graphics = graphics_index == null and queue_family.queue_flags.contains(graphics_bit);
-            if (is_graphics) {
-                graphics_index = index;
-            }
-
             const is_present = present_index == null and (try vki.getPhysicalDeviceSurfaceSupportKHR(physical_device, index, surface)) == vk.TRUE;
-            if (is_present) {
+            if (is_graphics and is_present) {
+                graphics_index = index;
                 present_index = index;
             }
 
@@ -76,7 +72,6 @@ pub const QueueFamilyIndices = struct {
             .compute = compute_index.?,
             .compute_queue_count = compute_queue_count,
             .graphics = graphics_index.?,
-            .present = present_index.?,
         };
     }
 };
@@ -209,13 +204,9 @@ fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.Phys
 pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
 
     // merge indices if they are identical according to vulkan spec
-    var family_indices = [3]u32{ ctx.queue_indices.graphics, undefined, undefined };
+    var family_indices = [_]u32{ ctx.queue_indices.graphics, undefined };
     var indices: usize = 1;
-    if (ctx.queue_indices.graphics != ctx.queue_indices.present) {
-        family_indices[indices] = ctx.queue_indices.present;
-        indices += 1;
-    }
-    if (ctx.queue_indices.compute != ctx.queue_indices.graphics and ctx.queue_indices.compute != ctx.queue_indices.present) {
+    if (ctx.queue_indices.compute != ctx.queue_indices.graphics) {
         family_indices[indices] = ctx.queue_indices.compute;
         indices += 1;
     }
