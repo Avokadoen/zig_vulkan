@@ -21,17 +21,6 @@ buffer: vk.Buffer,
 memory: vk.DeviceMemory,
 mapped: ?*anyopaque,
 
-/// create a undefined buffer that can be utilized later
-pub fn @"undefined"() GpuBufferMemory {
-    return GpuBufferMemory{
-        .len = 0,
-        .size = 0,
-        .buffer = .null_handle,
-        .memory = .null_handle,
-        .mapped = null,
-    };
-}
-
 /// user has to make sure to call deinit on buffer
 pub fn init(ctx: Context, size: vk.DeviceSize, buf_usage_flags: vk.BufferUsageFlags, mem_prop_flags: vk.MemoryPropertyFlags) !GpuBufferMemory {
     const buffer = blk: {
@@ -85,42 +74,6 @@ pub fn copy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, command
     };
     ctx.vkd.cmdCopyBuffer(command_buffer, self.buffer, into.buffer, 1, @ptrCast(&copy_region));
     try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, command_buffer);
-}
-
-/// Same as copy but caller manage synchronization
-pub fn manualCopy(self: GpuBufferMemory, ctx: Context, into: *GpuBufferMemory, command_buffer: vk.CommandBuffer, fence: vk.Fence, config: CopyConfig) !void {
-    var copy_region = vk.BufferCopy{
-        .src_offset = config.src_offset,
-        .dst_offset = config.dst_offset,
-        .size = config.size,
-    };
-    const begin_info = vk.CommandBufferBeginInfo{
-        .flags = .{
-            .one_time_submit_bit = true,
-        },
-        .p_inheritance_info = null,
-    };
-
-    try ctx.vkd.beginCommandBuffer(command_buffer, &begin_info);
-    ctx.vkd.cmdCopyBuffer(command_buffer, self.buffer, into.buffer, 1, @ptrCast(&copy_region));
-    try ctx.vkd.endCommandBuffer(command_buffer);
-
-    {
-        @setRuntimeSafety(false);
-        const semo_null_ptr: [*c]const vk.Semaphore = null;
-        const wait_null_ptr: [*c]const vk.PipelineStageFlags = null;
-        // perform the compute ray tracing, draw to target texture
-        const submit_info = vk.SubmitInfo{
-            .wait_semaphore_count = 0,
-            .p_wait_semaphores = semo_null_ptr,
-            .p_wait_dst_stage_mask = wait_null_ptr,
-            .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast(&command_buffer),
-            .signal_semaphore_count = 0,
-            .p_signal_semaphores = semo_null_ptr,
-        };
-        try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @ptrCast(&submit_info), fence);
-    }
 }
 
 /// Transfer data from host to device
