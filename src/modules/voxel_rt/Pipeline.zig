@@ -316,8 +316,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     };
     errdefer compute_pipeline.deinit(ctx);
 
-    try compute_pipeline.recordCommandBuffer(ctx, compute_workgroup_size, camera.*, sun.*);
-
     var staging_buffers = try StagingRamp.init(ctx, allocator, config.staging_buffers);
     errdefer staging_buffers.deinit(ctx, allocator);
 
