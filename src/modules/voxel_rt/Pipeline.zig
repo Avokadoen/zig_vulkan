@@ -271,8 +271,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     const compute_workgroup_size = ComputePipeline.calculateDefaultWorkgroupSize(ctx);
     var compute_pipeline = blk: {
         const uniform_sizes = [_]u64{
-            // use storage min size for last uniform entry
-            MinSize.storage(ctx, @sizeOf(GridState.Device)),
+            MinSize.uniform(ctx, @sizeOf(GridState.Device)),
         };
         const storage_sizes = [_]u64{
             MinSize.storage(ctx, @sizeOf(gpu_types.Material) * config.material_buffer),
