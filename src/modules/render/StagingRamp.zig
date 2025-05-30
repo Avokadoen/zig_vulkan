@@ -230,7 +230,7 @@ const StagingBuffer = struct {
             ctx,
             buffer_size,
             .{ .transfer_src_bit = true },
-            .{ .host_visible_bit = true, .host_coherent_bit = true, .device_local_bit = true },
+            .{ .host_visible_bit = true },
         );
         errdefer device_buffer_memory.deinit(ctx);
 
