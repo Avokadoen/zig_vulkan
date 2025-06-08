@@ -58,6 +58,12 @@ pub fn init(ctx: Context, size: vk.DeviceSize, buf_usage_flags: vk.BufferUsageFl
     };
 }
 
+pub inline fn checkCapacity(self: GpuBufferMemory, ctx: Context, extra: vk.DeviceSize) error{InsufficientMemory}!void {
+    if (memory_util.nonCoherentAtomSize(ctx, self.len + extra) > self.size) {
+        return error.InsufficientMemory;
+    }
+}
+
 pub const CopyConfig = struct {
     src_offset: vk.DeviceSize = 0,
     dst_offset: vk.DeviceSize = 0,

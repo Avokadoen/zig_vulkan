@@ -7,13 +7,13 @@ const zglfw = @import("zglfw");
 const za = @import("zalgebra");
 const ztracy = @import("ztracy");
 
-const render = @import("modules/render.zig");
+const render = @import("render.zig");
 const consts = render.consts;
 
-const input = @import("modules/input.zig");
+const input = @import("input.zig");
 
 // TODO: API topology
-const VoxelRT = @import("modules/VoxelRT.zig");
+const VoxelRT = @import("VoxelRT.zig");
 const BrickGrid = VoxelRT.BrickGrid;
 const gpu_types = VoxelRT.gpu_types;
 const vox = VoxelRT.vox;
@@ -126,6 +126,11 @@ pub fn main() anyerror!void {
             .type_data = material_data,
         };
     }
+
+    // for (0..8) |index| {
+    //     // grid.insert(index, (64 * 4) - 1, 1, 0);
+    //     grid.insert(index, 3, 0, @intCast(index));
+    // }
 
     // Test what we are loading
     for (model.xyzi_chunks[0]) |xyzi| {
