@@ -8,7 +8,7 @@ const shaders = @import("shaders");
 const vk = @import("vulkan");
 const render = @import("../render.zig");
 const Context = render.Context;
-const Texture = render.Texture;
+const texture = render.texture;
 const vk_utils = render.vk_utils;
 const memory = render.memory;
 
@@ -141,7 +141,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
 
     // transition from undefined -> general -> shader_read_only_optimal -> general
     // with queue ownership transfer is needed to silence validation
-    const transitions = [_]Texture.TransitionConfig{ .{
+    const transitions = [_]texture.TransitionConfig{ .{
         .image = compute_image,
         .old_layout = .undefined,
         .new_layout = .general,
@@ -160,7 +160,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .src_queue_family_index = ctx.queue_indices.graphics,
         .dst_queue_family_index = ctx.queue_indices.compute,
     } };
-    try Texture.transitionImageLayouts(ctx, init_command_pool, &transitions);
+    try texture.transitionImageLayouts(ctx, init_command_pool, &transitions);
 
     const compute_image_view = blk: {
         const image_view_info = vk.ImageViewCreateInfo{

@@ -7,7 +7,7 @@ const tracy = @import("ztracy");
 const render = @import("../render.zig");
 const Context = render.Context;
 const GpuBufferMemory = render.GpuBufferMemory;
-const Texture = render.Texture;
+const texture = render.texture;
 const memory = render.memory;
 
 pub const buffer_size = 63 * memory.bytes_in_mb;
@@ -394,7 +394,7 @@ const StagingBuffer = struct {
 
             for (self.image_copy.items) |copy| {
                 {
-                    const transfer_transition = Texture.getTransitionBits(copy.src_layout, .transfer_dst_optimal);
+                    const transfer_transition = texture.getTransitionBits(copy.src_layout, .transfer_dst_optimal);
                     const transfer_barrier = vk.ImageMemoryBarrier{
                         .src_access_mask = transfer_transition.src_mask,
                         .dst_access_mask = transfer_transition.dst_mask,
@@ -437,7 +437,7 @@ const StagingBuffer = struct {
                 );
 
                 {
-                    const read_only_transition = Texture.getTransitionBits(.transfer_dst_optimal, copy.dst_layout);
+                    const read_only_transition = texture.getTransitionBits(.transfer_dst_optimal, copy.dst_layout);
                     const read_only_barrier = vk.ImageMemoryBarrier{
                         .src_access_mask = read_only_transition.src_mask,
                         .dst_access_mask = read_only_transition.dst_mask,
