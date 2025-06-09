@@ -22,10 +22,10 @@ const terrain = VoxelRT.terrain;
 const ecez = @import("ecez");
 
 pub const Storage = ecez.CreateStorage(.{
-    input.Component.ImguiContext,
-    input.Component.UserInput,
-    input.Component.PrevCursorPos,
-    input.Component.MenuActiveTag,
+    input.component.ImguiContext,
+    input.component.UserInput,
+    input.component.PrevCursorPos,
+    input.component.MenuActiveTag,
 });
 
 pub const InputTypes = input.CreateInputTypes(Storage);
@@ -174,7 +174,7 @@ pub fn main() anyerror!void {
     );
     defer input_rt.deinit(allocator, window);
 
-    var input_update_event_arg = input.EventArgument.Update{
+    var input_update_event_arg = input.event_argument.Update{
         .window = window,
         .voxel_rt = &voxel_rt,
         .dt = 0,

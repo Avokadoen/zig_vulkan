@@ -5,119 +5,16 @@ const zgui = @import("zgui");
 const za = @import("zalgebra");
 
 const zglfw = @import("zglfw");
-const WindowHandle = zglfw.Window;
 const Key = zglfw.Key;
 const Action = zglfw.Action;
 const Mods = zglfw.Mods;
 const MouseButton = zglfw.MouseButton;
 
-const VoxelRT = @import("VoxelRT.zig");
-
 const ecez = @import("ecez");
 
-pub const EventArgument = struct {
-    pub const Update = struct {
-        window: *zglfw.Window,
-        voxel_rt: *VoxelRT,
-        dt: f32,
-    };
-
-    pub const KeyEvent = struct {
-        window: *zglfw.Window,
-        key: Key,
-        action: Action,
-        mods: Mods,
-    };
-
-    pub const MouseButtonEvent = struct {
-        button: MouseButton,
-        action: Action,
-        mods: Mods,
-    };
-
-    pub const CursorPosEvent = struct {
-        x: f64,
-        y: f64,
-    };
-
-    pub const CharEvent = struct {
-        codepoint: u21,
-    };
-
-    pub const ScrollEvent = struct {
-        offset_x: f32,
-        offset_y: f32,
-    };
-};
-
-pub const Component = struct {
-    pub const ImguiContext = struct {
-        hand: *zglfw.Cursor,
-        arrow: *zglfw.Cursor,
-        ibeam: *zglfw.Cursor,
-        crosshair: *zglfw.Cursor,
-        resize_ns: *zglfw.Cursor,
-        resize_ew: *zglfw.Cursor,
-        resize_nesw: *zglfw.Cursor,
-        resize_nwse: *zglfw.Cursor,
-        not_allowed: *zglfw.Cursor,
-    };
-
-    // TODO: remove VecN from component
-    pub const UserInput = struct {
-        activate_sprint: bool,
-        call_translate: u8,
-        camera_translate: za.Vec3,
-        call_yaw: bool,
-        call_pitch: bool,
-        mouse_delta: za.Vec2,
-        mouse_ignore_frames: u32,
-    };
-
-    pub const PrevCursorPos = struct {
-        event: EventArgument.CursorPosEvent,
-    };
-
-    pub const MenuActiveTag = struct {};
-};
-
-pub const Queries = struct {
-    pub const GameUserInput = ecez.QueryAny(
-        struct {
-            entity: ecez.Entity,
-            user_input: *Component.UserInput,
-        },
-        .{},
-        .{
-            Component.MenuActiveTag,
-        },
-    );
-
-    pub const MenuUserInput = ecez.QueryAny(
-        struct {
-            entity: ecez.Entity,
-            user_input: *Component.UserInput,
-        },
-        .{
-            Component.MenuActiveTag,
-        },
-        .{},
-    );
-
-    pub const MenuActive = ecez.QueryAny(
-        struct {},
-        .{Component.MenuActiveTag},
-        .{},
-    );
-
-    pub const ImguiContext = ecez.QueryAny(
-        struct {
-            ctx: Component.ImguiContext,
-        },
-        .{},
-        .{},
-    );
-};
+pub const component = @import("input/component.zig");
+pub const event_argument = @import("input/event_argument.zig");
+pub const queries = @import("input/queries.zig");
 
 pub fn CreateInputTypes(comptime Storage: type) type {
     return struct {
@@ -164,16 +61,16 @@ pub fn CreateInputTypes(comptime Storage: type) type {
         };
 
         pub const SubStorages = struct {
-            pub const MenuActive = Storage.Subset(.{*Component.MenuActiveTag});
+            pub const MenuActive = Storage.Subset(.{*component.MenuActiveTag});
 
-            pub const PrevCursorPos = Storage.Subset(.{*Component.PrevCursorPos});
+            pub const PrevCursorPos = Storage.Subset(.{*component.PrevCursorPos});
         };
 
         const Systems = struct {
             pub const Update = struct {
                 pub fn game(
-                    state: *Queries.GameUserInput,
-                    event: EventArgument.Update,
+                    state: *queries.GameUserInput,
+                    event: event_argument.Update,
                 ) void {
                     if (state.getAny()) |item_entity| {
                         const user_input = item_entity.user_input;
@@ -205,9 +102,9 @@ pub fn CreateInputTypes(comptime Storage: type) type {
 
                 /// update cursor based on imgui
                 pub fn menu(
-                    state: *Queries.MenuUserInput,
-                    imgui_ctx: *Queries.ImguiContext,
-                    event: EventArgument.Update,
+                    state: *queries.MenuUserInput,
+                    imgui_ctx: *queries.ImguiContext,
+                    event: event_argument.Update,
                 ) void {
                     if (state.getAny()) |item_entity| {
                         const user_input = item_entity.user_input;
@@ -215,7 +112,7 @@ pub fn CreateInputTypes(comptime Storage: type) type {
                         user_input.mouse_ignore_frames -= if (user_input.mouse_ignore_frames > 0) 1 else 0;
 
                         const window = event.window;
-                        const imgui_context: Component.ImguiContext = imgui_ctx.getAny().?.ctx;
+                        const imgui_context: component.ImguiContext = imgui_ctx.getAny().?.ctx;
 
                         switch (zgui.getMouseCursor()) {
                             .none => window.setInputMode(.cursor, .hidden) catch {},
@@ -236,45 +133,45 @@ pub fn CreateInputTypes(comptime Storage: type) type {
 
             pub const HandleKeyEvent = struct {
                 pub fn game(
-                    state: *Queries.GameUserInput,
+                    state: *queries.GameUserInput,
                     menu_active_storage: *SubStorages.MenuActive,
-                    event: EventArgument.KeyEvent,
+                    event: event_argument.KeyEvent,
                 ) void {
                     if (state.getAny()) |input_entity| {
                         const user_input = input_entity.user_input;
 
                         if (event.action == .press) {
                             switch (event.key) {
-                                Key.w => {
+                                .w => {
                                     user_input.call_translate += 1;
                                     user_input.camera_translate.data[2] -= 1;
                                 },
-                                Key.s => {
+                                .s => {
                                     user_input.call_translate += 1;
                                     user_input.camera_translate.data[2] += 1;
                                 },
-                                Key.d => {
+                                .d => {
                                     user_input.call_translate += 1;
                                     user_input.camera_translate.data[0] += 1;
                                 },
-                                Key.a => {
+                                .a => {
                                     user_input.call_translate += 1;
                                     user_input.camera_translate.data[0] -= 1;
                                 },
-                                Key.left_control => {
+                                .left_control => {
                                     user_input.call_translate += 1;
                                     user_input.camera_translate.data[1] += 1;
                                 },
-                                Key.left_shift => user_input.activate_sprint = true,
-                                Key.space => {
+                                .left_shift => user_input.activate_sprint = true,
+                                .space => {
                                     user_input.call_translate += 1;
                                     user_input.camera_translate.data[1] -= 1;
                                 },
-                                Key.escape => {
+                                .escape => {
                                     if (user_input.mouse_ignore_frames == 0) {
                                         user_input.mouse_ignore_frames = 5;
 
-                                        menu_active_storage.setComponents(input_entity.entity, .{Component.MenuActiveTag{}}) catch {};
+                                        menu_active_storage.setComponents(input_entity.entity, .{component.MenuActiveTag{}}) catch {};
                                         event.window.setInputMode(.cursor, .normal) catch {};
                                     }
                                 },
@@ -282,30 +179,30 @@ pub fn CreateInputTypes(comptime Storage: type) type {
                             }
                         } else if (event.action == .release) {
                             switch (event.key) {
-                                Key.w => {
+                                .w => {
                                     user_input.call_translate -= 1;
                                     user_input.camera_translate.data[2] += 1;
                                 },
-                                Key.s => {
+                                .s => {
                                     user_input.call_translate -= 1;
                                     user_input.camera_translate.data[2] -= 1;
                                 },
-                                Key.d => {
+                                .d => {
                                     user_input.call_translate -= 1;
                                     user_input.camera_translate.data[0] -= 1;
                                 },
-                                Key.a => {
+                                .a => {
                                     user_input.call_translate -= 1;
                                     user_input.camera_translate.data[0] += 1;
                                 },
-                                Key.left_control => {
+                                .left_control => {
                                     user_input.call_translate -= 1;
                                     user_input.camera_translate.data[1] -= 1;
                                 },
-                                Key.left_shift => {
+                                .left_shift => {
                                     user_input.activate_sprint = false;
                                 },
-                                Key.space => {
+                                .space => {
                                     user_input.call_translate -= 1;
                                     user_input.camera_translate.data[1] += 1;
                                 },
@@ -316,9 +213,9 @@ pub fn CreateInputTypes(comptime Storage: type) type {
                 }
 
                 pub fn menu(
-                    state: *Queries.MenuUserInput,
+                    state: *queries.MenuUserInput,
                     menu_active_storage: *SubStorages.MenuActive,
-                    event: EventArgument.KeyEvent,
+                    event: event_argument.KeyEvent,
                 ) void {
                     if (state.getAny()) |input_entity| {
                         const user_input = input_entity.user_input;
@@ -331,7 +228,7 @@ pub fn CreateInputTypes(comptime Storage: type) type {
                                         // ignore first 5 frames of input after
                                         user_input.mouse_ignore_frames = 5;
 
-                                        menu_active_storage.unsetComponents(input_entity.entity, .{Component.MenuActiveTag});
+                                        menu_active_storage.unsetComponents(input_entity.entity, .{component.MenuActiveTag});
                                         event.window.setInputMode(.cursor, .disabled) catch {};
                                     }
                                 },
@@ -339,10 +236,10 @@ pub fn CreateInputTypes(comptime Storage: type) type {
                             }
                         }
 
-                        zgui.io.addKeyEvent(zgui.Key.mod_shift, event.mods.shift);
-                        zgui.io.addKeyEvent(zgui.Key.mod_ctrl, event.mods.control);
-                        zgui.io.addKeyEvent(zgui.Key.mod_alt, event.mods.alt);
-                        zgui.io.addKeyEvent(zgui.Key.mod_super, event.mods.super);
+                        zgui.io.addKeyEvent(.mod_shift, event.mods.shift);
+                        zgui.io.addKeyEvent(.mod_ctrl, event.mods.control);
+                        zgui.io.addKeyEvent(.mod_alt, event.mods.alt);
+                        zgui.io.addKeyEvent(.mod_super, event.mods.super);
                         // zgui.addKeyEvent(zgui.Key.mod_caps_lock, mod.caps_lock);
                         // zgui.addKeyEvent(zgui.Key.mod_num_lock, mod.num_lock);
 
@@ -353,8 +250,8 @@ pub fn CreateInputTypes(comptime Storage: type) type {
 
             pub const HandleMouseButton = struct {
                 pub fn menu(
-                    state: *Queries.MenuActive,
-                    event: EventArgument.MouseButtonEvent,
+                    state: *queries.MenuActive,
+                    event: event_argument.MouseButtonEvent,
                 ) void {
                     if (state.getAny()) |_| {
                         if (switch (event.button) {
@@ -364,10 +261,10 @@ pub fn CreateInputTypes(comptime Storage: type) type {
                             .four, .five, .six, .seven, .eight => null,
                         }) |zgui_button| {
                             // apply modifiers
-                            zgui.io.addKeyEvent(zgui.Key.mod_shift, event.mods.shift);
-                            zgui.io.addKeyEvent(zgui.Key.mod_ctrl, event.mods.control);
-                            zgui.io.addKeyEvent(zgui.Key.mod_alt, event.mods.alt);
-                            zgui.io.addKeyEvent(zgui.Key.mod_super, event.mods.super);
+                            zgui.io.addKeyEvent(.mod_shift, event.mods.shift);
+                            zgui.io.addKeyEvent(.mod_ctrl, event.mods.control);
+                            zgui.io.addKeyEvent(.mod_alt, event.mods.alt);
+                            zgui.io.addKeyEvent(.mod_super, event.mods.super);
 
                             zgui.io.addMouseButtonEvent(zgui_button, event.action == .press);
                         }
@@ -377,14 +274,14 @@ pub fn CreateInputTypes(comptime Storage: type) type {
 
             pub const HandleCursorPos = struct {
                 pub fn game(
-                    state: *Queries.GameUserInput,
+                    state: *queries.GameUserInput,
                     prev_event_storage: *SubStorages.PrevCursorPos,
-                    event: EventArgument.CursorPosEvent,
+                    event: event_argument.CursorPosEvent,
                 ) void {
                     if (state.getAny()) |item| {
-                        const prev_cursor_pos = prev_event_storage.getComponent(item.entity, *Component.PrevCursorPos) catch null;
+                        const prev_cursor_pos = prev_event_storage.getComponent(item.entity, *component.PrevCursorPos) catch null;
                         defer {
-                            prev_event_storage.setComponents(item.entity, .{Component.PrevCursorPos{
+                            prev_event_storage.setComponents(item.entity, .{component.PrevCursorPos{
                                 .event = event,
                             }}) catch {};
                         }
@@ -403,8 +300,8 @@ pub fn CreateInputTypes(comptime Storage: type) type {
                 }
 
                 pub fn menu(
-                    state: *Queries.MenuActive,
-                    event: EventArgument.CursorPosEvent,
+                    state: *queries.MenuActive,
+                    event: event_argument.CursorPosEvent,
                 ) void {
                     if (state.getAny()) |_| {
                         zgui.io.addMousePositionEvent(@floatCast(event.x), @floatCast(event.y));
@@ -414,8 +311,8 @@ pub fn CreateInputTypes(comptime Storage: type) type {
 
             pub const HandleChar = struct {
                 pub fn menu(
-                    state: *Queries.MenuActive,
-                    event: EventArgument.CharEvent,
+                    state: *queries.MenuActive,
+                    event: event_argument.CharEvent,
                 ) void {
                     if (state.getAny()) |_| {
                         var buffer: [8]u8 = undefined;
@@ -429,8 +326,8 @@ pub fn CreateInputTypes(comptime Storage: type) type {
 
             pub const HandleScroll = struct {
                 pub fn menu(
-                    state: *Queries.MenuActive,
-                    event: EventArgument.ScrollEvent,
+                    state: *queries.MenuActive,
+                    event: event_argument.ScrollEvent,
                 ) void {
                     if (state.getAny()) |_| {
                         zgui.io.addMouseWheelEvent(
@@ -447,7 +344,6 @@ pub fn CreateInputTypes(comptime Storage: type) type {
 pub const Config = struct {
     camera_translate: za.Vec3 = .zero(),
 };
-
 pub fn CreateInputRuntime(comptime Storage: type, comptime Scheduler: type) type {
     return struct {
         const InputRuntime = @This();
@@ -475,7 +371,7 @@ pub fn CreateInputRuntime(comptime Storage: type, comptime Scheduler: type) type
             const imgui_context = try linkImguiCodes();
             errdefer unlinkImguiCodes(imgui_context);
 
-            const user_input = Component.UserInput{
+            const user_input = component.UserInput{
                 .activate_sprint = false,
                 .call_translate = 0,
                 .camera_translate = config.camera_translate,
@@ -509,7 +405,7 @@ pub fn CreateInputRuntime(comptime Storage: type, comptime Scheduler: type) type
             const window_context = window.getUserPointer(CallbackWindowContext).?;
             defer allocator.destroy(window_context);
 
-            const imgui_context = window_context.storage.getComponent(self.input_ctx_entity, Component.ImguiContext) catch unreachable;
+            const imgui_context = window_context.storage.getComponent(self.input_ctx_entity, component.ImguiContext) catch unreachable;
             unlinkImguiCodes(imgui_context);
 
             window.setUserPointer(null);
@@ -528,7 +424,7 @@ pub fn CreateInputRuntime(comptime Storage: type, comptime Scheduler: type) type
 
             var owned_mods = mods;
             const parsed_mods: *Mods = @ptrCast(&owned_mods);
-            const event = EventArgument.KeyEvent{
+            const event = event_argument.KeyEvent{
                 .window = window,
                 .key = key,
                 .action = action,
@@ -544,7 +440,7 @@ pub fn CreateInputRuntime(comptime Storage: type, comptime Scheduler: type) type
             var owned_mods = mods;
             const parsed_mods: *Mods = @ptrCast(&owned_mods);
 
-            const event = EventArgument.MouseButtonEvent{
+            const event = event_argument.MouseButtonEvent{
                 .button = button,
                 .action = action,
                 .mods = parsed_mods.*,
@@ -555,7 +451,7 @@ pub fn CreateInputRuntime(comptime Storage: type, comptime Scheduler: type) type
         fn cursorPosCallback(window: *zglfw.Window, x_pos: f64, y_pos: f64) callconv(.c) void {
             const context = if (window.getUserPointer(CallbackWindowContext)) |some| some else return;
 
-            const event = EventArgument.CursorPosEvent{
+            const event = event_argument.CursorPosEvent{
                 .x = x_pos,
                 .y = y_pos,
             };
@@ -565,7 +461,7 @@ pub fn CreateInputRuntime(comptime Storage: type, comptime Scheduler: type) type
         fn charCallback(window: *zglfw.Window, codepoint: u32) callconv(.c) void {
             const context = if (window.getUserPointer(CallbackWindowContext)) |some| some else return;
 
-            const event = EventArgument.CharEvent{
+            const event = event_argument.CharEvent{
                 .codepoint = @intCast(codepoint),
             };
             context.scheduler.dispatchEvent(context.storage, .input_on_char, event);
@@ -574,7 +470,7 @@ pub fn CreateInputRuntime(comptime Storage: type, comptime Scheduler: type) type
         fn scrollCallback(window: *zglfw.Window, xoffset: f64, yoffset: f64) callconv(.c) void {
             const context = if (window.getUserPointer(CallbackWindowContext)) |some| some else return;
 
-            const event = EventArgument.ScrollEvent{
+            const event = event_argument.ScrollEvent{
                 .offset_x = @floatCast(xoffset),
                 .offset_y = @floatCast(yoffset),
             };
@@ -596,7 +492,7 @@ pub fn CreateInputRuntime(comptime Storage: type, comptime Scheduler: type) type
         }
 
         /// link imgui and glfw codes
-        fn linkImguiCodes() !Component.ImguiContext {
+        fn linkImguiCodes() !component.ImguiContext {
             const hand = try zglfw.Cursor.createStandard(.hand);
             errdefer hand.destroy();
             const arrow = try zglfw.Cursor.createStandard(.arrow);
@@ -616,7 +512,7 @@ pub fn CreateInputRuntime(comptime Storage: type, comptime Scheduler: type) type
             const not_allowed = try zglfw.Cursor.createStandard(.not_allowed);
             errdefer not_allowed.destroy();
 
-            return Component.ImguiContext{
+            return component.ImguiContext{
                 .hand = hand,
                 .arrow = arrow,
                 .ibeam = ibeam,
@@ -629,7 +525,7 @@ pub fn CreateInputRuntime(comptime Storage: type, comptime Scheduler: type) type
             };
         }
 
-        fn unlinkImguiCodes(imgui_context: Component.ImguiContext) void {
+        fn unlinkImguiCodes(imgui_context: component.ImguiContext) void {
             imgui_context.hand.destroy();
             imgui_context.arrow.destroy();
             imgui_context.ibeam.destroy();
