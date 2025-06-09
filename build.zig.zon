@@ -33,6 +33,10 @@
             .url = "git+https://github.com/Games-by-Mason/shader_compiler#7a28b4dbab429ebf17ac5b26aac4d660a97052b1",
             .hash = "shader_compiler-1.0.0-bOVsasuGAADsqQPvVDRD-bSkQCwDBQx06dVyrQws0EFK",
         },
+        .ecez = .{
+            .url = "git+https://github.com/Avokadoen/ecez.git/?ref=HEAD#23e1321a5eb3cdb548472531b86498a902e57ce0",
+            .hash = "ecez-0.0.0-X-dkoDFOBQA0l4EfsC_DgEzl5QfYaAAYtjHuKpzxlgJp",
+        },
     },
 
     .paths = .{

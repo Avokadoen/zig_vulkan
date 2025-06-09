@@ -4,7 +4,6 @@ const Allocator = std.mem.Allocator;
 const vk = @import("vulkan");
 
 const swapchain = @import("swapchain.zig");
-const utils = @import("../utils.zig");
 
 const Context = @import("Context.zig");
 

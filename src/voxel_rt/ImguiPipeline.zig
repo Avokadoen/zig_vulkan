@@ -15,7 +15,6 @@ const render = @import("../render.zig");
 const GpuBufferMemory = render.GpuBufferMemory;
 const StagingRamp = render.StagingRamp;
 const Context = render.Context;
-const Texture = render.Texture;
 
 /// application imgui vulkan render wrapper
 /// this should not be used directly by user code and should only be used by internal code

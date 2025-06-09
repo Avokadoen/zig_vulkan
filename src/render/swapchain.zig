@@ -9,7 +9,7 @@ const dispatch = @import("dispatch.zig");
 const physical_device = @import("physical_device.zig");
 const QueueFamilyIndices = physical_device.QueueFamilyIndices;
 const Context = @import("Context.zig");
-const Texture = @import("Texture.zig");
+const texture = @import("texture.zig");
 
 pub const ViewportScissor = struct {
     viewport: [1]vk.Viewport,
@@ -115,7 +115,7 @@ pub const Data = struct {
         const max_swapchain_size = 16;
         std.debug.assert(swapchain_images.len <= max_swapchain_size);
 
-        var transition_configs: [max_swapchain_size]Texture.TransitionConfig = undefined;
+        var transition_configs: [max_swapchain_size]texture.TransitionConfig = undefined;
         for (transition_configs[0..swapchain_images.len], swapchain_images) |*transition_config, image| {
             transition_config.* = .{
                 .image = image,
@@ -123,7 +123,7 @@ pub const Data = struct {
                 .new_layout = .present_src_khr,
             };
         }
-        try Texture.transitionImageLayouts(ctx, command_pool, transition_configs[0..swapchain_images.len]);
+        try texture.transitionImageLayouts(ctx, command_pool, transition_configs[0..swapchain_images.len]);
 
         const image_views = blk: {
             var views = try allocator.alloc(vk.ImageView, swapchain_images.len);

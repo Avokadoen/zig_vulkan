@@ -6,7 +6,7 @@ const tracy = @import("ztracy");
 const za = @import("zalgebra");
 const Vec2 = @Vector(2, f32);
 
-const render = @import("../modules/render.zig");
+const render = @import("render.zig");
 const Context = render.Context;
 
 const Pipeline = @import("voxel_rt/Pipeline.zig");
