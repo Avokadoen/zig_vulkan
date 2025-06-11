@@ -128,6 +128,12 @@ pub fn unmap(self: *GpuBufferMemory, ctx: Context) void {
     }
 }
 
+pub fn typedMapAssumeMapped(self: *GpuBufferMemory, comptime T: type, offset: vk.DeviceSize) [*]T {
+    var bytes: [*]u8 = @ptrCast(self.mapped.?);
+    const ptr: [*]T = @alignCast(@ptrCast(&bytes[offset]));
+    return ptr;
+}
+
 pub fn flush(self: GpuBufferMemory, ctx: Context, offset: vk.DeviceSize, size: vk.DeviceSize) !void {
     const atom_size = memory_util.nonCoherentAtomSize(ctx, size);
     if (atom_size + offset > self.size) return error.InsufficientMemory; // size greater than buffer

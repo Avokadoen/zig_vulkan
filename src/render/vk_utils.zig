@@ -40,23 +40,20 @@ pub fn isInstanceExtensionsPresent(allocator: Allocator, vkb: dispatch.Base, tar
     return matches == target_extensions.len;
 }
 
-pub inline fn findMemoryTypeIndex(ctx: Context, type_filter: u32, memory_flags: vk.MemoryPropertyFlags) !u32 {
+pub fn findMemoryTypeIndex(ctx: Context, type_filter: u32, memory_flags: vk.MemoryPropertyFlags) error{NotFound}!u32 {
     const properties = ctx.vki.getPhysicalDeviceMemoryProperties(ctx.physical_device);
-    {
-        var i: u32 = 0;
-        while (i < properties.memory_type_count) : (i += 1) {
-            const left_shift: u5 = @intCast(i);
-            const correct_type: bool = (type_filter & (@as(u32, 1) << left_shift)) != 0;
-            if (correct_type and (properties.memory_types[i].property_flags.toInt() & memory_flags.toInt()) == memory_flags.toInt()) {
-                return i;
-            }
+    for (0..properties.memory_type_count) |i| {
+        const left_shift: u5 = @intCast(i);
+        const correct_type: bool = (type_filter & (@as(u32, 1) << left_shift)) != 0;
+        if (correct_type and properties.memory_types[i].property_flags.contains(memory_flags)) {
+            return @intCast(i);
         }
     }
 
     return error.NotFound;
 }
 
-pub inline fn beginOneTimeCommandBuffer(ctx: Context, command_pool: vk.CommandPool) !vk.CommandBuffer {
+pub fn beginOneTimeCommandBuffer(ctx: Context, command_pool: vk.CommandPool) !vk.CommandBuffer {
     const allocate_info = vk.CommandBufferAllocateInfo{
         .command_pool = command_pool,
         .level = .primary,
