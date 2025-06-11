@@ -117,6 +117,7 @@ pub fn init(
     std.debug.assert(image_memory_type == memory_type_index);
     std.debug.assert(image_memory_size.* + memory_requirements.size < image_memory_capacity);
     try ctx.vkd.bindImageMemory(ctx.logical_device, font_image, image_memory, image_memory_size.*);
+
     image_memory_size.* += memory_requirements.size;
 
     const font_view = blk: {

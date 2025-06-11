@@ -91,6 +91,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .queue_family_index = ctx.queue_indices.graphics,
     };
     const init_command_pool = try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
+    errdefer ctx.vkd.destroyCommandPool(ctx.logical_device, init_command_pool, null);
 
     // use graphics and compute index
     // if they are the same, then we use that index
@@ -128,7 +129,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     const image_memory_type_index = try vk_utils.findMemoryTypeIndex(ctx, memory_requirements.memory_type_bits, .{
         .device_local_bit = true,
     });
-    const image_memory_capacity = 250 * render.memory.bytes_in_mb;
+    const image_memory_capacity = 64 * render.memory.bytes_in_mb;
     const image_alloc_info = vk.MemoryAllocateInfo{
         .allocation_size = image_memory_capacity,
         .memory_type_index = image_memory_type_index,
@@ -208,6 +209,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         };
         break :blk try ctx.vkd.createSampler(ctx.logical_device, &sampler_info, null);
     };
+    errdefer ctx.vkd.destroySampler(ctx.logical_device, sampler, null);
 
     const swapchain = try render.swapchain.Data.init(allocator, ctx, init_command_pool, null);
     errdefer swapchain.deinit(ctx);
@@ -252,6 +254,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         },
     };
     const render_complete_fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
+    errdefer ctx.vkd.destroyFence(ctx.logical_device, render_complete_fence, null);
 
     const MinSize = struct {
         fn storage(ctx1: Context, size: u64) u64 {
@@ -322,6 +325,8 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .{ .vertex_buffer_bit = true, .index_buffer_bit = true },
         .{ .host_visible_bit = true },
     );
+    errdefer vertex_index_buffer.deinit(ctx);
+
     const gfx_pipeline = try GraphicsPipeline.init(
         allocator,
         ctx,
@@ -333,6 +338,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         config.gfx_pipeline_config,
     );
     errdefer gfx_pipeline.deinit(allocator, ctx);
+
     const imgui_pipeline = try ImguiPipeline.init(
         ctx,
         allocator,
@@ -533,6 +539,8 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) !void {
 
     if (self.requested_rescale_pipeline) try self.rescalePipeline(ctx);
 
+    // TODO: only flush relevant range, i.e only flush upcoming frame
+    try self.compute_pipeline.buffer.flush(ctx, 0, self.compute_pipeline.buffer.size);
     // transfer any pending transfers
     try self.staging_buffers.flush(ctx);
 }
@@ -554,98 +562,59 @@ pub fn setDenoisePixelMultiplier(self: *Pipeline, pixel_multiplier: f32) void {
 }
 
 /// Transfer grid data to GPU
-pub fn transferGridState(self: *Pipeline, ctx: Context, grid: GridState) !void {
-    const grid_data = [_]GridState.Device{grid.device_state};
+pub fn transferGridState(self: *Pipeline, grid: GridState) !void {
     const buffer_offset = self.compute_pipeline.uniform_offsets[0];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset,
-        GridState.Device,
-        grid_data[0..],
-    );
+
+    const device_grid_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(GridState.Device, buffer_offset);
+    device_grid_mem[0] = grid.device_state;
 }
 
 /// Transfer material data to GPU
-pub fn transferMaterials(self: *Pipeline, ctx: Context, offset: usize, materials: []const gpu_types.Material) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[0];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(gpu_types.Material),
-        gpu_types.Material,
-        materials,
-    );
+pub fn transferMaterials(self: *Pipeline, offset: usize, materials: []const gpu_types.Material) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[0] + offset * @sizeOf(gpu_types.Material);
+
+    const materials_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(gpu_types.Material, buffer_offset);
+    @memcpy(materials_mem[0..materials.len], materials);
 }
 
 /// Transfer entry types data to GPU
-pub fn transferBrickStatuses(self: *Pipeline, ctx: Context, offset: usize, brick_statuses: []const GridState.BrickStatusMask) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[1];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(GridState.BrickStatusMask),
-        GridState.BrickStatusMask,
-        brick_statuses,
-    );
+pub fn transferBrickStatuses(self: *Pipeline, offset: usize, brick_statuses: []const GridState.BrickStatusMask) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[1] + offset * @sizeOf(GridState.BrickStatusMask);
+
+    const brick_statuses_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(GridState.BrickStatusMask, buffer_offset);
+    @memcpy(brick_statuses_mem[0..brick_statuses.len], brick_statuses);
 }
 
 /// Transfer entry indices data to GPU
-pub fn transferBrickIndices(self: *Pipeline, ctx: Context, offset: usize, brick_indices: []const GridState.IndexToBrick) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[2];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(GridState.IndexToBrick),
-        GridState.IndexToBrick,
-        brick_indices,
-    );
+pub fn transferBrickIndices(self: *Pipeline, offset: usize, brick_indices: []const GridState.IndexToBrick) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[2] + offset * @sizeOf(GridState.IndexToBrick);
+
+    const brick_indices_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(GridState.IndexToBrick, buffer_offset);
+    @memcpy(brick_indices_mem[0..brick_indices.len], brick_indices);
 }
 
 /// Transfer bricks data to GPU
-pub fn transferBrickOccupancy(
-    self: *Pipeline,
-    ctx: Context,
-    offset: usize,
-    brick_occupancy: []u8,
-) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[3];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(u8),
-        u8,
-        brick_occupancy,
-    );
+pub fn transferBrickOccupancy(self: *Pipeline, offset: usize, brick_occupancy: []u8) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[3] + offset * @sizeOf(u8);
+
+    const brick_occupancy_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(u8, buffer_offset);
+    @memcpy(brick_occupancy_mem[0..brick_occupancy.len], brick_occupancy);
 }
 
 /// Transfer bricks data to GPU
-pub fn transferBrickStartIndex(
-    self: *Pipeline,
-    ctx: Context,
-    offset: usize,
-    brick_material_indices: []const GridState.Brick.StartIndex,
-) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[4];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(GridState.Brick.StartIndex),
-        GridState.Brick.StartIndex,
-        brick_material_indices,
-    );
+pub fn transferBrickStartIndex(self: *Pipeline, offset: usize, brick_material_indices: []const GridState.Brick.StartIndex) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[4] + offset * @sizeOf(GridState.Brick.StartIndex);
+
+    const brick_start_index_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(GridState.Brick.StartIndex, buffer_offset);
+    @memcpy(brick_start_index_mem[0..brick_material_indices.len], brick_material_indices);
 }
 
 /// Transfer material index data to GPU
-pub fn transferMaterialIndices(self: *Pipeline, ctx: Context, offset: usize, material_indices: []const GridState.MaterialIndices) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[5];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(GridState.MaterialIndices),
-        GridState.MaterialIndices,
-        material_indices,
-    );
+pub fn transferMaterialIndices(self: *Pipeline, offset: usize, material_indices: []const GridState.MaterialIndices) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[5] + offset * @sizeOf(GridState.MaterialIndices);
+
+    const material_indices_men = self.compute_pipeline.buffer.typedMapAssumeMapped(GridState.MaterialIndices, buffer_offset);
+    @memcpy(material_indices_men[0..material_indices.len], material_indices);
 }
 
 // TODO: make allow to multithread this

@@ -57,7 +57,7 @@ target_descriptor_set: vk.DescriptorSet,
 uniform_offsets: []vk.DeviceSize,
 storage_offsets: []vk.DeviceSize,
 
-buffers: GpuBufferMemory,
+buffer: GpuBufferMemory,
 
 // TODO: descriptor has a lot of duplicate code with init ...
 // TODO: refactor descriptor stuff to be configurable (loop array of config objects for buffer stuff)
@@ -89,12 +89,22 @@ pub fn init(
         storage_offset.* = buffer_size;
         buffer_size += size;
     }
-    const buffers = try GpuBufferMemory.init(
-        ctx,
-        @intCast(buffer_size),
-        .{ .storage_buffer_bit = true, .uniform_buffer_bit = true, .transfer_dst_bit = true },
-        .{ .device_local_bit = true },
-    );
+
+    const buffer = buffer_init: {
+        var buf = try GpuBufferMemory.init(
+            ctx,
+            @intCast(buffer_size),
+            .{ .storage_buffer_bit = true, .uniform_buffer_bit = true },
+            .{ .device_local_bit = true, .host_visible_bit = true },
+        );
+        errdefer buf.deinit(ctx);
+
+        // Map this buf persistently
+        try buf.map(ctx, 0, vk.WHOLE_SIZE);
+
+        break :buffer_init buf;
+    };
+    errdefer buffer.deinit(ctx);
 
     const set_count = 1 + state_config.uniform_sizes.len + state_config.storage_sizes.len;
     const layout_bindings = try allocator.alloc(vk.DescriptorSetLayoutBinding, set_count);
@@ -221,7 +231,7 @@ pub fn init(
 
         for (state_config.uniform_sizes, 0..) |size, i| {
             buffer_infos[i] = vk.DescriptorBufferInfo{
-                .buffer = buffers.buffer,
+                .buffer = buffer.buffer,
                 .offset = uniform_offsets[i],
                 .range = size,
             };
@@ -242,7 +252,7 @@ pub fn init(
             const index = 1 + state_config.uniform_sizes.len + i;
             // descriptor for buffer info
             buffer_infos[index - 1] = vk.DescriptorBufferInfo{
-                .buffer = buffers.buffer,
+                .buffer = buffer.buffer,
                 .offset = storage_offsets[i],
                 .range = size,
             };
@@ -384,7 +394,7 @@ pub fn init(
         .target_descriptor_set = target_descriptor_set,
         .uniform_offsets = uniform_offsets,
         .storage_offsets = storage_offsets,
-        .buffers = buffers,
+        .buffer = buffer,
     };
 }
 
@@ -408,7 +418,7 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
 
     self.allocator.free(self.uniform_offsets);
     self.allocator.free(self.storage_offsets);
-    self.buffers.deinit(ctx);
+    self.buffer.deinit(ctx);
 
     ctx.vkd.destroySemaphore(ctx.logical_device, self.complete_semaphore, null);
     ctx.vkd.destroyFence(ctx.logical_device, self.complete_fence, null);

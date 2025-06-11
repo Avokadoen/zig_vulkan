@@ -162,7 +162,7 @@ pub fn main() anyerror!void {
     });
     defer voxel_rt.deinit(allocator, ctx);
 
-    try voxel_rt.pushMaterials(ctx, materials[0..]);
+    try voxel_rt.pushMaterials(materials[0..]);
 
     // init input module with default input handler functions
     const input_rt = try InputRuntime.init(
@@ -191,7 +191,7 @@ pub fn main() anyerror!void {
         input_update_event_arg.dt = @floatCast(delta_time);
 
         voxel_rt.updateSun(input_update_event_arg.dt);
-        try voxel_rt.updateGridDelta(ctx);
+        try voxel_rt.updateGridDelta();
         try voxel_rt.draw(ctx, input_update_event_arg.dt);
 
         // Poll for and process events
