@@ -56,7 +56,7 @@ pub fn getTransitionBits(old_layout: vk.ImageLayout, new_layout: vk.ImageLayout)
         },
         else => {
             // TODO return error
-            std.debug.panic("illegal old layout", .{});
+            std.debug.panic("illegal old layout {any}", .{old_layout});
         },
     }
     switch (new_layout) {
@@ -106,7 +106,7 @@ pub fn getTransitionBits(old_layout: vk.ImageLayout, new_layout: vk.ImageLayout)
         },
         else => {
             // TODO return error
-            std.debug.panic("illegal new layout", .{});
+            std.debug.panic("illegal new layout {any}", .{new_layout});
         },
     }
     return transition_bits;
@@ -180,4 +180,45 @@ pub fn copyBufferToImage(ctx: Context, command_pool: vk.CommandPool, image: vk.I
         ctx.vkd.cmdCopyBufferToImage(command_buffer, buffer, image, .transfer_dst_optimal, 1, @ptrCast(&region));
     }
     try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, command_buffer);
+}
+
+pub const DeviceImageCopyInfo = struct {
+    subresource: vk.ImageSubresourceLayers,
+    offset: vk.Offset3D,
+    extent: vk.Extent3D,
+    layout: vk.ImageLayout,
+};
+
+/// Copy image data from host to device
+/// Parameters
+///  - ctx: the global vulkan context
+///  - dst_image: image on the device
+///  - T: src image pixel type
+///  - src_image: image data on the host
+///  - dst_info: device image info submitted to the driver
+pub fn hostToDeviceCopy(
+    ctx: Context,
+    dst_image: vk.Image,
+    comptime T: type,
+    src_image: []const T,
+    dst_info: DeviceImageCopyInfo,
+) Context.dispatch.Device.CopyMemoryToImageError!void {
+    const memory_to_image_copy = vk.MemoryToImageCopy{
+        .p_host_pointer = @ptrCast(src_image.ptr),
+        .memory_row_length = 0, // Memory is always packed on host currently
+        .memory_image_height = 0, // Memory is always packed on host currently
+        .image_subresource = dst_info.subresource,
+        .image_offset = dst_info.offset,
+        .image_extent = dst_info.extent,
+    };
+
+    const copy_image_to_image_info = vk.CopyMemoryToImageInfo{
+        .flags = .{},
+        .dst_image = dst_image,
+        .dst_image_layout = dst_info.layout,
+        .region_count = 1,
+        .p_regions = @ptrCast(&memory_to_image_copy),
+    };
+
+    try ctx.vkd.copyMemoryToImage(ctx.logical_device, &copy_image_to_image_info);
 }

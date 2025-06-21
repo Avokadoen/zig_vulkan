@@ -45,9 +45,6 @@ const Pipeline = @This();
 
 allocator: Allocator,
 
-image_memory_type_index: u32,
-image_memory_size: vk.DeviceSize,
-image_memory_capacity: vk.DeviceSize,
 image_memory: vk.DeviceMemory,
 
 compute_image_view: vk.ImageView,
@@ -124,7 +121,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     };
     errdefer ctx.vkd.destroyImage(ctx.logical_device, compute_image, null);
 
-    // Allocate memory for all pipeline images
     const memory_requirements = ctx.vkd.getImageMemoryRequirements(ctx.logical_device, compute_image);
     const image_memory_type_index = try vk_utils.findMemoryTypeIndex(ctx, memory_requirements.memory_type_bits, .{
         .device_local_bit = true,
@@ -138,7 +134,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     errdefer ctx.vkd.freeMemory(ctx.logical_device, image_memory, null);
 
     try ctx.vkd.bindImageMemory(ctx.logical_device, compute_image, image_memory, 0);
-    var image_memory_size = memory_requirements.size;
 
     // transition from undefined -> general -> shader_read_only_optimal -> general
     // with queue ownership transfer is needed to silence validation
@@ -344,12 +339,8 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         allocator,
         render_pass,
         swapchain.images.len,
-        &staging_buffers,
+        init_command_pool,
         gfx_pipeline.bytes_used_in_buffer,
-        image_memory_type_index,
-        image_memory,
-        image_memory_capacity,
-        &image_memory_size,
     );
     errdefer imgui_pipeline.deinit(ctx);
 
@@ -368,9 +359,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
 
     return Pipeline{
         .allocator = allocator,
-        .image_memory_type_index = image_memory_type_index,
-        .image_memory_size = image_memory_size,
-        .image_memory_capacity = image_memory_capacity,
         .image_memory = image_memory,
         .compute_image_view = compute_image_view,
         .compute_image = compute_image,
