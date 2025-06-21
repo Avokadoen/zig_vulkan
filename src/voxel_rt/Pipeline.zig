@@ -258,12 +258,12 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
 
     const MinSize = struct {
         fn storage(ctx1: Context, size: u64) u64 {
-            const storage_size = ctx1.physical_device_limits.min_storage_buffer_offset_alignment;
+            const storage_size = ctx1.physical_device_properties.limits.min_storage_buffer_offset_alignment;
             return storage_size * (std.math.divCeil(vk.DeviceSize, size, storage_size) catch unreachable);
         }
 
         fn uniform(ctx1: Context, size: u64) u64 {
-            const uniform_size = ctx1.physical_device_limits.min_uniform_buffer_offset_alignment;
+            const uniform_size = ctx1.physical_device_properties.limits.min_uniform_buffer_offset_alignment;
             return uniform_size * (std.math.divCeil(vk.DeviceSize, size, uniform_size) catch unreachable);
         }
     };
@@ -360,7 +360,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .gfx_pipeline_shader_constants = gfx_pipeline.shader_constants,
     };
     const gui = ImguiGui.init(
-        ctx,
         @floatFromInt(swapchain.extent.width),
         @floatFromInt(swapchain.extent.height),
         state_binding,

@@ -119,7 +119,7 @@ pub const TransitionConfig = struct {
     src_queue_family_index: u32 = vk.QUEUE_FAMILY_IGNORED,
     dst_queue_family_index: u32 = vk.QUEUE_FAMILY_IGNORED,
 };
-pub inline fn transitionImageLayouts(
+pub fn transitionImageLayouts(
     ctx: Context,
     command_pool: vk.CommandPool,
     configs: []const TransitionConfig,

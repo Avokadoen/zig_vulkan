@@ -602,7 +602,7 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, workgroup_size: 
 }
 
 pub fn calculateDefaultWorkgroupSize(ctx: Context) WorkgroupSize {
-    const device_properties = ctx.getPhysicalDeviceProperties();
+    const device_properties = ctx.physical_device_properties;
     const dim_size = device_properties.limits.max_compute_work_group_invocations;
     const sqrt_dim_size = @sqrt(@as(f64, @floatFromInt(dim_size)));
     const uniform_dim: u32 = @intFromFloat(@floor(sqrt_dim_size));
