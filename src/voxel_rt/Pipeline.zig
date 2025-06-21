@@ -16,7 +16,6 @@ const memory = render.memory;
 const ComputePipeline = @import("ComputePipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const ImguiPipeline = @import("ImguiPipeline.zig");
-const StagingRamp = render.StagingRamp;
 const GpuBufferMemory = render.GpuBufferMemory;
 
 const ImguiGui = @import("ImguiGui.zig");
@@ -29,7 +28,6 @@ const gpu_types = @import("gpu_types.zig");
 pub const Config = struct {
     material_buffer: u64 = 256,
 
-    staging_buffers: usize = 2,
     gfx_pipeline_config: GraphicsPipeline.Config = .{},
 };
 
@@ -50,9 +48,6 @@ image_memory: vk.DeviceMemory,
 compute_image_view: vk.ImageView,
 compute_image: vk.Image,
 sampler: vk.Sampler,
-
-// buffers used to transfer to device local memory
-staging_buffers: StagingRamp,
 
 swapchain: render.swapchain.Data,
 render_pass: vk.RenderPass,
@@ -311,9 +306,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     };
     errdefer compute_pipeline.deinit(ctx);
 
-    var staging_buffers = try StagingRamp.init(ctx, allocator, config.staging_buffers);
-    errdefer staging_buffers.deinit(ctx, allocator);
-
     var vertex_index_buffer = try GpuBufferMemory.init(
         ctx,
         memory.bytes_in_mb * 63,
@@ -363,7 +355,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .compute_image_view = compute_image_view,
         .compute_image = compute_image,
         .sampler = sampler,
-        .staging_buffers = staging_buffers,
         .swapchain = swapchain,
         .render_pass = render_pass,
         .present_complete_semaphore_index = 0,
@@ -397,11 +388,6 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     self.allocator.free(self.present_complete_semaphores);
 
     ctx.vkd.destroyFence(ctx.logical_device, self.render_complete_fence, null);
-
-    // wait for staging buffer transfer to finish before deinit staging buffer and
-    // any potential src buffers
-    self.staging_buffers.waitIdle(ctx) catch {};
-    self.staging_buffers.deinit(ctx, self.allocator);
 
     self.imgui_pipeline.deinit(ctx);
     self.gfx_pipeline.deinit(self.allocator, ctx);
@@ -528,8 +514,6 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) !void {
 
     // TODO: only flush relevant range, i.e only flush upcoming frame
     try self.compute_pipeline.buffer.flush(ctx, 0, self.compute_pipeline.buffer.size);
-    // transfer any pending transfers
-    try self.staging_buffers.flush(ctx);
 }
 
 pub fn setDenoiseSampleCount(self: *Pipeline, sample_count: i32) void {

@@ -13,7 +13,6 @@ const tracy = @import("ztracy");
 
 const render = @import("../render.zig");
 const GpuBufferMemory = render.GpuBufferMemory;
-const StagingRamp = render.StagingRamp;
 const Context = render.Context;
 const texture = render.texture;
 
