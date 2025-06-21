@@ -153,11 +153,9 @@ fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.Phys
     };
 
     const feature_score: i32 = blk: {
-        // required by vulkan 1.4
-        // var eigth_bit_storage_feature = vk.PhysicalDevice8BitStorageFeatures{};
-
+        var host_image_copy_feature = vk.PhysicalDeviceHostImageCopyFeatures{};
         var maintenance4_feature = vk.PhysicalDeviceMaintenance4Features{
-            .p_next = null, // @ptrCast(&eigth_bit_storage_feature),
+            .p_next = @ptrCast(&host_image_copy_feature),
         };
 
         var p_features: vk.PhysicalDeviceFeatures2 = .{
@@ -170,6 +168,9 @@ fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.Phys
 
         vki.getPhysicalDeviceFeatures2(device, &p_features);
         if (maintenance4_feature.maintenance_4 == vk.FALSE) {
+            break :blk -1000;
+        }
+        if (host_image_copy_feature.host_image_copy == vk.FALSE) {
             break :blk -1000;
         }
         break :blk 10;
@@ -224,7 +225,11 @@ pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
         };
     }
 
+    var host_image_copy_feature = vk.PhysicalDeviceHostImageCopyFeatures{
+        .host_image_copy = vk.TRUE,
+    };
     var synchronization2 = vk.PhysicalDeviceSynchronization2FeaturesKHR{
+        .p_next = @ptrCast(&host_image_copy_feature),
         .synchronization_2 = vk.TRUE,
     };
     var maintenance_4_features = vk.PhysicalDeviceMaintenance4Features{

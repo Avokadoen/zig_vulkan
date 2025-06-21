@@ -46,13 +46,11 @@ metrics_window_active: bool,
 post_process_window_active: bool,
 sun_window_active: bool,
 
-device_properties: vk.PhysicalDeviceProperties,
-
 metrics_state: MetricState,
 
 benchmark: ?Benchmark = null,
 
-pub fn init(ctx: Context, gui_width: f32, gui_height: f32, state_binding: StateBinding, config: Config) ImguiGui {
+pub fn init(gui_width: f32, gui_height: f32, state_binding: StateBinding, config: Config) ImguiGui {
     // Color scheme
     const StyleCol = zgui.StyleCol;
     const style = zgui.getStyle();
@@ -72,7 +70,6 @@ pub fn init(ctx: Context, gui_width: f32, gui_height: f32, state_binding: StateB
         .metrics_window_active = config.metrics_window_active,
         .post_process_window_active = config.post_process_window_active,
         .sun_window_active = config.sun_window_active,
-        .device_properties = ctx.getPhysicalDeviceProperties(),
         .metrics_state = .{
             .update_frame_timings = config.update_frame_timings,
             .frame_times = [_]f32{0} ** 128,
@@ -91,7 +88,6 @@ pub fn handleRescale(self: ImguiGui, gui_width: f32, gui_height: f32) void {
 
 // Starts a new imGui frame and sets up windows and ui elements
 pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metrics: bool, dt: f32) void {
-    _ = ctx;
     zgui.newFrame();
 
     const style = zgui.getStyle();
@@ -155,7 +151,7 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
         if (self.benchmark) |*b| {
             if (b.update(dt)) {
                 self.state_binding.camera_ptr.reset();
-                b.printReport(self.device_properties.device_name[0..]);
+                b.printReport(ctx.physical_device_properties.device_name[0..]);
                 break :blk null;
             }
         }
@@ -163,7 +159,7 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
     };
 
     self.drawCameraWindowIfEnabled();
-    self.drawMetricsWindowIfEnabled();
+    self.drawMetricsWindowIfEnabled(ctx);
     self.drawPostProcessWindowIfEnabled();
     self.drawPostSunWindowIfEnabled();
 
@@ -208,7 +204,7 @@ inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
     }
 }
 
-inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
+fn drawMetricsWindowIfEnabled(self: *ImguiGui, ctx: Context) void {
     if (self.metrics_window_active == false) return;
 
     zgui.setNextWindowSize(.{
@@ -220,8 +216,8 @@ inline fn drawMetricsWindowIfEnabled(self: *ImguiGui) void {
     defer zgui.end();
     if (metrics_open == false) return;
 
-    const zero_index = std.mem.indexOf(u8, &self.device_properties.device_name, &[_]u8{0});
-    zgui.textUnformatted(self.device_properties.device_name[0..zero_index.?]);
+    const zero_index = std.mem.indexOf(u8, &ctx.physical_device_properties.device_name, &[_]u8{0});
+    zgui.textUnformatted(ctx.physical_device_properties.device_name[0..zero_index.?]);
 
     if (zgui.plot.beginPlot("Frame times", .{})) {
         defer zgui.plot.endPlot();

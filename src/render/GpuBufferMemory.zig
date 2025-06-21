@@ -58,6 +58,12 @@ pub fn init(ctx: Context, size: vk.DeviceSize, buf_usage_flags: vk.BufferUsageFl
     };
 }
 
+pub inline fn checkCapacity(self: GpuBufferMemory, ctx: Context, extra: vk.DeviceSize) error{InsufficientMemory}!void {
+    if (memory_util.nonCoherentAtomSize(ctx, self.len + extra) > self.size) {
+        return error.InsufficientMemory;
+    }
+}
+
 pub const CopyConfig = struct {
     src_offset: vk.DeviceSize = 0,
     dst_offset: vk.DeviceSize = 0,
@@ -120,6 +126,12 @@ pub fn unmap(self: *GpuBufferMemory, ctx: Context) void {
         ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
         self.mapped = null;
     }
+}
+
+pub fn typedMapAssumeMapped(self: *GpuBufferMemory, comptime T: type, offset: vk.DeviceSize) [*]T {
+    var bytes: [*]u8 = @ptrCast(self.mapped.?);
+    const ptr: [*]T = @alignCast(@ptrCast(&bytes[offset]));
+    return ptr;
 }
 
 pub fn flush(self: GpuBufferMemory, ctx: Context, offset: vk.DeviceSize, size: vk.DeviceSize) !void {

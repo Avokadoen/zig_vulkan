@@ -6,7 +6,7 @@ const tracy = @import("ztracy");
 const za = @import("zalgebra");
 const Vec2 = @Vector(2, f32);
 
-const render = @import("../modules/render.zig");
+const render = @import("render.zig");
 const Context = render.Context;
 
 const Pipeline = @import("voxel_rt/Pipeline.zig");
@@ -59,7 +59,7 @@ pub fn init(allocator: Allocator, ctx: Context, brick_grid: *BrickGrid, config: 
     );
     errdefer pipeline.deinit(ctx);
 
-    try pipeline.transferGridState(ctx, brick_grid.state.*);
+    try pipeline.transferGridState(brick_grid.state.*);
 
     return VoxelRT{
         .camera = camera,
@@ -82,13 +82,8 @@ pub fn updateSun(self: *VoxelRT, delta_time: f32) void {
 }
 
 /// push the materials to GPU
-pub fn pushMaterials(self: *VoxelRT, ctx: Context, materials: []const gpu_types.Material) !void {
-    try self.pipeline.transferMaterials(ctx, 0, materials);
-}
-
-/// push the albedo to GPU
-pub fn pushAlbedo(self: *VoxelRT, ctx: Context, albedos: []const gpu_types.Albedo) !void {
-    try self.pipeline.transferAlbedos(ctx, 0, albedos);
+pub fn pushMaterials(self: *VoxelRT, materials: []const gpu_types.Material) !void {
+    try self.pipeline.transferMaterials(0, materials);
 }
 
 /// flush all grid data to GPU
@@ -104,7 +99,7 @@ pub fn debugFlushGrid(self: *VoxelRT, ctx: Context) void {
 }
 
 /// update grid device data based on changes
-pub fn updateGridDelta(self: *VoxelRT, ctx: Context) !void {
+pub fn updateGridDelta(self: *VoxelRT) !void {
     {
         const transfer_zone = tracy.ZoneN(@src(), "grid type transfer");
         defer transfer_zone.End();
@@ -114,7 +109,7 @@ pub fn updateGridDelta(self: *VoxelRT, ctx: Context) !void {
         defer delta.mutex.unlock();
 
         if (delta.state == .active) {
-            try self.pipeline.transferBrickStatuses(ctx, delta.from, self.brick_grid.state.brick_statuses[delta.from..delta.to]);
+            try self.pipeline.transferBrickStatuses(delta.from, self.brick_grid.state.brick_statuses[delta.from..delta.to]);
             delta.resetDelta();
         }
     }
@@ -127,7 +122,7 @@ pub fn updateGridDelta(self: *VoxelRT, ctx: Context) !void {
         defer delta.mutex.unlock();
 
         if (delta.state == .active) {
-            try self.pipeline.transferBrickIndices(ctx, delta.from, self.brick_grid.state.brick_indices[delta.from..delta.to]);
+            try self.pipeline.transferBrickIndices(delta.from, self.brick_grid.state.brick_indices[delta.from..delta.to]);
             delta.resetDelta();
         }
     }
@@ -140,7 +135,7 @@ pub fn updateGridDelta(self: *VoxelRT, ctx: Context) !void {
         defer delta.mutex.unlock();
 
         if (delta.state == .active) {
-            try self.pipeline.transferBrickOccupancy(ctx, delta.from, self.brick_grid.state.brick_occupancy[delta.from..delta.to]);
+            try self.pipeline.transferBrickOccupancy(delta.from, self.brick_grid.state.brick_occupancy[delta.from..delta.to]);
             delta.resetDelta();
         }
     }
@@ -153,7 +148,7 @@ pub fn updateGridDelta(self: *VoxelRT, ctx: Context) !void {
         defer delta.mutex.unlock();
 
         if (delta.state == .active) {
-            try self.pipeline.transferBrickStartIndex(ctx, delta.from, self.brick_grid.state.brick_start_indices[delta.from..delta.to]);
+            try self.pipeline.transferBrickStartIndex(delta.from, self.brick_grid.state.brick_start_indices[delta.from..delta.to]);
             delta.resetDelta();
         }
     }
@@ -165,7 +160,7 @@ pub fn updateGridDelta(self: *VoxelRT, ctx: Context) !void {
         defer delta.mutex.unlock();
 
         if (delta.state == .active) {
-            try self.pipeline.transferMaterialIndices(ctx, delta.from, self.brick_grid.state.material_indices[delta.from..delta.to]);
+            try self.pipeline.transferMaterialIndices(delta.from, self.brick_grid.state.material_indices[delta.from..delta.to]);
             delta.resetDelta();
         }
     }
