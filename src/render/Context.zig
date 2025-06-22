@@ -7,7 +7,7 @@ const zglfw = @import("zglfw");
 const c = @import("c.zig");
 
 const consts = @import("consts.zig");
-const dispatch = @import("dispatch.zig");
+pub const dispatch = @import("dispatch.zig");
 const QueueFamilyIndices = @import("physical_device.zig").QueueFamilyIndices;
 const validation_layer = @import("validation_layer.zig");
 const vk_utils = @import("vk_utils.zig");
@@ -25,9 +25,11 @@ vki: dispatch.Instance,
 vkd: dispatch.Device,
 
 instance: vk.Instance,
-physical_device_limits: vk.PhysicalDeviceLimits,
 physical_device: vk.PhysicalDevice,
 logical_device: vk.Device,
+
+physical_device_properties: vk.PhysicalDeviceProperties,
+host_image_properties: vk.PhysicalDeviceHostImageCopyProperties,
 
 compute_queue: vk.Queue,
 graphics_queue: vk.Queue,
@@ -85,17 +87,13 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *zglfw.W
         try extensions.append(extension);
     }
 
-    // Partially init a context so that we can use "self" even in init
-    var self: Context = undefined;
-    self.allocator = allocator;
-
     // load base dispatch wrapper
-    self.vkb = dispatch.Base.load(c.glfwGetInstanceProcAddress);
-    if (!(try vk_utils.isInstanceExtensionsPresent(allocator, self.vkb, extensions.items))) {
+    const vkb = dispatch.Base.load(c.glfwGetInstanceProcAddress);
+    if (!(try vk_utils.isInstanceExtensionsPresent(allocator, vkb, extensions.items))) {
         return error.InstanceExtensionNotPresent;
     }
 
-    const validation_layer_info = try validation_layer.Info.init(allocator, self.vkb);
+    const validation_layer_info = try validation_layer.Info.init(allocator, vkb);
 
     const debug_create_info: ?*const vk.DebugUtilsMessengerCreateInfoEXT = blk: {
         if (consts.enable_validation_layers) {
@@ -121,7 +119,7 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *zglfw.W
         break :blk null;
     };
 
-    self.instance = blk: {
+    const instance = blk: {
         const instance_info = vk.InstanceCreateInfo{
             .p_next = @ptrCast(features),
             .flags = .{},
@@ -131,53 +129,74 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *zglfw.W
             .enabled_extension_count = @intCast(extensions.items.len),
             .pp_enabled_extension_names = @ptrCast(extensions.items.ptr),
         };
-        break :blk try self.vkb.createInstance(&instance_info, null);
+        break :blk try vkb.createInstance(&instance_info, null);
     };
 
-    self.vki = dispatch.Instance.load(self.instance, self.vkb.dispatch.vkGetInstanceProcAddr.?);
-    errdefer self.vki.destroyInstance(self.instance, null);
+    const vki = dispatch.Instance.load(instance, vkb.dispatch.vkGetInstanceProcAddr.?);
+    errdefer vki.destroyInstance(instance, null);
 
-    const result: vk.Result = c.glfwCreateWindowSurface(self.instance, window, null, &self.surface);
+    var surface: vk.SurfaceKHR = undefined;
+    const result: vk.Result = c.glfwCreateWindowSurface(instance, window, null, &surface);
     if (result != .success) {
         return error.FailedToCreateSurface;
     }
-    errdefer self.vki.destroySurfaceKHR(self.instance, self.surface, null);
+    errdefer vki.destroySurfaceKHR(instance, surface, null);
 
-    self.physical_device = try @import("physical_device.zig").selectPrimary(allocator, self.vki, self.instance, self.surface);
-    self.queue_indices = try QueueFamilyIndices.init(allocator, self.vki, self.physical_device, self.surface);
+    const physical_device = try @import("physical_device.zig").selectPrimary(allocator, vki, instance, surface);
+    const queue_indices = try QueueFamilyIndices.init(allocator, vki, physical_device, surface);
 
-    self.messenger = blk: {
+    const messenger = blk: {
         if (!consts.enable_validation_layers) break :blk null;
-        break :blk self.vki.createDebugUtilsMessengerEXT(self.instance, debug_create_info.?, null) catch {
+        break :blk vki.createDebugUtilsMessengerEXT(instance, debug_create_info.?, null) catch {
             std.debug.panic("failed to create debug messenger", .{});
         };
     };
-    self.logical_device = try @import("physical_device.zig").createLogicalDevice(allocator, self);
+    const logical_device = try @import("physical_device.zig").createLogicalDevice(
+        allocator,
+        vkb,
+        vki,
+        queue_indices,
+        physical_device,
+    );
 
-    self.vkd = dispatch.Device.load(self.logical_device, self.vki.dispatch.vkGetDeviceProcAddr.?);
-    self.compute_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.compute, 0);
-    self.graphics_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.graphics, 0);
+    const vkd = dispatch.Device.load(logical_device, vki.dispatch.vkGetDeviceProcAddr.?);
+    const compute_queue = vkd.getDeviceQueue(logical_device, queue_indices.compute, 0);
+    const graphics_queue = vkd.getDeviceQueue(logical_device, queue_indices.graphics, 0);
 
-    self.physical_device_limits = self.getPhysicalDeviceProperties().limits;
+    var host_image_properties = vk.PhysicalDeviceHostImageCopyProperties{
+        .optimal_tiling_layout_uuid = undefined,
+        .identical_memory_type_requirements = undefined,
+    };
+    var properties = vk.PhysicalDeviceProperties2{ .p_next = @ptrCast(&host_image_properties), .properties = undefined };
+    vki.getPhysicalDeviceProperties2(physical_device, &properties);
 
-    // possibly a bit wasteful, but to get compile errors when forgetting to
-    // init a variable the partial context variables are moved to a new context which we return
     return Context{
-        .allocator = self.allocator,
-        .vkb = self.vkb,
-        .vki = self.vki,
-        .vkd = self.vkd,
-        .instance = self.instance,
-        .physical_device = self.physical_device,
-        .logical_device = self.logical_device,
-        .compute_queue = self.compute_queue,
-        .graphics_queue = self.graphics_queue,
-        .physical_device_limits = self.physical_device_limits,
-        .surface = self.surface,
-        .queue_indices = self.queue_indices,
-        .messenger = self.messenger,
+        .allocator = allocator,
+        .vkb = vkb,
+        .vki = vki,
+        .vkd = vkd,
+        .instance = instance,
+        .physical_device = physical_device,
+        .logical_device = logical_device,
+        .compute_queue = compute_queue,
+        .graphics_queue = graphics_queue,
+        .physical_device_properties = properties.properties,
+        .host_image_properties = host_image_properties,
+        .surface = surface,
+        .queue_indices = queue_indices,
+        .messenger = messenger,
         .window_ptr = window,
     };
+}
+
+pub fn deinit(self: Context) void {
+    self.vki.destroySurfaceKHR(self.instance, self.surface, null);
+    self.vkd.destroyDevice(self.logical_device, null);
+
+    if (consts.enable_validation_layers) {
+        self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.messenger.?, null);
+    }
+    self.vki.destroyInstance(self.instance, null);
 }
 
 pub fn destroyShaderModule(self: Context, module: vk.ShaderModule) void {
@@ -233,10 +252,6 @@ pub fn createComputePipeline(self: Context, create_info: vk.ComputePipelineCreat
 /// destroy pipeline from vulkan *not* from the application memory
 pub fn destroyPipeline(self: Context, pipeline: *vk.Pipeline) void {
     self.vkd.destroyPipeline(self.logical_device, pipeline.*, null);
-}
-
-pub fn getPhysicalDeviceProperties(self: Context) vk.PhysicalDeviceProperties {
-    return self.vki.getPhysicalDeviceProperties(self.physical_device);
 }
 
 /// caller must destroy returned render pass
@@ -307,14 +322,18 @@ pub fn destroyRenderPass(self: Context, render_pass: vk.RenderPass) void {
     self.vkd.destroyRenderPass(self.logical_device, render_pass, null);
 }
 
-pub fn deinit(self: Context) void {
-    self.vki.destroySurfaceKHR(self.instance, self.surface, null);
-    self.vkd.destroyDevice(self.logical_device, null);
-
-    if (consts.enable_validation_layers) {
-        self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.messenger.?, null);
+// TODO: should not be in context ...
+pub fn hasCopySrcLayout(self: Context, src_layout: vk.ImageLayout) bool {
+    if (self.host_image_properties.p_copy_src_layouts) |copy_src_layouts| {
+        const copy_src_layout_count = self.host_image_properties.copy_src_layout_count;
+        for (copy_src_layouts[0..copy_src_layout_count]) |device_src_layout| {
+            if (src_layout == device_src_layout) {
+                return true;
+            }
+        }
     }
-    self.vki.destroyInstance(self.instance, null);
+
+    return false;
 }
 
 // TODO: can probably drop function and inline it in init

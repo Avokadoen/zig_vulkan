@@ -153,11 +153,9 @@ fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.Phys
     };
 
     const feature_score: i32 = blk: {
-        // required by vulkan 1.4
-        // var eigth_bit_storage_feature = vk.PhysicalDevice8BitStorageFeatures{};
-
+        var host_image_copy_feature = vk.PhysicalDeviceHostImageCopyFeatures{};
         var maintenance4_feature = vk.PhysicalDeviceMaintenance4Features{
-            .p_next = null, // @ptrCast(&eigth_bit_storage_feature),
+            .p_next = @ptrCast(&host_image_copy_feature),
         };
 
         var p_features: vk.PhysicalDeviceFeatures2 = .{
@@ -170,6 +168,9 @@ fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.Phys
 
         vki.getPhysicalDeviceFeatures2(device, &p_features);
         if (maintenance4_feature.maintenance_4 == vk.FALSE) {
+            break :blk -1000;
+        }
+        if (host_image_copy_feature.host_image_copy == vk.FALSE) {
             break :blk -1000;
         }
         break :blk 10;
@@ -201,13 +202,19 @@ fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.Phys
     return -30 + property_score + feature_score + queue_fam_score + extensions_score + swapchain_score;
 }
 
-pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
+pub fn createLogicalDevice(
+    allocator: Allocator,
+    vkb: dispatch.Base,
+    vki: dispatch.Instance,
+    queue_indices: QueueFamilyIndices,
+    physical_device: vk.PhysicalDevice,
+) !vk.Device {
 
     // merge indices if they are identical according to vulkan spec
-    var family_indices = [_]u32{ ctx.queue_indices.graphics, undefined };
+    var family_indices = [_]u32{ queue_indices.graphics, undefined };
     var indices: usize = 1;
-    if (ctx.queue_indices.compute != ctx.queue_indices.graphics) {
-        family_indices[indices] = ctx.queue_indices.compute;
+    if (queue_indices.compute != queue_indices.graphics) {
+        family_indices[indices] = queue_indices.compute;
         indices += 1;
     }
 
@@ -219,12 +226,16 @@ pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
         queue_create_infos[i] = .{
             .flags = .{},
             .queue_family_index = family_index,
-            .queue_count = if (family_index == ctx.queue_indices.compute) ctx.queue_indices.compute_queue_count else 1,
+            .queue_count = if (family_index == queue_indices.compute) queue_indices.compute_queue_count else 1,
             .p_queue_priorities = &queue_priority,
         };
     }
 
+    var host_image_copy_feature = vk.PhysicalDeviceHostImageCopyFeatures{
+        .host_image_copy = vk.TRUE,
+    };
     var synchronization2 = vk.PhysicalDeviceSynchronization2FeaturesKHR{
+        .p_next = @ptrCast(&host_image_copy_feature),
         .synchronization_2 = vk.TRUE,
     };
     var maintenance_4_features = vk.PhysicalDeviceMaintenance4Features{
@@ -240,7 +251,7 @@ pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
         .p_next = @ptrCast(&device_feature_1_2),
         .features = .{},
     };
-    const validation_layer_info = try validation_layer.Info.init(allocator, ctx.vkb);
+    const validation_layer_info = try validation_layer.Info.init(allocator, vkb);
 
     const create_info = vk.DeviceCreateInfo{
         .p_next = @ptrCast(&device_features),
@@ -253,5 +264,5 @@ pub fn createLogicalDevice(allocator: Allocator, ctx: Context) !vk.Device {
         .pp_enabled_extension_names = &constants.logical_device_extensions,
         .p_enabled_features = null,
     };
-    return ctx.vki.createDevice(ctx.physical_device, &create_info, null);
+    return vki.createDevice(physical_device, &create_info, null);
 }

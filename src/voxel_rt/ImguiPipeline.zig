@@ -13,9 +13,8 @@ const tracy = @import("ztracy");
 
 const render = @import("../render.zig");
 const GpuBufferMemory = render.GpuBufferMemory;
-const StagingRamp = render.StagingRamp;
 const Context = render.Context;
-const Texture = render.Texture;
+const texture = render.texture;
 
 /// application imgui vulkan render wrapper
 /// this should not be used directly by user code and should only be used by internal code
@@ -46,17 +45,15 @@ descriptor_set: vk.DescriptorSet,
 // shader modules stored for cleanup
 shader_modules: [2]vk.ShaderModule,
 
+image_memory: vk.DeviceMemory,
+
 pub fn init(
     ctx: Context,
     allocator: std.mem.Allocator,
     render_pass: vk.RenderPass,
     swapchain_image_count: usize,
-    staging_buffers: *StagingRamp,
+    init_command_pool: vk.CommandPool,
     vertex_index_buffer_offset: vk.DeviceSize,
-    image_memory_type: u32,
-    image_memory: vk.DeviceMemory,
-    image_memory_capacity: vk.DeviceSize,
-    image_memory_size: *vk.DeviceSize,
 ) !ImguiPipeline {
     // initialize zgui
     zgui.init(allocator);
@@ -78,16 +75,18 @@ pub fn init(
         };
     };
 
+    const font_extent = vk.Extent3D{
+        .width = @intCast(width),
+        .height = @intCast(height),
+        .depth = 1,
+    };
+
     const font_image = blk: {
         const image_info = vk.ImageCreateInfo{
             .flags = .{},
             .image_type = .@"2d",
             .format = .r8g8b8a8_unorm,
-            .extent = .{
-                .width = @intCast(width),
-                .height = @intCast(height),
-                .depth = 1,
-            },
+            .extent = font_extent,
             .mip_levels = 1,
             .array_layers = 1,
             .samples = .{
@@ -96,7 +95,7 @@ pub fn init(
             .tiling = .optimal,
             .usage = .{
                 .sampled_bit = true,
-                .transfer_dst_bit = true,
+                .host_transfer_bit = true,
             },
             .sharing_mode = .exclusive,
             .queue_family_index_count = 0,
@@ -113,12 +112,15 @@ pub fn init(
         memory_requirements.memory_type_bits,
         .{ .device_local_bit = true },
     );
-    // In the event that any of the asserts below fail, we should allocate more memory
-    // we will not handle this for now, but a memory abstraction is needed sooner or later ...
-    std.debug.assert(image_memory_type == memory_type_index);
-    std.debug.assert(image_memory_size.* + memory_requirements.size < image_memory_capacity);
-    try ctx.vkd.bindImageMemory(ctx.logical_device, font_image, image_memory, image_memory_size.*);
-    image_memory_size.* += memory_requirements.size;
+    const image_memory_capacity = 64 * render.memory.bytes_in_mb;
+    const image_alloc_info = vk.MemoryAllocateInfo{
+        .allocation_size = image_memory_capacity,
+        .memory_type_index = memory_type_index,
+    };
+    const image_memory = try ctx.vkd.allocateMemory(ctx.logical_device, &image_alloc_info, null);
+    errdefer ctx.vkd.freeMemory(ctx.logical_device, image_memory, null);
+
+    try ctx.vkd.bindImageMemory(ctx.logical_device, font_image, image_memory, 0);
 
     const font_view = blk: {
         const view_info = vk.ImageViewCreateInfo{
@@ -145,16 +147,47 @@ pub fn init(
     errdefer ctx.vkd.destroyImageView(ctx.logical_device, font_view, null);
 
     // upload texture data to gpu
-    try staging_buffers.transferToImage(
-        ctx,
-        .undefined,
-        .shader_read_only_optimal,
-        font_image,
-        @intCast(width),
-        @intCast(height),
-        u32,
-        pixels[0..@intCast(width * height)],
-    );
+
+    // TODO: query for https://registry.khronos.org/vulkan/specs/latest/man/html/VkPhysicalDeviceHostImageCopyProperties.html
+    //       then only optionally transition into general if shader_read_only_optimal is not supported (and then to shader_read_only_optimal).
+
+    // Silence validation layers warning about undefined values (which is incorrect)
+    const transition_configs = init_transitions_blk: {
+        const can_direct_copy = ctx.hasCopySrcLayout(.shader_read_only_optimal);
+
+        if (render.consts.enable_validation_layers or can_direct_copy == false) {
+            break :init_transitions_blk [_]texture.TransitionConfig{ .{
+                .image = font_image,
+                .old_layout = .undefined,
+                .new_layout = .general,
+            }, .{
+                .image = font_image,
+                .old_layout = .general,
+                .new_layout = .shader_read_only_optimal,
+            } };
+        } else {
+            std.debug.print("hello!\n", .{});
+            break :init_transitions_blk [_]texture.TransitionConfig{
+                .{
+                    .image = font_image,
+                    .old_layout = .undefined,
+                    .new_layout = .shader_read_only_optimal,
+                },
+            };
+        }
+    };
+    try texture.transitionImageLayouts(ctx, init_command_pool, &transition_configs);
+    try texture.hostToDeviceCopy(ctx, font_image, u32, pixels[0..@intCast(width * height)], .{
+        .subresource = .{
+            .aspect_mask = .{ .color_bit = true },
+            .mip_level = 0,
+            .base_array_layer = 0,
+            .layer_count = 1,
+        },
+        .offset = .{ .x = 0, .y = 0, .z = 0 },
+        .extent = font_extent,
+        .layout = .shader_read_only_optimal,
+    });
 
     const sampler = blk: {
         const sampler_info = vk.SamplerCreateInfo{
@@ -465,6 +498,7 @@ pub fn init(
         .descriptor_set_layout = descriptor_set_layout,
         .descriptor_set = descriptor_set,
         .shader_modules = [2]vk.ShaderModule{ vert.module, frag.module },
+        .image_memory = image_memory,
     };
 }
 
@@ -482,6 +516,7 @@ pub fn deinit(self: ImguiPipeline, ctx: Context) void {
     ctx.vkd.destroyImageView(ctx.logical_device, self.font_view, null);
     ctx.vkd.destroySampler(ctx.logical_device, self.sampler, null);
     ctx.vkd.destroyImage(ctx.logical_device, self.font_image, null);
+    ctx.vkd.freeMemory(ctx.logical_device, self.image_memory, null);
 }
 
 /// record a command buffer that can draw current frame
@@ -600,21 +635,15 @@ pub fn updateBuffers(
     self.vertex_buffer_len = draw_data.total_vtx_count;
     self.index_buffer_len = draw_data.total_idx_count;
     if (index_size == 0 or self.vertex_size == 0) return; // nothing to draw
-    std.debug.assert(self.vertex_size + index_size < vertex_index_buffer.size);
+    std.debug.assert(self.vertex_size + index_size < vertex_index_buffer.capacity);
 
-    try vertex_index_buffer.map(ctx, self.vertex_index_buffer_offset, self.vertex_size + index_size);
-    defer vertex_index_buffer.unmap(ctx);
-
-    const vertex_dest_align: [*]align(1) zgui.DrawVert = @ptrCast(vertex_index_buffer.mapped);
-    var vertex_dest: [*]zgui.DrawVert = @alignCast(vertex_dest_align);
+    var vertex_dest = vertex_index_buffer.typedMapAssumeMapped(zgui.DrawVert, self.vertex_index_buffer_offset);
     var vertex_offset: usize = 0;
 
     // map index_dest to be the buffer memory + vertex byte offset
-    const index_addr = @intFromPtr(vertex_index_buffer.mapped) + self.vertex_size;
-    const index_dest_aling: [*]align(1) zgui.DrawIdx = @ptrCast(@as(?*anyopaque, @ptrFromInt(index_addr)));
-    var index_dest: [*]zgui.DrawIdx = @alignCast(index_dest_aling);
-
+    var index_dest = vertex_index_buffer.typedMapAssumeMapped(zgui.DrawIdx, self.vertex_index_buffer_offset + self.vertex_size);
     var index_offset: usize = 0;
+
     for (draw_data.cmd_lists.items[0..@intCast(draw_data.cmd_lists.len)]) |command_list| {
         // transfer vertex data
         {

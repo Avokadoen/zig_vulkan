@@ -56,7 +56,8 @@ target_descriptor_set: vk.DescriptorSet,
 // TODO: should be a slice or list. When the sum of a buffer size is greater than 250mb, we create a new buffer
 uniform_offsets: []vk.DeviceSize,
 storage_offsets: []vk.DeviceSize,
-buffers: GpuBufferMemory,
+
+buffer: GpuBufferMemory,
 
 // TODO: descriptor has a lot of duplicate code with init ...
 // TODO: refactor descriptor stuff to be configurable (loop array of config objects for buffer stuff)
@@ -71,38 +72,45 @@ pub fn init(
     state_config: StateConfigs,
     specialization_constants: anytype,
 ) !ComputePipeline {
-    var self: ComputePipeline = undefined;
-    self.allocator = allocator;
-    self.target_image_info = target_image_info;
-
     // TODO: grab a dedicated compute queue if available https://github.com/Avokadoen/zig_vulkan/issues/163
-    self.queue = ctx.vkd.getDeviceQueue(ctx.logical_device, ctx.queue_indices.compute, 0);
+    const queue = ctx.vkd.getDeviceQueue(ctx.logical_device, ctx.queue_indices.compute, 0);
 
-    self.uniform_offsets = try allocator.alloc(vk.DeviceSize, state_config.uniform_sizes.len);
-    errdefer allocator.free(self.uniform_offsets);
-    self.storage_offsets = try allocator.alloc(vk.DeviceSize, state_config.storage_sizes.len);
-    errdefer allocator.free(self.storage_offsets);
+    const uniform_offsets = try allocator.alloc(vk.DeviceSize, state_config.uniform_sizes.len);
+    errdefer allocator.free(uniform_offsets);
+    const storage_offsets = try allocator.alloc(vk.DeviceSize, state_config.storage_sizes.len);
+    errdefer allocator.free(storage_offsets);
 
     var buffer_size: u64 = 0;
-    for (state_config.uniform_sizes, 0..) |size, i| {
-        self.uniform_offsets[i] = buffer_size;
+    for (uniform_offsets, state_config.uniform_sizes) |*uniform_offset, size| {
+        uniform_offset.* = buffer_size;
         buffer_size += size;
     }
-    for (state_config.storage_sizes, 0..) |size, i| {
-        self.storage_offsets[i] = buffer_size;
+    for (storage_offsets, state_config.storage_sizes) |*storage_offset, size| {
+        storage_offset.* = buffer_size;
         buffer_size += size;
     }
-    self.buffers = try GpuBufferMemory.init(
-        ctx,
-        @intCast(buffer_size),
-        .{ .storage_buffer_bit = true, .uniform_buffer_bit = true, .transfer_dst_bit = true },
-        .{ .device_local_bit = true },
-    );
+
+    const buffer = buffer_init: {
+        var buf = try GpuBufferMemory.init(
+            ctx,
+            @intCast(buffer_size),
+            .{ .storage_buffer_bit = true, .uniform_buffer_bit = true },
+            .{ .device_local_bit = true, .host_visible_bit = true },
+        );
+        errdefer buf.deinit(ctx);
+
+        // Map this buf persistently
+        try buf.map(ctx, 0, vk.WHOLE_SIZE);
+
+        break :buffer_init buf;
+    };
+    errdefer buffer.deinit(ctx);
 
     const set_count = 1 + state_config.uniform_sizes.len + state_config.storage_sizes.len;
     const layout_bindings = try allocator.alloc(vk.DescriptorSetLayoutBinding, set_count);
     defer allocator.free(layout_bindings);
-    self.target_descriptor_layout = blk: {
+
+    const target_descriptor_layout = blk: {
         // target image
         layout_bindings[0] = vk.DescriptorSetLayoutBinding{
             .binding = 0,
@@ -144,11 +152,12 @@ pub fn init(
         };
         break :blk try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &layout_info, null);
     };
-    errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.target_descriptor_layout, null);
+    errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, target_descriptor_layout, null);
 
     const pool_sizes = try allocator.alloc(vk.DescriptorPoolSize, set_count);
     defer allocator.free(pool_sizes);
-    self.target_descriptor_pool = blk: {
+
+    const target_descriptor_pool = blk: {
         pool_sizes[0] = vk.DescriptorPoolSize{
             .type = .storage_image,
             .descriptor_count = 1,
@@ -174,15 +183,28 @@ pub fn init(
         };
         break :blk try ctx.vkd.createDescriptorPool(ctx.logical_device, &pool_info, null);
     };
-    errdefer ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.target_descriptor_pool, null);
+    errdefer ctx.vkd.destroyDescriptorPool(ctx.logical_device, target_descriptor_pool, null);
 
+    var target_descriptor_set: vk.DescriptorSet = undefined;
     {
         const descriptor_set_alloc_info = vk.DescriptorSetAllocateInfo{
-            .descriptor_pool = self.target_descriptor_pool,
+            .descriptor_pool = target_descriptor_pool,
             .descriptor_set_count = 1,
-            .p_set_layouts = @ptrCast(&self.target_descriptor_layout),
+            .p_set_layouts = @ptrCast(&target_descriptor_layout),
         };
-        try ctx.vkd.allocateDescriptorSets(ctx.logical_device, &descriptor_set_alloc_info, @ptrCast(&self.target_descriptor_set));
+        try ctx.vkd.allocateDescriptorSets(
+            ctx.logical_device,
+            &descriptor_set_alloc_info,
+            @ptrCast(&target_descriptor_set),
+        );
+    }
+    errdefer {
+        ctx.vkd.freeDescriptorSets(
+            ctx.logical_device,
+            target_descriptor_pool,
+            1,
+            @ptrCast(&target_descriptor_set),
+        ) catch {};
     }
 
     {
@@ -192,12 +214,12 @@ pub fn init(
         defer allocator.free(write_descriptor_sets);
 
         const image_info = vk.DescriptorImageInfo{
-            .sampler = self.target_image_info.sampler,
-            .image_view = self.target_image_info.image_view,
+            .sampler = target_image_info.sampler,
+            .image_view = target_image_info.image_view,
             .image_layout = .general,
         };
         write_descriptor_sets[0] = vk.WriteDescriptorSet{
-            .dst_set = self.target_descriptor_set,
+            .dst_set = target_descriptor_set,
             .dst_binding = 0,
             .dst_array_element = 0,
             .descriptor_count = 1,
@@ -209,12 +231,12 @@ pub fn init(
 
         for (state_config.uniform_sizes, 0..) |size, i| {
             buffer_infos[i] = vk.DescriptorBufferInfo{
-                .buffer = self.buffers.buffer,
-                .offset = self.uniform_offsets[i],
+                .buffer = buffer.buffer,
+                .offset = uniform_offsets[i],
                 .range = size,
             };
             write_descriptor_sets[i + 1] = vk.WriteDescriptorSet{
-                .dst_set = self.target_descriptor_set,
+                .dst_set = target_descriptor_set,
                 .dst_binding = @intCast(i + 1),
                 .dst_array_element = 0,
                 .descriptor_count = 1,
@@ -230,12 +252,12 @@ pub fn init(
             const index = 1 + state_config.uniform_sizes.len + i;
             // descriptor for buffer info
             buffer_infos[index - 1] = vk.DescriptorBufferInfo{
-                .buffer = self.buffers.buffer,
-                .offset = self.storage_offsets[i],
+                .buffer = buffer.buffer,
+                .offset = storage_offsets[i],
                 .range = size,
             };
             write_descriptor_sets[index] = vk.WriteDescriptorSet{
-                .dst_set = self.target_descriptor_set,
+                .dst_set = target_descriptor_set,
                 .dst_binding = @intCast(index),
                 .dst_array_element = 0,
                 .descriptor_count = 1,
@@ -255,7 +277,7 @@ pub fn init(
         );
     }
 
-    self.pipeline_layout = blk: {
+    const pipeline_layout = blk: {
         const push_constant_ranges = [_]vk.PushConstantRange{.{
             .stage_flags = .{ .compute_bit = true },
             .offset = 0,
@@ -264,14 +286,14 @@ pub fn init(
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
             .set_layout_count = 1,
-            .p_set_layouts = @ptrCast(&self.target_descriptor_layout),
+            .p_set_layouts = @ptrCast(&target_descriptor_layout),
             .push_constant_range_count = push_constant_ranges.len,
             .p_push_constant_ranges = &push_constant_ranges,
         };
         break :blk try ctx.createPipelineLayout(pipeline_layout_info);
     };
 
-    self.pipeline = blk: {
+    const pipeline = blk: {
         const SpecializationConsts = @TypeOf(specialization_constants);
         switch (@typeInfo(SpecializationConsts)) {
             .@"struct" => |struct_info| {
@@ -322,7 +344,7 @@ pub fn init(
         const pipeline_info = vk.ComputePipelineCreateInfo{
             .flags = .{},
             .stage = stage,
-            .layout = self.pipeline_layout,
+            .layout = pipeline_layout,
             .base_pipeline_handle = .null_handle, // TODO: GfxPipeline?
             .base_pipeline_index = -1,
         };
@@ -330,55 +352,49 @@ pub fn init(
         break :blk try ctx.createComputePipeline(pipeline_info);
     };
 
-    {
-        const pool_info = vk.CommandPoolCreateInfo{
-            .flags = .{ .transient_bit = true },
-            .queue_family_index = ctx.queue_indices.compute,
-        };
-        self.command_pool = try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
-        self.command_buffer = try render.pipeline.createCmdBuffer(ctx, self.command_pool);
-    }
-    errdefer {
-        ctx.vkd.freeCommandBuffers(
-            ctx.logical_device,
-            self.command_pool,
-            @intCast(1),
-            @ptrCast(&self.command_buffer),
-        );
-        ctx.vkd.destroyCommandPool(ctx.logical_device, self.command_pool, null);
-    }
+    const pool_info = vk.CommandPoolCreateInfo{
+        .flags = .{ .transient_bit = true },
+        .queue_family_index = ctx.queue_indices.compute,
+    };
+    const command_pool = try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
+    errdefer ctx.vkd.destroyCommandPool(ctx.logical_device, command_pool, null);
 
-    {
-        const semaphore_info = vk.SemaphoreCreateInfo{ .flags = .{} };
-        self.complete_semaphore = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
-    }
-    errdefer ctx.vkd.destroySemaphore(ctx.logical_device, self.complete_semaphore, null);
+    const command_buffer = try render.pipeline.createCmdBuffer(ctx, command_pool);
+    errdefer ctx.vkd.freeCommandBuffers(
+        ctx.logical_device,
+        command_pool,
+        1,
+        @ptrCast(&command_buffer),
+    );
 
-    {
-        const fence_info = vk.FenceCreateInfo{
-            .flags = .{
-                .signaled_bit = true,
-            },
-        };
-        self.complete_fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
-    }
+    const semaphore_info = vk.SemaphoreCreateInfo{ .flags = .{} };
+    const complete_semaphore = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
+    errdefer ctx.vkd.destroySemaphore(ctx.logical_device, complete_semaphore, null);
+
+    const fence_info = vk.FenceCreateInfo{
+        .flags = .{
+            .signaled_bit = true,
+        },
+    };
+    const complete_fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
+    errdefer ctx.vkd.destroyFence(ctx.logical_device, complete_fence);
 
     return ComputePipeline{
-        .allocator = self.allocator,
-        .pipeline_layout = self.pipeline_layout,
-        .pipeline = self.pipeline,
-        .command_pool = self.command_pool,
-        .command_buffer = self.command_buffer,
-        .queue = self.queue,
-        .complete_semaphore = self.complete_semaphore,
-        .complete_fence = self.complete_fence,
-        .target_image_info = self.target_image_info,
-        .target_descriptor_layout = self.target_descriptor_layout,
-        .target_descriptor_pool = self.target_descriptor_pool,
-        .target_descriptor_set = self.target_descriptor_set,
-        .uniform_offsets = self.uniform_offsets,
-        .storage_offsets = self.storage_offsets,
-        .buffers = self.buffers,
+        .allocator = allocator,
+        .pipeline_layout = pipeline_layout,
+        .pipeline = pipeline,
+        .command_pool = command_pool,
+        .command_buffer = command_buffer,
+        .queue = queue,
+        .complete_semaphore = complete_semaphore,
+        .complete_fence = complete_fence,
+        .target_image_info = target_image_info,
+        .target_descriptor_layout = target_descriptor_layout,
+        .target_descriptor_pool = target_descriptor_pool,
+        .target_descriptor_set = target_descriptor_set,
+        .uniform_offsets = uniform_offsets,
+        .storage_offsets = storage_offsets,
+        .buffer = buffer,
     };
 }
 
@@ -402,7 +418,7 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
 
     self.allocator.free(self.uniform_offsets);
     self.allocator.free(self.storage_offsets);
-    self.buffers.deinit(ctx);
+    self.buffer.deinit(ctx);
 
     ctx.vkd.destroySemaphore(ctx.logical_device, self.complete_semaphore, null);
     ctx.vkd.destroyFence(ctx.logical_device, self.complete_fence, null);
@@ -586,7 +602,7 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, workgroup_size: 
 }
 
 pub fn calculateDefaultWorkgroupSize(ctx: Context) WorkgroupSize {
-    const device_properties = ctx.getPhysicalDeviceProperties();
+    const device_properties = ctx.physical_device_properties;
     const dim_size = device_properties.limits.max_compute_work_group_invocations;
     const sqrt_dim_size = @sqrt(@as(f64, @floatFromInt(dim_size)));
     const uniform_dim: u32 = @intFromFloat(@floor(sqrt_dim_size));

@@ -8,7 +8,7 @@ const shaders = @import("shaders");
 const vk = @import("vulkan");
 const render = @import("../render.zig");
 const Context = render.Context;
-const Texture = render.Texture;
+const texture = render.texture;
 const vk_utils = render.vk_utils;
 const memory = render.memory;
 
@@ -16,7 +16,6 @@ const memory = render.memory;
 const ComputePipeline = @import("ComputePipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const ImguiPipeline = @import("ImguiPipeline.zig");
-const StagingRamp = render.StagingRamp;
 const GpuBufferMemory = render.GpuBufferMemory;
 
 const ImguiGui = @import("ImguiGui.zig");
@@ -28,11 +27,7 @@ const gpu_types = @import("gpu_types.zig");
 
 pub const Config = struct {
     material_buffer: u64 = 256,
-    albedo_buffer: u64 = 256,
-    metal_buffer: u64 = 256,
-    dielectric_buffer: u64 = 256,
 
-    staging_buffers: usize = 2,
     gfx_pipeline_config: GraphicsPipeline.Config = .{},
 };
 
@@ -48,17 +43,11 @@ const Pipeline = @This();
 
 allocator: Allocator,
 
-image_memory_type_index: u32,
-image_memory_size: vk.DeviceSize,
-image_memory_capacity: vk.DeviceSize,
 image_memory: vk.DeviceMemory,
 
 compute_image_view: vk.ImageView,
 compute_image: vk.Image,
 sampler: vk.Sampler,
-
-// buffers used to transfer to device local memory
-staging_buffers: StagingRamp,
 
 swapchain: render.swapchain.Data,
 render_pass: vk.RenderPass,
@@ -85,7 +74,15 @@ init_command_pool: vk.CommandPool, // kept in case of rescale
 // shared vertex index buffer for imgui and graphics pipeline
 vertex_index_buffer: GpuBufferMemory,
 
-pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.Extent2D, grid_state: GridState, camera: *Camera, sun: *Sun, config: Config) !Pipeline {
+pub fn init(
+    ctx: Context,
+    allocator: Allocator,
+    internal_render_resolution: vk.Extent2D,
+    grid_state: GridState,
+    camera: *Camera,
+    sun: *Sun,
+    config: Config,
+) !Pipeline {
     const init_zone = tracy.ZoneN(@src(), "init pipeline");
     defer init_zone.End();
 
@@ -94,6 +91,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .queue_family_index = ctx.queue_indices.graphics,
     };
     const init_command_pool = try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
+    errdefer ctx.vkd.destroyCommandPool(ctx.logical_device, init_command_pool, null);
 
     // use graphics and compute index
     // if they are the same, then we use that index
@@ -126,12 +124,11 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     };
     errdefer ctx.vkd.destroyImage(ctx.logical_device, compute_image, null);
 
-    // Allocate memory for all pipeline images
     const memory_requirements = ctx.vkd.getImageMemoryRequirements(ctx.logical_device, compute_image);
     const image_memory_type_index = try vk_utils.findMemoryTypeIndex(ctx, memory_requirements.memory_type_bits, .{
         .device_local_bit = true,
     });
-    const image_memory_capacity = 250 * render.memory.bytes_in_mb;
+    const image_memory_capacity = 64 * render.memory.bytes_in_mb;
     const image_alloc_info = vk.MemoryAllocateInfo{
         .allocation_size = image_memory_capacity,
         .memory_type_index = image_memory_type_index,
@@ -140,11 +137,10 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     errdefer ctx.vkd.freeMemory(ctx.logical_device, image_memory, null);
 
     try ctx.vkd.bindImageMemory(ctx.logical_device, compute_image, image_memory, 0);
-    var image_memory_size = memory_requirements.size;
 
     // transition from undefined -> general -> shader_read_only_optimal -> general
     // with queue ownership transfer is needed to silence validation
-    const transitions = [_]Texture.TransitionConfig{ .{
+    const transitions = [_]texture.TransitionConfig{ .{
         .image = compute_image,
         .old_layout = .undefined,
         .new_layout = .general,
@@ -163,7 +159,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .src_queue_family_index = ctx.queue_indices.graphics,
         .dst_queue_family_index = ctx.queue_indices.compute,
     } };
-    try Texture.transitionImageLayouts(ctx, init_command_pool, &transitions);
+    try texture.transitionImageLayouts(ctx, init_command_pool, &transitions);
 
     const compute_image_view = blk: {
         const image_view_info = vk.ImageViewCreateInfo{
@@ -211,6 +207,7 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         };
         break :blk try ctx.vkd.createSampler(ctx.logical_device, &sampler_info, null);
     };
+    errdefer ctx.vkd.destroySampler(ctx.logical_device, sampler, null);
 
     const swapchain = try render.swapchain.Data.init(allocator, ctx, init_command_pool, null);
     errdefer swapchain.deinit(ctx);
@@ -255,15 +252,16 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         },
     };
     const render_complete_fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
+    errdefer ctx.vkd.destroyFence(ctx.logical_device, render_complete_fence, null);
 
     const MinSize = struct {
         fn storage(ctx1: Context, size: u64) u64 {
-            const storage_size = ctx1.physical_device_limits.min_storage_buffer_offset_alignment;
+            const storage_size = ctx1.physical_device_properties.limits.min_storage_buffer_offset_alignment;
             return storage_size * (std.math.divCeil(vk.DeviceSize, size, storage_size) catch unreachable);
         }
 
         fn uniform(ctx1: Context, size: u64) u64 {
-            const uniform_size = ctx1.physical_device_limits.min_uniform_buffer_offset_alignment;
+            const uniform_size = ctx1.physical_device_properties.limits.min_uniform_buffer_offset_alignment;
             return uniform_size * (std.math.divCeil(vk.DeviceSize, size, uniform_size) catch unreachable);
         }
     };
@@ -316,15 +314,16 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
     };
     errdefer compute_pipeline.deinit(ctx);
 
-    var staging_buffers = try StagingRamp.init(ctx, allocator, config.staging_buffers);
-    errdefer staging_buffers.deinit(ctx, allocator);
-
     var vertex_index_buffer = try GpuBufferMemory.init(
         ctx,
         memory.bytes_in_mb * 63,
         .{ .vertex_buffer_bit = true, .index_buffer_bit = true },
-        .{ .host_visible_bit = true },
+        .{ .device_local_bit = true, .host_visible_bit = true },
     );
+    errdefer vertex_index_buffer.deinit(ctx);
+
+    try vertex_index_buffer.map(ctx, 0, vertex_index_buffer.capacity);
+
     const gfx_pipeline = try GraphicsPipeline.init(
         allocator,
         ctx,
@@ -336,17 +335,14 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         config.gfx_pipeline_config,
     );
     errdefer gfx_pipeline.deinit(allocator, ctx);
+
     const imgui_pipeline = try ImguiPipeline.init(
         ctx,
         allocator,
         render_pass,
         swapchain.images.len,
-        &staging_buffers,
+        init_command_pool,
         gfx_pipeline.bytes_used_in_buffer,
-        image_memory_type_index,
-        image_memory,
-        image_memory_capacity,
-        &image_memory_size,
     );
     errdefer imgui_pipeline.deinit(ctx);
 
@@ -357,7 +353,6 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         .gfx_pipeline_shader_constants = gfx_pipeline.shader_constants,
     };
     const gui = ImguiGui.init(
-        ctx,
         @floatFromInt(swapchain.extent.width),
         @floatFromInt(swapchain.extent.height),
         state_binding,
@@ -366,14 +361,10 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
 
     return Pipeline{
         .allocator = allocator,
-        .image_memory_type_index = image_memory_type_index,
-        .image_memory_size = image_memory_size,
-        .image_memory_capacity = image_memory_capacity,
         .image_memory = image_memory,
         .compute_image_view = compute_image_view,
         .compute_image = compute_image,
         .sampler = sampler,
-        .staging_buffers = staging_buffers,
         .swapchain = swapchain,
         .render_pass = render_pass,
         .present_complete_semaphore_index = 0,
@@ -407,11 +398,6 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     self.allocator.free(self.present_complete_semaphores);
 
     ctx.vkd.destroyFence(ctx.logical_device, self.render_complete_fence, null);
-
-    // wait for staging buffer transfer to finish before deinit staging buffer and
-    // any potential src buffers
-    self.staging_buffers.waitIdle(ctx) catch {};
-    self.staging_buffers.deinit(ctx, self.allocator);
 
     self.imgui_pipeline.deinit(ctx);
     self.gfx_pipeline.deinit(self.allocator, ctx);
@@ -536,8 +522,8 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) !void {
 
     if (self.requested_rescale_pipeline) try self.rescalePipeline(ctx);
 
-    // transfer any pending transfers
-    try self.staging_buffers.flush(ctx);
+    // TODO: only flush relevant range, i.e only flush upcoming frame
+    try self.compute_pipeline.buffer.flush(ctx, 0, self.compute_pipeline.buffer.capacity);
 }
 
 pub fn setDenoiseSampleCount(self: *Pipeline, sample_count: i32) void {
@@ -557,98 +543,59 @@ pub fn setDenoisePixelMultiplier(self: *Pipeline, pixel_multiplier: f32) void {
 }
 
 /// Transfer grid data to GPU
-pub fn transferGridState(self: *Pipeline, ctx: Context, grid: GridState) !void {
-    const grid_data = [_]GridState.Device{grid.device_state};
+pub fn transferGridState(self: *Pipeline, grid: GridState) !void {
     const buffer_offset = self.compute_pipeline.uniform_offsets[0];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset,
-        GridState.Device,
-        grid_data[0..],
-    );
+
+    const device_grid_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(GridState.Device, buffer_offset);
+    device_grid_mem[0] = grid.device_state;
 }
 
 /// Transfer material data to GPU
-pub fn transferMaterials(self: *Pipeline, ctx: Context, offset: usize, materials: []const gpu_types.Material) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[0];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(gpu_types.Material),
-        gpu_types.Material,
-        materials,
-    );
+pub fn transferMaterials(self: *Pipeline, offset: usize, materials: []const gpu_types.Material) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[0] + offset * @sizeOf(gpu_types.Material);
+
+    const materials_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(gpu_types.Material, buffer_offset);
+    @memcpy(materials_mem[0..materials.len], materials);
 }
 
 /// Transfer entry types data to GPU
-pub fn transferBrickStatuses(self: *Pipeline, ctx: Context, offset: usize, brick_statuses: []const GridState.BrickStatusMask) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[1];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(GridState.BrickStatusMask),
-        GridState.BrickStatusMask,
-        brick_statuses,
-    );
+pub fn transferBrickStatuses(self: *Pipeline, offset: usize, brick_statuses: []const GridState.BrickStatusMask) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[1] + offset * @sizeOf(GridState.BrickStatusMask);
+
+    const brick_statuses_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(GridState.BrickStatusMask, buffer_offset);
+    @memcpy(brick_statuses_mem[0..brick_statuses.len], brick_statuses);
 }
 
 /// Transfer entry indices data to GPU
-pub fn transferBrickIndices(self: *Pipeline, ctx: Context, offset: usize, brick_indices: []const GridState.IndexToBrick) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[2];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(GridState.IndexToBrick),
-        GridState.IndexToBrick,
-        brick_indices,
-    );
+pub fn transferBrickIndices(self: *Pipeline, offset: usize, brick_indices: []const GridState.IndexToBrick) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[2] + offset * @sizeOf(GridState.IndexToBrick);
+
+    const brick_indices_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(GridState.IndexToBrick, buffer_offset);
+    @memcpy(brick_indices_mem[0..brick_indices.len], brick_indices);
 }
 
 /// Transfer bricks data to GPU
-pub fn transferBrickOccupancy(
-    self: *Pipeline,
-    ctx: Context,
-    offset: usize,
-    brick_occupancy: []u8,
-) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[3];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(u8),
-        u8,
-        brick_occupancy,
-    );
+pub fn transferBrickOccupancy(self: *Pipeline, offset: usize, brick_occupancy: []u8) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[3] + offset * @sizeOf(u8);
+
+    const brick_occupancy_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(u8, buffer_offset);
+    @memcpy(brick_occupancy_mem[0..brick_occupancy.len], brick_occupancy);
 }
 
 /// Transfer bricks data to GPU
-pub fn transferBrickStartIndex(
-    self: *Pipeline,
-    ctx: Context,
-    offset: usize,
-    brick_material_indices: []const GridState.Brick.StartIndex,
-) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[4];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(GridState.Brick.StartIndex),
-        GridState.Brick.StartIndex,
-        brick_material_indices,
-    );
+pub fn transferBrickStartIndex(self: *Pipeline, offset: usize, brick_material_indices: []const GridState.Brick.StartIndex) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[4] + offset * @sizeOf(GridState.Brick.StartIndex);
+
+    const brick_start_index_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(GridState.Brick.StartIndex, buffer_offset);
+    @memcpy(brick_start_index_mem[0..brick_material_indices.len], brick_material_indices);
 }
 
 /// Transfer material index data to GPU
-pub fn transferMaterialIndices(self: *Pipeline, ctx: Context, offset: usize, material_indices: []const GridState.MaterialIndices) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[5];
-    try self.staging_buffers.transferToBuffer(
-        ctx,
-        &self.compute_pipeline.buffers,
-        buffer_offset + offset * @sizeOf(GridState.MaterialIndices),
-        GridState.MaterialIndices,
-        material_indices,
-    );
+pub fn transferMaterialIndices(self: *Pipeline, offset: usize, material_indices: []const GridState.MaterialIndices) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[5] + offset * @sizeOf(GridState.MaterialIndices);
+
+    const material_indices_men = self.compute_pipeline.buffer.typedMapAssumeMapped(GridState.MaterialIndices, buffer_offset);
+    @memcpy(material_indices_men[0..material_indices.len], material_indices);
 }
 
 // TODO: make allow to multithread this
