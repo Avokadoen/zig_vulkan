@@ -112,10 +112,8 @@ pub fn deinit(self: GpuBufferMemory, ctx: Context) void {
     if (self.mapped != null) {
         ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
     }
-    if (self.buffer != .null_handle) {
-        ctx.vkd.destroyBuffer(ctx.logical_device, self.buffer, null);
-    }
-    if (self.memory != .null_handle) {
-        ctx.vkd.freeMemory(ctx.logical_device, self.memory, null);
-    }
+    std.debug.assert(self.buffer != .null_handle and self.memory != .null_handle);
+
+    ctx.vkd.destroyBuffer(ctx.logical_device, self.buffer, null);
+    ctx.vkd.freeMemory(ctx.logical_device, self.memory, null);
 }
