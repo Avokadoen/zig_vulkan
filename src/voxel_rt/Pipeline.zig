@@ -74,7 +74,15 @@ init_command_pool: vk.CommandPool, // kept in case of rescale
 // shared vertex index buffer for imgui and graphics pipeline
 vertex_index_buffer: GpuBufferMemory,
 
-pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.Extent2D, grid_state: GridState, camera: *Camera, sun: *Sun, config: Config) !Pipeline {
+pub fn init(
+    ctx: Context,
+    allocator: Allocator,
+    internal_render_resolution: vk.Extent2D,
+    grid_state: GridState,
+    camera: *Camera,
+    sun: *Sun,
+    config: Config,
+) !Pipeline {
     const init_zone = tracy.ZoneN(@src(), "init pipeline");
     defer init_zone.End();
 
@@ -310,9 +318,11 @@ pub fn init(ctx: Context, allocator: Allocator, internal_render_resolution: vk.E
         ctx,
         memory.bytes_in_mb * 63,
         .{ .vertex_buffer_bit = true, .index_buffer_bit = true },
-        .{ .host_visible_bit = true },
+        .{ .device_local_bit = true, .host_visible_bit = true },
     );
     errdefer vertex_index_buffer.deinit(ctx);
+
+    try vertex_index_buffer.map(ctx, 0, vertex_index_buffer.capacity);
 
     const gfx_pipeline = try GraphicsPipeline.init(
         allocator,
@@ -513,7 +523,7 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) !void {
     if (self.requested_rescale_pipeline) try self.rescalePipeline(ctx);
 
     // TODO: only flush relevant range, i.e only flush upcoming frame
-    try self.compute_pipeline.buffer.flush(ctx, 0, self.compute_pipeline.buffer.size);
+    try self.compute_pipeline.buffer.flush(ctx, 0, self.compute_pipeline.buffer.capacity);
 }
 
 pub fn setDenoiseSampleCount(self: *Pipeline, sample_count: i32) void {

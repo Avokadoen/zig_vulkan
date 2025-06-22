@@ -635,21 +635,15 @@ pub fn updateBuffers(
     self.vertex_buffer_len = draw_data.total_vtx_count;
     self.index_buffer_len = draw_data.total_idx_count;
     if (index_size == 0 or self.vertex_size == 0) return; // nothing to draw
-    std.debug.assert(self.vertex_size + index_size < vertex_index_buffer.size);
+    std.debug.assert(self.vertex_size + index_size < vertex_index_buffer.capacity);
 
-    try vertex_index_buffer.map(ctx, self.vertex_index_buffer_offset, self.vertex_size + index_size);
-    defer vertex_index_buffer.unmap(ctx);
-
-    const vertex_dest_align: [*]align(1) zgui.DrawVert = @ptrCast(vertex_index_buffer.mapped);
-    var vertex_dest: [*]zgui.DrawVert = @alignCast(vertex_dest_align);
+    var vertex_dest = vertex_index_buffer.typedMapAssumeMapped(zgui.DrawVert, self.vertex_index_buffer_offset);
     var vertex_offset: usize = 0;
 
     // map index_dest to be the buffer memory + vertex byte offset
-    const index_addr = @intFromPtr(vertex_index_buffer.mapped) + self.vertex_size;
-    const index_dest_aling: [*]align(1) zgui.DrawIdx = @ptrCast(@as(?*anyopaque, @ptrFromInt(index_addr)));
-    var index_dest: [*]zgui.DrawIdx = @alignCast(index_dest_aling);
-
+    var index_dest = vertex_index_buffer.typedMapAssumeMapped(zgui.DrawIdx, self.vertex_index_buffer_offset + self.vertex_size);
     var index_offset: usize = 0;
+
     for (draw_data.cmd_lists.items[0..@intCast(draw_data.cmd_lists.len)]) |command_list| {
         // transfer vertex data
         {

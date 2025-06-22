@@ -71,13 +71,16 @@ pub fn init(
     vertex_index_buffer: *GpuBufferMemory,
     config: Config,
 ) !GraphicsPipeline {
-    try vertex_index_buffer.transferToDevice(ctx, Vertex, 0, vertices[0..]);
-    try vertex_index_buffer.transferToDevice(ctx, u16, vertex_size, indices[0..]);
-
     const bytes_used_in_buffer = memory.nonCoherentAtomSize(ctx, vertex_size * indices_size);
-    if (bytes_used_in_buffer > vertex_index_buffer.size) {
+    if (bytes_used_in_buffer > vertex_index_buffer.capacity) {
         return error.OutOfDeviceMemory;
     }
+
+    const dev_vertices = vertex_index_buffer.typedMapAssumeMapped(Vertex, 0);
+    @memcpy(dev_vertices[0..vertices.len], &vertices);
+
+    const dev_indices = vertex_index_buffer.typedMapAssumeMapped(u16, vertex_size);
+    @memcpy(dev_indices[0..indices.len], &indices);
 
     const descriptor_pool = blk: {
         const pool_sizes = [_]vk.DescriptorPoolSize{.{

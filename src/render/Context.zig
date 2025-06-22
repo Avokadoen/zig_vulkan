@@ -87,17 +87,13 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *zglfw.W
         try extensions.append(extension);
     }
 
-    // Partially init a context so that we can use "self" even in init
-    var self: Context = undefined;
-    self.allocator = allocator;
-
     // load base dispatch wrapper
-    self.vkb = dispatch.Base.load(c.glfwGetInstanceProcAddress);
-    if (!(try vk_utils.isInstanceExtensionsPresent(allocator, self.vkb, extensions.items))) {
+    const vkb = dispatch.Base.load(c.glfwGetInstanceProcAddress);
+    if (!(try vk_utils.isInstanceExtensionsPresent(allocator, vkb, extensions.items))) {
         return error.InstanceExtensionNotPresent;
     }
 
-    const validation_layer_info = try validation_layer.Info.init(allocator, self.vkb);
+    const validation_layer_info = try validation_layer.Info.init(allocator, vkb);
 
     const debug_create_info: ?*const vk.DebugUtilsMessengerCreateInfoEXT = blk: {
         if (consts.enable_validation_layers) {
@@ -123,7 +119,7 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *zglfw.W
         break :blk null;
     };
 
-    self.instance = blk: {
+    const instance = blk: {
         const instance_info = vk.InstanceCreateInfo{
             .p_next = @ptrCast(features),
             .flags = .{},
@@ -133,60 +129,62 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *zglfw.W
             .enabled_extension_count = @intCast(extensions.items.len),
             .pp_enabled_extension_names = @ptrCast(extensions.items.ptr),
         };
-        break :blk try self.vkb.createInstance(&instance_info, null);
+        break :blk try vkb.createInstance(&instance_info, null);
     };
 
-    self.vki = dispatch.Instance.load(self.instance, self.vkb.dispatch.vkGetInstanceProcAddr.?);
-    errdefer self.vki.destroyInstance(self.instance, null);
+    const vki = dispatch.Instance.load(instance, vkb.dispatch.vkGetInstanceProcAddr.?);
+    errdefer vki.destroyInstance(instance, null);
 
-    const result: vk.Result = c.glfwCreateWindowSurface(self.instance, window, null, &self.surface);
+    var surface: vk.SurfaceKHR = undefined;
+    const result: vk.Result = c.glfwCreateWindowSurface(instance, window, null, &surface);
     if (result != .success) {
         return error.FailedToCreateSurface;
     }
-    errdefer self.vki.destroySurfaceKHR(self.instance, self.surface, null);
+    errdefer vki.destroySurfaceKHR(instance, surface, null);
 
-    self.physical_device = try @import("physical_device.zig").selectPrimary(allocator, self.vki, self.instance, self.surface);
-    self.queue_indices = try QueueFamilyIndices.init(allocator, self.vki, self.physical_device, self.surface);
+    const physical_device = try @import("physical_device.zig").selectPrimary(allocator, vki, instance, surface);
+    const queue_indices = try QueueFamilyIndices.init(allocator, vki, physical_device, surface);
 
-    self.messenger = blk: {
+    const messenger = blk: {
         if (!consts.enable_validation_layers) break :blk null;
-        break :blk self.vki.createDebugUtilsMessengerEXT(self.instance, debug_create_info.?, null) catch {
+        break :blk vki.createDebugUtilsMessengerEXT(instance, debug_create_info.?, null) catch {
             std.debug.panic("failed to create debug messenger", .{});
         };
     };
-    self.logical_device = try @import("physical_device.zig").createLogicalDevice(allocator, self);
+    const logical_device = try @import("physical_device.zig").createLogicalDevice(
+        allocator,
+        vkb,
+        vki,
+        queue_indices,
+        physical_device,
+    );
 
-    self.vkd = dispatch.Device.load(self.logical_device, self.vki.dispatch.vkGetDeviceProcAddr.?);
-    self.compute_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.compute, 0);
-    self.graphics_queue = self.vkd.getDeviceQueue(self.logical_device, self.queue_indices.graphics, 0);
+    const vkd = dispatch.Device.load(logical_device, vki.dispatch.vkGetDeviceProcAddr.?);
+    const compute_queue = vkd.getDeviceQueue(logical_device, queue_indices.compute, 0);
+    const graphics_queue = vkd.getDeviceQueue(logical_device, queue_indices.graphics, 0);
 
     var host_image_properties = vk.PhysicalDeviceHostImageCopyProperties{
         .optimal_tiling_layout_uuid = undefined,
         .identical_memory_type_requirements = undefined,
     };
     var properties = vk.PhysicalDeviceProperties2{ .p_next = @ptrCast(&host_image_properties), .properties = undefined };
-    self.vki.getPhysicalDeviceProperties2(self.physical_device, &properties);
+    vki.getPhysicalDeviceProperties2(physical_device, &properties);
 
-    self.physical_device_properties = properties.properties;
-    self.host_image_properties = host_image_properties;
-
-    // possibly a bit wasteful, but to get compile errors when forgetting to
-    // init a variable the partial context variables are moved to a new context which we return
     return Context{
-        .allocator = self.allocator,
-        .vkb = self.vkb,
-        .vki = self.vki,
-        .vkd = self.vkd,
-        .instance = self.instance,
-        .physical_device = self.physical_device,
-        .logical_device = self.logical_device,
-        .compute_queue = self.compute_queue,
-        .graphics_queue = self.graphics_queue,
-        .physical_device_properties = self.physical_device_properties,
-        .host_image_properties = self.host_image_properties,
-        .surface = self.surface,
-        .queue_indices = self.queue_indices,
-        .messenger = self.messenger,
+        .allocator = allocator,
+        .vkb = vkb,
+        .vki = vki,
+        .vkd = vkd,
+        .instance = instance,
+        .physical_device = physical_device,
+        .logical_device = logical_device,
+        .compute_queue = compute_queue,
+        .graphics_queue = graphics_queue,
+        .physical_device_properties = properties.properties,
+        .host_image_properties = host_image_properties,
+        .surface = surface,
+        .queue_indices = queue_indices,
+        .messenger = messenger,
         .window_ptr = window,
     };
 }
