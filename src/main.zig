@@ -26,17 +26,27 @@ pub const Storage = ecez.CreateStorage(.{
     input.component.UserInput,
     input.component.PrevCursorPos,
     input.component.MenuActiveTag,
+
+    VoxelRT.camera.components.Camera,
+    VoxelRT.camera.components.DeviceCamera,
+    VoxelRT.sun.components.Sun,
+    VoxelRT.sun.components.DeviceSun,
+    VoxelRT.benchmark.components.Benchmark,
+    VoxelRT.benchmark.components.Report,
 });
 
 pub const InputTypes = input.CreateInputTypes(Storage);
+pub const VoxelRTEvents = VoxelRT.CreateEvents(Storage);
 
 pub const Scheduler = ecez.CreateScheduler(.{
-    InputTypes.Events.input_on_key_events,
-    InputTypes.Events.input_on_mouse_button,
-    InputTypes.Events.input_on_cursor_pos,
-    InputTypes.Events.input_on_char,
-    InputTypes.Events.input_on_scroll,
-    InputTypes.Events.input_on_event_update,
+    InputTypes.events.input_on_key_events,
+    InputTypes.events.input_on_mouse_button,
+    InputTypes.events.input_on_cursor_pos,
+    InputTypes.events.input_on_char,
+    InputTypes.events.input_on_scroll,
+    InputTypes.events.input_on_event_update,
+
+    VoxelRTEvents.events.voxel_rt_update,
 });
 
 pub const InputRuntime = input.CreateInputRuntime(Storage, Scheduler);
@@ -146,7 +156,7 @@ pub fn main() anyerror!void {
     // generate terrain on CPU
     try terrain.generateCpu(2, allocator, 420, 4, 20, &grid);
 
-    var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, .{
+    var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, Storage, &storage, .{
         .internal_resolution_width = internal_render_resolution.x(),
         .internal_resolution_height = internal_render_resolution.y(),
         .camera = .{
@@ -158,7 +168,7 @@ pub fn main() anyerror!void {
         },
         .pipeline = .{},
     });
-    defer voxel_rt.deinit(allocator, ctx);
+    defer voxel_rt.deinit(ctx);
 
     try voxel_rt.pushMaterials(materials[0..]);
 
@@ -175,27 +185,31 @@ pub fn main() anyerror!void {
     var input_update_event_arg = input.event_argument.Update{
         .window = window,
         .voxel_rt = &voxel_rt,
-        .dt = 0,
+        .delta_time = 0,
     };
 
     var prev_frame = std.time.milliTimestamp();
     // Loop until the user closes the window
     while (!window.shouldClose()) {
-        scheduler.waitEvent(.input_on_event_update);
-
         const current_frame = std.time.milliTimestamp();
         delta_time = @as(f64, @floatFromInt(current_frame - prev_frame)) / @as(f64, std.time.ms_per_s);
-        // f32 variant of delta_time
-        input_update_event_arg.dt = @floatCast(delta_time);
 
-        voxel_rt.updateSun(input_update_event_arg.dt);
+        scheduler.dispatchEvent(&storage, .voxel_rt_update, VoxelRT.EventArgument{
+            .ctx = ctx,
+            .delta_time = @floatCast(delta_time),
+        });
+
+        input_update_event_arg.delta_time = @floatCast(delta_time);
+
+        voxel_rt.updateSun(Storage, &storage, input_update_event_arg.delta_time);
         try voxel_rt.updateGridDelta();
-        try voxel_rt.draw(ctx, input_update_event_arg.dt);
+        try voxel_rt.draw(ctx, Storage, &storage, input_update_event_arg.delta_time);
 
         // Poll for and process events
         zglfw.pollEvents();
         prev_frame = current_frame;
 
+        // this event runs on the main thread and does not need a wait
         scheduler.dispatchEvent(&storage, .input_on_event_update, input_update_event_arg);
 
         ztracy.FrameMark();

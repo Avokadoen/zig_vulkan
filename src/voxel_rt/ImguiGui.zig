@@ -3,30 +3,24 @@ const std = @import("std");
 const zgui = @import("zgui");
 const vk = @import("vulkan");
 
+const ecez = @import("ecez");
+
 const render = @import("../render.zig");
 const Context = render.Context;
 
-const Camera = @import("Camera.zig");
-const Sun = @import("Sun.zig");
+const camera = @import("camera.zig");
+const sun = @import("sun.zig");
 const BrickState = @import("brick/State.zig");
 const Pipeline = @import("Pipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
-const Benchmark = @import("Benchmark.zig");
+const benchmark = @import("benchmark.zig");
 
 pub const StateBinding = struct {
-    camera_ptr: *Camera,
+    camera_entity: ecez.Entity,
+    sun_entity: ecez.Entity,
     /// used in benchmark report
     grid_state: BrickState,
-    sun_ptr: *Sun,
     gfx_pipeline_shader_constants: *GraphicsPipeline.PushConstant,
-};
-
-pub const Config = struct {
-    camera_window_active: bool = true,
-    metrics_window_active: bool = true,
-    post_process_window_active: bool = true,
-    sun_window_active: bool = true,
-    update_frame_timings: bool = true,
 };
 
 const MetricState = struct {
@@ -48,9 +42,16 @@ sun_window_active: bool,
 
 metrics_state: MetricState,
 
-benchmark: ?Benchmark = null,
+benchmark_entity: ecez.Entity,
 
-pub fn init(gui_width: f32, gui_height: f32, state_binding: StateBinding, config: Config) ImguiGui {
+pub const Config = struct {
+    camera_window_active: bool = true,
+    metrics_window_active: bool = true,
+    post_process_window_active: bool = true,
+    sun_window_active: bool = true,
+    update_frame_timings: bool = true,
+};
+pub fn init(gui_width: f32, gui_height: f32, storage: anytype, state_binding: StateBinding, config: Config) error{OutOfMemory}!ImguiGui {
     // Color scheme
     const StyleCol = zgui.StyleCol;
     const style = zgui.getStyle();
@@ -64,6 +65,8 @@ pub fn init(gui_width: f32, gui_height: f32, state_binding: StateBinding, config
     zgui.io.setDisplaySize(gui_width, gui_height);
     zgui.io.setDisplayFramebufferScale(1.0, 1.0);
 
+    const benchmark_entity = try storage.createEntity(.{});
+
     return ImguiGui{
         .state_binding = state_binding,
         .camera_window_active = config.camera_window_active,
@@ -76,6 +79,7 @@ pub fn init(gui_width: f32, gui_height: f32, state_binding: StateBinding, config
             .min_frame_time = std.math.floatMax(f32),
             .max_frame_time = std.math.floatMin(f32),
         },
+        .benchmark_entity = benchmark_entity,
     };
 }
 
@@ -87,7 +91,18 @@ pub fn handleRescale(self: ImguiGui, gui_width: f32, gui_height: f32) void {
 }
 
 // Starts a new imGui frame and sets up windows and ui elements
-pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metrics: bool, dt: f32) void {
+pub fn newFrame(
+    self: *ImguiGui,
+    ctx: Context,
+    storage: anytype,
+    pipeline: *Pipeline,
+    camera_ptr: *camera.components.Camera,
+    device_camera: *camera.components.DeviceCamera,
+    sun_ptr: *sun.components.Sun,
+    device_sun: *sun.components.DeviceSun,
+    update_metrics: bool,
+    dt: f32,
+) !void {
     zgui.newFrame();
 
     const style = zgui.getStyle();
@@ -147,21 +162,10 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
         self.metrics_state.max_frame_time = @max(self.metrics_state.max_frame_time, frame_time);
     }
 
-    self.benchmark = blk: {
-        if (self.benchmark) |*b| {
-            if (b.update(dt)) {
-                self.state_binding.camera_ptr.reset();
-                b.printReport(ctx.physical_device_properties.device_name[0..]);
-                break :blk null;
-            }
-        }
-        break :blk self.benchmark;
-    };
-
-    self.drawCameraWindowIfEnabled();
-    self.drawMetricsWindowIfEnabled(ctx);
+    self.drawCameraWindowIfEnabled(camera_ptr, device_camera);
+    try self.drawMetricsWindowIfEnabled(ctx, storage, camera_ptr, device_camera, sun_ptr, device_sun);
     self.drawPostProcessWindowIfEnabled();
-    self.drawPostSunWindowIfEnabled();
+    self.drawPostSunWindowIfEnabled(sun_ptr, device_sun);
 
     // imgui.igSetNextWindowPos(.{ .x = 650, .y = 20 }, imgui.ImGuiCond_FirstUseEver, .{ .x = 0, .y = 0 });
     // imgui.igShowDemoWindow(null);
@@ -169,7 +173,7 @@ pub fn newFrame(self: *ImguiGui, ctx: Context, pipeline: *Pipeline, update_metri
     zgui.render();
 }
 
-inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
+fn drawCameraWindowIfEnabled(self: *ImguiGui, camera_ptr: *camera.components.Camera, device_camera: *camera.components.DeviceCamera) void {
     if (self.camera_window_active == false) return;
 
     zgui.setNextWindowSize(.{
@@ -182,29 +186,41 @@ inline fn drawCameraWindowIfEnabled(self: *ImguiGui) void {
     if (camera_open == false) return;
 
     _ = zgui.sliderInt("max bounces", .{
-        .v = &self.state_binding.camera_ptr.d_camera.max_bounce,
+        .v = &device_camera.max_bounce,
         .min = 1,
         .max = 32,
     });
     imguiToolTip("how many times a ray is allowed to bounce before terminating", .{});
     _ = zgui.sliderInt("samples per pixel", .{
-        .v = &self.state_binding.camera_ptr.d_camera.samples_per_pixel,
+        .v = &device_camera.samples_per_pixel,
         .min = 1,
         .max = 32,
     });
     imguiToolTip("how many rays per pixel", .{});
 
-    _ = zgui.inputFloat("move speed", .{ .v = &self.state_binding.camera_ptr.normal_speed });
-    _ = zgui.inputFloat("turn rate", .{ .v = &self.state_binding.camera_ptr.turn_rate });
+    _ = zgui.inputFloat("move speed", .{
+        .v = &camera_ptr.normal_speed,
+    });
+    _ = zgui.inputFloat("turn rate", .{
+        .v = &camera_ptr.turn_rate,
+    });
 
-    var camera_origin: [3]f32 = self.state_binding.camera_ptr.d_camera.origin;
+    var camera_origin: [3]f32 = [_]f32{ 0, 0, 0 }; // self.state_binding.camera_ptr.d_camera.origin; // TODO
     const camera_origin_changed = zgui.inputFloat3("position", .{ .v = &camera_origin });
     if (camera_origin_changed) {
-        self.state_binding.camera_ptr.setOrigin(camera_origin);
+        camera.setOrigin(camera_ptr, device_camera, camera_origin);
     }
 }
 
-fn drawMetricsWindowIfEnabled(self: *ImguiGui, ctx: Context) void {
+fn drawMetricsWindowIfEnabled(
+    self: *ImguiGui,
+    ctx: Context,
+    storage: anytype,
+    camera_ptr: *camera.components.Camera,
+    device_camera: *camera.components.DeviceCamera,
+    sun_ptr: *sun.components.Sun,
+    device_sun: *sun.components.DeviceSun,
+) error{OutOfMemory}!void {
     if (self.metrics_window_active == false) return;
 
     zgui.setNextWindowSize(.{
@@ -242,7 +258,7 @@ fn drawMetricsWindowIfEnabled(self: *ImguiGui, ctx: Context) void {
     zgui.text("Maximum frame time: {d:>8.3}", .{self.metrics_state.max_frame_time});
 
     if (zgui.collapsingHeader("Benchmark", .{})) {
-        const benchmark_active = self.benchmark != null;
+        const benchmark_active = storage.hasComponents(self.benchmark_entity, .{benchmark.components.Benchmark});
         if (benchmark_active) {
             // imgui.igPushItemFlag(ImGuiButtonFlags_Disabled, true);
             zgui.pushStyleVar1f(.{ .idx = .alpha, .v = zgui.getStyle().alpha * 0.5 });
@@ -250,19 +266,26 @@ fn drawMetricsWindowIfEnabled(self: *ImguiGui, ctx: Context) void {
         if (zgui.button("Start benchmark", .{ .w = 200, .h = 80 })) {
             if (benchmark_active == false) {
                 // reset sun to avoid any difference in lighting affecting performance
-                if (self.state_binding.sun_ptr.device_data.enabled > 0 and self.state_binding.sun_ptr.animate) {
-                    self.state_binding.sun_ptr.* = Sun.init(.{});
+                if (device_sun.enabled > 0 and sun_ptr.animate) {
+                    const reset_sun = sun.createSunComponents(.{});
+                    sun_ptr.* = reset_sun.sun;
+                    device_sun.* = reset_sun.device;
                 }
-                self.benchmark = Benchmark.init(
-                    self.state_binding.camera_ptr,
-                    self.state_binding.grid_state,
-                    (self.state_binding.sun_ptr.device_data.enabled > 0),
-                );
+
+                try storage.setComponents(self.benchmark_entity, benchmark.createBenchmarkComponents(
+                    camera_ptr,
+                    device_camera,
+                    [_]f32{
+                        @floatFromInt(self.state_binding.grid_state.device_state.dim_x),
+                        @floatFromInt(self.state_binding.grid_state.device_state.dim_y),
+                        @floatFromInt(self.state_binding.grid_state.device_state.dim_z),
+                    },
+                    device_sun.enabled > 0,
+                ));
             }
         }
         imguiToolTip("benchmark will control camera and create a report to stdout", .{});
         if (benchmark_active) {
-            // imgui.igPopItemFlag();
             zgui.popStyleVar(.{});
         }
     }
@@ -301,7 +324,7 @@ inline fn drawPostProcessWindowIfEnabled(self: *ImguiGui) void {
     });
 }
 
-inline fn drawPostSunWindowIfEnabled(self: *ImguiGui) void {
+inline fn drawPostSunWindowIfEnabled(self: *ImguiGui, sun_ptr: *sun.components.Sun, device_sun: *sun.components.DeviceSun) void {
     if (self.sun_window_active == false) return;
 
     zgui.setNextWindowSize(.{
@@ -314,31 +337,36 @@ inline fn drawPostSunWindowIfEnabled(self: *ImguiGui) void {
     defer zgui.end();
     if (sun_open == false) return;
 
-    var enabled = (self.state_binding.sun_ptr.device_data.enabled > 0);
+    var enabled = device_sun.enabled > 0;
     _ = zgui.checkbox("enabled", .{ .v = &enabled });
-    self.state_binding.sun_ptr.device_data.enabled = if (enabled) 1 else 0;
+    device_sun.enabled = if (enabled) 1 else 0;
 
     _ = zgui.dragFloat3("position", .{
-        .v = &self.state_binding.sun_ptr.device_data.position,
+        .v = &device_sun.position,
         .speed = 1,
         .min = -10000,
         .max = 10000,
     });
-    _ = zgui.colorEdit3("color", .{ .col = &self.state_binding.sun_ptr.device_data.color });
-    _ = zgui.dragFloat("radius", .{ .v = &self.state_binding.sun_ptr.device_data.radius, .speed = 1, .min = 0, .max = 20 });
+    _ = zgui.colorEdit3("color", .{
+        .col = &device_sun.color,
+    });
+    _ = zgui.dragFloat("radius", .{
+        .v = &device_sun.radius,
+        .speed = 1,
+        .min = 0,
+        .max = 20,
+    });
 
     if (zgui.collapsingHeader("Animation", .{})) {
-        _ = zgui.checkbox("animate", .{ .v = &self.state_binding.sun_ptr.animate });
-        var speed: f32 = self.state_binding.sun_ptr.animate_speed / 3;
+        _ = zgui.checkbox("animate", .{
+            .v = &sun_ptr.animate,
+        });
+        var speed: f32 = sun_ptr.animate_speed / 3;
         const speed_changed = zgui.inputFloat("speed", .{ .v = &speed });
         imguiToolTip("how long a day and night last in seconds", .{});
         if (speed_changed) {
-            self.state_binding.sun_ptr.animate_speed = speed * 3;
+            sun_ptr.animate_speed = speed * 3;
         }
-        // TODO: allow these to be changed: (?)
-        // slerp_orientations: [3]za.Quat,
-        // lerp_color: [3]za.Vec3,
-        // static_pos_vec: za.Vec3,
     }
 }
 

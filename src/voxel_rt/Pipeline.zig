@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 
 const tracy = @import("ztracy");
 
-const shaders = @import("shaders");
+const ecez = @import("ecez");
 
 const vk = @import("vulkan");
 const render = @import("../render.zig");
@@ -20,8 +20,8 @@ const GpuBufferMemory = render.GpuBufferMemory;
 
 const ImguiGui = @import("ImguiGui.zig");
 
-const Camera = @import("Camera.zig");
-const Sun = @import("Sun.zig");
+const camera = @import("camera.zig");
+const sun = @import("sun.zig");
 const GridState = @import("brick/State.zig");
 const gpu_types = @import("gpu_types.zig");
 
@@ -63,8 +63,8 @@ compute_pipeline: ComputePipeline,
 gfx_pipeline: GraphicsPipeline,
 imgui_pipeline: ImguiPipeline,
 
-camera: *Camera,
-sun: *Sun,
+camera_entity: ecez.Entity,
+sun_entity: ecez.Entity,
 
 gui: ImguiGui,
 
@@ -77,10 +77,12 @@ vertex_index_buffer: GpuBufferMemory,
 pub fn init(
     ctx: Context,
     allocator: Allocator,
+    comptime Storage: type,
+    storage: *Storage,
     internal_render_resolution: vk.Extent2D,
     grid_state: GridState,
-    camera: *Camera,
-    sun: *Sun,
+    camera_entity: ecez.Entity,
+    sun_entity: ecez.Entity,
     config: Config,
 ) !Pipeline {
     const init_zone = tracy.ZoneN(@src(), "init pipeline");
@@ -255,7 +257,7 @@ pub fn init(
     errdefer ctx.vkd.destroyFence(ctx.logical_device, render_complete_fence, null);
 
     const MinSize = struct {
-        fn storage(ctx1: Context, size: u64) u64 {
+        fn ssbo(ctx1: Context, size: u64) u64 {
             const storage_size = ctx1.physical_device_properties.limits.min_storage_buffer_offset_alignment;
             return storage_size * (std.math.divCeil(vk.DeviceSize, size, storage_size) catch unreachable);
         }
@@ -272,12 +274,12 @@ pub fn init(
             MinSize.uniform(ctx, @sizeOf(GridState.Device)),
         };
         const storage_sizes = [_]u64{
-            MinSize.storage(ctx, @sizeOf(gpu_types.Material) * config.material_buffer),
-            MinSize.storage(ctx, @sizeOf(GridState.BrickStatusMask) * grid_state.brick_statuses.len),
-            MinSize.storage(ctx, @sizeOf(GridState.IndexToBrick) * grid_state.brick_indices.len),
-            MinSize.storage(ctx, @sizeOf(GridState.Brick.Occupancy) * grid_state.brick_occupancy.len),
-            MinSize.storage(ctx, @sizeOf(GridState.Brick.StartIndex) * grid_state.brick_start_indices.len),
-            MinSize.storage(ctx, @sizeOf(GridState.MaterialIndices) * grid_state.material_indices.len),
+            MinSize.ssbo(ctx, @sizeOf(gpu_types.Material) * config.material_buffer),
+            MinSize.ssbo(ctx, @sizeOf(GridState.BrickStatusMask) * grid_state.brick_statuses.len),
+            MinSize.ssbo(ctx, @sizeOf(GridState.IndexToBrick) * grid_state.brick_indices.len),
+            MinSize.ssbo(ctx, @sizeOf(GridState.Brick.Occupancy) * grid_state.brick_occupancy.len),
+            MinSize.ssbo(ctx, @sizeOf(GridState.Brick.StartIndex) * grid_state.brick_start_indices.len),
+            MinSize.ssbo(ctx, @sizeOf(GridState.MaterialIndices) * grid_state.material_indices.len),
         };
         const state_configs = ComputePipeline.StateConfigs{ .uniform_sizes = uniform_sizes[0..], .storage_sizes = storage_sizes[0..] };
 
@@ -347,14 +349,15 @@ pub fn init(
     errdefer imgui_pipeline.deinit(ctx);
 
     const state_binding = ImguiGui.StateBinding{
-        .camera_ptr = camera,
+        .camera_entity = camera_entity,
+        .sun_entity = sun_entity,
         .grid_state = grid_state,
-        .sun_ptr = sun,
         .gfx_pipeline_shader_constants = gfx_pipeline.shader_constants,
     };
-    const gui = ImguiGui.init(
+    const gui = try ImguiGui.init(
         @floatFromInt(swapchain.extent.width),
         @floatFromInt(swapchain.extent.height),
+        storage,
         state_binding,
         .{},
     );
@@ -375,8 +378,8 @@ pub fn init(
         .compute_pipeline = compute_pipeline,
         .gfx_pipeline = gfx_pipeline,
         .imgui_pipeline = imgui_pipeline,
-        .camera = camera,
-        .sun = sun,
+        .camera_entity = camera_entity,
+        .sun_entity = sun_entity,
         .gui = gui,
         .init_command_pool = init_command_pool,
         .vertex_index_buffer = vertex_index_buffer,
@@ -415,7 +418,7 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
 }
 
 /// draw a new frame, delta time is only used by gui
-pub fn draw(self: *Pipeline, ctx: Context, dt: f32) !void {
+pub fn draw(self: *Pipeline, ctx: Context, comptime Storage: type, storage: *Storage, dt: f32) !void {
     const draw_zone = tracy.ZoneN(@src(), "draw");
     defer draw_zone.End();
 
@@ -424,11 +427,13 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) !void {
         self.present_complete_semaphore_index = @mod(self.present_complete_semaphore_index, self.present_complete_semaphores.len);
     }
 
+    const device_camera = storage.getComponent(self.camera_entity, *camera.components.DeviceCamera) catch unreachable;
+    const device_sun = storage.getComponent(self.sun_entity, *sun.components.DeviceSun) catch unreachable;
     const compute_semaphore = try self.compute_pipeline.dispatch(
         ctx,
         self.compute_workgroup_size,
-        self.camera.*,
-        self.sun.*,
+        device_camera.*,
+        device_sun.*,
     );
 
     const image_index = blk: {
@@ -470,7 +475,20 @@ pub fn draw(self: *Pipeline, ctx: Context, dt: f32) !void {
         try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast(&self.render_complete_fence));
     }
 
-    self.gui.newFrame(ctx, self, image_index == 0, dt);
+    const update_metrics = image_index == 0;
+    const camera_ptr = storage.getComponent(self.camera_entity, *camera.components.Camera) catch unreachable;
+    const sun_ptr = storage.getComponent(self.sun_entity, *sun.components.Sun) catch unreachable;
+    try self.gui.newFrame(
+        ctx,
+        storage,
+        self,
+        camera_ptr,
+        device_camera,
+        sun_ptr,
+        device_sun,
+        update_metrics,
+        dt,
+    );
     try self.imgui_pipeline.updateBuffers(ctx, &self.vertex_index_buffer);
 
     // re-record command buffer to update any state

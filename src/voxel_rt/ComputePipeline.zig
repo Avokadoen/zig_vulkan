@@ -10,8 +10,8 @@ const Context = render.Context;
 const GpuBufferMemory = render.GpuBufferMemory;
 const Texture = render.Texture;
 
-const Camera = @import("Camera.zig");
-const Sun = @import("Sun.zig");
+const DeviceCamera = @import("camera.zig").components.DeviceCamera;
+const DeviceSun = @import("sun.zig").components.DeviceSun;
 
 /// compute shader that draws to a target texture
 const ComputePipeline = @This();
@@ -281,7 +281,7 @@ pub fn init(
         const push_constant_ranges = [_]vk.PushConstantRange{.{
             .stage_flags = .{ .compute_bit = true },
             .offset = 0,
-            .size = @sizeOf(Camera.Device) + @sizeOf(Sun.Device),
+            .size = @sizeOf(DeviceCamera) + @sizeOf(DeviceSun),
         }};
         const pipeline_layout_info = vk.PipelineLayoutCreateInfo{
             .flags = .{},
@@ -430,7 +430,7 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
     ctx.vkd.destroyPipeline(ctx.logical_device, self.pipeline, null);
 }
 
-pub fn dispatch(self: *ComputePipeline, ctx: Context, workgroup_size: WorkgroupSize, camera: Camera, sun: Sun) !vk.Semaphore {
+pub fn dispatch(self: *ComputePipeline, ctx: Context, workgroup_size: WorkgroupSize, device_camera: DeviceCamera, device_sun: DeviceSun) !vk.Semaphore {
     {
         const wait_compute_zone = tracy.ZoneN(@src(), "idle wait compute");
         defer wait_compute_zone.End();
@@ -451,7 +451,7 @@ pub fn dispatch(self: *ComputePipeline, ctx: Context, workgroup_size: WorkgroupS
     }
 
     try ctx.vkd.resetCommandPool(ctx.logical_device, self.command_pool, .{});
-    try self.recordCommandBuffer(ctx, workgroup_size, camera, sun);
+    try self.recordCommandBuffer(ctx, workgroup_size, device_camera, device_sun);
 
     {
         @setRuntimeSafety(false);
@@ -478,7 +478,7 @@ pub fn dispatch(self: *ComputePipeline, ctx: Context, workgroup_size: WorkgroupS
     return self.complete_semaphore;
 }
 
-pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, workgroup_size: WorkgroupSize, camera: Camera, sun: Sun) !void {
+pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, workgroup_size: WorkgroupSize, device_camera: DeviceCamera, device_sun: DeviceSun) !void {
     const draw_zone = tracy.ZoneN(@src(), "compute record");
     defer draw_zone.End();
 
@@ -506,8 +506,8 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, workgroup_size: 
         self.pipeline_layout,
         .{ .compute_bit = true },
         0,
-        @sizeOf(Camera.Device),
-        &camera.d_camera,
+        @sizeOf(DeviceCamera),
+        &device_camera,
     );
 
     // push sun data as a push constant
@@ -515,9 +515,9 @@ pub fn recordCommandBuffer(self: ComputePipeline, ctx: Context, workgroup_size: 
         self.command_buffer,
         self.pipeline_layout,
         .{ .compute_bit = true },
-        @sizeOf(Camera.Device),
-        @sizeOf(Sun.Device),
-        &sun.device_data,
+        @sizeOf(DeviceCamera),
+        @sizeOf(DeviceSun),
+        &device_sun,
     );
 
     const acquire_image_barrier = vk.ImageMemoryBarrier{

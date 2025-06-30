@@ -9,7 +9,7 @@ const VoxelRT = @import("../VoxelRT.zig");
 pub const Update = struct {
     window: *zglfw.Window,
     voxel_rt: *VoxelRT,
-    dt: f32,
+    delta_time: f32,
 };
 
 pub const KeyEvent = struct {

@@ -16,87 +16,91 @@ pub const component = @import("input/component.zig");
 pub const event_argument = @import("input/event_argument.zig");
 pub const queries = @import("input/queries.zig");
 
+pub const camera = @import("VoxelRT.zig").camera;
+
 pub fn CreateInputTypes(comptime Storage: type) type {
     return struct {
         // TODO: single handle input event event. This will then flush a queue of events
-        pub const Events = struct {
+        pub const events = struct {
             pub const input_on_key_events = ecez.Event("input_on_key_events", .{
-                Systems.HandleKeyEvent.game,
-                Systems.HandleKeyEvent.menu,
+                systems.HandleKeyEvent.game,
+                systems.HandleKeyEvent.menu,
             }, .{
                 .run_on_main_thread = true,
             });
 
             pub const input_on_mouse_button = ecez.Event("input_on_mouse_button", .{
-                Systems.HandleMouseButton.menu,
+                systems.HandleMouseButton.menu,
             }, .{
                 .run_on_main_thread = true,
             });
 
             pub const input_on_cursor_pos = ecez.Event("input_on_cursor_pos", .{
-                Systems.HandleCursorPos.game,
-                Systems.HandleCursorPos.menu,
+                systems.HandleCursorPos.game,
+                systems.HandleCursorPos.menu,
             }, .{
                 .run_on_main_thread = true,
             });
 
             pub const input_on_char = ecez.Event("input_on_char", .{
-                Systems.HandleChar.menu,
+                systems.HandleChar.menu,
             }, .{
                 .run_on_main_thread = true,
             });
 
             pub const input_on_scroll = ecez.Event("input_on_scroll", .{
-                Systems.HandleScroll.menu,
+                systems.HandleScroll.menu,
             }, .{
                 .run_on_main_thread = true,
             });
 
             pub const input_on_event_update = ecez.Event("input_on_event_update", .{
-                Systems.Update.game,
-                Systems.Update.menu,
+                systems.Update.game,
+                systems.Update.menu,
             }, .{
                 .run_on_main_thread = true,
             });
         };
 
-        pub const SubStorages = struct {
+        pub const sub_storages = struct {
             pub const MenuActive = Storage.Subset(.{*component.MenuActiveTag});
 
             pub const PrevCursorPos = Storage.Subset(.{*component.PrevCursorPos});
         };
 
-        const Systems = struct {
+        const systems = struct {
             pub const Update = struct {
                 pub fn game(
                     state: *queries.GameUserInput,
+                    camera_query: *camera.queries.Camera,
                     event: event_argument.Update,
                 ) void {
-                    if (state.getAny()) |item_entity| {
-                        const user_input = item_entity.user_input;
+                    const camera_state = camera_query.getAny() orelse return;
+                    const item_entity = state.getAny() orelse return;
 
-                        user_input.mouse_ignore_frames -= if (user_input.mouse_ignore_frames > 0) 1 else 0;
+                    const user_input = item_entity.user_input;
 
-                        if (user_input.call_translate > 0) {
-                            if (user_input.activate_sprint) {
-                                event.voxel_rt.camera.activateSprint();
-                            } else {
-                                event.voxel_rt.camera.disableSprint();
-                            }
-                            event.voxel_rt.camera.translate(event.dt, user_input.camera_translate);
+                    user_input.mouse_ignore_frames -= if (user_input.mouse_ignore_frames > 0) 1 else 0;
+
+                    if (user_input.call_translate > 0) {
+                        if (user_input.activate_sprint) {
+                            camera.activateSprint(camera_state.camera);
+                        } else {
+                            camera.disableSprint(camera_state.camera);
                         }
-                        if (user_input.call_yaw) {
-                            event.voxel_rt.camera.turnYaw(-user_input.mouse_delta.x() * event.dt);
-                        }
-                        if (user_input.call_pitch) {
-                            event.voxel_rt.camera.turnPitch(user_input.mouse_delta.y() * event.dt);
-                        }
-                        if (user_input.call_translate > 0 or user_input.call_yaw or user_input.call_pitch) {
-                            user_input.call_yaw = false;
-                            user_input.call_pitch = false;
-                            user_input.mouse_delta.data[0] = 0;
-                            user_input.mouse_delta.data[1] = 0;
-                        }
+                        camera.translate(camera_state.camera, camera_state.device, event.delta_time, user_input.camera_translate);
+                    }
+                    if (user_input.call_yaw) {
+                        camera.turnYaw(camera_state.camera, camera_state.device, -user_input.mouse_delta.x() * event.delta_time);
+                    }
+                    if (user_input.call_pitch) {
+                        camera.turnPitch(camera_state.camera, camera_state.device, user_input.mouse_delta.y() * event.delta_time);
+                    }
+                    if (user_input.call_translate > 0 or user_input.call_yaw or user_input.call_pitch) {
+                        user_input.call_yaw = false;
+                        user_input.call_pitch = false;
+                        user_input.mouse_delta.data[0] = 0;
+                        user_input.mouse_delta.data[1] = 0;
                     }
                 }
 
@@ -134,7 +138,7 @@ pub fn CreateInputTypes(comptime Storage: type) type {
             pub const HandleKeyEvent = struct {
                 pub fn game(
                     state: *queries.GameUserInput,
-                    menu_active_storage: *SubStorages.MenuActive,
+                    menu_active_storage: *sub_storages.MenuActive,
                     event: event_argument.KeyEvent,
                 ) void {
                     if (state.getAny()) |input_entity| {
@@ -214,7 +218,7 @@ pub fn CreateInputTypes(comptime Storage: type) type {
 
                 pub fn menu(
                     state: *queries.MenuUserInput,
-                    menu_active_storage: *SubStorages.MenuActive,
+                    menu_active_storage: *sub_storages.MenuActive,
                     event: event_argument.KeyEvent,
                 ) void {
                     if (state.getAny()) |input_entity| {
@@ -275,7 +279,7 @@ pub fn CreateInputTypes(comptime Storage: type) type {
             pub const HandleCursorPos = struct {
                 pub fn game(
                     state: *queries.GameUserInput,
-                    prev_event_storage: *SubStorages.PrevCursorPos,
+                    prev_event_storage: *sub_storages.PrevCursorPos,
                     event: event_argument.CursorPosEvent,
                 ) void {
                     if (state.getAny()) |item| {
