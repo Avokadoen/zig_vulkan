@@ -2,6 +2,7 @@ const za = @import("zalgebra");
 const math = @import("std").math;
 
 const ecez = @import("ecez");
+const EventArgument = @import("event_arg.zig").EventArgument;
 
 pub const components = struct {
     pub const Sun = struct {
@@ -21,6 +22,13 @@ pub const components = struct {
         color: [3]f32,
         radius: f32,
     };
+};
+
+pub const queries = struct {
+    pub const sun = ecez.QueryAny(struct {
+        sun: *components.Sun,
+        device: *components.DeviceSun,
+    }, .{}, .{});
 };
 
 pub const Config = struct {
@@ -66,29 +74,31 @@ pub fn createSunComponents(config: Config) struct {
     };
 }
 
-// TODO: this should be a system
-pub inline fn update(sun_entity: ecez.Entity, storage: anytype, delta_time: f32) void {
-    const sun = storage.getComponent(sun_entity, *components.Sun) catch unreachable;
-    const device_sun = storage.getComponent(sun_entity, *components.DeviceSun) catch unreachable;
+pub const systems = struct {
+    pub fn update(sun_query: *queries.sun, event_arg: EventArgument) void {
+        const sun_entity = sun_query.getAny() orelse unreachable;
+        const sun = sun_entity.sun;
+        const device = sun_entity.device;
 
-    if (sun.animate == false or device_sun.enabled == 0) return;
+        if (sun.animate == false or device.enabled == 0) return;
 
-    const next_index = (sun.slerp_index + 1) % sun.slerp_orientations.len;
-    {
-        const quat_a = sun.slerp_orientations[sun.slerp_index];
-        const quat_b = sun.slerp_orientations[next_index];
-        device_sun.position = quat_a.slerp(quat_b, sun.slerp_pos).rotateVec(sun.static_pos_vec).data;
+        const next_index = (sun.slerp_index + 1) % sun.slerp_orientations.len;
+        {
+            const quat_a = sun.slerp_orientations[sun.slerp_index];
+            const quat_b = sun.slerp_orientations[next_index];
+            device.position = quat_a.slerp(quat_b, sun.slerp_pos).rotateVec(sun.static_pos_vec).data;
+        }
+
+        {
+            const color_a = sun.lerp_color[sun.slerp_index];
+            const color_b = sun.lerp_color[next_index];
+            device.color = color_a.lerp(color_b, sun.slerp_pos).data;
+        }
+
+        sun.slerp_pos += sun.animate_speed * event_arg.delta_time;
+        if (sun.slerp_pos > 1) {
+            sun.slerp_pos = math.modf(sun.slerp_pos).fpart;
+            sun.slerp_index = next_index;
+        }
     }
-
-    {
-        const color_a = sun.lerp_color[sun.slerp_index];
-        const color_b = sun.lerp_color[next_index];
-        device_sun.color = color_a.lerp(color_b, sun.slerp_pos).data;
-    }
-
-    sun.slerp_pos += sun.animate_speed * delta_time;
-    if (sun.slerp_pos > 1) {
-        sun.slerp_pos = math.modf(sun.slerp_pos).fpart;
-        sun.slerp_index = next_index;
-    }
-}
+};

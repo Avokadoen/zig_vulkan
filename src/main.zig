@@ -54,9 +54,6 @@ pub const InputRuntime = input.CreateInputRuntime(Storage, Scheduler);
 pub const application_name = "zig vulkan";
 pub const internal_render_resolution = za.GenericVector(2, u32).new(2560, 1440);
 
-// TODO: wrap this in render to make main seem simpler :^)
-var delta_time: f64 = 0;
-
 pub fn main() anyerror!void {
     ztracy.SetThreadName("main thread");
     const main_zone = ztracy.ZoneN(@src(), "main");
@@ -182,35 +179,33 @@ pub fn main() anyerror!void {
     );
     defer input_rt.deinit(allocator, window);
 
-    var input_update_event_arg = input.event_argument.Update{
-        .window = window,
-        .voxel_rt = &voxel_rt,
-        .delta_time = 0,
-    };
-
     var prev_frame = std.time.milliTimestamp();
     // Loop until the user closes the window
     while (!window.shouldClose()) {
         const current_frame = std.time.milliTimestamp();
-        delta_time = @as(f64, @floatFromInt(current_frame - prev_frame)) / @as(f64, std.time.ms_per_s);
+        const delta_time = @as(f64, @floatFromInt(current_frame - prev_frame)) / @as(f64, std.time.ms_per_s);
+        const f32_delta_time: f32 = @floatCast(delta_time);
 
         scheduler.dispatchEvent(&storage, .voxel_rt_update, VoxelRT.EventArgument{
             .ctx = ctx,
-            .delta_time = @floatCast(delta_time),
+            .delta_time = f32_delta_time,
         });
 
-        input_update_event_arg.delta_time = @floatCast(delta_time);
+        scheduler.waitEvent(.voxel_rt_update);
 
-        voxel_rt.updateSun(Storage, &storage, input_update_event_arg.delta_time);
         try voxel_rt.updateGridDelta();
-        try voxel_rt.draw(ctx, Storage, &storage, input_update_event_arg.delta_time);
+        try voxel_rt.draw(ctx, Storage, &storage, f32_delta_time);
 
         // Poll for and process events
         zglfw.pollEvents();
         prev_frame = current_frame;
 
         // this event runs on the main thread and does not need a wait
-        scheduler.dispatchEvent(&storage, .input_on_event_update, input_update_event_arg);
+        scheduler.dispatchEvent(&storage, .input_on_event_update, input.event_argument.Update{
+            .window = window,
+            .voxel_rt = &voxel_rt,
+            .delta_time = f32_delta_time,
+        });
 
         ztracy.FrameMark();
     }

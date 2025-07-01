@@ -21,7 +21,7 @@ pub const gpu_types = @import("voxel_rt/gpu_types.zig");
 pub const terrain = @import("voxel_rt/terrain/terrain.zig");
 pub const vox = @import("voxel_rt/vox/loader.zig");
 
-pub const EventArgument = benchmark.EventArgument;
+pub const EventArgument = @import("voxel_rt/event_arg.zig").EventArgument;
 
 pub fn CreateEvents(comptime Storage: type) type {
     return struct {
@@ -30,6 +30,7 @@ pub fn CreateEvents(comptime Storage: type) type {
         pub const events = struct {
             pub const voxel_rt_update = ecez.Event("voxel_rt_update", .{
                 BenchmarkSystems.update,
+                sun.systems.update,
             }, .{});
         };
     };

@@ -8,6 +8,8 @@ const BrickState = @import("brick/State.zig");
 const camera = @import("camera.zig");
 const Context = @import("../render.zig").Context;
 
+const EventArgument = @import("event_arg.zig").EventArgument;
+
 pub const components = struct {
     pub const Benchmark = struct {
         timer: f32,
@@ -33,11 +35,6 @@ pub const queries = struct {
         benchmark: *components.Benchmark,
         report: *components.Report,
     }, .{}, .{});
-};
-
-pub const EventArgument = struct {
-    ctx: Context,
-    delta_time: f32,
 };
 
 pub fn CreateSystems(comptime Storage: type) type {
