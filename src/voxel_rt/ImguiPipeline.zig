@@ -166,7 +166,6 @@ pub fn init(
                 .new_layout = .shader_read_only_optimal,
             } };
         } else {
-            std.debug.print("hello!\n", .{});
             break :init_transitions_blk [_]texture.TransitionConfig{
                 .{
                     .image = font_image,

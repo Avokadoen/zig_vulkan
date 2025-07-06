@@ -41,14 +41,18 @@ pub fn init(
     };
     errdefer ctx.vkd.destroyBuffer(ctx.logical_device, buffer, null);
 
-    const memory = blk: {
+    const memory, const atom_coherent_capacity = blk: {
         const memory_requirements = ctx.vkd.getBufferMemoryRequirements(ctx.logical_device, buffer);
         const memory_type_index = try vk_utils.findMemoryTypeIndex(ctx, memory_requirements.memory_type_bits, mem_prop_flags);
         const allocate_info = vk.MemoryAllocateInfo{
             .allocation_size = memory_requirements.size,
             .memory_type_index = memory_type_index,
         };
-        break :blk try ctx.vkd.allocateMemory(ctx.logical_device, &allocate_info, null);
+
+        break :blk .{
+            try ctx.vkd.allocateMemory(ctx.logical_device, &allocate_info, null),
+            memory_requirements.size,
+        };
     };
     errdefer ctx.vkd.freeMemory(ctx.logical_device, memory, null);
 
@@ -56,7 +60,7 @@ pub fn init(
 
     return GpuBufferMemory{
         .len = 0,
-        .capacity = capacity,
+        .capacity = atom_coherent_capacity,
         .buffer = buffer,
         .memory = memory,
         .mapped = null,
@@ -85,7 +89,7 @@ pub fn unmap(self: *GpuBufferMemory, ctx: Context) void {
     }
 }
 
-pub fn typedMapAssumeMapped(self: *GpuBufferMemory, comptime T: type, offset: vk.DeviceSize) [*]T {
+pub fn typedMapAssumeMapped(self: *const GpuBufferMemory, comptime T: type, offset: vk.DeviceSize) [*]T {
     var bytes: [*]u8 = @ptrCast(self.mapped.?);
     const ptr: [*]T = @alignCast(@ptrCast(&bytes[offset]));
     return ptr;

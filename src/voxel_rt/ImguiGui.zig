@@ -10,16 +10,14 @@ const Context = render.Context;
 
 const camera = @import("camera.zig");
 const sun = @import("sun.zig");
-const BrickState = @import("brick/State.zig");
+const brick_state = @import("brick/state.zig");
 const Pipeline = @import("Pipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const benchmark = @import("benchmark.zig");
 
 pub const StateBinding = struct {
-    camera_entity: ecez.Entity,
-    sun_entity: ecez.Entity,
     /// used in benchmark report
-    grid_state: BrickState,
+    grid_device: brick_state.components.Device,
     gfx_pipeline_shader_constants: *GraphicsPipeline.PushConstant,
 };
 
@@ -276,9 +274,9 @@ fn drawMetricsWindowIfEnabled(
                     camera_ptr,
                     device_camera,
                     [_]f32{
-                        @floatFromInt(self.state_binding.grid_state.device_state.dim_x),
-                        @floatFromInt(self.state_binding.grid_state.device_state.dim_y),
-                        @floatFromInt(self.state_binding.grid_state.device_state.dim_z),
+                        @floatFromInt(self.state_binding.grid_device.dim_x),
+                        @floatFromInt(self.state_binding.grid_device.dim_y),
+                        @floatFromInt(self.state_binding.grid_device.dim_z),
                     },
                     device_sun.enabled > 0,
                 ));

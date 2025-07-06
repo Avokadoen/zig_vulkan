@@ -22,7 +22,7 @@ const ImguiGui = @import("ImguiGui.zig");
 
 const camera = @import("camera.zig");
 const sun = @import("sun.zig");
-const GridState = @import("brick/State.zig");
+const grid_state = @import("brick/state.zig");
 const gpu_types = @import("gpu_types.zig");
 
 pub const Config = struct {
@@ -80,7 +80,7 @@ pub fn init(
     comptime Storage: type,
     storage: *Storage,
     internal_render_resolution: vk.Extent2D,
-    grid_state: GridState,
+    grid_entity: ecez.Entity,
     camera_entity: ecez.Entity,
     sun_entity: ecez.Entity,
     config: Config,
@@ -217,18 +217,15 @@ pub fn init(
     const render_pass = try ctx.createRenderPass(swapchain.format);
     errdefer ctx.destroyRenderPass(render_pass);
 
-    const semaphore_info = vk.SemaphoreCreateInfo{ .flags = .{} };
-
-    // TODO function for this?
     const present_complete_semaphores = try allocator.alloc(vk.Semaphore, swapchain.images.len);
     errdefer allocator.free(present_complete_semaphores);
-
     var created_present_complete_semaphores: u32 = 0;
     errdefer {
         for (present_complete_semaphores[0..created_present_complete_semaphores]) |*semaphore| {
             ctx.vkd.destroySemaphore(ctx.logical_device, semaphore.*, null);
         }
     }
+    const semaphore_info = vk.SemaphoreCreateInfo{ .flags = .{} };
     for (present_complete_semaphores) |*semaphore| {
         semaphore.* = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
         created_present_complete_semaphores += 1;
@@ -271,15 +268,15 @@ pub fn init(
     const compute_workgroup_size = ComputePipeline.calculateDefaultWorkgroupSize(ctx);
     var compute_pipeline = blk: {
         const uniform_sizes = [_]u64{
-            MinSize.uniform(ctx, @sizeOf(GridState.Device)),
+            MinSize.uniform(ctx, @sizeOf(grid_state.components.Device)),
         };
         const storage_sizes = [_]u64{
             MinSize.ssbo(ctx, @sizeOf(gpu_types.Material) * config.material_buffer),
-            MinSize.ssbo(ctx, @sizeOf(GridState.BrickStatusMask) * grid_state.brick_statuses.len),
-            MinSize.ssbo(ctx, @sizeOf(GridState.IndexToBrick) * grid_state.brick_indices.len),
-            MinSize.ssbo(ctx, @sizeOf(GridState.Brick.Occupancy) * grid_state.brick_occupancy.len),
-            MinSize.ssbo(ctx, @sizeOf(GridState.Brick.StartIndex) * grid_state.brick_start_indices.len),
-            MinSize.ssbo(ctx, @sizeOf(GridState.MaterialIndices) * grid_state.material_indices.len),
+            MinSize.ssbo(ctx, @sizeOf(grid_state.BrickStatusMask) * grid_state.components.Statuses.brick_status_count),
+            MinSize.ssbo(ctx, @sizeOf(grid_state.IndexToBrick) * grid_state.brick_count),
+            MinSize.ssbo(ctx, @sizeOf(grid_state.Brick.Occupancy) * grid_state.components.Occupancy.occupancy_count),
+            MinSize.ssbo(ctx, @sizeOf(grid_state.Brick.StartIndex) * grid_state.brick_count),
+            MinSize.ssbo(ctx, @sizeOf(grid_state.components.MaterialIndices.IndexType) * grid_state.components.MaterialIndices.material_index_count),
         };
         const state_configs = ComputePipeline.StateConfigs{ .uniform_sizes = uniform_sizes[0..], .storage_sizes = storage_sizes[0..] };
 
@@ -307,10 +304,10 @@ pub fn init(
             ComputeSpecialization{
                 .workgroup_size_x = @intCast(compute_workgroup_size.x),
                 .workgroup_size_y = @intCast(compute_workgroup_size.y),
-                .brick_bits = @intCast(GridState.brick_bits),
-                .brick_bytes = @intCast(GridState.brick_bytes),
-                .brick_dimensions = @intCast(GridState.brick_dimension),
-                .brick_voxel_scale = 1.0 / @as(f32, @floatFromInt(GridState.brick_dimension)),
+                .brick_bits = @intCast(grid_state.brick_bits),
+                .brick_bytes = @intCast(grid_state.brick_bytes),
+                .brick_dimensions = @intCast(grid_state.brick_dimension),
+                .brick_voxel_scale = 1.0 / @as(f32, @floatFromInt(grid_state.brick_dimension)),
             },
         );
     };
@@ -348,10 +345,9 @@ pub fn init(
     );
     errdefer imgui_pipeline.deinit(ctx);
 
+    const grid_device = try storage.getComponent(grid_entity, grid_state.components.Device);
     const state_binding = ImguiGui.StateBinding{
-        .camera_entity = camera_entity,
-        .sun_entity = sun_entity,
-        .grid_state = grid_state,
+        .grid_device = grid_device,
         .gfx_pipeline_shader_constants = gfx_pipeline.shader_constants,
     };
     const gui = try ImguiGui.init(
@@ -539,9 +535,6 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime Storage: type, storage: *Sto
     }
 
     if (self.requested_rescale_pipeline) try self.rescalePipeline(ctx);
-
-    // TODO: only flush relevant range, i.e only flush upcoming frame
-    try self.compute_pipeline.buffer.flush(ctx, 0, self.compute_pipeline.buffer.capacity);
 }
 
 pub fn setDenoiseSampleCount(self: *Pipeline, sample_count: i32) void {
@@ -561,15 +554,15 @@ pub fn setDenoisePixelMultiplier(self: *Pipeline, pixel_multiplier: f32) void {
 }
 
 /// Transfer grid data to GPU
-pub fn transferGridState(self: *Pipeline, grid: GridState) !void {
+pub fn transferGridState(self: *const Pipeline, device_state: grid_state.components.Device) !void {
     const buffer_offset = self.compute_pipeline.uniform_offsets[0];
 
-    const device_grid_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(GridState.Device, buffer_offset);
-    device_grid_mem[0] = grid.device_state;
+    const device_grid_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(grid_state.components.Device, buffer_offset);
+    device_grid_mem[0] = device_state;
 }
 
 /// Transfer material data to GPU
-pub fn transferMaterials(self: *Pipeline, offset: usize, materials: []const gpu_types.Material) !void {
+pub fn transferMaterials(self: *const Pipeline, offset: usize, materials: []const gpu_types.Material) !void {
     const buffer_offset = self.compute_pipeline.storage_offsets[0] + offset * @sizeOf(gpu_types.Material);
 
     const materials_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(gpu_types.Material, buffer_offset);
@@ -577,23 +570,23 @@ pub fn transferMaterials(self: *Pipeline, offset: usize, materials: []const gpu_
 }
 
 /// Transfer entry types data to GPU
-pub fn transferBrickStatuses(self: *Pipeline, offset: usize, brick_statuses: []const GridState.BrickStatusMask) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[1] + offset * @sizeOf(GridState.BrickStatusMask);
+pub fn transferBrickStatuses(self: *const Pipeline, offset: usize, brick_statuses: []const grid_state.BrickStatusMask) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[1] + offset * @sizeOf(grid_state.BrickStatusMask);
 
-    const brick_statuses_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(GridState.BrickStatusMask, buffer_offset);
+    const brick_statuses_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(grid_state.BrickStatusMask, buffer_offset);
     @memcpy(brick_statuses_mem[0..brick_statuses.len], brick_statuses);
 }
 
 /// Transfer entry indices data to GPU
-pub fn transferBrickIndices(self: *Pipeline, offset: usize, brick_indices: []const GridState.IndexToBrick) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[2] + offset * @sizeOf(GridState.IndexToBrick);
+pub fn transferBrickIndices(self: *const Pipeline, offset: usize, brick_indices: []const grid_state.IndexToBrick) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[2] + offset * @sizeOf(grid_state.IndexToBrick);
 
-    const brick_indices_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(GridState.IndexToBrick, buffer_offset);
+    const brick_indices_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(grid_state.IndexToBrick, buffer_offset);
     @memcpy(brick_indices_mem[0..brick_indices.len], brick_indices);
 }
 
 /// Transfer bricks data to GPU
-pub fn transferBrickOccupancy(self: *Pipeline, offset: usize, brick_occupancy: []u8) !void {
+pub fn transferBrickOccupancy(self: *const Pipeline, offset: usize, brick_occupancy: []const u8) !void {
     const buffer_offset = self.compute_pipeline.storage_offsets[3] + offset * @sizeOf(u8);
 
     const brick_occupancy_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(u8, buffer_offset);
@@ -601,18 +594,18 @@ pub fn transferBrickOccupancy(self: *Pipeline, offset: usize, brick_occupancy: [
 }
 
 /// Transfer bricks data to GPU
-pub fn transferBrickStartIndex(self: *Pipeline, offset: usize, brick_material_indices: []const GridState.Brick.StartIndex) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[4] + offset * @sizeOf(GridState.Brick.StartIndex);
+pub fn transferBrickStartIndex(self: *const Pipeline, offset: usize, brick_material_indices: []const grid_state.Brick.StartIndex) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[4] + offset * @sizeOf(grid_state.Brick.StartIndex);
 
-    const brick_start_index_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(GridState.Brick.StartIndex, buffer_offset);
+    const brick_start_index_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(grid_state.Brick.StartIndex, buffer_offset);
     @memcpy(brick_start_index_mem[0..brick_material_indices.len], brick_material_indices);
 }
 
 /// Transfer material index data to GPU
-pub fn transferMaterialIndices(self: *Pipeline, offset: usize, material_indices: []const GridState.MaterialIndices) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[5] + offset * @sizeOf(GridState.MaterialIndices);
+pub fn transferMaterialIndices(self: *const Pipeline, offset: usize, material_indices: []const grid_state.components.MaterialIndices.IndexType) !void {
+    const buffer_offset = self.compute_pipeline.storage_offsets[5] + offset * @sizeOf(grid_state.components.MaterialIndices.IndexType);
 
-    const material_indices_men = self.compute_pipeline.buffer.typedMapAssumeMapped(GridState.MaterialIndices, buffer_offset);
+    const material_indices_men = self.compute_pipeline.buffer.typedMapAssumeMapped(grid_state.components.MaterialIndices.IndexType, buffer_offset);
     @memcpy(material_indices_men[0..material_indices.len], material_indices);
 }
 

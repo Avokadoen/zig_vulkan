@@ -6,11 +6,6 @@ pub const Entry = u32;
 
 pub const Cursor = std.atomic.Value(Entry);
 
-const IndexMap = std.AutoArrayHashMapUnmanaged(
-    usize,
-    usize,
-);
-
 const MaterialAllocator = @This();
 
 capacity: usize,

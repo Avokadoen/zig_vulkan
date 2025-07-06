@@ -1,18 +1,32 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const ecez = @import("ecez");
+
 const za = @import("zalgebra");
 const stbi = @import("stbi");
-
-const tracy = @import("ztracy");
+const ztracy = @import("ztracy");
 
 const render = @import("../../render.zig");
 const Context = render.Context;
 
-const BrickGrid = @import("../brick/Grid.zig");
+const brick_state = @import("../brick/state.zig");
+const brick_grid = @import("../brick/grid.zig");
 
-const gpu_types = @import("../gpu_types.zig");
-const Perlin = @import("perlin.zig").PerlinNoiseGenerator(256);
+pub fn createAndStoreInitialTerrainGenEntites(
+    comptime Storage: type,
+    storage: *Storage,
+    seed: u64,
+    scale: f32,
+    ocean_level: usize,
+) error{OutOfMemory}!void {
+    _ = try storage.createEntity(.{components.Perlin.init(seed)});
+
+    _ = try storage.createEntity(.{components.ChunkToGenerate{
+        .scale = scale,
+        .ocean_level = ocean_level,
+    }});
+}
 
 const Material = enum(u8) {
     water = 0,
@@ -24,110 +38,147 @@ const Material = enum(u8) {
         switch (self) {
             .water => return 0,
             .grass => {
-                const roll = rnd.float(f32);
-                return 1 + @as(u8, @intFromFloat(@round(roll)));
+                const roll = rnd.intRangeAtMost(u8, 0, 1);
+                return 1 + roll;
             },
             .dirt => {
-                const roll = rnd.float(f32);
-                return 3 + @as(u8, @intFromFloat(@round(roll)));
+                const roll = rnd.intRangeAtMost(u8, 0, 1);
+                return 3 + roll;
             },
             .rock => {
-                const roll = rnd.float(f32);
-                return 5 + @as(u8, @intFromFloat(@round(roll)));
+                const roll = rnd.intRangeAtMost(u8, 0, 1);
+                return 5 + roll;
             },
         }
     }
 };
 
-/// populate a voxel grid with perlin noise terrain on CPU
-pub fn generateCpu(comptime threads_count: usize, allocator: Allocator, seed: u64, scale: f32, ocean_level: usize, grid: *BrickGrid) !void { // TODO: return Terrain
-    const zone = tracy.ZoneNS(@src(), "generate terrain chunk", 1);
-    defer zone.End();
+pub const components = struct {
+    pub const Perlin = @import("perlin.zig").PerlinNoiseGenerator(256);
 
-    const perlin = blk: {
-        const p = try allocator.create(Perlin);
-        p.* = Perlin.init(seed);
-        break :blk p;
+    pub const ChunkToGenerate = struct {
+        scale: f32,
+        ocean_level: usize,
     };
-    defer allocator.destroy(perlin);
+};
 
-    const voxel_dim = [3]f32{
-        @floatFromInt(grid.state.device_state.voxel_dim_x),
-        @floatFromInt(grid.state.device_state.voxel_dim_y),
-        @floatFromInt(grid.state.device_state.voxel_dim_z),
-    };
-    const point_mod = [3]f32{
-        (1 / voxel_dim[0]) * scale,
-        (1 / voxel_dim[1]) * scale,
-        (1 / voxel_dim[2]) * scale,
-    };
+pub const queries = struct {
+    pub const Perlin = ecez.QueryAny(struct {
+        perlin: components.Perlin,
+    }, .{}, .{});
 
-    // create our gen function
-    const insert_job_gen_fn = struct {
-        pub fn insert(thread_id: usize, thread_name: [:0]const u8, perlin_: *const Perlin, voxel_dim_: [3]f32, point_mod_: [3]f32, ocean_level_v: usize, grid_: *BrickGrid) void {
-            tracy.SetThreadName(thread_name.ptr);
-            const gen_zone = tracy.ZoneN(@src(), "terrain gen");
-            defer gen_zone.End();
+    pub const ReadChunkToGenerate = ecez.QueryAny(struct {
+        chunk: components.ChunkToGenerate,
+    }, .{}, .{});
 
-            const thread_segment_size: f32 = blk: {
-                if (threads_count == 0) {
-                    break :blk voxel_dim_[0];
-                } else {
-                    break :blk @ceil(voxel_dim_[0] / @as(f32, @floatFromInt(threads_count)));
-                }
+    pub const ChunkToGenerateEntities = ecez.QueryAny(struct {
+        entity: ecez.Entity,
+    }, .{components.ChunkToGenerate}, .{});
+};
+
+pub fn CreateSystems(comptime Storage: type) type {
+    const InsertVoxelStorage = Storage.Subset(.{
+        *brick_grid.components.InsertVoxel,
+        *brick_grid.components.InsertVoxelTag,
+    });
+
+    const ChunkToGenerateStorage = Storage.Subset(.{
+        *components.ChunkToGenerate,
+    });
+
+    return struct {
+        pub fn generateTerrainChunk(
+            perlin_query: *queries.Perlin,
+            read_chunk_query: *queries.ReadChunkToGenerate,
+            grid_device_query: *brick_state.queries.Device,
+            insert_storage: *InsertVoxelStorage,
+        ) void {
+            const zone = ztracy.ZoneN(@src(), @src().fn_name);
+            defer zone.End();
+
+            const read_chunk = read_chunk_query.getAny() orelse return;
+
+            const grid_device = grid_device_query.getAny().?;
+            const perlin = (perlin_query.getAny().?).perlin;
+
+            const voxel_dim = [3]f32{
+                @floatFromInt(grid_device.device.voxel_dim_x),
+                @floatFromInt(grid_device.device.voxel_dim_y),
+                @floatFromInt(grid_device.device.voxel_dim_z),
+            };
+            const point_mod = [3]f32{
+                (1 / voxel_dim[0]) * read_chunk.chunk.scale,
+                (1 / voxel_dim[1]) * read_chunk.chunk.scale,
+                (1 / voxel_dim[2]) * read_chunk.chunk.scale,
             };
 
-            const terrain_max_height: f32 = voxel_dim_[1] * 0.5;
+            const terrain_max_height: f32 = voxel_dim[1] * 0.5;
             const inv_terrain_max_height = 1.0 / terrain_max_height;
 
-            var point: [3]f32 = undefined;
-            const thread_x_begin = thread_segment_size * @as(f32, @floatFromInt(thread_id));
-            const thread_x_end = @min(thread_x_begin + thread_segment_size, voxel_dim_[0]);
-            var x: f32 = thread_x_begin;
-            while (x < thread_x_end) : (x += 1) {
-                const i_x: usize = @intFromFloat(x);
-                var z: f32 = 0;
-                while (z < voxel_dim_[2]) : (z += 1) {
-                    const i_z: usize = @intFromFloat(z);
+            for (0..grid_device.device.voxel_dim_x) |x| {
+                const x_f: f32 = @floatFromInt(x);
 
-                    point[0] = x * point_mod_[0];
-                    point[1] = 0;
-                    point[2] = z * point_mod_[2];
+                for (0..grid_device.device.voxel_dim_z) |z| {
+                    const z_f: f32 = @floatFromInt(z);
 
-                    const height: usize = @intFromFloat(@min(perlin_.smoothNoise(f32, point), 1) * terrain_max_height);
-                    var i_y: usize = height / 2;
-                    while (i_y < height) : (i_y += 1) {
-                        const height_lerp = za.lerp(f32, 1, 3.4, @as(f32, @floatFromInt(i_y)) * inv_terrain_max_height);
-                        const material_value = height_lerp + perlin_.rng.float(f32) * 0.5;
+                    const point = [_]f32{
+                        x_f * point_mod[0],
+                        0,
+                        z_f * point_mod[2],
+                    };
+
+                    const height: usize = @intFromFloat(@min(perlin.smoothNoise(f32, point), 1) * terrain_max_height);
+                    for (height / 2..height) |y| {
+                        const height_lerp = za.lerp(f32, 1, 3.4, @as(f32, @floatFromInt(y)) * inv_terrain_max_height);
+                        const material_value = height_lerp + perlin.rng.float(f32) * 0.5;
                         const material: Material = @enumFromInt(@as(u8, @intFromFloat(@floor(material_value))));
-                        grid_.*.insert(i_x, i_y, i_z, material.getMaterialIndex(perlin_.rng));
+
+                        _ = insert_storage.createEntity(.{
+                            brick_grid.components.InsertVoxel{
+                                .x = @intCast(x),
+                                .y = @intCast(y),
+                                .z = @intCast(z),
+                                .material_index = material.getMaterialIndex(perlin.rng),
+                                .brick_index = undefined, // calculated by later system
+                                .grid_index = undefined, // calculated by later system
+                            },
+                            brick_grid.components.InsertVoxelTag{},
+                        }) catch std.debug.panic("terrain gen: failed to create inser voxel", .{});
                     }
-                    while (i_y < ocean_level_v) : (i_y += 1) {
-                        grid_.*.insert(i_x, i_y, i_z, 0); // insert water
+
+                    // insert water
+                    if (height < read_chunk.chunk.ocean_level) {
+                        for (height..read_chunk.chunk.ocean_level) |y| {
+                            _ = insert_storage.createEntity(.{
+                                brick_grid.components.InsertVoxel{
+                                    .x = @intCast(x),
+                                    .y = @intCast(y),
+                                    .z = @intCast(z),
+                                    .material_index = Material.water.getMaterialIndex(perlin.rng),
+                                    .brick_index = undefined, // calculated by later system
+                                    .grid_index = undefined, // calculated by later system
+                                },
+                                brick_grid.components.InsertVoxelTag{},
+                            }) catch std.debug.panic("terrain gen: failed to create inser voxel", .{});
+                        }
                     }
                 }
             }
         }
-    }.insert;
 
-    if (threads_count == 0) {
-        // run on main thread
-        @call(.{ .modifier = .always_inline }, insert_job_gen_fn, .{ 0, perlin, voxel_dim, point_mod, ocean_level, grid });
-    } else {
-        var threads: [threads_count]std.Thread = undefined;
-        comptime var i = 0;
-        inline while (i < threads_count) : (i += 1) {
-            const thread_name = comptime std.fmt.comptimePrint("terrain thread {d}", .{i});
-            threads[i] = try std.Thread.spawn(.{}, insert_job_gen_fn, .{ i, thread_name, perlin, voxel_dim, point_mod, ocean_level, grid });
+        // TODO: there is not caching of chunk generation entities
+        pub fn removeGenerateChunkJob(
+            chunk_to_generate_query: *queries.ChunkToGenerateEntities,
+            chunk_to_generate_storage: *ChunkToGenerateStorage,
+        ) void {
+            while (chunk_to_generate_query.next()) |chunk| {
+                chunk_to_generate_storage.unsetComponents(chunk.entity, .{components.ChunkToGenerate});
+            }
         }
-        i = 0;
-        inline while (i < threads_count) : (i += 1) {
-            threads[i].join();
-        }
-    }
+    };
 }
 
-pub const materials = [_]gpu_types.Material{
+pub const materials = [_]@import("../gpu_types.zig").Material{
     // Water
     .{
         .type = .dielectric,

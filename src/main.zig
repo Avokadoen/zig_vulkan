@@ -12,9 +12,8 @@ const consts = render.consts;
 
 const input = @import("input.zig");
 
-// TODO: API topology
 const VoxelRT = @import("VoxelRT.zig");
-const BrickGrid = VoxelRT.BrickGrid;
+const grid = VoxelRT.grid;
 const gpu_types = VoxelRT.gpu_types;
 const vox = VoxelRT.vox;
 const terrain = VoxelRT.terrain;
@@ -33,11 +32,30 @@ pub const Storage = ecez.CreateStorage(.{
     VoxelRT.sun.components.DeviceSun,
     VoxelRT.benchmark.components.Benchmark,
     VoxelRT.benchmark.components.Report,
+
+    VoxelRT.grid_state.components.ActiveBricks,
+    VoxelRT.grid_state.components.Statuses,
+    VoxelRT.grid_state.components.StatusDelta,
+    VoxelRT.grid_state.components.Indices,
+    VoxelRT.grid_state.components.IndicesDelta,
+    VoxelRT.grid_state.components.Occupancy,
+    VoxelRT.grid_state.components.OccupancyDelta,
+    VoxelRT.grid_state.components.StartIndices,
+    VoxelRT.grid_state.components.StartIndicesDelta,
+    VoxelRT.grid_state.components.MaterialIndices,
+    VoxelRT.grid_state.components.MaterialIndicesDelta,
+    VoxelRT.grid_state.components.MaterialAllocator,
+    VoxelRT.grid_state.components.Device,
+
+    VoxelRT.grid.components.InsertVoxel,
+    VoxelRT.grid.components.InsertVoxelTag,
+
+    VoxelRT.terrain.components.ChunkToGenerate,
+    VoxelRT.terrain.components.Perlin,
 });
 
 pub const InputTypes = input.CreateInputTypes(Storage);
 pub const VoxelRTEvents = VoxelRT.CreateEvents(Storage);
-
 pub const Scheduler = ecez.CreateScheduler(.{
     InputTypes.events.input_on_key_events,
     InputTypes.events.input_on_mouse_button,
@@ -103,12 +121,20 @@ pub fn main() anyerror!void {
     const ctx = try render.Context.init(allocator, application_name, window);
     defer ctx.deinit();
 
-    var grid = try BrickGrid.init(allocator, 128, 64, 128, .{
-        .min_point = [3]f32{ -32, -16, -32 },
+    // init input module with default input handler functions
+    const input_rt = try InputRuntime.init(
+        allocator,
+        window,
+        &storage,
+        &scheduler,
+        .{},
+    );
+    defer input_rt.deinit(allocator, window);
+
+    const grid_entity = try grid.createAndStoreStateComponents(Storage, &storage, .{
+        .min_point = [3]f32{ 0, 0, 0 },
         .scale = 0.5,
-        .workers_count = 4,
     });
-    defer grid.deinit();
 
     const model = try vox.load(false, allocator, "../assets/models/doom.vox");
     defer model.deinit();
@@ -134,26 +160,38 @@ pub fn main() anyerror!void {
         };
     }
 
-    // for (0..8) |index| {
-    //     // grid.insert(index, (64 * 4) - 1, 1, 0);
-    //     grid.insert(index, 3, 0, @intCast(index));
-    // }
+    try terrain.createAndStoreInitialTerrainGenEntites(
+        Storage,
+        &storage,
+        420,
+        4,
+        20,
+    );
 
-    // Test what we are loading
+    for (0..8) |index| {
+        try grid.scheduleInsert(
+            Storage,
+            &storage,
+            @intCast(index),
+            0,
+            0,
+            @intCast(index),
+        );
+    }
+
     for (model.xyzi_chunks[0]) |xyzi| {
         const material_index: u8 = xyzi.color_index + @as(u8, @intCast(terrain.materials.len));
-        grid.insert(
-            @as(usize, @intCast(xyzi.x)) + 200,
-            @as(usize, @intCast(xyzi.z)) + 50,
-            @as(usize, @intCast(xyzi.y)) + 150,
+        try grid.scheduleInsert(
+            Storage,
+            &storage,
+            @intCast(xyzi.x),
+            @intCast(xyzi.z),
+            @intCast(xyzi.y),
             material_index,
         );
     }
 
-    // generate terrain on CPU
-    try terrain.generateCpu(2, allocator, 420, 4, 20, &grid);
-
-    var voxel_rt = try VoxelRT.init(allocator, ctx, &grid, Storage, &storage, .{
+    var voxel_rt = try VoxelRT.init(allocator, ctx, Storage, &storage, grid_entity, .{
         .internal_resolution_width = internal_render_resolution.x(),
         .internal_resolution_height = internal_render_resolution.y(),
         .camera = .{
@@ -169,16 +207,6 @@ pub fn main() anyerror!void {
 
     try voxel_rt.pushMaterials(materials[0..]);
 
-    // init input module with default input handler functions
-    const input_rt = try InputRuntime.init(
-        allocator,
-        window,
-        &storage,
-        &scheduler,
-        .{},
-    );
-    defer input_rt.deinit(allocator, window);
-
     var prev_frame = std.time.milliTimestamp();
     // Loop until the user closes the window
     while (!window.shouldClose()) {
@@ -188,12 +216,11 @@ pub fn main() anyerror!void {
 
         scheduler.dispatchEvent(&storage, .voxel_rt_update, VoxelRT.EventArgument{
             .ctx = ctx,
+            .voxel_rt = &voxel_rt,
             .delta_time = f32_delta_time,
         });
-
         scheduler.waitEvent(.voxel_rt_update);
 
-        try voxel_rt.updateGridDelta();
         try voxel_rt.draw(ctx, Storage, &storage, f32_delta_time);
 
         // Poll for and process events

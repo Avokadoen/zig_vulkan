@@ -1,6 +1,7 @@
-const za = @import("zalgebra");
 const math = @import("std").math;
 
+const za = @import("zalgebra");
+const tracy = @import("ztracy");
 const ecez = @import("ecez");
 const EventArgument = @import("event_arg.zig").EventArgument;
 
@@ -76,6 +77,9 @@ pub fn createSunComponents(config: Config) struct {
 
 pub const systems = struct {
     pub fn update(sun_query: *queries.sun, event_arg: EventArgument) void {
+        const transfer_zone = tracy.ZoneN(@src(), "sun update");
+        defer transfer_zone.End();
+
         const sun_entity = sun_query.getAny() orelse unreachable;
         const sun = sun_entity.sun;
         const device = sun_entity.device;

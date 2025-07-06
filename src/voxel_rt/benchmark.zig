@@ -3,6 +3,7 @@ const std = @import("std");
 const za = @import("zalgebra");
 
 const ecez = @import("ecez");
+const tracy = @import("ztracy");
 
 const BrickState = @import("brick/State.zig");
 const camera = @import("camera.zig");
@@ -51,6 +52,9 @@ pub fn CreateSystems(comptime Storage: type) type {
                 benchmark_storage: *sub_storage.Benchmark,
                 event_arg: EventArgument,
             ) void {
+                const transfer_zone = tracy.ZoneN(@src(), "sun update");
+                defer transfer_zone.End();
+
                 const benchmark_entity = benchmark_query.getAny() orelse return;
                 // Camera should always exist
                 const camera_entity = camera_query.getAny() orelse unreachable;
