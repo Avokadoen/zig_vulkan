@@ -70,7 +70,7 @@ pub const Scheduler = ecez.CreateScheduler(.{
 pub const InputRuntime = input.CreateInputRuntime(Storage, Scheduler);
 
 pub const application_name = "zig vulkan";
-pub const internal_render_resolution = za.GenericVector(2, u32).new(2560, 1440);
+pub const internal_render_resolution = [2]u32{ 2560, 1440 };
 
 pub fn main() anyerror!void {
     ztracy.SetThreadName("main thread");
@@ -192,8 +192,8 @@ pub fn main() anyerror!void {
     }
 
     var voxel_rt = try VoxelRT.init(allocator, ctx, Storage, &storage, grid_entity, .{
-        .internal_resolution_width = internal_render_resolution.x(),
-        .internal_resolution_height = internal_render_resolution.y(),
+        .internal_resolution_width = internal_render_resolution[0],
+        .internal_resolution_height = internal_render_resolution[1],
         .camera = .{
             .samples_per_pixel = 2,
             .max_bounce = 2,
