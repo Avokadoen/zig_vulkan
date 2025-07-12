@@ -197,6 +197,7 @@ pub fn main() anyerror!void {
         .camera = .{
             .samples_per_pixel = 2,
             .max_bounce = 2,
+            .origin = za.Vec3.new(8, 8, 15).data,
         },
         .sun = .{
             .enabled = true,
