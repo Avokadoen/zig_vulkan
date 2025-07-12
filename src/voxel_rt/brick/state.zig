@@ -140,12 +140,13 @@ pub const components = struct {
 
     pub const Occupancy = struct {
         pub const occupancy_count = brick_count * brick_bytes;
+        pub const OccupancyByte = u8;
 
         pub const empty = Occupancy{
-            .occupancy = [_]u8{0} ** occupancy_count,
+            .occupancy = [_]OccupancyByte{0} ** occupancy_count,
         };
 
-        occupancy: [occupancy_count]u8,
+        occupancy: [occupancy_count]OccupancyByte,
     };
     pub const OccupancyDelta = struct {
         pub const empty = OccupancyDelta{

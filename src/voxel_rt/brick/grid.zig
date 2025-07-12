@@ -244,7 +244,11 @@ pub fn CreateSystems(comptime Storage: type) type {
             const statuses = status_query.getAny().?;
             const delta = &statuses.delta.delta;
             if (delta.state == .active) {
-                try event_arg.voxel_rt.pipeline.transferBrickStatuses(delta.from, statuses.statuses.statuses[delta.from..delta.to]);
+                try event_arg.voxel_rt.pipeline.transfer(
+                    delta.from,
+                    .brick_status,
+                    statuses.statuses.statuses[delta.from..delta.to],
+                );
                 delta.resetDelta();
             }
         }
@@ -259,7 +263,11 @@ pub fn CreateSystems(comptime Storage: type) type {
             const indices = indices_query.getAny().?;
             const delta = &indices.delta.delta;
             if (delta.state == .active) {
-                try event_arg.voxel_rt.pipeline.transferBrickIndices(delta.from, indices.indices.indices[delta.from..delta.to]);
+                try event_arg.voxel_rt.pipeline.transfer(
+                    delta.from,
+                    .index_to_brick,
+                    indices.indices.indices[delta.from..delta.to],
+                );
                 delta.resetDelta();
             }
         }
@@ -274,7 +282,11 @@ pub fn CreateSystems(comptime Storage: type) type {
             const occupancy = occupancy_query.getAny().?;
             const delta = &occupancy.delta.delta;
             if (delta.state == .active) {
-                try event_arg.voxel_rt.pipeline.transferBrickOccupancy(delta.from, occupancy.occupancy.occupancy[delta.from..delta.to]);
+                try event_arg.voxel_rt.pipeline.transfer(
+                    delta.from,
+                    .occupancy,
+                    occupancy.occupancy.occupancy[delta.from..delta.to],
+                );
                 delta.resetDelta();
             }
         }
@@ -289,7 +301,11 @@ pub fn CreateSystems(comptime Storage: type) type {
             const material_indices = material_indices_query.getAny().?;
             const delta = &material_indices.delta.delta;
             if (delta.state == .active) {
-                try event_arg.voxel_rt.pipeline.transferMaterialIndices(delta.from, material_indices.indices.indices[delta.from..delta.to]);
+                try event_arg.voxel_rt.pipeline.transfer(
+                    delta.from,
+                    .material_index,
+                    material_indices.indices.indices[delta.from..delta.to],
+                );
                 delta.resetDelta();
             }
         }
@@ -304,7 +320,11 @@ pub fn CreateSystems(comptime Storage: type) type {
             const start_indices = start_indices_query.getAny().?;
             const delta = &start_indices.delta.delta;
             if (delta.state == .active) {
-                try event_arg.voxel_rt.pipeline.transferBrickStartIndex(delta.from, start_indices.indices.indices[delta.from..delta.to]);
+                try event_arg.voxel_rt.pipeline.transfer(
+                    delta.from,
+                    .brick_start_index,
+                    start_indices.indices.indices[delta.from..delta.to],
+                );
                 delta.resetDelta();
             }
         }

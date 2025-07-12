@@ -553,60 +553,43 @@ pub fn setDenoisePixelMultiplier(self: *Pipeline, pixel_multiplier: f32) void {
     self.gfx_pipeline.shader_constants.pixel_multiplier = pixel_multiplier;
 }
 
-/// Transfer grid data to GPU
-pub fn transferGridState(self: *const Pipeline, device_state: grid_state.components.Device) !void {
-    const buffer_offset = self.compute_pipeline.uniform_offsets[0];
+pub const TransferBuffers = enum {
+    grid_device,
+    material,
+    brick_status,
+    index_to_brick,
+    occupancy,
+    brick_start_index,
+    material_index,
 
-    const device_grid_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(grid_state.components.Device, buffer_offset);
-    device_grid_mem[0] = device_state;
-}
+    pub fn ToType(comptime self: TransferBuffers) type {
+        return switch (self) {
+            .grid_device => grid_state.components.Device,
+            .material => gpu_types.Material,
+            .brick_status => grid_state.BrickStatusMask,
+            .index_to_brick => grid_state.IndexToBrick,
+            .occupancy => grid_state.components.Occupancy.OccupancyByte,
+            .brick_start_index => grid_state.Brick.StartIndex,
+            .material_index => grid_state.components.MaterialIndices.IndexType,
+        };
+    }
+};
+/// Transfer data to the device
+pub fn transfer(self: *const Pipeline, offset: usize, comptime buffer_type: TransferBuffers, data: []const buffer_type.ToType()) !void {
+    const type_offset = switch (buffer_type) {
+        .grid_device => self.compute_pipeline.uniform_offsets[0],
+        .material => self.compute_pipeline.storage_offsets[0],
+        .brick_status => self.compute_pipeline.storage_offsets[1],
+        .index_to_brick => self.compute_pipeline.storage_offsets[2],
+        .occupancy => self.compute_pipeline.storage_offsets[3],
+        .brick_start_index => self.compute_pipeline.storage_offsets[4],
+        .material_index => self.compute_pipeline.storage_offsets[5],
+    };
+    const DataType = buffer_type.ToType();
+    const buffer_offset = type_offset + offset * @sizeOf(DataType);
 
-/// Transfer material data to GPU
-pub fn transferMaterials(self: *const Pipeline, offset: usize, materials: []const gpu_types.Material) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[0] + offset * @sizeOf(gpu_types.Material);
-
-    const materials_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(gpu_types.Material, buffer_offset);
-    @memcpy(materials_mem[0..materials.len], materials);
-}
-
-/// Transfer entry types data to GPU
-pub fn transferBrickStatuses(self: *const Pipeline, offset: usize, brick_statuses: []const grid_state.BrickStatusMask) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[1] + offset * @sizeOf(grid_state.BrickStatusMask);
-
-    const brick_statuses_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(grid_state.BrickStatusMask, buffer_offset);
-    @memcpy(brick_statuses_mem[0..brick_statuses.len], brick_statuses);
-}
-
-/// Transfer entry indices data to GPU
-pub fn transferBrickIndices(self: *const Pipeline, offset: usize, brick_indices: []const grid_state.IndexToBrick) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[2] + offset * @sizeOf(grid_state.IndexToBrick);
-
-    const brick_indices_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(grid_state.IndexToBrick, buffer_offset);
-    @memcpy(brick_indices_mem[0..brick_indices.len], brick_indices);
-}
-
-/// Transfer bricks data to GPU
-pub fn transferBrickOccupancy(self: *const Pipeline, offset: usize, brick_occupancy: []const u8) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[3] + offset * @sizeOf(u8);
-
-    const brick_occupancy_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(u8, buffer_offset);
-    @memcpy(brick_occupancy_mem[0..brick_occupancy.len], brick_occupancy);
-}
-
-/// Transfer bricks data to GPU
-pub fn transferBrickStartIndex(self: *const Pipeline, offset: usize, brick_material_indices: []const grid_state.Brick.StartIndex) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[4] + offset * @sizeOf(grid_state.Brick.StartIndex);
-
-    const brick_start_index_mem = self.compute_pipeline.buffer.typedMapAssumeMapped(grid_state.Brick.StartIndex, buffer_offset);
-    @memcpy(brick_start_index_mem[0..brick_material_indices.len], brick_material_indices);
-}
-
-/// Transfer material index data to GPU
-pub fn transferMaterialIndices(self: *const Pipeline, offset: usize, material_indices: []const grid_state.components.MaterialIndices.IndexType) !void {
-    const buffer_offset = self.compute_pipeline.storage_offsets[5] + offset * @sizeOf(grid_state.components.MaterialIndices.IndexType);
-
-    const material_indices_men = self.compute_pipeline.buffer.typedMapAssumeMapped(grid_state.components.MaterialIndices.IndexType, buffer_offset);
-    @memcpy(material_indices_men[0..material_indices.len], material_indices);
+    const mapped_device_data = self.compute_pipeline.buffer.typedMapAssumeMapped(DataType, buffer_offset);
+    @memcpy(mapped_device_data[0..data.len], data);
 }
 
 // TODO: make allow to multithread this
