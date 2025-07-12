@@ -11,36 +11,6 @@ const QueueFamilyIndices = physical_device.QueueFamilyIndices;
 const Context = @import("Context.zig");
 const texture = @import("texture.zig");
 
-pub const ViewportScissor = struct {
-    viewport: [1]vk.Viewport,
-    scissor: [1]vk.Rect2D,
-
-    /// utility to create simple view state info
-    pub fn init(extent: vk.Extent2D) ViewportScissor {
-        // TODO: this can be broken down a bit since the code is pretty cluster fck
-        const width = extent.width;
-        const height = extent.height;
-        return .{
-            .viewport = [1]vk.Viewport{
-                .{
-                    .x = 0,
-                    .y = 0,
-                    .width = @floatFromInt(width),
-                    .height = @floatFromInt(height),
-                    .min_depth = 0.0,
-                    .max_depth = 1.0,
-                },
-            },
-            .scissor = [1]vk.Rect2D{
-                .{ .offset = .{
-                    .x = 0,
-                    .y = 0,
-                }, .extent = extent },
-            },
-        };
-    }
-};
-
 // TODO: rename
 // TODO: mutex! : the data is shared between rendering implementation and pipeline
 //                pipeline will attempt to update the data in the event of rescale which might lead to RC
