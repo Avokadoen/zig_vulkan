@@ -7,8 +7,9 @@ const swapchain = @import("swapchain.zig");
 
 const Context = @import("Context.zig");
 
-pub fn createFramebuffers(allocator: Allocator, ctx: Context, swapchain_data: *const swapchain.Data, render_pass: vk.RenderPass, prev_framebuffer: ?[]vk.Framebuffer) ![]vk.Framebuffer {
-    const image_views = swapchain_data.image_views;
+pub fn createFramebuffers(allocator: Allocator, ctx: Context, swapchain_data: *const swapchain.components.SwapchainData, render_pass: vk.RenderPass, prev_framebuffer: ?[]vk.Framebuffer) ![]vk.Framebuffer {
+    const image_len = swapchain_data.image_len;
+    const image_views = swapchain_data.image_views[0..image_len];
     var framebuffers = prev_framebuffer orelse try allocator.alloc(vk.Framebuffer, image_views.len);
     for (image_views, 0..) |view, i| {
         const attachments = [_]vk.ImageView{

@@ -1,3 +1,5 @@
+const ecez = @import("ecez");
+
 /// library with utility wrappers around vulkan functions
 pub const Context = @import("render/Context.zig");
 /// Wrapper for vk buffer and memory to simplify handling of these in conjunction
@@ -14,3 +16,17 @@ pub const pipeline = @import("render/pipeline.zig");
 pub const swapchain = @import("render/swapchain.zig");
 pub const validation_layer = @import("render/validation_layer.zig");
 pub const vk_utils = @import("render/vk_utils.zig");
+
+pub const events = struct {
+    pub const render_deinit = ecez.Event(
+        "render_deinit",
+        .{
+            swapchain.systems.deinit.swapchainData,
+        },
+        .{
+            // systems might deinit components "independent" of eachother,
+            // but from vulkan's perspective they may have a dependency
+            .run_on_main_thread = true,
+        },
+    );
+};

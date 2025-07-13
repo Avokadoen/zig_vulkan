@@ -52,6 +52,8 @@ pub const Storage = ecez.CreateStorage(.{
 
     VoxelRT.terrain.components.ChunkToGenerate,
     VoxelRT.terrain.components.Perlin,
+
+    render.swapchain.components.SwapchainData,
 });
 
 pub const InputTypes = input.CreateInputTypes(Storage);
@@ -65,6 +67,8 @@ pub const Scheduler = ecez.CreateScheduler(.{
     InputTypes.events.input_on_event_update,
 
     VoxelRTEvents.events.voxel_rt_update,
+
+    render.events.render_deinit,
 });
 
 pub const InputRuntime = input.CreateInputRuntime(Storage, Scheduler);
@@ -204,7 +208,11 @@ pub fn main() anyerror!void {
         },
         .pipeline = .{},
     });
-    defer voxel_rt.deinit(ctx);
+    defer {
+        // TODO: this should be removed when render is 100% ecez
+        voxel_rt.deinit(ctx);
+        scheduler.dispatchEvent(&storage, .render_deinit, ctx);
+    }
 
     try voxel_rt.pushMaterials(materials[0..]);
 

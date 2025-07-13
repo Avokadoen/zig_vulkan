@@ -6,7 +6,7 @@ const vk = @import("vulkan");
 const render = @import("../render.zig");
 const Context = render.Context;
 const GpuBufferMemory = render.GpuBufferMemory;
-const Swapchain = render.swapchain.Data;
+const SwapchainData = render.swapchain.components.SwapchainData;
 const memory = render.memory;
 
 const Vertex = extern struct {
@@ -64,7 +64,7 @@ shader_modules: [2]vk.ShaderModule,
 pub fn init(
     allocator: Allocator,
     ctx: Context,
-    swapchain: Swapchain,
+    swapchain: SwapchainData,
     render_pass: vk.RenderPass,
     draw_sampler: vk.Sampler,
     draw_image_view: vk.ImageView,
@@ -89,7 +89,7 @@ pub fn init(
         }};
         const descriptor_pool_info = vk.DescriptorPoolCreateInfo{
             .flags = .{},
-            .max_sets = @intCast(swapchain.images.len),
+            .max_sets = @intCast(swapchain.image_len),
             .pool_size_count = pool_sizes.len,
             .p_pool_sizes = &pool_sizes,
         };
@@ -356,9 +356,9 @@ pub fn init(
         .flags = .{ .transient_bit = true },
         .queue_family_index = ctx.queue_indices.graphics,
     };
-    const command_pools = try allocator.alloc(vk.CommandPool, swapchain.images.len);
+    const command_pools = try allocator.alloc(vk.CommandPool, swapchain.image_len);
     errdefer allocator.free(command_pools);
-    const command_buffers = try allocator.alloc(vk.CommandBuffer, swapchain.images.len);
+    const command_buffers = try allocator.alloc(vk.CommandBuffer, swapchain.image_len);
     errdefer allocator.free(command_buffers);
     var initialized_pools: usize = 0;
     var initialized_buffers: usize = 0;

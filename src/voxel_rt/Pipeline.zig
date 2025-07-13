@@ -49,7 +49,6 @@ compute_image_view: vk.ImageView,
 compute_image: vk.Image,
 sampler: vk.Sampler,
 
-swapchain: render.swapchain.Data,
 render_pass: vk.RenderPass,
 
 present_complete_semaphore_index: usize,
@@ -63,6 +62,7 @@ compute_pipeline: ComputePipeline,
 gfx_pipeline: GraphicsPipeline,
 imgui_pipeline: ImguiPipeline,
 
+swapchain_entity: ecez.Entity,
 camera_entity: ecez.Entity,
 sun_entity: ecez.Entity,
 
@@ -211,13 +211,13 @@ pub fn init(
     };
     errdefer ctx.vkd.destroySampler(ctx.logical_device, sampler, null);
 
-    const swapchain = try render.swapchain.Data.init(allocator, ctx, init_command_pool, null);
-    errdefer swapchain.deinit(ctx);
+    const swapchain_component = try render.swapchain.createSwapchainComponent(allocator, ctx, init_command_pool, null);
+    const swapchain_entity = try storage.createEntity(.{swapchain_component});
 
-    const render_pass = try ctx.createRenderPass(swapchain.format);
+    const render_pass = try ctx.createRenderPass(swapchain_component.format);
     errdefer ctx.destroyRenderPass(render_pass);
 
-    const present_complete_semaphores = try allocator.alloc(vk.Semaphore, swapchain.images.len);
+    const present_complete_semaphores = try allocator.alloc(vk.Semaphore, swapchain_component.image_len);
     errdefer allocator.free(present_complete_semaphores);
     var created_present_complete_semaphores: u32 = 0;
     errdefer {
@@ -231,7 +231,7 @@ pub fn init(
         created_present_complete_semaphores += 1;
     }
 
-    const render_complete_semaphores = try allocator.alloc(vk.Semaphore, swapchain.images.len);
+    const render_complete_semaphores = try allocator.alloc(vk.Semaphore, swapchain_component.image_len);
     errdefer allocator.free(render_complete_semaphores);
 
     var created_render_complete_semaphores: u32 = 0;
@@ -326,7 +326,7 @@ pub fn init(
     const gfx_pipeline = try GraphicsPipeline.init(
         allocator,
         ctx,
-        swapchain,
+        swapchain_component,
         render_pass,
         sampler,
         compute_image_view,
@@ -339,7 +339,7 @@ pub fn init(
         ctx,
         allocator,
         render_pass,
-        swapchain.images.len,
+        swapchain_component.image_len,
         init_command_pool,
         gfx_pipeline.bytes_used_in_buffer,
     );
@@ -351,8 +351,8 @@ pub fn init(
         .gfx_pipeline_shader_constants = gfx_pipeline.shader_constants,
     };
     const gui = try ImguiGui.init(
-        @floatFromInt(swapchain.extent.width),
-        @floatFromInt(swapchain.extent.height),
+        @floatFromInt(swapchain_component.extent.width),
+        @floatFromInt(swapchain_component.extent.height),
         storage,
         state_binding,
         .{},
@@ -364,7 +364,6 @@ pub fn init(
         .compute_image_view = compute_image_view,
         .compute_image = compute_image,
         .sampler = sampler,
-        .swapchain = swapchain,
         .render_pass = render_pass,
         .present_complete_semaphore_index = 0,
         .present_complete_semaphores = present_complete_semaphores,
@@ -374,6 +373,7 @@ pub fn init(
         .compute_pipeline = compute_pipeline,
         .gfx_pipeline = gfx_pipeline,
         .imgui_pipeline = imgui_pipeline,
+        .swapchain_entity = swapchain_entity,
         .camera_entity = camera_entity,
         .sun_entity = sun_entity,
         .gui = gui,
@@ -402,7 +402,6 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     self.gfx_pipeline.deinit(self.allocator, ctx);
     self.compute_pipeline.deinit(ctx);
     ctx.destroyRenderPass(self.render_pass);
-    self.swapchain.deinit(ctx);
     self.vertex_index_buffer.deinit(ctx);
 
     ctx.vkd.destroyCommandPool(ctx.logical_device, self.init_command_pool, null);
@@ -432,10 +431,11 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime Storage: type, storage: *Sto
         device_sun.*,
     );
 
+    const swapchain_data = storage.getComponent(self.swapchain_entity, render.swapchain.components.SwapchainData) catch unreachable;
     const image_index = blk: {
         const aquired = ctx.vkd.acquireNextImageKHR(
             ctx.logical_device,
-            self.swapchain.swapchain,
+            swapchain_data.swapchain,
             std.math.maxInt(u64),
             self.present_complete_semaphores[self.present_complete_semaphore_index],
             .null_handle,
@@ -477,7 +477,7 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime Storage: type, storage: *Sto
     try self.gui.newFrame(
         ctx,
         storage,
-        self,
+        swapchain_data.extent,
         camera_ptr,
         device_camera,
         sun_ptr,
@@ -489,7 +489,7 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime Storage: type, storage: *Sto
 
     // re-record command buffer to update any state
     try ctx.vkd.resetCommandPool(ctx.logical_device, self.gfx_pipeline.command_pools[image_index], .{});
-    try self.recordCommandBuffer(ctx, image_index);
+    try self.recordCommandBuffer(ctx, swapchain_data.extent, image_index);
 
     const stage_masks = [_]vk.PipelineStageFlags{
         .{ .vertex_input_bit = true },
@@ -520,7 +520,7 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime Storage: type, storage: *Sto
         .wait_semaphore_count = 1,
         .p_wait_semaphores = @ptrCast(&self.render_complete_semaphores[image_index]),
         .swapchain_count = 1,
-        .p_swapchains = @ptrCast(&self.swapchain.swapchain),
+        .p_swapchains = @ptrCast(&swapchain_data.swapchain),
         .p_image_indices = @ptrCast(&image_index),
         .p_results = null,
     };
@@ -534,7 +534,7 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime Storage: type, storage: *Sto
         else => return err,
     }
 
-    if (self.requested_rescale_pipeline) try self.rescalePipeline(ctx);
+    if (self.requested_rescale_pipeline) try self.rescalePipeline(ctx, storage);
 }
 
 pub fn setDenoiseSampleCount(self: *Pipeline, sample_count: i32) void {
@@ -595,7 +595,7 @@ pub fn transfer(self: *const Pipeline, offset: usize, comptime buffer_type: Tran
 // TODO: make allow to multithread this
 /// Used to update the pipeline according to changes in the window spec
 /// This functions should only be called from the main thread (see glfwGetFramebufferSize)
-fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
+fn rescalePipeline(self: *Pipeline, ctx: Context, storage: anytype) !void {
     const rescale_zone = tracy.ZoneN(@src(), "rescale pipeline");
     defer rescale_zone.End();
 
@@ -620,23 +620,33 @@ fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
         _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast(&self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
     }
 
+    const swapchain_ptr = try storage.getComponent(self.swapchain_entity, *render.swapchain.components.SwapchainData);
     // recreate swapchain utilizing the old one
-    const old_swapchain = self.swapchain;
-    defer old_swapchain.deinit(ctx);
-
-    self.swapchain = try render.swapchain.Data.init(self.allocator, ctx, self.init_command_pool, old_swapchain.swapchain);
-    errdefer self.swapchain.deinit(ctx);
+    const old_swapchain = swapchain_ptr.*;
+    defer render.swapchain.destroySwapchainData(old_swapchain, ctx);
+    swapchain_ptr.* = try render.swapchain.createSwapchainComponent(
+        self.allocator,
+        ctx,
+        self.init_command_pool,
+        old_swapchain.swapchain,
+    );
 
     // recreate renderpass
     ctx.destroyRenderPass(self.render_pass);
-    self.render_pass = try ctx.createRenderPass(self.swapchain.format);
+    self.render_pass = try ctx.createRenderPass(swapchain_ptr.format);
     errdefer ctx.destroyRenderPass(self.render_pass);
 
     // recreate framebuffers
     for (self.gfx_pipeline.framebuffers) |framebuffer| {
         ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
     }
-    self.gfx_pipeline.framebuffers = try render.pipeline.createFramebuffers(self.allocator, ctx, &self.swapchain, self.render_pass, self.gfx_pipeline.framebuffers);
+    self.gfx_pipeline.framebuffers = try render.pipeline.createFramebuffers(
+        self.allocator,
+        ctx,
+        swapchain_ptr,
+        self.render_pass,
+        self.gfx_pipeline.framebuffers,
+    );
     errdefer {
         for (self.gfx_pipeline.framebuffers) |buffer| {
             ctx.vkd.destroyFramebuffer(ctx.logical_device, buffer, null);
@@ -650,16 +660,13 @@ fn rescalePipeline(self: *Pipeline, ctx: Context) !void {
     );
 }
 
-/// prepare gfx_pipeline + imgui_pipeline command buffer
-fn recordCommandBuffers(self: Pipeline, ctx: Context) !void {
-    // copy begin info
-    for (0..self.gfx_pipeline.command_buffers.len) |i| {
-        try self.recordCommandBuffer(ctx, i);
-    }
-}
-
 // TODO: properly handling of errors
-fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
+fn recordCommandBuffer(
+    self: Pipeline,
+    ctx: Context,
+    swapchain_extent: vk.Extent2D,
+    index: usize,
+) !void {
     const record_zone = tracy.ZoneN(@src(), "record gfx & imgui commands");
     defer record_zone.End();
 
@@ -708,7 +715,7 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
         .framebuffer = self.gfx_pipeline.framebuffers[index],
         .render_area = .{
             .offset = .{ .x = 0, .y = 0 },
-            .extent = self.swapchain.extent,
+            .extent = swapchain_extent,
         },
         .clear_value_count = 0,
         .p_clear_values = undefined,
@@ -719,8 +726,8 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
         const viewport = vk.Viewport{
             .x = 0,
             .y = 0,
-            .width = @floatFromInt(self.swapchain.extent.width),
-            .height = @floatFromInt(self.swapchain.extent.height),
+            .width = @floatFromInt(swapchain_extent.width),
+            .height = @floatFromInt(swapchain_extent.height),
             .min_depth = 0,
             .max_depth = 1,
         };
@@ -738,7 +745,7 @@ fn recordCommandBuffer(self: Pipeline, ctx: Context, index: usize) !void {
                 .x = 0,
                 .y = 0,
             },
-            .extent = self.swapchain.extent,
+            .extent = swapchain_extent,
         };
         ctx.vkd.cmdSetScissor(command_buffer, 0, 1, @ptrCast(&scissor));
     }

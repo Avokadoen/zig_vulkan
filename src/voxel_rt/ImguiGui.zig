@@ -93,7 +93,7 @@ pub fn newFrame(
     self: *ImguiGui,
     ctx: Context,
     storage: anytype,
-    pipeline: *Pipeline,
+    swapchain_extent: vk.Extent2D,
     camera_ptr: *camera.components.Camera,
     device_camera: *camera.components.DeviceCamera,
     sun_ptr: *sun.components.Sun,
@@ -109,7 +109,7 @@ pub fn newFrame(
 
     zgui.setNextWindowSize(
         .{
-            .w = @floatFromInt(pipeline.swapchain.extent.width),
+            .w = @floatFromInt(swapchain_extent.width),
             .h = 0,
             .cond = .always,
         },
