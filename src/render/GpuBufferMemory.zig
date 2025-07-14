@@ -19,7 +19,7 @@ len: u32,
 capacity: vk.DeviceSize,
 buffer: vk.Buffer,
 memory: vk.DeviceMemory,
-mapped: ?*anyopaque,
+mapped: *anyopaque,
 
 /// user has to make sure to call deinit on buffer
 pub fn init(
@@ -58,39 +58,25 @@ pub fn init(
 
     try ctx.vkd.bindBufferMemory(ctx.logical_device, buffer, memory, 0);
 
+    const mapped = (try ctx.vkd.mapMemory(
+        ctx.logical_device,
+        memory,
+        0,
+        vk.WHOLE_SIZE,
+        .{},
+    )) orelse return error.FailedToMapGPUMem;
+
     return GpuBufferMemory{
         .len = 0,
         .capacity = atom_coherent_capacity,
         .buffer = buffer,
         .memory = memory,
-        .mapped = null,
+        .mapped = mapped,
     };
-}
-
-pub fn map(self: *GpuBufferMemory, ctx: Context, offset: vk.DeviceSize, size: vk.DeviceSize) !void {
-    const map_size = blk: {
-        if (size == vk.WHOLE_SIZE) {
-            break :blk vk.WHOLE_SIZE;
-        }
-        const atom_size = memory_util.nonCoherentAtomSize(ctx, size);
-        if (atom_size + offset > self.capacity) {
-            return error.InsufficientMemory;
-        }
-        break :blk atom_size;
-    };
-
-    self.mapped = (try ctx.vkd.mapMemory(ctx.logical_device, self.memory, offset, map_size, .{})) orelse return error.FailedToMapGPUMem;
-}
-
-pub fn unmap(self: *GpuBufferMemory, ctx: Context) void {
-    if (self.mapped != null) {
-        ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
-        self.mapped = null;
-    }
 }
 
 pub fn typedMapAssumeMapped(self: *const GpuBufferMemory, comptime T: type, offset: vk.DeviceSize) [*]T {
-    var bytes: [*]u8 = @ptrCast(self.mapped.?);
+    var bytes: [*]u8 = @ptrCast(self.mapped);
     const ptr: [*]T = @alignCast(@ptrCast(&bytes[offset]));
     return ptr;
 }
@@ -113,9 +99,7 @@ pub fn flush(self: GpuBufferMemory, ctx: Context, offset: vk.DeviceSize, size: v
 
 /// destroy buffer and free memory
 pub fn deinit(self: GpuBufferMemory, ctx: Context) void {
-    if (self.mapped != null) {
-        ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
-    }
+    ctx.vkd.unmapMemory(ctx.logical_device, self.memory);
     std.debug.assert(self.buffer != .null_handle and self.memory != .null_handle);
 
     ctx.vkd.destroyBuffer(ctx.logical_device, self.buffer, null);

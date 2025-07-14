@@ -321,8 +321,6 @@ pub fn init(
     );
     errdefer vertex_index_buffer.deinit(ctx);
 
-    try vertex_index_buffer.map(ctx, 0, vertex_index_buffer.capacity);
-
     const gfx_pipeline = try GraphicsPipeline.init(
         allocator,
         ctx,

@@ -99,9 +99,6 @@ pub fn init(
         );
         errdefer buf.deinit(ctx);
 
-        // Map this buf persistently
-        try buf.map(ctx, 0, vk.WHOLE_SIZE);
-
         break :buffer_init buf;
     };
     errdefer buffer.deinit(ctx);
