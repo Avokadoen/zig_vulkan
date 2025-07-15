@@ -96,6 +96,8 @@ pub fn init(
 
     const grid_device_state = try storage.getComponent(grid_entity, grid_state.components.Device);
     try pipeline.transfer(
+        Storage,
+        storage,
         0,
         .grid_device,
         &[_]grid_state.components.Device{grid_device_state},
@@ -111,8 +113,8 @@ pub fn draw(self: *VoxelRT, ctx: Context, comptime Storage: type, storage: *Stor
 }
 
 /// push the materials to GPU
-pub fn pushMaterials(self: *VoxelRT, materials: []const gpu_types.Material) !void {
-    try self.pipeline.transfer(0, .material, materials);
+pub fn pushMaterials(self: *VoxelRT, comptime Storage: type, storage: *Storage, materials: []const gpu_types.Material) !void {
+    try self.pipeline.transfer(Storage, storage, 0, .material, materials);
 }
 
 pub fn deinit(self: VoxelRT, ctx: Context) void {

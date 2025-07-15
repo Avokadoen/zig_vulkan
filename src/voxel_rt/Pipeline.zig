@@ -16,7 +16,7 @@ const memory = render.memory;
 const ComputePipeline = @import("ComputePipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const ImguiPipeline = @import("ImguiPipeline.zig");
-const GpuBufferMemory = render.GpuBufferMemory;
+const gpu_buffer_memory = render.gpu_buffer_memory;
 
 const ImguiGui = @import("ImguiGui.zig");
 
@@ -72,7 +72,7 @@ requested_rescale_pipeline: bool = false,
 init_command_pool: vk.CommandPool, // kept in case of rescale
 
 // shared vertex index buffer for imgui and graphics pipeline
-vertex_index_buffer: GpuBufferMemory,
+vertex_index_buffer_entity: ecez.Entity,
 
 pub fn init(
     ctx: Context,
@@ -299,6 +299,8 @@ pub fn init(
         break :blk try ComputePipeline.init(
             allocator,
             ctx,
+            Storage,
+            storage,
             target_image_info,
             state_configs,
             ComputeSpecialization{
@@ -313,13 +315,14 @@ pub fn init(
     };
     errdefer compute_pipeline.deinit(ctx);
 
-    var vertex_index_buffer = try GpuBufferMemory.init(
+    var vertex_index_buffer = try gpu_buffer_memory.createGpuBufferMemoryComponents(
         ctx,
         memory.bytes_in_mb * 63,
         .{ .vertex_buffer_bit = true, .index_buffer_bit = true },
         .{ .device_local_bit = true, .host_visible_bit = true },
     );
-    errdefer vertex_index_buffer.deinit(ctx);
+    errdefer gpu_buffer_memory.destroyBuffer(vertex_index_buffer, ctx);
+    const vertex_index_buffer_entity = try storage.createEntity(.{vertex_index_buffer});
 
     const gfx_pipeline = try GraphicsPipeline.init(
         allocator,
@@ -376,7 +379,7 @@ pub fn init(
         .sun_entity = sun_entity,
         .gui = gui,
         .init_command_pool = init_command_pool,
-        .vertex_index_buffer = vertex_index_buffer,
+        .vertex_index_buffer_entity = vertex_index_buffer_entity,
     };
 }
 
@@ -400,7 +403,6 @@ pub fn deinit(self: Pipeline, ctx: Context) void {
     self.gfx_pipeline.deinit(self.allocator, ctx);
     self.compute_pipeline.deinit(ctx);
     ctx.destroyRenderPass(self.render_pass);
-    self.vertex_index_buffer.deinit(ctx);
 
     ctx.vkd.destroyCommandPool(ctx.logical_device, self.init_command_pool, null);
 
@@ -483,11 +485,22 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime Storage: type, storage: *Sto
         update_metrics,
         dt,
     );
-    try self.imgui_pipeline.updateBuffers(ctx, &self.vertex_index_buffer);
+
+    const vertex_index_buffer = storage.getComponent(self.vertex_index_buffer_entity, *gpu_buffer_memory.components.GpuBufferMemory) catch unreachable;
+    try self.imgui_pipeline.updateBuffers(ctx, vertex_index_buffer);
 
     // re-record command buffer to update any state
-    try ctx.vkd.resetCommandPool(ctx.logical_device, self.gfx_pipeline.command_pools[image_index], .{});
-    try self.recordCommandBuffer(ctx, swapchain_data.extent, image_index);
+    try ctx.vkd.resetCommandPool(
+        ctx.logical_device,
+        self.gfx_pipeline.command_pools[image_index],
+        .{},
+    );
+    try self.recordCommandBuffer(
+        ctx,
+        vertex_index_buffer.*,
+        swapchain_data.extent,
+        image_index,
+    );
 
     const stage_masks = [_]vk.PipelineStageFlags{
         .{ .vertex_input_bit = true },
@@ -573,7 +586,14 @@ pub const TransferBuffers = enum {
     }
 };
 /// Transfer data to the device
-pub fn transfer(self: *const Pipeline, offset: usize, comptime buffer_type: TransferBuffers, data: []const buffer_type.ToType()) !void {
+pub fn transfer(
+    self: *const Pipeline,
+    comptime Storage: type,
+    storage: *Storage,
+    offset: usize,
+    comptime buffer_type: TransferBuffers,
+    data: []const buffer_type.ToType(),
+) !void {
     const type_offset = switch (buffer_type) {
         .grid_device => self.compute_pipeline.uniform_offsets[0],
         .material => self.compute_pipeline.storage_offsets[0],
@@ -586,7 +606,12 @@ pub fn transfer(self: *const Pipeline, offset: usize, comptime buffer_type: Tran
     const DataType = buffer_type.ToType();
     const buffer_offset = type_offset + offset * @sizeOf(DataType);
 
-    const mapped_device_data = self.compute_pipeline.buffer.typedMapAssumeMapped(DataType, buffer_offset);
+    const buffer = try storage.getComponent(
+        self.compute_pipeline.buffer_entity,
+        gpu_buffer_memory.components.GpuBufferMemory,
+    );
+
+    const mapped_device_data = buffer.typedMapAssumeMapped(DataType, buffer_offset);
     @memcpy(mapped_device_data[0..data.len], data);
 }
 
@@ -662,6 +687,7 @@ fn rescalePipeline(self: *Pipeline, ctx: Context, storage: anytype) !void {
 fn recordCommandBuffer(
     self: Pipeline,
     ctx: Context,
+    vertex_index_buffer: gpu_buffer_memory.components.GpuBufferMemory,
     swapchain_extent: vk.Extent2D,
     index: usize,
 ) !void {
@@ -772,17 +798,17 @@ fn recordCommandBuffer(
         command_buffer,
         0,
         1,
-        @ptrCast(&self.vertex_index_buffer.buffer),
+        @ptrCast(&vertex_index_buffer.buffer),
         &vertex_zero_offset,
     );
-    ctx.vkd.cmdBindIndexBuffer(command_buffer, self.vertex_index_buffer.buffer, GraphicsPipeline.vertex_size, .uint16);
+    ctx.vkd.cmdBindIndexBuffer(command_buffer, vertex_index_buffer.buffer, GraphicsPipeline.vertex_size, .uint16);
     ctx.vkd.cmdDrawIndexed(command_buffer, GraphicsPipeline.indices.len, 1, 0, 0, 0);
 
     try self.imgui_pipeline.recordCommandBuffer(
         ctx,
         command_buffer,
         self.gfx_pipeline.bytes_used_in_buffer,
-        self.vertex_index_buffer,
+        vertex_index_buffer,
     );
 
     ctx.vkd.cmdEndRenderPass(command_buffer);

@@ -54,6 +54,7 @@ pub const Storage = ecez.CreateStorage(.{
     VoxelRT.terrain.components.Perlin,
 
     render.swapchain.components.SwapchainData,
+    render.gpu_buffer_memory.components.GpuBufferMemory,
 });
 
 pub const InputTypes = input.CreateInputTypes(Storage);
@@ -214,7 +215,7 @@ pub fn main() anyerror!void {
         scheduler.dispatchEvent(&storage, .render_deinit, ctx);
     }
 
-    try voxel_rt.pushMaterials(materials[0..]);
+    try voxel_rt.pushMaterials(Storage, &storage, materials[0..]);
 
     var prev_frame = std.time.milliTimestamp();
     // Loop until the user closes the window

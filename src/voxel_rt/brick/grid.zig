@@ -13,6 +13,7 @@ const ztracy = @import("ztracy");
 const state = @import("state.zig");
 const AtomicCount = state.AtomicCount;
 const MaterialAllocator = @import("MaterialAllocator.zig");
+const gpu_buffer_memory = @import("../../render.zig").gpu_buffer_memory;
 
 const EventArgument = @import("../event_arg.zig").EventArgument;
 
@@ -105,6 +106,10 @@ pub fn CreateSystems(comptime Storage: type) type {
     const sub_storages = struct {
         const RemoveInsertVoxel = Storage.Subset(.{
             *components.InsertVoxel,
+        });
+
+        const GpuBufferMemory = Storage.Subset(.{
+            gpu_buffer_memory.components.GpuBufferMemory,
         });
     };
 
@@ -236,6 +241,7 @@ pub fn CreateSystems(comptime Storage: type) type {
 
         pub fn updateStatusDeltaGridDelta(
             status_query: *state.queries.upload.Status,
+            gpu_buffer_storage: *sub_storages.GpuBufferMemory,
             event_arg: EventArgument,
         ) void {
             const zone = ztracy.ZoneN(@src(), @src().fn_name);
@@ -244,17 +250,20 @@ pub fn CreateSystems(comptime Storage: type) type {
             const statuses = status_query.getAny().?;
             const delta = &statuses.delta.delta;
             if (delta.state == .active) {
-                try event_arg.voxel_rt.pipeline.transfer(
+                event_arg.voxel_rt.pipeline.transfer(
+                    sub_storages.GpuBufferMemory,
+                    gpu_buffer_storage,
                     delta.from,
                     .brick_status,
                     statuses.statuses.statuses[delta.from..delta.to],
-                );
+                ) catch @panic("missing voxel gpu buffer");
                 delta.resetDelta();
             }
         }
 
         pub fn updateIndicesDeltaGridDelta(
             indices_query: *state.queries.upload.Indices,
+            gpu_buffer_storage: *sub_storages.GpuBufferMemory,
             event_arg: EventArgument,
         ) void {
             const zone = ztracy.ZoneN(@src(), @src().fn_name);
@@ -263,17 +272,20 @@ pub fn CreateSystems(comptime Storage: type) type {
             const indices = indices_query.getAny().?;
             const delta = &indices.delta.delta;
             if (delta.state == .active) {
-                try event_arg.voxel_rt.pipeline.transfer(
+                event_arg.voxel_rt.pipeline.transfer(
+                    sub_storages.GpuBufferMemory,
+                    gpu_buffer_storage,
                     delta.from,
                     .index_to_brick,
                     indices.indices.indices[delta.from..delta.to],
-                );
+                ) catch @panic("missing voxel gpu buffer");
                 delta.resetDelta();
             }
         }
 
         pub fn updateOccupancyDeltaGridDelta(
             occupancy_query: *state.queries.upload.Occupancy,
+            gpu_buffer_storage: *sub_storages.GpuBufferMemory,
             event_arg: EventArgument,
         ) void {
             const zone = ztracy.ZoneN(@src(), @src().fn_name);
@@ -282,17 +294,20 @@ pub fn CreateSystems(comptime Storage: type) type {
             const occupancy = occupancy_query.getAny().?;
             const delta = &occupancy.delta.delta;
             if (delta.state == .active) {
-                try event_arg.voxel_rt.pipeline.transfer(
+                event_arg.voxel_rt.pipeline.transfer(
+                    sub_storages.GpuBufferMemory,
+                    gpu_buffer_storage,
                     delta.from,
                     .occupancy,
                     occupancy.occupancy.occupancy[delta.from..delta.to],
-                );
+                ) catch @panic("missing voxel gpu buffer");
                 delta.resetDelta();
             }
         }
 
         pub fn updateMaterialIndicesDeltaGridDelta(
             material_indices_query: *state.queries.upload.MaterialIndices,
+            gpu_buffer_storage: *sub_storages.GpuBufferMemory,
             event_arg: EventArgument,
         ) void {
             const zone = ztracy.ZoneN(@src(), @src().fn_name);
@@ -301,17 +316,20 @@ pub fn CreateSystems(comptime Storage: type) type {
             const material_indices = material_indices_query.getAny().?;
             const delta = &material_indices.delta.delta;
             if (delta.state == .active) {
-                try event_arg.voxel_rt.pipeline.transfer(
+                event_arg.voxel_rt.pipeline.transfer(
+                    sub_storages.GpuBufferMemory,
+                    gpu_buffer_storage,
                     delta.from,
                     .material_index,
                     material_indices.indices.indices[delta.from..delta.to],
-                );
+                ) catch @panic("missing voxel gpu buffer");
                 delta.resetDelta();
             }
         }
 
         pub fn updateStartIndicesDeltaGridDelta(
             start_indices_query: *state.queries.upload.StartIndices,
+            gpu_buffer_storage: *sub_storages.GpuBufferMemory,
             event_arg: EventArgument,
         ) void {
             const zone = ztracy.ZoneN(@src(), @src().fn_name);
@@ -320,11 +338,13 @@ pub fn CreateSystems(comptime Storage: type) type {
             const start_indices = start_indices_query.getAny().?;
             const delta = &start_indices.delta.delta;
             if (delta.state == .active) {
-                try event_arg.voxel_rt.pipeline.transfer(
+                event_arg.voxel_rt.pipeline.transfer(
+                    sub_storages.GpuBufferMemory,
+                    gpu_buffer_storage,
                     delta.from,
                     .brick_start_index,
                     start_indices.indices.indices[delta.from..delta.to],
-                );
+                ) catch @panic("missing voxel gpu buffer");
                 delta.resetDelta();
             }
         }

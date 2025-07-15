@@ -1,13 +1,14 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const ecez = @import("ecez");
 const vk = @import("vulkan");
 const glfw = @import("glfw");
 const tracy = @import("ztracy");
 
 const render = @import("../render.zig");
 const Context = render.Context;
-const GpuBufferMemory = render.GpuBufferMemory;
+const gpu_buffer_memory = render.gpu_buffer_memory;
 const Texture = render.Texture;
 
 const DeviceCamera = @import("camera.zig").components.DeviceCamera;
@@ -57,7 +58,7 @@ target_descriptor_set: vk.DescriptorSet,
 uniform_offsets: []vk.DeviceSize,
 storage_offsets: []vk.DeviceSize,
 
-buffer: GpuBufferMemory,
+buffer_entity: ecez.Entity,
 
 // TODO: descriptor has a lot of duplicate code with init ...
 // TODO: refactor descriptor stuff to be configurable (loop array of config objects for buffer stuff)
@@ -68,6 +69,8 @@ buffer: GpuBufferMemory,
 pub fn init(
     allocator: Allocator,
     ctx: Context,
+    comptime Storage: type,
+    storage: *Storage,
     target_image_info: ImageInfo,
     state_config: StateConfigs,
     specialization_constants: anytype,
@@ -90,18 +93,17 @@ pub fn init(
         buffer_size += size;
     }
 
-    const buffer = buffer_init: {
-        var buf = try GpuBufferMemory.init(
-            ctx,
-            @intCast(buffer_size),
-            .{ .storage_buffer_bit = true, .uniform_buffer_bit = true },
-            .{ .device_local_bit = true, .host_visible_bit = true },
-        );
-        errdefer buf.deinit(ctx);
+    const buffer = try gpu_buffer_memory.createGpuBufferMemoryComponents(
+        ctx,
+        @intCast(buffer_size),
+        .{ .storage_buffer_bit = true, .uniform_buffer_bit = true },
+        .{ .device_local_bit = true, .host_visible_bit = true },
+    );
+    const buffer_entity = buffer_init: {
+        errdefer gpu_buffer_memory.destroyBuffer(buffer, ctx);
 
-        break :buffer_init buf;
+        break :buffer_init try storage.createEntity(.{buffer});
     };
-    errdefer buffer.deinit(ctx);
 
     const set_count = 1 + state_config.uniform_sizes.len + state_config.storage_sizes.len;
     const layout_bindings = try allocator.alloc(vk.DescriptorSetLayoutBinding, set_count);
@@ -391,7 +393,7 @@ pub fn init(
         .target_descriptor_set = target_descriptor_set,
         .uniform_offsets = uniform_offsets,
         .storage_offsets = storage_offsets,
-        .buffer = buffer,
+        .buffer_entity = buffer_entity,
     };
 }
 
@@ -415,7 +417,6 @@ pub fn deinit(self: ComputePipeline, ctx: Context) void {
 
     self.allocator.free(self.uniform_offsets);
     self.allocator.free(self.storage_offsets);
-    self.buffer.deinit(ctx);
 
     ctx.vkd.destroySemaphore(ctx.logical_device, self.complete_semaphore, null);
     ctx.vkd.destroyFence(ctx.logical_device, self.complete_fence, null);

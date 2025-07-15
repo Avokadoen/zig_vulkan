@@ -12,7 +12,6 @@ const za = @import("zalgebra");
 const tracy = @import("ztracy");
 
 const render = @import("../render.zig");
-const GpuBufferMemory = render.GpuBufferMemory;
 const Context = render.Context;
 const texture = render.texture;
 
@@ -524,7 +523,7 @@ pub fn recordCommandBuffer(
     ctx: Context,
     command_buffer: vk.CommandBuffer,
     buffer_offset: vk.DeviceSize,
-    vertex_index_buffer: GpuBufferMemory,
+    vertex_index_buffer: render.gpu_buffer_memory.components.GpuBufferMemory,
 ) !void {
     const record_zone = tracy.ZoneN(@src(), "imgui commands");
     defer record_zone.End();
@@ -619,7 +618,7 @@ pub fn recordCommandBuffer(
 pub fn updateBuffers(
     self: *ImguiPipeline,
     ctx: Context,
-    vertex_index_buffer: *GpuBufferMemory,
+    vertex_index_buffer: *render.gpu_buffer_memory.components.GpuBufferMemory,
 ) !void {
     const update_buffers_zone = tracy.ZoneN(@src(), "imgui: vertex & index update");
     defer update_buffers_zone.End();

@@ -2,7 +2,6 @@ const std = @import("std");
 const vk = @import("vulkan");
 
 const vk_utils = @import("vk_utils.zig");
-const GpuBufferMemory = @import("GpuBufferMemory.zig");
 const Context = @import("Context.zig");
 const Allocator = std.mem.Allocator;
 

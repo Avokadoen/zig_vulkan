@@ -3,7 +3,7 @@ const ecez = @import("ecez");
 /// library with utility wrappers around vulkan functions
 pub const Context = @import("render/Context.zig");
 /// Wrapper for vk buffer and memory to simplify handling of these in conjunction
-pub const GpuBufferMemory = @import("render/GpuBufferMemory.zig");
+pub const gpu_buffer_memory = @import("render/gpu_buffer_memory.zig");
 /// Texture utilities
 pub const texture = @import("render/texture.zig");
 
@@ -21,6 +21,7 @@ pub const events = struct {
     pub const render_deinit = ecez.Event(
         "render_deinit",
         .{
+            gpu_buffer_memory.systems.deinit.gpuBufferMemory,
             swapchain.systems.deinit.swapchainData,
         },
         .{

@@ -5,7 +5,7 @@ const vk = @import("vulkan");
 
 const render = @import("../render.zig");
 const Context = render.Context;
-const GpuBufferMemory = render.GpuBufferMemory;
+const GpuBufferMemory = render.gpu_buffer_memory.components.GpuBufferMemory;
 const SwapchainData = render.swapchain.components.SwapchainData;
 const memory = render.memory;
 
