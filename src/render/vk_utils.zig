@@ -9,7 +9,7 @@ const Allocator = std.mem.Allocator;
 const vk = @import("vulkan");
 const dispatch = @import("dispatch.zig");
 
-const Context = @import("Context.zig");
+const context = @import("context.zig");
 
 /// Check if extensions are available on host instance
 pub fn isInstanceExtensionsPresent(allocator: Allocator, vkb: dispatch.Base, target_extensions: []const [*:0]const u8) !bool {
@@ -40,8 +40,13 @@ pub fn isInstanceExtensionsPresent(allocator: Allocator, vkb: dispatch.Base, tar
     return matches == target_extensions.len;
 }
 
-pub fn findMemoryTypeIndex(ctx: Context, type_filter: u32, memory_flags: vk.MemoryPropertyFlags) error{NotFound}!u32 {
-    const properties = ctx.vki.getPhysicalDeviceMemoryProperties(ctx.physical_device);
+pub fn findMemoryTypeIndex(
+    vki: context.components.vk_dispatch.Instance,
+    physical_device: context.components.VkPhysicalDevice,
+    type_filter: u32,
+    memory_flags: vk.MemoryPropertyFlags,
+) error{NotFound}!u32 {
+    const properties = vki.getPhysicalDeviceMemoryProperties(physical_device.v);
     for (0..properties.memory_type_count) |i| {
         const left_shift: u5 = @intCast(i);
         const correct_type: bool = (type_filter & (@as(u32, 1) << left_shift)) != 0;
@@ -53,14 +58,18 @@ pub fn findMemoryTypeIndex(ctx: Context, type_filter: u32, memory_flags: vk.Memo
     return error.NotFound;
 }
 
-pub fn beginOneTimeCommandBuffer(ctx: Context, command_pool: vk.CommandPool) !vk.CommandBuffer {
+pub fn beginOneTimeCommandBuffer(
+    vkd: context.components.vk_dispatch.Device,
+    logical_device: context.components.VkDevice,
+    command_pool: vk.CommandPool,
+) !vk.CommandBuffer {
     const allocate_info = vk.CommandBufferAllocateInfo{
         .command_pool = command_pool,
         .level = .primary,
         .command_buffer_count = 1,
     };
     var command_buffer: vk.CommandBuffer = undefined;
-    try ctx.vkd.allocateCommandBuffers(ctx.logical_device, &allocate_info, @ptrCast(&command_buffer));
+    try vkd.allocateCommandBuffers(logical_device.v, &allocate_info, @ptrCast(&command_buffer));
 
     const begin_info = vk.CommandBufferBeginInfo{
         .flags = .{
@@ -68,14 +77,20 @@ pub fn beginOneTimeCommandBuffer(ctx: Context, command_pool: vk.CommandPool) !vk
         },
         .p_inheritance_info = null,
     };
-    try ctx.vkd.beginCommandBuffer(command_buffer, &begin_info);
+    try vkd.beginCommandBuffer(command_buffer, &begin_info);
 
     return command_buffer;
 }
 
 // TODO: synchronization should be improved in this function (currently very sub optimal)!
-pub inline fn endOneTimeCommandBuffer(ctx: Context, command_pool: vk.CommandPool, command_buffer: vk.CommandBuffer) !void {
-    try ctx.vkd.endCommandBuffer(command_buffer);
+pub inline fn endOneTimeCommandBuffer(
+    vkd: context.components.vk_dispatch.Device,
+    logical_device: context.components.VkDevice,
+    graphics_queue: context.components.GraphicsQueue,
+    command_pool: vk.CommandPool,
+    command_buffer: vk.CommandBuffer,
+) !void {
+    try vkd.endCommandBuffer(command_buffer);
 
     {
         @setRuntimeSafety(false);
@@ -91,10 +106,10 @@ pub inline fn endOneTimeCommandBuffer(ctx: Context, command_pool: vk.CommandPool
             .signal_semaphore_count = 0,
             .p_signal_semaphores = semo_null_ptr,
         };
-        try ctx.vkd.queueSubmit(ctx.graphics_queue, 1, @ptrCast(&submit_info), .null_handle);
+        try vkd.queueSubmit(graphics_queue.queue, 1, @ptrCast(&submit_info), .null_handle);
     }
 
-    try ctx.vkd.queueWaitIdle(ctx.graphics_queue);
+    try vkd.queueWaitIdle(graphics_queue.queue);
 
-    ctx.vkd.freeCommandBuffers(ctx.logical_device, command_pool, 1, @ptrCast(&command_buffer));
+    vkd.freeCommandBuffers(logical_device.v, command_pool, 1, @ptrCast(&command_buffer));
 }

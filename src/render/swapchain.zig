@@ -7,7 +7,7 @@ const ecez = @import("ecez");
 
 const dispatch = @import("dispatch.zig");
 const physical_device = @import("physical_device.zig");
-const Context = @import("Context.zig");
+const context = @import("context.zig");
 const texture = @import("texture.zig");
 
 pub const components = struct {
@@ -32,10 +32,11 @@ pub const queries = struct {
 pub const systems = struct {
     pub const deinit = struct {
         // TODO: event argument for ctx?
-        pub fn swapchainData(swapchain_data_query: *queries.SwapchainData, ctx: Context) void {
+        pub fn swapchainData(swapchain_data_query: *queries.SwapchainData, ctx_query: *context.queries.VkdAndDevice) void {
             const swapchain_entity = swapchain_data_query.getAny() orelse return;
+            const ctx = ctx_query.getAny().?;
 
-            destroySwapchainData(swapchain_entity.data, ctx);
+            destroySwapchainData(ctx.vkd, ctx.logical_device, swapchain_entity.data);
         }
     };
 };
@@ -46,22 +47,35 @@ pub const systems = struct {
 /// Allocator needed for init only, no memory is needed to be deleted after normal return
 pub fn createSwapchainComponent(
     allocator: Allocator,
-    ctx: Context,
-    command_pool: vk.CommandPool,
+    ctx_entity: ecez.Entity,
+    comptime Storage: type,
+    storage: *Storage,
     old_swapchain: ?vk.SwapchainKHR,
 ) !components.SwapchainData {
+    const ctx = try storage.getComponents(ctx_entity, struct {
+        vki: context.components.vk_dispatch.Instance,
+        vkd: context.components.vk_dispatch.Device,
+        physical_device: context.components.VkPhysicalDevice,
+        queue_indices: context.components.QueueFamilyIndices,
+        graphics_queue: context.components.GraphicsQueue,
+        logical_device: context.components.VkDevice,
+        surface: context.components.VkSurface,
+        window: context.components.WindowPtr,
+        auxillary_cmd_pool: context.components.AuxillaryCommandPool,
+    });
+
     const sc_create_info = create_swapchain_info_blk: {
         const support_details = try SupportDetails.init(
             allocator,
             ctx.vki,
-            ctx.physical_device,
-            ctx.surface,
+            ctx.physical_device.v,
+            ctx.surface.v,
         );
         defer support_details.deinit(allocator);
 
         const format = support_details.selectSwapChainFormat();
         const present_mode = support_details.selectSwapchainPresentMode();
-        const extent = try support_details.constructSwapChainExtent(ctx.window_ptr);
+        const extent = try support_details.constructSwapChainExtent(ctx.window.ptr);
 
         const max_images = if (support_details.capabilities.max_image_count == 0) std.math.maxInt(u32) else support_details.capabilities.max_image_count;
         const image_count = @min(support_details.capabilities.min_image_count + 1, max_images);
@@ -79,7 +93,7 @@ pub fn createSwapchainComponent(
 
         break :create_swapchain_info_blk vk.SwapchainCreateInfoKHR{
             .flags = .{},
-            .surface = ctx.surface,
+            .surface = ctx.surface.v,
             .min_image_count = image_count,
             .image_format = format.format,
             .image_color_space = format.color_space,
@@ -97,15 +111,15 @@ pub fn createSwapchainComponent(
         };
     };
 
-    const swapchain_khr = try ctx.vkd.createSwapchainKHR(ctx.logical_device, &sc_create_info, null);
+    const swapchain_khr = try ctx.vkd.createSwapchainKHR(ctx.logical_device.v, &sc_create_info, null);
     var image_len: u32 = 0;
     const swapchain_images = blk: {
-        _ = try ctx.vkd.getSwapchainImagesKHR(ctx.logical_device, swapchain_khr, &image_len, null);
+        _ = try ctx.vkd.getSwapchainImagesKHR(ctx.logical_device.v, swapchain_khr, &image_len, null);
 
         var images: [components.SwapchainData.max_images]vk.Image = undefined;
 
         // TODO: handle incomplete
-        _ = try ctx.vkd.getSwapchainImagesKHR(ctx.logical_device, swapchain_khr, &image_len, &images);
+        _ = try ctx.vkd.getSwapchainImagesKHR(ctx.logical_device.v, swapchain_khr, &image_len, &images);
         break :blk images;
     };
 
@@ -120,7 +134,13 @@ pub fn createSwapchainComponent(
             .new_layout = .present_src_khr,
         };
     }
-    try texture.transitionImageLayouts(ctx, command_pool, transition_configs[0..image_len]);
+    try texture.transitionImageLayouts(
+        ctx.vkd,
+        ctx.logical_device,
+        ctx.graphics_queue,
+        ctx.auxillary_cmd_pool.pool,
+        transition_configs[0..image_len],
+    );
 
     const image_views = blk: {
         var views: [components.SwapchainData.max_images]vk.ImageView = undefined;
@@ -147,7 +167,7 @@ pub fn createSwapchainComponent(
                 .components = mappings,
                 .subresource_range = subresource_range,
             };
-            view.* = try ctx.vkd.createImageView(ctx.logical_device, &create_info, null);
+            view.* = try ctx.vkd.createImageView(ctx.logical_device.v, &create_info, null);
         }
 
         break :blk views;
@@ -163,11 +183,15 @@ pub fn createSwapchainComponent(
     };
 }
 
-pub fn destroySwapchainData(swapchain_data: components.SwapchainData, ctx: Context) void {
+pub fn destroySwapchainData(
+    vkd: context.components.vk_dispatch.Device,
+    logical_device: context.components.VkDevice,
+    swapchain_data: components.SwapchainData,
+) void {
     for (swapchain_data.image_views[0..swapchain_data.image_len]) |view| {
-        ctx.vkd.destroyImageView(ctx.logical_device, view, null);
+        vkd.destroyImageView(logical_device.v, view, null);
     }
-    ctx.vkd.destroySwapchainKHR(ctx.logical_device, swapchain_data.swapchain, null);
+    vkd.destroySwapchainKHR(logical_device.v, swapchain_data.swapchain, null);
 }
 
 pub const SupportDetails = struct {

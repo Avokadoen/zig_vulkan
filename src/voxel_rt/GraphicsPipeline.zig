@@ -4,7 +4,7 @@ const Allocator = std.mem.Allocator;
 const vk = @import("vulkan");
 
 const render = @import("../render.zig");
-const Context = render.Context;
+const context = render.context;
 const GpuBufferMemory = render.gpu_buffer_memory.components.GpuBufferMemory;
 const SwapchainData = render.swapchain.components.SwapchainData;
 const memory = render.memory;
@@ -63,7 +63,10 @@ shader_modules: [2]vk.ShaderModule,
 
 pub fn init(
     allocator: Allocator,
-    ctx: Context,
+    vkd: context.components.vk_dispatch.Device,
+    logical_device: context.components.VkDevice,
+    physical_device_properties: context.components.VkPhysicalDeviceProperties,
+    queue_indices: context.components.QueueFamilyIndices,
     swapchain: SwapchainData,
     render_pass: vk.RenderPass,
     draw_sampler: vk.Sampler,
@@ -71,7 +74,7 @@ pub fn init(
     vertex_index_buffer: *GpuBufferMemory,
     config: Config,
 ) !GraphicsPipeline {
-    const bytes_used_in_buffer = memory.nonCoherentAtomSize(ctx, vertex_size * indices_size);
+    const bytes_used_in_buffer = memory.nonCoherentAtomSize(physical_device_properties, vertex_size * indices_size);
     if (bytes_used_in_buffer > vertex_index_buffer.capacity) {
         return error.OutOfDeviceMemory;
     }
@@ -93,9 +96,9 @@ pub fn init(
             .pool_size_count = pool_sizes.len,
             .p_pool_sizes = &pool_sizes,
         };
-        break :blk try ctx.vkd.createDescriptorPool(ctx.logical_device, &descriptor_pool_info, null);
+        break :blk try vkd.createDescriptorPool(logical_device.v, &descriptor_pool_info, null);
     };
-    errdefer ctx.vkd.destroyDescriptorPool(ctx.logical_device, descriptor_pool, null);
+    errdefer vkd.destroyDescriptorPool(logical_device.v, descriptor_pool, null);
 
     const descriptor_set_layout = blk: {
         const set_layout_bindings = [_]vk.DescriptorSetLayoutBinding{.{
@@ -112,9 +115,9 @@ pub fn init(
             .binding_count = set_layout_bindings.len,
             .p_bindings = &set_layout_bindings,
         };
-        break :blk try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &set_layout_info, null);
+        break :blk try vkd.createDescriptorSetLayout(logical_device.v, &set_layout_info, null);
     };
-    errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, descriptor_set_layout, null);
+    errdefer vkd.destroyDescriptorSetLayout(logical_device.v, descriptor_set_layout, null);
 
     const descriptor_set = blk: {
         const alloc_info = vk.DescriptorSetAllocateInfo{
@@ -123,15 +126,15 @@ pub fn init(
             .p_set_layouts = @ptrCast(&descriptor_set_layout),
         };
         var descriptor_set_tmp: vk.DescriptorSet = undefined;
-        try ctx.vkd.allocateDescriptorSets(
-            ctx.logical_device,
+        try vkd.allocateDescriptorSets(
+            logical_device.v,
             &alloc_info,
             @ptrCast(&descriptor_set_tmp),
         );
         break :blk descriptor_set_tmp;
     };
-    errdefer ctx.vkd.freeDescriptorSets(
-        ctx.logical_device,
+    errdefer vkd.freeDescriptorSets(
+        logical_device.v,
         descriptor_pool,
         1,
         @ptrCast(&descriptor_set),
@@ -153,8 +156,8 @@ pub fn init(
             .p_buffer_info = undefined,
             .p_texel_buffer_view = undefined,
         }};
-        ctx.vkd.updateDescriptorSets(
-            ctx.logical_device,
+        vkd.updateDescriptorSets(
+            logical_device.v,
             write_descriptor_sets.len,
             @ptrCast(&write_descriptor_sets),
             0,
@@ -175,9 +178,9 @@ pub fn init(
             .push_constant_range_count = 1,
             .p_push_constant_ranges = @ptrCast(&push_constant_range),
         };
-        break :blk try ctx.vkd.createPipelineLayout(ctx.logical_device, &pipeline_layout_info, null);
+        break :blk try vkd.createPipelineLayout(logical_device.v, &pipeline_layout_info, null);
     };
-    errdefer ctx.vkd.destroyPipelineLayout(ctx.logical_device, pipeline_layout, null);
+    errdefer vkd.destroyPipelineLayout(logical_device.v, pipeline_layout, null);
 
     const input_assembly_state = vk.PipelineInputAssemblyStateCreateInfo{
         .flags = .{},
@@ -257,7 +260,7 @@ pub fn init(
             .p_code = @ptrCast(&image_vert_spv),
             .code_size = image_vert_spv.len,
         };
-        const module = try ctx.vkd.createShaderModule(ctx.logical_device, &create_info, null);
+        const module = try vkd.createShaderModule(logical_device.v, &create_info, null);
 
         break :blk vk.PipelineShaderStageCreateInfo{
             .flags = .{},
@@ -267,7 +270,7 @@ pub fn init(
             .p_specialization_info = null,
         };
     };
-    errdefer ctx.vkd.destroyShaderModule(ctx.logical_device, vert.module, null);
+    errdefer vkd.destroyShaderModule(logical_device.v, vert.module, null);
     const frag = blk: {
         const image_frag_spv align(@alignOf(u32)) = @embedFile("image_frag_spv").*;
 
@@ -276,7 +279,7 @@ pub fn init(
             .p_code = @ptrCast(&image_frag_spv),
             .code_size = image_frag_spv.len,
         };
-        const module = try ctx.vkd.createShaderModule(ctx.logical_device, &create_info, null);
+        const module = try vkd.createShaderModule(logical_device.v, &create_info, null);
 
         break :blk vk.PipelineShaderStageCreateInfo{
             .flags = .{},
@@ -286,7 +289,7 @@ pub fn init(
             .p_specialization_info = null,
         };
     };
-    errdefer ctx.vkd.destroyShaderModule(ctx.logical_device, frag.module, null);
+    errdefer vkd.destroyShaderModule(logical_device.v, frag.module, null);
     const shader_stages = [_]vk.PipelineShaderStageCreateInfo{ vert, frag };
 
     const vertex_input_bindings = [_]vk.VertexInputBindingDescription{.{
@@ -318,9 +321,9 @@ pub fn init(
             .initial_data_size = 0,
             .p_initial_data = undefined,
         };
-        break :blk try ctx.vkd.createPipelineCache(ctx.logical_device, &pipeline_cache_info, null);
+        break :blk try vkd.createPipelineCache(logical_device.v, &pipeline_cache_info, null);
     };
-    errdefer ctx.vkd.destroyPipelineCache(ctx.logical_device, pipeline_cache, null);
+    errdefer vkd.destroyPipelineCache(logical_device.v, pipeline_cache, null);
 
     const pipeline_create_info = vk.GraphicsPipelineCreateInfo{
         .flags = .{},
@@ -342,19 +345,19 @@ pub fn init(
         .base_pipeline_index = -1,
     };
     var pipeline: vk.Pipeline = undefined;
-    _ = try ctx.vkd.createGraphicsPipelines(
-        ctx.logical_device,
+    _ = try vkd.createGraphicsPipelines(
+        logical_device.v,
         pipeline_cache,
         1,
         @ptrCast(&pipeline_create_info),
         null,
         @ptrCast(&pipeline),
     );
-    errdefer ctx.vkd.destroyPipeline(ctx.logical_device, pipeline, null);
+    errdefer vkd.destroyPipeline(logical_device.v, pipeline, null);
 
     const pool_info = vk.CommandPoolCreateInfo{
         .flags = .{ .transient_bit = true },
-        .queue_family_index = ctx.queue_indices.graphics,
+        .queue_family_index = queue_indices.graphics,
     };
     const command_pools = try allocator.alloc(vk.CommandPool, swapchain.image_len);
     errdefer allocator.free(command_pools);
@@ -363,16 +366,16 @@ pub fn init(
     var initialized_pools: usize = 0;
     var initialized_buffers: usize = 0;
     for (command_pools, 0..) |*command_pool, i| {
-        command_pool.* = try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
+        command_pool.* = try vkd.createCommandPool(logical_device.v, &pool_info, null);
         initialized_pools = i + 1;
-        command_buffers[i] = try render.pipeline.createCmdBuffer(ctx, command_pool.*);
+        command_buffers[i] = try render.pipeline.createCmdBuffer(vkd, logical_device, command_pool.*);
         initialized_buffers = i + 1;
     }
     errdefer {
         var i: usize = 0;
         while (i < initialized_buffers) : (i += 1) {
-            ctx.vkd.freeCommandBuffers(
-                ctx.logical_device,
+            vkd.freeCommandBuffers(
+                logical_device.v,
                 command_pools[i],
                 1,
                 @ptrCast(&command_buffers[i]),
@@ -380,14 +383,21 @@ pub fn init(
         }
         i = 0;
         while (i < initialized_pools) : (i += 1) {
-            ctx.vkd.destroyCommandPool(ctx.logical_device, command_pools[i], null);
+            vkd.destroyCommandPool(logical_device.v, command_pools[i], null);
         }
     }
 
-    const framebuffers = try render.pipeline.createFramebuffers(allocator, ctx, &swapchain, render_pass, null);
+    const framebuffers = try render.pipeline.createFramebuffers(
+        allocator,
+        vkd,
+        logical_device,
+        &swapchain,
+        render_pass,
+        null,
+    );
     errdefer {
         for (framebuffers) |buffer| {
-            ctx.vkd.destroyFramebuffer(ctx.logical_device, buffer, null);
+            vkd.destroyFramebuffer(logical_device.v, buffer, null);
         }
         allocator.free(framebuffers);
     }
@@ -417,33 +427,38 @@ pub fn init(
     };
 }
 
-pub fn deinit(self: GraphicsPipeline, allocator: Allocator, ctx: Context) void {
+pub fn deinit(
+    self: GraphicsPipeline,
+    allocator: Allocator,
+    vkd: context.components.vk_dispatch.Device,
+    logical_device: context.components.VkDevice,
+) void {
     for (self.framebuffers) |buffer| {
-        ctx.vkd.destroyFramebuffer(ctx.logical_device, buffer, null);
+        vkd.destroyFramebuffer(logical_device.v, buffer, null);
     }
     allocator.free(self.framebuffers);
 
     for (self.command_buffers, 0..) |command_buffer, i| {
-        ctx.vkd.freeCommandBuffers(
-            ctx.logical_device,
+        vkd.freeCommandBuffers(
+            logical_device.v,
             self.command_pools[i],
             1,
             @ptrCast(&command_buffer),
         );
     }
     for (self.command_pools) |command_pool| {
-        ctx.vkd.destroyCommandPool(ctx.logical_device, command_pool, null);
+        vkd.destroyCommandPool(logical_device.v, command_pool, null);
     }
     allocator.free(self.command_pools);
     allocator.free(self.command_buffers);
 
-    ctx.vkd.destroyPipeline(ctx.logical_device, self.pipeline, null);
-    ctx.vkd.destroyPipelineCache(ctx.logical_device, self.pipeline_cache, null);
-    ctx.vkd.destroyShaderModule(ctx.logical_device, self.shader_modules[0], null);
-    ctx.vkd.destroyShaderModule(ctx.logical_device, self.shader_modules[1], null);
-    ctx.vkd.destroyPipelineLayout(ctx.logical_device, self.pipeline_layout, null);
-    ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.descriptor_set_layout, null);
-    ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.descriptor_pool, null);
+    vkd.destroyPipeline(logical_device.v, self.pipeline, null);
+    vkd.destroyPipelineCache(logical_device.v, self.pipeline_cache, null);
+    vkd.destroyShaderModule(logical_device.v, self.shader_modules[0], null);
+    vkd.destroyShaderModule(logical_device.v, self.shader_modules[1], null);
+    vkd.destroyPipelineLayout(logical_device.v, self.pipeline_layout, null);
+    vkd.destroyDescriptorSetLayout(logical_device.v, self.descriptor_set_layout, null);
+    vkd.destroyDescriptorPool(logical_device.v, self.descriptor_pool, null);
 
     allocator.destroy(self.shader_constants);
 }

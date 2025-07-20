@@ -7,7 +7,7 @@ const ecez = @import("ecez");
 
 const vk = @import("vulkan");
 const render = @import("../render.zig");
-const Context = render.Context;
+const context = render.context;
 const texture = render.texture;
 const vk_utils = render.vk_utils;
 const memory = render.memory;
@@ -31,13 +31,6 @@ pub const Config = struct {
     gfx_pipeline_config: GraphicsPipeline.Config = .{},
 };
 
-const Pixel = packed struct {
-    r: u8,
-    g: u8,
-    b: u8,
-    a: u8,
-};
-
 /// VoxelRT render pipeline
 const Pipeline = @This();
 
@@ -58,7 +51,6 @@ render_complete_fence: vk.Fence,
 
 compute_workgroup_size: ComputePipeline.WorkgroupSize,
 compute_pipeline: ComputePipeline,
-// TODO: rename pipeline
 gfx_pipeline: GraphicsPipeline,
 imgui_pipeline: ImguiPipeline,
 
@@ -69,13 +61,12 @@ sun_entity: ecez.Entity,
 gui: ImguiGui,
 
 requested_rescale_pipeline: bool = false,
-init_command_pool: vk.CommandPool, // kept in case of rescale
 
 // shared vertex index buffer for imgui and graphics pipeline
 vertex_index_buffer_entity: ecez.Entity,
 
 pub fn init(
-    ctx: Context,
+    ctx_entity: ecez.Entity,
     allocator: Allocator,
     comptime Storage: type,
     storage: *Storage,
@@ -88,12 +79,17 @@ pub fn init(
     const init_zone = tracy.ZoneN(@src(), "init pipeline");
     defer init_zone.End();
 
-    const pool_info = vk.CommandPoolCreateInfo{
-        .flags = .{ .transient_bit = true },
-        .queue_family_index = ctx.queue_indices.graphics,
-    };
-    const init_command_pool = try ctx.vkd.createCommandPool(ctx.logical_device, &pool_info, null);
-    errdefer ctx.vkd.destroyCommandPool(ctx.logical_device, init_command_pool, null);
+    const ctx = try storage.getComponents(ctx_entity, struct {
+        vki: context.components.vk_dispatch.Instance,
+        physical_device: context.components.VkPhysicalDevice,
+        physical_device_properties: context.components.VkPhysicalDeviceProperties,
+        host_image_properties: context.components.VkPhysicalDeviceHostImageCopyProperties,
+        vkd: context.components.vk_dispatch.Device,
+        logical_device: context.components.VkDevice,
+        queue_indices: context.components.QueueFamilyIndices,
+        graphics_queue: context.components.GraphicsQueue,
+        auxillary_cmd_pool: context.components.AuxillaryCommandPool,
+    });
 
     // use graphics and compute index
     // if they are the same, then we use that index
@@ -122,23 +118,28 @@ pub fn init(
             .p_queue_family_indices = &indices,
             .initial_layout = .undefined,
         };
-        break :blk try ctx.vkd.createImage(ctx.logical_device, &image_info, null);
+        break :blk try ctx.vkd.createImage(ctx.logical_device.v, &image_info, null);
     };
-    errdefer ctx.vkd.destroyImage(ctx.logical_device, compute_image, null);
+    errdefer ctx.vkd.destroyImage(ctx.logical_device.v, compute_image, null);
 
-    const memory_requirements = ctx.vkd.getImageMemoryRequirements(ctx.logical_device, compute_image);
-    const image_memory_type_index = try vk_utils.findMemoryTypeIndex(ctx, memory_requirements.memory_type_bits, .{
-        .device_local_bit = true,
-    });
+    const memory_requirements = ctx.vkd.getImageMemoryRequirements(ctx.logical_device.v, compute_image);
+    const image_memory_type_index = try vk_utils.findMemoryTypeIndex(
+        ctx.vki,
+        ctx.physical_device,
+        memory_requirements.memory_type_bits,
+        .{
+            .device_local_bit = true,
+        },
+    );
     const image_memory_capacity = 64 * render.memory.bytes_in_mb;
     const image_alloc_info = vk.MemoryAllocateInfo{
         .allocation_size = image_memory_capacity,
         .memory_type_index = image_memory_type_index,
     };
-    const image_memory = try ctx.vkd.allocateMemory(ctx.logical_device, &image_alloc_info, null);
-    errdefer ctx.vkd.freeMemory(ctx.logical_device, image_memory, null);
+    const image_memory = try ctx.vkd.allocateMemory(ctx.logical_device.v, &image_alloc_info, null);
+    errdefer ctx.vkd.freeMemory(ctx.logical_device.v, image_memory, null);
 
-    try ctx.vkd.bindImageMemory(ctx.logical_device, compute_image, image_memory, 0);
+    try ctx.vkd.bindImageMemory(ctx.logical_device.v, compute_image, image_memory, 0);
 
     // transition from undefined -> general -> shader_read_only_optimal -> general
     // with queue ownership transfer is needed to silence validation
@@ -161,7 +162,13 @@ pub fn init(
         .src_queue_family_index = ctx.queue_indices.graphics,
         .dst_queue_family_index = ctx.queue_indices.compute,
     } };
-    try texture.transitionImageLayouts(ctx, init_command_pool, &transitions);
+    try texture.transitionImageLayouts(
+        ctx.vkd,
+        ctx.logical_device,
+        ctx.graphics_queue,
+        ctx.auxillary_cmd_pool.pool,
+        &transitions,
+    );
 
     const compute_image_view = blk: {
         const image_view_info = vk.ImageViewCreateInfo{
@@ -185,7 +192,7 @@ pub fn init(
                 .layer_count = 1,
             },
         };
-        break :blk try ctx.vkd.createImageView(ctx.logical_device, &image_view_info, null);
+        break :blk try ctx.vkd.createImageView(ctx.logical_device.v, &image_view_info, null);
     };
 
     const sampler = blk: {
@@ -207,27 +214,33 @@ pub fn init(
             .border_color = .int_opaque_black,
             .unnormalized_coordinates = vk.FALSE,
         };
-        break :blk try ctx.vkd.createSampler(ctx.logical_device, &sampler_info, null);
+        break :blk try ctx.vkd.createSampler(ctx.logical_device.v, &sampler_info, null);
     };
-    errdefer ctx.vkd.destroySampler(ctx.logical_device, sampler, null);
+    errdefer ctx.vkd.destroySampler(ctx.logical_device.v, sampler, null);
 
-    const swapchain_component = try render.swapchain.createSwapchainComponent(allocator, ctx, init_command_pool, null);
+    const swapchain_component = try render.swapchain.createSwapchainComponent(
+        allocator,
+        ctx_entity,
+        Storage,
+        storage,
+        null,
+    );
     const swapchain_entity = try storage.createEntity(.{swapchain_component});
 
-    const render_pass = try ctx.createRenderPass(swapchain_component.format);
-    errdefer ctx.destroyRenderPass(render_pass);
+    const render_pass = try context.createRenderPass(ctx.vkd, ctx.logical_device, swapchain_component.format);
+    errdefer ctx.vkd.destroyRenderPass(ctx.logical_device.v, render_pass, null);
 
     const present_complete_semaphores = try allocator.alloc(vk.Semaphore, swapchain_component.image_len);
     errdefer allocator.free(present_complete_semaphores);
     var created_present_complete_semaphores: u32 = 0;
     errdefer {
         for (present_complete_semaphores[0..created_present_complete_semaphores]) |*semaphore| {
-            ctx.vkd.destroySemaphore(ctx.logical_device, semaphore.*, null);
+            ctx.vkd.destroySemaphore(ctx.logical_device.v, semaphore.*, null);
         }
     }
     const semaphore_info = vk.SemaphoreCreateInfo{ .flags = .{} };
     for (present_complete_semaphores) |*semaphore| {
-        semaphore.* = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
+        semaphore.* = try ctx.vkd.createSemaphore(ctx.logical_device.v, &semaphore_info, null);
         created_present_complete_semaphores += 1;
     }
 
@@ -237,11 +250,11 @@ pub fn init(
     var created_render_complete_semaphores: u32 = 0;
     errdefer {
         for (render_complete_semaphores[0..created_render_complete_semaphores]) |*semaphore| {
-            ctx.vkd.destroySemaphore(ctx.logical_device, semaphore.*, null);
+            ctx.vkd.destroySemaphore(ctx.logical_device.v, semaphore.*, null);
         }
     }
     for (render_complete_semaphores) |*semaphore| {
-        semaphore.* = try ctx.vkd.createSemaphore(ctx.logical_device, &semaphore_info, null);
+        semaphore.* = try ctx.vkd.createSemaphore(ctx.logical_device.v, &semaphore_info, null);
         created_render_complete_semaphores += 1;
     }
 
@@ -250,33 +263,33 @@ pub fn init(
             .signaled_bit = true,
         },
     };
-    const render_complete_fence = try ctx.vkd.createFence(ctx.logical_device, &fence_info, null);
-    errdefer ctx.vkd.destroyFence(ctx.logical_device, render_complete_fence, null);
+    const render_complete_fence = try ctx.vkd.createFence(ctx.logical_device.v, &fence_info, null);
+    errdefer ctx.vkd.destroyFence(ctx.logical_device.v, render_complete_fence, null);
 
     const MinSize = struct {
-        fn ssbo(ctx1: Context, size: u64) u64 {
-            const storage_size = ctx1.physical_device_properties.limits.min_storage_buffer_offset_alignment;
+        fn ssbo(physical_device_properties: context.components.VkPhysicalDeviceProperties, size: u64) u64 {
+            const storage_size = physical_device_properties.limits.min_storage_buffer_offset_alignment;
             return storage_size * (std.math.divCeil(vk.DeviceSize, size, storage_size) catch unreachable);
         }
 
-        fn uniform(ctx1: Context, size: u64) u64 {
-            const uniform_size = ctx1.physical_device_properties.limits.min_uniform_buffer_offset_alignment;
+        fn uniform(physical_device_properties: context.components.VkPhysicalDeviceProperties, size: u64) u64 {
+            const uniform_size = physical_device_properties.limits.min_uniform_buffer_offset_alignment;
             return uniform_size * (std.math.divCeil(vk.DeviceSize, size, uniform_size) catch unreachable);
         }
     };
 
-    const compute_workgroup_size = ComputePipeline.calculateDefaultWorkgroupSize(ctx);
+    const compute_workgroup_size = ComputePipeline.calculateDefaultWorkgroupSize(ctx.physical_device_properties);
     var compute_pipeline = blk: {
         const uniform_sizes = [_]u64{
-            MinSize.uniform(ctx, @sizeOf(grid_state.components.Device)),
+            MinSize.uniform(ctx.physical_device_properties, @sizeOf(grid_state.components.Device)),
         };
         const storage_sizes = [_]u64{
-            MinSize.ssbo(ctx, @sizeOf(gpu_types.Material) * config.material_buffer),
-            MinSize.ssbo(ctx, @sizeOf(grid_state.BrickStatusMask) * grid_state.components.Statuses.brick_status_count),
-            MinSize.ssbo(ctx, @sizeOf(grid_state.IndexToBrick) * grid_state.brick_count),
-            MinSize.ssbo(ctx, @sizeOf(grid_state.Brick.Occupancy) * grid_state.components.Occupancy.occupancy_count),
-            MinSize.ssbo(ctx, @sizeOf(grid_state.Brick.StartIndex) * grid_state.brick_count),
-            MinSize.ssbo(ctx, @sizeOf(grid_state.components.MaterialIndices.IndexType) * grid_state.components.MaterialIndices.material_index_count),
+            MinSize.ssbo(ctx.physical_device_properties, @sizeOf(gpu_types.Material) * config.material_buffer),
+            MinSize.ssbo(ctx.physical_device_properties, @sizeOf(grid_state.BrickStatusMask) * grid_state.components.Statuses.brick_status_count),
+            MinSize.ssbo(ctx.physical_device_properties, @sizeOf(grid_state.IndexToBrick) * grid_state.brick_count),
+            MinSize.ssbo(ctx.physical_device_properties, @sizeOf(grid_state.Brick.Occupancy) * grid_state.components.Occupancy.occupancy_count),
+            MinSize.ssbo(ctx.physical_device_properties, @sizeOf(grid_state.Brick.StartIndex) * grid_state.brick_count),
+            MinSize.ssbo(ctx.physical_device_properties, @sizeOf(grid_state.components.MaterialIndices.IndexType) * grid_state.components.MaterialIndices.material_index_count),
         };
         const state_configs = ComputePipeline.StateConfigs{ .uniform_sizes = uniform_sizes[0..], .storage_sizes = storage_sizes[0..] };
 
@@ -298,7 +311,11 @@ pub fn init(
 
         break :blk try ComputePipeline.init(
             allocator,
-            ctx,
+            ctx.vki,
+            ctx.physical_device,
+            ctx.vkd,
+            ctx.logical_device,
+            ctx.queue_indices,
             Storage,
             storage,
             target_image_info,
@@ -313,20 +330,26 @@ pub fn init(
             },
         );
     };
-    errdefer compute_pipeline.deinit(ctx);
+    errdefer compute_pipeline.deinit(ctx.vkd, ctx.logical_device);
 
     var vertex_index_buffer = try gpu_buffer_memory.createGpuBufferMemoryComponents(
-        ctx,
+        ctx.vki,
+        ctx.physical_device,
+        ctx.vkd,
+        ctx.logical_device,
         memory.bytes_in_mb * 63,
         .{ .vertex_buffer_bit = true, .index_buffer_bit = true },
         .{ .device_local_bit = true, .host_visible_bit = true },
     );
-    errdefer gpu_buffer_memory.destroyBuffer(vertex_index_buffer, ctx);
+    errdefer gpu_buffer_memory.destroyBuffer(ctx.vkd, ctx.logical_device, vertex_index_buffer);
     const vertex_index_buffer_entity = try storage.createEntity(.{vertex_index_buffer});
 
     const gfx_pipeline = try GraphicsPipeline.init(
         allocator,
-        ctx,
+        ctx.vkd,
+        ctx.logical_device,
+        ctx.physical_device_properties,
+        ctx.queue_indices,
         swapchain_component,
         render_pass,
         sampler,
@@ -334,17 +357,26 @@ pub fn init(
         &vertex_index_buffer,
         config.gfx_pipeline_config,
     );
-    errdefer gfx_pipeline.deinit(allocator, ctx);
+    errdefer gfx_pipeline.deinit(
+        allocator,
+        ctx.vkd,
+        ctx.logical_device,
+    );
 
     const imgui_pipeline = try ImguiPipeline.init(
-        ctx,
         allocator,
+        ctx.vki,
+        ctx.physical_device,
+        ctx.host_image_properties,
+        ctx.vkd,
+        ctx.logical_device,
+        ctx.graphics_queue,
+        ctx.auxillary_cmd_pool.pool,
         render_pass,
         swapchain_component.image_len,
-        init_command_pool,
         gfx_pipeline.bytes_used_in_buffer,
     );
-    errdefer imgui_pipeline.deinit(ctx);
+    errdefer imgui_pipeline.deinit(ctx.vkd, ctx.logical_device);
 
     const grid_device = try storage.getComponent(grid_entity, grid_state.components.Device);
     const state_binding = ImguiGui.StateBinding{
@@ -378,42 +410,46 @@ pub fn init(
         .camera_entity = camera_entity,
         .sun_entity = sun_entity,
         .gui = gui,
-        .init_command_pool = init_command_pool,
         .vertex_index_buffer_entity = vertex_index_buffer_entity,
     };
 }
 
-pub fn deinit(self: Pipeline, ctx: Context) void {
-    ctx.vkd.queueWaitIdle(ctx.compute_queue) catch {};
-    ctx.vkd.queueWaitIdle(ctx.graphics_queue) catch {};
+pub fn deinit(self: Pipeline, comptime Storage: type, storage: *Storage, ctx_entity: ecez.Entity) void {
+    const ctx = storage.getComponents(ctx_entity, struct {
+        vkd: context.components.vk_dispatch.Device,
+        logical_device: context.components.VkDevice,
+        compute_queue: context.components.ComputeQueue,
+        graphics_queue: context.components.GraphicsQueue,
+    }) catch unreachable;
+
+    ctx.vkd.queueWaitIdle(ctx.compute_queue.queue) catch {};
+    ctx.vkd.queueWaitIdle(ctx.graphics_queue.queue) catch {};
 
     for (self.render_complete_semaphores) |semaphore| {
-        ctx.vkd.destroySemaphore(ctx.logical_device, semaphore, null);
+        ctx.vkd.destroySemaphore(ctx.logical_device.v, semaphore, null);
     }
     self.allocator.free(self.render_complete_semaphores);
 
     for (self.present_complete_semaphores) |semaphore| {
-        ctx.vkd.destroySemaphore(ctx.logical_device, semaphore, null);
+        ctx.vkd.destroySemaphore(ctx.logical_device.v, semaphore, null);
     }
     self.allocator.free(self.present_complete_semaphores);
 
-    ctx.vkd.destroyFence(ctx.logical_device, self.render_complete_fence, null);
+    ctx.vkd.destroyFence(ctx.logical_device.v, self.render_complete_fence, null);
 
-    self.imgui_pipeline.deinit(ctx);
-    self.gfx_pipeline.deinit(self.allocator, ctx);
-    self.compute_pipeline.deinit(ctx);
-    ctx.destroyRenderPass(self.render_pass);
+    self.imgui_pipeline.deinit(ctx.vkd, ctx.logical_device);
+    self.gfx_pipeline.deinit(self.allocator, ctx.vkd, ctx.logical_device);
+    self.compute_pipeline.deinit(ctx.vkd, ctx.logical_device);
+    ctx.vkd.destroyRenderPass(ctx.logical_device.v, self.render_pass, null);
 
-    ctx.vkd.destroyCommandPool(ctx.logical_device, self.init_command_pool, null);
-
-    ctx.vkd.destroySampler(ctx.logical_device, self.sampler, null);
-    ctx.vkd.destroyImageView(ctx.logical_device, self.compute_image_view, null);
-    ctx.vkd.destroyImage(ctx.logical_device, self.compute_image, null);
-    ctx.vkd.freeMemory(ctx.logical_device, self.image_memory, null);
+    ctx.vkd.destroySampler(ctx.logical_device.v, self.sampler, null);
+    ctx.vkd.destroyImageView(ctx.logical_device.v, self.compute_image_view, null);
+    ctx.vkd.destroyImage(ctx.logical_device.v, self.compute_image, null);
+    ctx.vkd.freeMemory(ctx.logical_device.v, self.image_memory, null);
 }
 
 /// draw a new frame, delta time is only used by gui
-pub fn draw(self: *Pipeline, ctx: Context, comptime Storage: type, storage: *Storage, dt: f32) !void {
+pub fn draw(self: *Pipeline, comptime Storage: type, storage: *Storage, ctx_entity: ecez.Entity, dt: f32) !void {
     const draw_zone = tracy.ZoneN(@src(), "draw");
     defer draw_zone.End();
 
@@ -422,10 +458,23 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime Storage: type, storage: *Sto
         self.present_complete_semaphore_index = @mod(self.present_complete_semaphore_index, self.present_complete_semaphores.len);
     }
 
+    const ctx = storage.getComponents(ctx_entity, struct {
+        vkd: context.components.vk_dispatch.Device,
+        logical_device: context.components.VkDevice,
+        queue_indices: context.components.QueueFamilyIndices,
+        compute_queue: context.components.ComputeQueue,
+        graphics_queue: context.components.GraphicsQueue,
+        physical_device_properties: context.components.VkPhysicalDeviceProperties,
+        window_ptr: context.components.WindowPtr,
+    }) catch unreachable;
+
     const device_camera = storage.getComponent(self.camera_entity, *camera.components.DeviceCamera) catch unreachable;
     const device_sun = storage.getComponent(self.sun_entity, *sun.components.DeviceSun) catch unreachable;
     const compute_semaphore = try self.compute_pipeline.dispatch(
-        ctx,
+        ctx.vkd,
+        ctx.logical_device,
+        ctx.compute_queue,
+        ctx.queue_indices,
         self.compute_workgroup_size,
         device_camera.*,
         device_sun.*,
@@ -434,7 +483,7 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime Storage: type, storage: *Sto
     const swapchain_data = storage.getComponent(self.swapchain_entity, render.swapchain.components.SwapchainData) catch unreachable;
     const image_index = blk: {
         const aquired = ctx.vkd.acquireNextImageKHR(
-            ctx.logical_device,
+            ctx.logical_device.v,
             swapchain_data.swapchain,
             std.math.maxInt(u64),
             self.present_complete_semaphores[self.present_complete_semaphore_index],
@@ -467,15 +516,15 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime Storage: type, storage: *Sto
         defer wait_render_zone.End();
 
         // wait for previous texture draw before updating buffers and command buffers
-        _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast(&self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
-        try ctx.vkd.resetFences(ctx.logical_device, 1, @ptrCast(&self.render_complete_fence));
+        _ = try ctx.vkd.waitForFences(ctx.logical_device.v, 1, @ptrCast(&self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
+        try ctx.vkd.resetFences(ctx.logical_device.v, 1, @ptrCast(&self.render_complete_fence));
     }
 
     const update_metrics = image_index == 0;
     const camera_ptr = storage.getComponent(self.camera_entity, *camera.components.Camera) catch unreachable;
     const sun_ptr = storage.getComponent(self.sun_entity, *sun.components.Sun) catch unreachable;
     try self.gui.newFrame(
-        ctx,
+        ctx.physical_device_properties,
         storage,
         swapchain_data.extent,
         camera_ptr,
@@ -487,16 +536,22 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime Storage: type, storage: *Sto
     );
 
     const vertex_index_buffer = storage.getComponent(self.vertex_index_buffer_entity, *gpu_buffer_memory.components.GpuBufferMemory) catch unreachable;
-    try self.imgui_pipeline.updateBuffers(ctx, vertex_index_buffer);
+    try self.imgui_pipeline.updateBuffers(
+        ctx.vkd,
+        ctx.logical_device,
+        ctx.physical_device_properties,
+        vertex_index_buffer,
+    );
 
     // re-record command buffer to update any state
     try ctx.vkd.resetCommandPool(
-        ctx.logical_device,
+        ctx.logical_device.v,
         self.gfx_pipeline.command_pools[image_index],
         .{},
     );
     try self.recordCommandBuffer(
-        ctx,
+        ctx.vkd,
+        ctx.queue_indices,
         vertex_index_buffer.*,
         swapchain_data.extent,
         image_index,
@@ -521,7 +576,7 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime Storage: type, storage: *Sto
     };
 
     try ctx.vkd.queueSubmit(
-        ctx.graphics_queue,
+        ctx.graphics_queue.queue,
         1,
         @ptrCast(&render_submit_info),
         self.render_complete_fence,
@@ -536,7 +591,7 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime Storage: type, storage: *Sto
         .p_results = null,
     };
 
-    const queue_result = ctx.vkd.queuePresentKHR(ctx.graphics_queue, &present_info);
+    const queue_result = ctx.vkd.queuePresentKHR(ctx.graphics_queue.queue, &present_info);
     if (queue_result) |ok| switch (ok) {
         vk.Result.suboptimal_khr => self.requested_rescale_pipeline = true,
         else => {},
@@ -545,7 +600,14 @@ pub fn draw(self: *Pipeline, ctx: Context, comptime Storage: type, storage: *Sto
         else => return err,
     }
 
-    if (self.requested_rescale_pipeline) try self.rescalePipeline(ctx, storage);
+    if (self.requested_rescale_pipeline) try self.rescalePipeline(
+        Storage,
+        storage,
+        ctx_entity,
+        ctx.vkd,
+        ctx.logical_device,
+        ctx.window_ptr,
+    );
 }
 
 pub fn setDenoiseSampleCount(self: *Pipeline, sample_count: i32) void {
@@ -618,13 +680,21 @@ pub fn transfer(
 // TODO: make allow to multithread this
 /// Used to update the pipeline according to changes in the window spec
 /// This functions should only be called from the main thread (see glfwGetFramebufferSize)
-fn rescalePipeline(self: *Pipeline, ctx: Context, storage: anytype) !void {
+fn rescalePipeline(
+    self: *Pipeline,
+    comptime Storage: type,
+    storage: *Storage,
+    ctx_entity: ecez.Entity,
+    vkd: context.components.vk_dispatch.Device,
+    logical_device: context.components.VkDevice,
+    window_ptr: context.components.WindowPtr,
+) !void {
     const rescale_zone = tracy.ZoneN(@src(), "rescale pipeline");
     defer rescale_zone.End();
 
-    var window_size = ctx.window_ptr.*.getFramebufferSize();
+    var window_size = window_ptr.ptr.*.getFramebufferSize();
     if (window_size[0] == 0 or window_size[1] == 0) {
-        window_size = ctx.window_ptr.*.getFramebufferSize();
+        window_size = window_ptr.ptr.*.getFramebufferSize();
         @import("zglfw").waitEvents();
     }
 
@@ -632,47 +702,49 @@ fn rescalePipeline(self: *Pipeline, ctx: Context, storage: anytype) !void {
 
     // Wait for pipeline to become idle
     {
-        _ = ctx.vkd.waitForFences(
-            ctx.logical_device,
+        _ = vkd.waitForFences(
+            logical_device.v,
             1,
             @ptrCast(&self.compute_pipeline.complete_fence),
             vk.TRUE,
             std.math.maxInt(u64),
         ) catch |err| std.debug.print("failed to wait for compute fences, err: {any}", .{err});
         // wait for previous texture draw before updating buffers and command buffers
-        _ = try ctx.vkd.waitForFences(ctx.logical_device, 1, @ptrCast(&self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
+        _ = try vkd.waitForFences(logical_device.v, 1, @ptrCast(&self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
     }
 
     const swapchain_ptr = try storage.getComponent(self.swapchain_entity, *render.swapchain.components.SwapchainData);
     // recreate swapchain utilizing the old one
     const old_swapchain = swapchain_ptr.*;
-    defer render.swapchain.destroySwapchainData(old_swapchain, ctx);
+    defer render.swapchain.destroySwapchainData(vkd, logical_device, old_swapchain);
     swapchain_ptr.* = try render.swapchain.createSwapchainComponent(
         self.allocator,
-        ctx,
-        self.init_command_pool,
+        ctx_entity,
+        Storage,
+        storage,
         old_swapchain.swapchain,
     );
 
     // recreate renderpass
-    ctx.destroyRenderPass(self.render_pass);
-    self.render_pass = try ctx.createRenderPass(swapchain_ptr.format);
-    errdefer ctx.destroyRenderPass(self.render_pass);
+    vkd.destroyRenderPass(logical_device.v, self.render_pass, null);
+    self.render_pass = try context.createRenderPass(vkd, logical_device, swapchain_ptr.format);
+    errdefer vkd.destroyRenderPass(logical_device.v, self.render_pass, null);
 
     // recreate framebuffers
     for (self.gfx_pipeline.framebuffers) |framebuffer| {
-        ctx.vkd.destroyFramebuffer(ctx.logical_device, framebuffer, null);
+        vkd.destroyFramebuffer(logical_device.v, framebuffer, null);
     }
     self.gfx_pipeline.framebuffers = try render.pipeline.createFramebuffers(
         self.allocator,
-        ctx,
+        vkd,
+        logical_device,
         swapchain_ptr,
         self.render_pass,
         self.gfx_pipeline.framebuffers,
     );
     errdefer {
         for (self.gfx_pipeline.framebuffers) |buffer| {
-            ctx.vkd.destroyFramebuffer(ctx.logical_device, buffer, null);
+            vkd.destroyFramebuffer(logical_device.v, buffer, null);
         }
         self.allocator.free(self.gfx_pipeline.framebuffers);
     }
@@ -686,7 +758,8 @@ fn rescalePipeline(self: *Pipeline, ctx: Context, storage: anytype) !void {
 // TODO: properly handling of errors
 fn recordCommandBuffer(
     self: Pipeline,
-    ctx: Context,
+    vkd: context.components.vk_dispatch.Device,
+    queue_indices: context.components.QueueFamilyIndices,
     vertex_index_buffer: gpu_buffer_memory.components.GpuBufferMemory,
     swapchain_extent: vk.Extent2D,
     index: usize,
@@ -695,14 +768,14 @@ fn recordCommandBuffer(
     defer record_zone.End();
 
     const command_buffer = self.gfx_pipeline.command_buffers[index];
-    try ctx.vkd.beginCommandBuffer(command_buffer, &command_buffer_info);
+    try vkd.beginCommandBuffer(command_buffer, &command_buffer_info);
 
     if (render.consts.enable_debug_markers) {
         const debug_label = vk.DebugUtilsLabelEXT{
             .p_label_name = "GFX Pipeline",
             .color = [4]f32{ 0.1, 0.1, 0.8, 1.0 },
         };
-        ctx.vkd.cmdBeginDebugUtilsLabelEXT(command_buffer, &debug_label);
+        vkd.cmdBeginDebugUtilsLabelEXT(command_buffer, &debug_label);
     }
 
     const acquire_image_barrier = vk.ImageMemoryBarrier{
@@ -710,8 +783,8 @@ fn recordCommandBuffer(
         .dst_access_mask = .{ .shader_read_bit = true },
         .old_layout = .general,
         .new_layout = .shader_read_only_optimal,
-        .src_queue_family_index = ctx.queue_indices.compute,
-        .dst_queue_family_index = ctx.queue_indices.graphics,
+        .src_queue_family_index = queue_indices.compute,
+        .dst_queue_family_index = queue_indices.graphics,
         .image = self.compute_image,
         .subresource_range = .{
             .aspect_mask = .{ .color_bit = true },
@@ -721,7 +794,7 @@ fn recordCommandBuffer(
             .layer_count = 1,
         },
     };
-    ctx.vkd.cmdPipelineBarrier(
+    vkd.cmdPipelineBarrier(
         command_buffer,
         .{},
         .{ .fragment_shader_bit = true },
@@ -744,7 +817,7 @@ fn recordCommandBuffer(
         .clear_value_count = 0,
         .p_clear_values = undefined,
     };
-    ctx.vkd.cmdBeginRenderPass(command_buffer, &render_pass_begin_info, .@"inline");
+    vkd.cmdBeginRenderPass(command_buffer, &render_pass_begin_info, .@"inline");
 
     {
         const viewport = vk.Viewport{
@@ -755,7 +828,7 @@ fn recordCommandBuffer(
             .min_depth = 0,
             .max_depth = 1,
         };
-        ctx.vkd.cmdSetViewport(
+        vkd.cmdSetViewport(
             command_buffer,
             0,
             1,
@@ -771,10 +844,10 @@ fn recordCommandBuffer(
             },
             .extent = swapchain_extent,
         };
-        ctx.vkd.cmdSetScissor(command_buffer, 0, 1, @ptrCast(&scissor));
+        vkd.cmdSetScissor(command_buffer, 0, 1, @ptrCast(&scissor));
     }
 
-    ctx.vkd.cmdPushConstants(
+    vkd.cmdPushConstants(
         command_buffer,
         self.gfx_pipeline.pipeline_layout,
         .{ .fragment_bit = true },
@@ -783,7 +856,7 @@ fn recordCommandBuffer(
         self.gfx_pipeline.shader_constants,
     );
 
-    ctx.vkd.cmdBindDescriptorSets(
+    vkd.cmdBindDescriptorSets(
         command_buffer,
         .graphics,
         self.gfx_pipeline.pipeline_layout,
@@ -793,33 +866,33 @@ fn recordCommandBuffer(
         0,
         undefined,
     );
-    ctx.vkd.cmdBindPipeline(command_buffer, .graphics, self.gfx_pipeline.pipeline);
-    ctx.vkd.cmdBindVertexBuffers(
+    vkd.cmdBindPipeline(command_buffer, .graphics, self.gfx_pipeline.pipeline);
+    vkd.cmdBindVertexBuffers(
         command_buffer,
         0,
         1,
         @ptrCast(&vertex_index_buffer.buffer),
         &vertex_zero_offset,
     );
-    ctx.vkd.cmdBindIndexBuffer(command_buffer, vertex_index_buffer.buffer, GraphicsPipeline.vertex_size, .uint16);
-    ctx.vkd.cmdDrawIndexed(command_buffer, GraphicsPipeline.indices.len, 1, 0, 0, 0);
+    vkd.cmdBindIndexBuffer(command_buffer, vertex_index_buffer.buffer, GraphicsPipeline.vertex_size, .uint16);
+    vkd.cmdDrawIndexed(command_buffer, GraphicsPipeline.indices.len, 1, 0, 0, 0);
 
     try self.imgui_pipeline.recordCommandBuffer(
-        ctx,
+        vkd,
         command_buffer,
         self.gfx_pipeline.bytes_used_in_buffer,
         vertex_index_buffer,
     );
 
-    ctx.vkd.cmdEndRenderPass(command_buffer);
+    vkd.cmdEndRenderPass(command_buffer);
 
     const release_image_barrier = vk.ImageMemoryBarrier{
         .src_access_mask = .{ .shader_read_bit = true },
         .dst_access_mask = .{},
         .old_layout = .shader_read_only_optimal,
         .new_layout = .general,
-        .src_queue_family_index = ctx.queue_indices.graphics,
-        .dst_queue_family_index = ctx.queue_indices.compute,
+        .src_queue_family_index = queue_indices.graphics,
+        .dst_queue_family_index = queue_indices.compute,
         .image = self.compute_image,
         .subresource_range = .{
             .aspect_mask = .{ .color_bit = true },
@@ -829,7 +902,7 @@ fn recordCommandBuffer(
             .layer_count = 1,
         },
     };
-    ctx.vkd.cmdPipelineBarrier(
+    vkd.cmdPipelineBarrier(
         command_buffer,
         .{ .fragment_shader_bit = true },
         .{},
@@ -843,10 +916,10 @@ fn recordCommandBuffer(
     );
 
     if (render.consts.enable_debug_markers) {
-        ctx.vkd.cmdEndDebugUtilsLabelEXT(command_buffer);
+        vkd.cmdEndDebugUtilsLabelEXT(command_buffer);
     }
 
-    try ctx.vkd.endCommandBuffer(command_buffer);
+    try vkd.endCommandBuffer(command_buffer);
 }
 
 const command_buffer_info = vk.CommandBufferBeginInfo{

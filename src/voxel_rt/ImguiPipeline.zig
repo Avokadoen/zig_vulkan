@@ -12,7 +12,7 @@ const za = @import("zalgebra");
 const tracy = @import("ztracy");
 
 const render = @import("../render.zig");
-const Context = render.Context;
+const context = render.context;
 const texture = render.texture;
 
 /// application imgui vulkan render wrapper
@@ -47,11 +47,16 @@ shader_modules: [2]vk.ShaderModule,
 image_memory: vk.DeviceMemory,
 
 pub fn init(
-    ctx: Context,
     allocator: std.mem.Allocator,
+    vki: context.components.vk_dispatch.Instance,
+    physical_device: context.components.VkPhysicalDevice,
+    host_image_properties: context.components.VkPhysicalDeviceHostImageCopyProperties,
+    vkd: context.components.vk_dispatch.Device,
+    logical_device: context.components.VkDevice,
+    graphics_queue: context.components.GraphicsQueue,
+    init_command_pool: vk.CommandPool,
     render_pass: vk.RenderPass,
     swapchain_image_count: usize,
-    init_command_pool: vk.CommandPool,
     vertex_index_buffer_offset: vk.DeviceSize,
 ) !ImguiPipeline {
     // initialize zgui
@@ -101,13 +106,14 @@ pub fn init(
             .p_queue_family_indices = undefined,
             .initial_layout = .undefined,
         };
-        break :blk try ctx.vkd.createImage(ctx.logical_device, &image_info, null);
+        break :blk try vkd.createImage(logical_device.v, &image_info, null);
     };
-    errdefer ctx.vkd.destroyImage(ctx.logical_device, font_image, null);
+    errdefer vkd.destroyImage(logical_device.v, font_image, null);
 
-    const memory_requirements = ctx.vkd.getImageMemoryRequirements(ctx.logical_device, font_image);
+    const memory_requirements = vkd.getImageMemoryRequirements(logical_device.v, font_image);
     const memory_type_index = try render.vk_utils.findMemoryTypeIndex(
-        ctx,
+        vki,
+        physical_device,
         memory_requirements.memory_type_bits,
         .{ .device_local_bit = true },
     );
@@ -116,10 +122,10 @@ pub fn init(
         .allocation_size = image_memory_capacity,
         .memory_type_index = memory_type_index,
     };
-    const image_memory = try ctx.vkd.allocateMemory(ctx.logical_device, &image_alloc_info, null);
-    errdefer ctx.vkd.freeMemory(ctx.logical_device, image_memory, null);
+    const image_memory = try vkd.allocateMemory(logical_device.v, &image_alloc_info, null);
+    errdefer vkd.freeMemory(logical_device.v, image_memory, null);
 
-    try ctx.vkd.bindImageMemory(ctx.logical_device, font_image, image_memory, 0);
+    try vkd.bindImageMemory(logical_device.v, font_image, image_memory, 0);
 
     const font_view = blk: {
         const view_info = vk.ImageViewCreateInfo{
@@ -141,9 +147,9 @@ pub fn init(
                 .layer_count = 1,
             },
         };
-        break :blk try ctx.vkd.createImageView(ctx.logical_device, &view_info, null);
+        break :blk try vkd.createImageView(logical_device.v, &view_info, null);
     };
-    errdefer ctx.vkd.destroyImageView(ctx.logical_device, font_view, null);
+    errdefer vkd.destroyImageView(logical_device.v, font_view, null);
 
     // upload texture data to gpu
 
@@ -152,7 +158,7 @@ pub fn init(
 
     // Silence validation layers warning about undefined values (which is incorrect)
     const transition_configs = init_transitions_blk: {
-        const can_direct_copy = ctx.hasCopySrcLayout(.shader_read_only_optimal);
+        const can_direct_copy = context.hasCopySrcLayout(host_image_properties, .shader_read_only_optimal);
 
         if (render.consts.enable_validation_layers or can_direct_copy == false) {
             break :init_transitions_blk [_]texture.TransitionConfig{ .{
@@ -174,8 +180,8 @@ pub fn init(
             };
         }
     };
-    try texture.transitionImageLayouts(ctx, init_command_pool, &transition_configs);
-    try texture.hostToDeviceCopy(ctx, font_image, u32, pixels[0..@intCast(width * height)], .{
+    try texture.transitionImageLayouts(vkd, logical_device, graphics_queue, init_command_pool, &transition_configs);
+    try texture.hostToDeviceCopy(vkd, logical_device, font_image, u32, pixels[0..@intCast(width * height)], .{
         .subresource = .{
             .aspect_mask = .{ .color_bit = true },
             .mip_level = 0,
@@ -206,9 +212,9 @@ pub fn init(
             .border_color = .float_opaque_white,
             .unnormalized_coordinates = vk.FALSE,
         };
-        break :blk try ctx.vkd.createSampler(ctx.logical_device, &sampler_info, null);
+        break :blk try vkd.createSampler(logical_device.v, &sampler_info, null);
     };
-    errdefer ctx.vkd.destroySampler(ctx.logical_device, sampler, null);
+    errdefer vkd.destroySampler(logical_device.v, sampler, null);
 
     const descriptor_pool = blk: {
         const pool_sizes = [_]vk.DescriptorPoolSize{.{
@@ -221,9 +227,9 @@ pub fn init(
             .pool_size_count = pool_sizes.len,
             .p_pool_sizes = @ptrCast(&pool_sizes),
         };
-        break :blk try ctx.vkd.createDescriptorPool(ctx.logical_device, &descriptor_pool_info, null);
+        break :blk try vkd.createDescriptorPool(logical_device.v, &descriptor_pool_info, null);
     };
-    errdefer ctx.vkd.destroyDescriptorPool(ctx.logical_device, descriptor_pool, null);
+    errdefer vkd.destroyDescriptorPool(logical_device.v, descriptor_pool, null);
 
     const descriptor_set_layout = blk: {
         const set_layout_bindings = [_]vk.DescriptorSetLayoutBinding{.{
@@ -240,9 +246,9 @@ pub fn init(
             .binding_count = set_layout_bindings.len,
             .p_bindings = @ptrCast(&set_layout_bindings),
         };
-        break :blk try ctx.vkd.createDescriptorSetLayout(ctx.logical_device, &set_layout_info, null);
+        break :blk try vkd.createDescriptorSetLayout(logical_device.v, &set_layout_info, null);
     };
-    errdefer ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, descriptor_set_layout, null);
+    errdefer vkd.destroyDescriptorSetLayout(logical_device.v, descriptor_set_layout, null);
 
     const descriptor_set = blk: {
         const alloc_info = vk.DescriptorSetAllocateInfo{
@@ -251,8 +257,8 @@ pub fn init(
             .p_set_layouts = @ptrCast(&descriptor_set_layout),
         };
         var descriptor_set_tmp: vk.DescriptorSet = undefined;
-        try ctx.vkd.allocateDescriptorSets(
-            ctx.logical_device,
+        try vkd.allocateDescriptorSets(
+            logical_device.v,
             &alloc_info,
             @ptrCast(&descriptor_set_tmp),
         );
@@ -275,8 +281,8 @@ pub fn init(
             .p_buffer_info = undefined,
             .p_texel_buffer_view = undefined,
         }};
-        ctx.vkd.updateDescriptorSets(
-            ctx.logical_device,
+        vkd.updateDescriptorSets(
+            logical_device.v,
             write_descriptor_sets.len,
             @ptrCast(&write_descriptor_sets),
             0,
@@ -290,9 +296,9 @@ pub fn init(
             .initial_data_size = 0,
             .p_initial_data = undefined,
         };
-        break :blk try ctx.vkd.createPipelineCache(ctx.logical_device, &pipeline_cache_info, null);
+        break :blk try vkd.createPipelineCache(logical_device.v, &pipeline_cache_info, null);
     };
-    errdefer ctx.vkd.destroyPipelineCache(ctx.logical_device, pipeline_cache, null);
+    errdefer vkd.destroyPipelineCache(logical_device.v, pipeline_cache, null);
 
     const pipeline_layout = blk: {
         const push_constant_range = vk.PushConstantRange{
@@ -307,9 +313,9 @@ pub fn init(
             .push_constant_range_count = 1,
             .p_push_constant_ranges = @ptrCast(&push_constant_range),
         };
-        break :blk try ctx.vkd.createPipelineLayout(ctx.logical_device, &pipeline_layout_info, null);
+        break :blk try vkd.createPipelineLayout(logical_device.v, &pipeline_layout_info, null);
     };
-    errdefer ctx.vkd.destroyPipelineLayout(ctx.logical_device, pipeline_layout, null);
+    errdefer vkd.destroyPipelineLayout(logical_device.v, pipeline_layout, null);
 
     const input_assembly_state = vk.PipelineInputAssemblyStateCreateInfo{
         .flags = .{},
@@ -389,7 +395,7 @@ pub fn init(
             .p_code = @ptrCast(&ui_vert_spv),
             .code_size = ui_vert_spv.len,
         };
-        const module = try ctx.vkd.createShaderModule(ctx.logical_device, &create_info, null);
+        const module = try vkd.createShaderModule(logical_device.v, &create_info, null);
 
         break :blk vk.PipelineShaderStageCreateInfo{
             .flags = .{},
@@ -399,7 +405,7 @@ pub fn init(
             .p_specialization_info = null,
         };
     };
-    errdefer ctx.vkd.destroyShaderModule(ctx.logical_device, vert.module, null);
+    errdefer vkd.destroyShaderModule(logical_device.v, vert.module, null);
 
     const frag = blk: {
         const ui_frag_spv align(@alignOf(u32)) = @embedFile("ui_frag_spv").*;
@@ -409,7 +415,7 @@ pub fn init(
             .p_code = @ptrCast(&ui_frag_spv),
             .code_size = ui_frag_spv.len,
         };
-        const module = try ctx.vkd.createShaderModule(ctx.logical_device, &create_info, null);
+        const module = try vkd.createShaderModule(logical_device.v, &create_info, null);
 
         break :blk vk.PipelineShaderStageCreateInfo{
             .flags = .{},
@@ -419,7 +425,7 @@ pub fn init(
             .p_specialization_info = null,
         };
     };
-    errdefer ctx.vkd.destroyShaderModule(ctx.logical_device, frag.module, null);
+    errdefer vkd.destroyShaderModule(logical_device.v, frag.module, null);
     const shader_stages = [_]vk.PipelineShaderStageCreateInfo{ vert, frag };
 
     const vertex_input_bindings = [_]vk.VertexInputBindingDescription{.{
@@ -471,15 +477,15 @@ pub fn init(
         .base_pipeline_index = -1,
     };
     var pipeline: vk.Pipeline = undefined;
-    _ = try ctx.vkd.createGraphicsPipelines(
-        ctx.logical_device,
+    _ = try vkd.createGraphicsPipelines(
+        logical_device.v,
         pipeline_cache,
         1,
         @ptrCast(&pipeline_create_info),
         null,
         @ptrCast(&pipeline),
     );
-    errdefer ctx.vkd.destroyPipeline(ctx.logical_device, pipeline, null);
+    errdefer vkd.destroyPipeline(logical_device.v, pipeline, null);
 
     return ImguiPipeline{
         .sampler = sampler,
@@ -500,27 +506,31 @@ pub fn init(
     };
 }
 
-pub fn deinit(self: ImguiPipeline, ctx: Context) void {
+pub fn deinit(
+    self: ImguiPipeline,
+    vkd: context.components.vk_dispatch.Device,
+    logical_device: context.components.VkDevice,
+) void {
     zgui.plot.deinit();
     zgui.deinit();
 
-    ctx.vkd.destroyPipeline(ctx.logical_device, self.pipeline, null);
-    ctx.vkd.destroyPipelineLayout(ctx.logical_device, self.pipeline_layout, null);
-    ctx.vkd.destroyPipelineCache(ctx.logical_device, self.pipeline_cache, null);
-    ctx.vkd.destroyDescriptorPool(ctx.logical_device, self.descriptor_pool, null);
-    ctx.vkd.destroyDescriptorSetLayout(ctx.logical_device, self.descriptor_set_layout, null);
-    ctx.vkd.destroyShaderModule(ctx.logical_device, self.shader_modules[0], null);
-    ctx.vkd.destroyShaderModule(ctx.logical_device, self.shader_modules[1], null);
-    ctx.vkd.destroyImageView(ctx.logical_device, self.font_view, null);
-    ctx.vkd.destroySampler(ctx.logical_device, self.sampler, null);
-    ctx.vkd.destroyImage(ctx.logical_device, self.font_image, null);
-    ctx.vkd.freeMemory(ctx.logical_device, self.image_memory, null);
+    vkd.destroyPipeline(logical_device.v, self.pipeline, null);
+    vkd.destroyPipelineLayout(logical_device.v, self.pipeline_layout, null);
+    vkd.destroyPipelineCache(logical_device.v, self.pipeline_cache, null);
+    vkd.destroyDescriptorPool(logical_device.v, self.descriptor_pool, null);
+    vkd.destroyDescriptorSetLayout(logical_device.v, self.descriptor_set_layout, null);
+    vkd.destroyShaderModule(logical_device.v, self.shader_modules[0], null);
+    vkd.destroyShaderModule(logical_device.v, self.shader_modules[1], null);
+    vkd.destroyImageView(logical_device.v, self.font_view, null);
+    vkd.destroySampler(logical_device.v, self.sampler, null);
+    vkd.destroyImage(logical_device.v, self.font_image, null);
+    vkd.freeMemory(logical_device.v, self.image_memory, null);
 }
 
 /// record a command buffer that can draw current frame
 pub fn recordCommandBuffer(
     self: ImguiPipeline,
-    ctx: Context,
+    vkd: context.components.vk_dispatch.Device,
     command_buffer: vk.CommandBuffer,
     buffer_offset: vk.DeviceSize,
     vertex_index_buffer: render.gpu_buffer_memory.components.GpuBufferMemory,
@@ -533,11 +543,11 @@ pub fn recordCommandBuffer(
             .p_label_name = "Imgui UI",
             .color = [4]f32{ 0.1, 0.5, 0.2, 1.0 },
         };
-        ctx.vkd.cmdBeginDebugUtilsLabelEXT(command_buffer, &debug_label);
-        defer ctx.vkd.cmdEndDebugUtilsLabelEXT(command_buffer);
+        vkd.cmdBeginDebugUtilsLabelEXT(command_buffer, &debug_label);
+        defer vkd.cmdEndDebugUtilsLabelEXT(command_buffer);
     }
 
-    ctx.vkd.cmdBindDescriptorSets(
+    vkd.cmdBindDescriptorSets(
         command_buffer,
         .graphics,
         self.pipeline_layout,
@@ -547,7 +557,7 @@ pub fn recordCommandBuffer(
         0,
         undefined,
     );
-    ctx.vkd.cmdBindPipeline(command_buffer, .graphics, self.pipeline);
+    vkd.cmdBindPipeline(command_buffer, .graphics, self.pipeline);
 
     const display_size = zgui.io.getDisplaySize();
     const viewport = vk.Viewport{
@@ -558,14 +568,14 @@ pub fn recordCommandBuffer(
         .min_depth = 0,
         .max_depth = 1,
     };
-    ctx.vkd.cmdSetViewport(command_buffer, 0, 1, @ptrCast(&viewport));
+    vkd.cmdSetViewport(command_buffer, 0, 1, @ptrCast(&viewport));
 
     // UI scale and translate via push constants
     const push_constant = PushConstant{
         .scale = [2]f32{ 2 / display_size[0], 2 / display_size[1] },
         .translate = [2]f32{ -1, -1 },
     };
-    ctx.vkd.cmdPushConstants(command_buffer, self.pipeline_layout, .{ .vertex_bit = true }, 0, @sizeOf(PushConstant), &push_constant);
+    vkd.cmdPushConstants(command_buffer, self.pipeline_layout, .{ .vertex_bit = true }, 0, @sizeOf(PushConstant), &push_constant);
 
     // Render commands
     const im_draw_data = zgui.getDrawData();
@@ -574,14 +584,14 @@ pub fn recordCommandBuffer(
 
     if (im_draw_data.cmd_lists_count > 0) {
         const vertex_offsets = [_]vk.DeviceSize{buffer_offset};
-        ctx.vkd.cmdBindVertexBuffers(
+        vkd.cmdBindVertexBuffers(
             command_buffer,
             0,
             1,
             @ptrCast(&vertex_index_buffer.buffer),
             &vertex_offsets,
         );
-        ctx.vkd.cmdBindIndexBuffer(command_buffer, vertex_index_buffer.buffer, buffer_offset + self.vertex_size, .uint16);
+        vkd.cmdBindIndexBuffer(command_buffer, vertex_index_buffer.buffer, buffer_offset + self.vertex_size, .uint16);
 
         for (im_draw_data.cmd_lists.items[0..@intCast(im_draw_data.cmd_lists.len)]) |command_list| {
             const command_buffer_length = command_list.getCmdBufferLength();
@@ -598,8 +608,8 @@ pub fn recordCommandBuffer(
                         .height = @intFromFloat(draw_command.clip_rect[3] - draw_command.clip_rect[1]),
                     },
                 };
-                ctx.vkd.cmdSetScissor(command_buffer, 0, 1, @ptrCast(&scissor_rect));
-                ctx.vkd.cmdDrawIndexed(
+                vkd.cmdSetScissor(command_buffer, 0, 1, @ptrCast(&scissor_rect));
+                vkd.cmdDrawIndexed(
                     command_buffer,
                     draw_command.elem_count,
                     1,
@@ -617,7 +627,9 @@ pub fn recordCommandBuffer(
 // TODO: do not make new buffers if buffer is larger than total count
 pub fn updateBuffers(
     self: *ImguiPipeline,
-    ctx: Context,
+    vkd: context.components.vk_dispatch.Device,
+    logical_device: context.components.VkDevice,
+    physical_device_properties: context.components.VkPhysicalDeviceProperties,
     vertex_index_buffer: *render.gpu_buffer_memory.components.GpuBufferMemory,
 ) !void {
     const update_buffers_zone = tracy.ZoneN(@src(), "imgui: vertex & index update");
@@ -667,5 +679,11 @@ pub fn updateBuffers(
     }
 
     // send changes to GPU
-    try vertex_index_buffer.flush(ctx, self.vertex_index_buffer_offset, self.vertex_size + index_size);
+    try vertex_index_buffer.flush(
+        vkd,
+        logical_device,
+        physical_device_properties,
+        self.vertex_index_buffer_offset,
+        self.vertex_size + index_size,
+    );
 }

@@ -7,9 +7,6 @@ const za = @import("zalgebra");
 const stbi = @import("stbi");
 const ztracy = @import("ztracy");
 
-const render = @import("../../render.zig");
-const Context = render.Context;
-
 const brick_state = @import("../brick/state.zig");
 const brick_grid = @import("../brick/grid.zig");
 

@@ -5,9 +5,10 @@ const za = @import("zalgebra");
 const ecez = @import("ecez");
 const tracy = @import("ztracy");
 
+const render = @import("../render.zig");
+
 const BrickState = @import("brick/State.zig");
 const camera = @import("camera.zig");
-const Context = @import("../render.zig").Context;
 
 const EventArgument = @import("event_arg.zig").EventArgument;
 
@@ -47,6 +48,7 @@ pub fn CreateSystems(comptime Storage: type) type {
         pub const systems = struct {
             /// Update benchmark and camera state, return true if benchmark has completed
             pub fn update(
+                ctx: *render.context.queries.PhysicalDeviceProperties,
                 benchmark_query: *queries.Benchmark,
                 camera_query: *camera.queries.Camera,
                 benchmark_storage: *sub_storage.Benchmark,
@@ -55,6 +57,7 @@ pub fn CreateSystems(comptime Storage: type) type {
                 const transfer_zone = tracy.ZoneN(@src(), "sun update");
                 defer transfer_zone.End();
 
+                const physical_device_properties = ctx.getAny().?.properties;
                 const benchmark_entity = benchmark_query.getAny() orelse return;
                 // Camera should always exist
                 const camera_entity = camera_query.getAny() orelse unreachable;
@@ -87,7 +90,7 @@ pub fn CreateSystems(comptime Storage: type) type {
 
                 const print_report = benchmark_entity.benchmark.timer >= Configuration.benchmark_duration;
                 if (print_report) {
-                    const device_name = event_arg.ctx.physical_device_properties.device_name[0..];
+                    const device_name = physical_device_properties.device_name[0..];
                     const delta_time_sum_samples_f: f32 = @floatFromInt(benchmark_entity.report.delta_time_sum_samples);
                     const average_dt = benchmark_entity.report.delta_time_sum / delta_time_sum_samples_f;
 

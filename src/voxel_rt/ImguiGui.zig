@@ -6,7 +6,7 @@ const vk = @import("vulkan");
 const ecez = @import("ecez");
 
 const render = @import("../render.zig");
-const Context = render.Context;
+const context = render.context;
 
 const camera = @import("camera.zig");
 const sun = @import("sun.zig");
@@ -91,7 +91,7 @@ pub fn handleRescale(self: ImguiGui, gui_width: f32, gui_height: f32) void {
 // Starts a new imGui frame and sets up windows and ui elements
 pub fn newFrame(
     self: *ImguiGui,
-    ctx: Context,
+    physical_device_properties: context.components.VkPhysicalDeviceProperties,
     storage: anytype,
     swapchain_extent: vk.Extent2D,
     camera_ptr: *camera.components.Camera,
@@ -161,7 +161,7 @@ pub fn newFrame(
     }
 
     self.drawCameraWindowIfEnabled(camera_ptr, device_camera);
-    try self.drawMetricsWindowIfEnabled(ctx, storage, camera_ptr, device_camera, sun_ptr, device_sun);
+    try self.drawMetricsWindowIfEnabled(physical_device_properties, storage, camera_ptr, device_camera, sun_ptr, device_sun);
     self.drawPostProcessWindowIfEnabled();
     self.drawPostSunWindowIfEnabled(sun_ptr, device_sun);
 
@@ -212,7 +212,7 @@ fn drawCameraWindowIfEnabled(self: *ImguiGui, camera_ptr: *camera.components.Cam
 
 fn drawMetricsWindowIfEnabled(
     self: *ImguiGui,
-    ctx: Context,
+    physical_device_properties: context.components.VkPhysicalDeviceProperties,
     storage: anytype,
     camera_ptr: *camera.components.Camera,
     device_camera: *camera.components.DeviceCamera,
@@ -230,8 +230,8 @@ fn drawMetricsWindowIfEnabled(
     defer zgui.end();
     if (metrics_open == false) return;
 
-    const zero_index = std.mem.indexOf(u8, &ctx.physical_device_properties.device_name, &[_]u8{0});
-    zgui.textUnformatted(ctx.physical_device_properties.device_name[0..zero_index.?]);
+    const zero_index = std.mem.indexOf(u8, &physical_device_properties.device_name, &[_]u8{0});
+    zgui.textUnformatted(physical_device_properties.device_name[0..zero_index.?]);
 
     if (zgui.plot.beginPlot("Frame times", .{})) {
         defer zgui.plot.endPlot();

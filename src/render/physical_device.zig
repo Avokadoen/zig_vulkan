@@ -7,74 +7,8 @@ const vk = @import("vulkan");
 const dispatch = @import("dispatch.zig");
 const constants = @import("consts.zig");
 const swapchain = @import("swapchain.zig");
-const vk_utils = @import("vk_utils.zig");
 const validation_layer = @import("validation_layer.zig");
-const Context = @import("Context.zig");
-
-pub const QueueFamilyIndices = struct {
-    compute: u32,
-    compute_queue_count: u32,
-    graphics: u32,
-
-    // TODO: use internal allocator that is suitable
-    /// Initialize a QueueFamilyIndices instance, internal allocation is handled by QueueFamilyIndices (no manuall cleanup)
-    pub fn init(allocator: Allocator, vki: dispatch.Instance, physical_device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !QueueFamilyIndices {
-        var queue_family_count: u32 = 0;
-        vki.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, null);
-
-        var queue_families = try allocator.alloc(vk.QueueFamilyProperties, queue_family_count);
-        defer allocator.free(queue_families);
-
-        vki.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families.ptr);
-        queue_families.len = queue_family_count;
-
-        const compute_bit = vk.QueueFlags{
-            .compute_bit = true,
-        };
-        const graphics_bit = vk.QueueFlags{
-            .graphics_bit = true,
-        };
-
-        var compute_index: ?u32 = null;
-        var compute_queue_count: u32 = 0;
-        var graphics_index: ?u32 = null;
-        var present_index: ?u32 = null;
-        for (queue_families, 0..) |queue_family, i| {
-            const index: u32 = @intCast(i);
-
-            const is_graphics = graphics_index == null and queue_family.queue_flags.contains(graphics_bit);
-            const is_present = present_index == null and (try vki.getPhysicalDeviceSurfaceSupportKHR(physical_device, index, surface)) == vk.TRUE;
-            if (is_graphics and is_present) {
-                graphics_index = index;
-                present_index = index;
-            }
-
-            const is_compute = queue_family.queue_flags.contains(compute_bit);
-            const id_first_compute = is_compute and compute_index == null;
-            const is_discrete_compute = is_compute and !is_graphics and !is_present;
-            if (id_first_compute or is_discrete_compute) {
-                compute_index = index;
-                compute_queue_count = queue_family.queue_count;
-            }
-        }
-
-        if (compute_index == null) {
-            return error.ComputeIndexMissing;
-        }
-        if (graphics_index == null) {
-            return error.GraphicsIndexMissing;
-        }
-        if (present_index == null) {
-            return error.PresentIndexMissing;
-        }
-
-        return QueueFamilyIndices{
-            .compute = compute_index.?,
-            .compute_queue_count = compute_queue_count,
-            .graphics = graphics_index.?,
-        };
-    }
-};
+const context = @import("context.zig");
 
 /// check if physical device supports given target extensions
 // TODO: unify with getRequiredInstanceExtensions?
@@ -177,7 +111,7 @@ fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.Phys
     };
 
     const queue_fam_score: i32 = blk: {
-        _ = QueueFamilyIndices.init(allocator, vki, device, surface) catch break :blk -1000;
+        _ = context.createQueueFamilyIndices(vki, device, surface) catch break :blk -1000;
         break :blk 10;
     };
 
@@ -206,7 +140,7 @@ pub fn createLogicalDevice(
     allocator: Allocator,
     vkb: dispatch.Base,
     vki: dispatch.Instance,
-    queue_indices: QueueFamilyIndices,
+    queue_indices: context.components.QueueFamilyIndices,
     physical_device: vk.PhysicalDevice,
 ) !vk.Device {
 

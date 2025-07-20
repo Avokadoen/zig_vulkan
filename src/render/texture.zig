@@ -2,7 +2,7 @@ const std = @import("std");
 const vk = @import("vulkan");
 
 const vk_utils = @import("vk_utils.zig");
-const Context = @import("Context.zig");
+const context = @import("context.zig");
 const Allocator = std.mem.Allocator;
 
 const TransitionBits = struct {
@@ -119,11 +119,13 @@ pub const TransitionConfig = struct {
     dst_queue_family_index: u32 = vk.QUEUE_FAMILY_IGNORED,
 };
 pub fn transitionImageLayouts(
-    ctx: Context,
+    vkd: context.components.vk_dispatch.Device,
+    logical_device: context.components.VkDevice,
+    graphics_queue: context.components.GraphicsQueue,
     command_pool: vk.CommandPool,
     configs: []const TransitionConfig,
 ) !void {
-    const commmand_buffer = try vk_utils.beginOneTimeCommandBuffer(ctx, command_pool);
+    const commmand_buffer = try vk_utils.beginOneTimeCommandBuffer(vkd, logical_device, command_pool);
 
     for (configs) |config| {
         const transition = getTransitionBits(config.old_layout, config.new_layout);
@@ -145,40 +147,26 @@ pub fn transitionImageLayouts(
                 .layer_count = 1,
             },
         };
-        ctx.vkd.cmdPipelineBarrier(commmand_buffer, transition.src_stage, transition.dst_stage, vk.DependencyFlags{}, 0, undefined, 0, undefined, 1, @ptrCast(&barrier));
+        vkd.cmdPipelineBarrier(
+            commmand_buffer,
+            transition.src_stage,
+            transition.dst_stage,
+            vk.DependencyFlags{},
+            0,
+            undefined,
+            0,
+            undefined,
+            1,
+            @ptrCast(&barrier),
+        );
     }
-    try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, commmand_buffer);
-}
-
-pub fn copyBufferToImage(ctx: Context, command_pool: vk.CommandPool, image: vk.Image, buffer: vk.Buffer, image_extent: vk.Extent2D) !void {
-    const command_buffer = try vk_utils.beginOneTimeCommandBuffer(ctx, command_pool);
-    {
-        const region = vk.BufferImageCopy{
-            .buffer_offset = 0,
-            .buffer_row_length = 0,
-            .buffer_image_height = 0,
-            .image_subresource = vk.ImageSubresourceLayers{
-                .aspect_mask = .{
-                    .color_bit = true,
-                },
-                .mip_level = 0,
-                .base_array_layer = 0,
-                .layer_count = 1,
-            },
-            .image_offset = .{
-                .x = 0,
-                .y = 0,
-                .z = 0,
-            },
-            .image_extent = .{
-                .width = image_extent.width,
-                .height = image_extent.height,
-                .depth = 1,
-            },
-        };
-        ctx.vkd.cmdCopyBufferToImage(command_buffer, buffer, image, .transfer_dst_optimal, 1, @ptrCast(&region));
-    }
-    try vk_utils.endOneTimeCommandBuffer(ctx, command_pool, command_buffer);
+    try vk_utils.endOneTimeCommandBuffer(
+        vkd,
+        logical_device,
+        graphics_queue,
+        command_pool,
+        commmand_buffer,
+    );
 }
 
 pub const DeviceImageCopyInfo = struct {
@@ -196,12 +184,13 @@ pub const DeviceImageCopyInfo = struct {
 ///  - src_image: image data on the host
 ///  - dst_info: device image info submitted to the driver
 pub fn hostToDeviceCopy(
-    ctx: Context,
+    vkd: context.components.vk_dispatch.Device,
+    logical_device: context.components.VkDevice,
     dst_image: vk.Image,
     comptime T: type,
     src_image: []const T,
     dst_info: DeviceImageCopyInfo,
-) Context.dispatch.Device.CopyMemoryToImageError!void {
+) context.components.vk_dispatch.Device.CopyMemoryToImageError!void {
     const memory_to_image_copy = vk.MemoryToImageCopy{
         .p_host_pointer = @ptrCast(src_image.ptr),
         .memory_row_length = 0, // Memory is always packed on host currently
@@ -219,5 +208,5 @@ pub fn hostToDeviceCopy(
         .p_regions = @ptrCast(&memory_to_image_copy),
     };
 
-    try ctx.vkd.copyMemoryToImage(ctx.logical_device, &copy_image_to_image_info);
+    try vkd.copyMemoryToImage(logical_device.v, &copy_image_to_image_info);
 }

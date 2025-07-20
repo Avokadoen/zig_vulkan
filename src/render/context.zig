@@ -5,46 +5,160 @@ const ArrayList = std.ArrayList;
 const vk = @import("vulkan");
 const zglfw = @import("zglfw");
 const c = @import("c.zig");
+const ecez = @import("ecez");
 
 const consts = @import("consts.zig");
-pub const dispatch = @import("dispatch.zig");
-const QueueFamilyIndices = @import("physical_device.zig").QueueFamilyIndices;
+const dispatch = @import("dispatch.zig");
 const validation_layer = @import("validation_layer.zig");
 const vk_utils = @import("vk_utils.zig");
 
-// TODO: move command pool to context?
+pub const components = struct {
+    pub const vk_dispatch = struct {
+        pub const Base = dispatch.Base;
+        pub const Instance = dispatch.Instance;
+        pub const Device = dispatch.Device;
+    };
 
-/// Utilized to supply vulkan methods and common vulkan state to other
-/// renderer functions and structs
-const Context = @This();
+    pub const VkInstance = struct { v: vk.Instance };
+    pub const VkPhysicalDeviceProperties = vk.PhysicalDeviceProperties;
+    pub const VkPhysicalDeviceHostImageCopyProperties = vk.PhysicalDeviceHostImageCopyProperties;
+    pub const VkPhysicalDevice = struct { v: vk.PhysicalDevice };
+    pub const VkDevice = struct { v: vk.Device };
+    pub const VkSurface = struct { v: vk.SurfaceKHR };
 
-allocator: Allocator,
+    pub const VkDebugUtilsMessenger = struct { v: vk.DebugUtilsMessengerEXT };
 
-vkb: dispatch.Base,
-vki: dispatch.Instance,
-vkd: dispatch.Device,
+    pub const ComputeQueue = struct {
+        queue: vk.Queue,
+    };
+    pub const GraphicsQueue = struct {
+        queue: vk.Queue,
+    };
+    pub const QueueFamilyIndices = struct {
+        pub const max_family_count = 32;
 
-instance: vk.Instance,
-physical_device: vk.PhysicalDevice,
-logical_device: vk.Device,
+        compute: u32,
+        compute_queue_count: u32,
+        graphics: u32,
+    };
 
-physical_device_properties: vk.PhysicalDeviceProperties,
-host_image_properties: vk.PhysicalDeviceHostImageCopyProperties,
+    pub const WindowPtr = struct {
+        ptr: *zglfw.Window,
+    };
 
-compute_queue: vk.Queue,
-graphics_queue: vk.Queue,
+    pub const AuxillaryCommandPool = struct {
+        pool: vk.CommandPool,
+    };
 
-surface: vk.SurfaceKHR,
-queue_indices: QueueFamilyIndices,
+    // TODO: should swapchain be part of the Context entity + auxillary command pools?
+};
 
-// TODO: utilize comptime for this (emit from struct if we are in release mode)
-messenger: ?vk.DebugUtilsMessengerEXT,
+pub fn createQueueFamilyIndices(vki: dispatch.Instance, physical_device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !components.QueueFamilyIndices {
+    var queue_family_count: u32 = 0;
+    vki.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, null);
+    queue_family_count = @min(queue_family_count, components.QueueFamilyIndices.max_family_count);
 
-/// pointer to the window handle. Caution is adviced when using this pointer ...
-window_ptr: *zglfw.Window,
+    var queue_families: [components.QueueFamilyIndices.max_family_count]vk.QueueFamilyProperties = undefined;
+    vki.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, &queue_families);
 
-// Caller should make sure to call deinit
-pub fn init(allocator: Allocator, application_name: []const u8, window: *zglfw.Window) !Context {
+    const compute_bit = vk.QueueFlags{
+        .compute_bit = true,
+    };
+    const graphics_bit = vk.QueueFlags{
+        .graphics_bit = true,
+    };
+
+    var compute_index: ?u32 = null;
+    var compute_queue_count: u32 = 0;
+    var graphics_index: ?u32 = null;
+    var present_index: ?u32 = null;
+    for (queue_families[0..queue_family_count], 0..) |queue_family, i| {
+        const index: u32 = @intCast(i);
+
+        const is_graphics = graphics_index == null and queue_family.queue_flags.contains(graphics_bit);
+        const is_present = present_index == null and (try vki.getPhysicalDeviceSurfaceSupportKHR(physical_device, index, surface)) == vk.TRUE;
+        if (is_graphics and is_present) {
+            graphics_index = index;
+            present_index = index;
+        }
+
+        const is_compute = queue_family.queue_flags.contains(compute_bit);
+        const id_first_compute = is_compute and compute_index == null;
+        const is_discrete_compute = is_compute and !is_graphics and !is_present;
+        if (id_first_compute or is_discrete_compute) {
+            compute_index = index;
+            compute_queue_count = queue_family.queue_count;
+        }
+    }
+
+    if (compute_index == null) {
+        return error.ComputeIndexMissing;
+    }
+    if (graphics_index == null) {
+        return error.GraphicsIndexMissing;
+    }
+    if (present_index == null) {
+        return error.PresentIndexMissing;
+    }
+
+    return components.QueueFamilyIndices{
+        .compute = compute_index.?,
+        .compute_queue_count = compute_queue_count,
+        .graphics = graphics_index.?,
+    };
+}
+
+pub const queries = struct {
+    pub const VkdAndDevice = ecez.QueryAny(struct {
+        vkd: components.vk_dispatch.Device,
+        logical_device: components.VkDevice,
+    }, .{}, .{});
+
+    pub const PhysicalDeviceProperties = ecez.QueryAny(struct {
+        properties: components.VkPhysicalDeviceProperties,
+    }, .{}, .{});
+
+    pub const DeinitComponents = ecez.QueryAny(struct {
+        entity: ecez.Entity,
+        vki: components.vk_dispatch.Instance,
+        vkd: components.vk_dispatch.Device,
+        surface: components.VkSurface,
+        logical_device: components.VkDevice,
+        instance: components.VkInstance,
+        auxillary_cmd_pool: components.AuxillaryCommandPool,
+    }, .{}, .{});
+};
+
+pub fn CreateSystems(comptime Storage: type) type {
+    return struct {
+        const MessageStorage = Storage.Subset(.{components.VkDebugUtilsMessenger});
+
+        pub const deinit = struct {
+            pub fn context(ctx_query: *queries.DeinitComponents, message_storage: *MessageStorage) void {
+                const ctx = ctx_query.getAny().?;
+                ctx.vkd.destroyCommandPool(ctx.logical_device.v, ctx.auxillary_cmd_pool.pool, null);
+                ctx.vki.destroySurfaceKHR(ctx.instance.v, ctx.surface.v, null);
+                ctx.vkd.destroyDevice(ctx.logical_device.v, null);
+
+                if (consts.enable_validation_layers) {
+                    // TODO: only use runtime when getComponent return optional
+                    const messenger = message_storage.getComponent(ctx.entity, components.VkDebugUtilsMessenger) catch unreachable;
+                    ctx.vki.destroyDebugUtilsMessengerEXT(ctx.instance.v, messenger.v, null);
+                }
+                ctx.vki.destroyInstance(ctx.instance.v, null);
+            }
+        };
+    };
+}
+
+/// Create the context entity.
+pub fn createContextEntity(
+    comptime Storage: type,
+    storage: *Storage,
+    allocator: Allocator,
+    application_name: []const u8,
+    window: *zglfw.Window,
+) !ecez.Entity {
     const app_name: [:0]const u8 = app_name_blk: {
         var c_str = try allocator.allocSentinel(u8, application_name.len, 0);
         @memcpy(c_str[0..application_name.len], application_name);
@@ -143,7 +257,7 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *zglfw.W
     errdefer vki.destroySurfaceKHR(instance, surface, null);
 
     const physical_device = try @import("physical_device.zig").selectPrimary(allocator, vki, instance, surface);
-    const queue_indices = try QueueFamilyIndices.init(allocator, vki, physical_device, surface);
+    const queue_indices = try createQueueFamilyIndices(vki, physical_device, surface);
 
     const messenger = blk: {
         if (!consts.enable_validation_layers) break :blk null;
@@ -170,53 +284,42 @@ pub fn init(allocator: Allocator, application_name: []const u8, window: *zglfw.W
     var properties = vk.PhysicalDeviceProperties2{ .p_next = @ptrCast(&host_image_properties), .properties = undefined };
     vki.getPhysicalDeviceProperties2(physical_device, &properties);
 
-    return Context{
-        .allocator = allocator,
-        .vkb = vkb,
-        .vki = vki,
-        .vkd = vkd,
-        .instance = instance,
-        .physical_device = physical_device,
-        .logical_device = logical_device,
-        .compute_queue = compute_queue,
-        .graphics_queue = graphics_queue,
-        .physical_device_properties = properties.properties,
-        .host_image_properties = host_image_properties,
-        .surface = surface,
-        .queue_indices = queue_indices,
-        .messenger = messenger,
-        .window_ptr = window,
+    const auxillary_cmd_pool = init_cmd_pool: {
+        const pool_info = vk.CommandPoolCreateInfo{
+            .flags = .{ .transient_bit = true },
+            .queue_family_index = queue_indices.graphics,
+        };
+        const cmd_pool = try vkd.createCommandPool(logical_device, &pool_info, null);
+        break :init_cmd_pool components.AuxillaryCommandPool{
+            .pool = cmd_pool,
+        };
     };
-}
+    errdefer vkd.destroyCommandPool(logical_device, auxillary_cmd_pool.pool, null);
 
-pub fn deinit(self: Context) void {
-    self.vki.destroySurfaceKHR(self.instance, self.surface, null);
-    self.vkd.destroyDevice(self.logical_device, null);
-
-    if (consts.enable_validation_layers) {
-        self.vki.destroyDebugUtilsMessengerEXT(self.instance, self.messenger.?, null);
-    }
-    self.vki.destroyInstance(self.instance, null);
-}
-
-pub fn destroyShaderModule(self: Context, module: vk.ShaderModule) void {
-    self.vkd.destroyShaderModule(self.logical_device, module, null);
-}
-
-/// caller must destroy returned module
-pub fn createPipelineLayout(self: Context, create_info: vk.PipelineLayoutCreateInfo) !vk.PipelineLayout {
-    return self.vkd.createPipelineLayout(self.logical_device, &create_info, null);
-}
-
-pub fn destroyPipelineLayout(self: Context, pipeline_layout: vk.PipelineLayout) void {
-    self.vkd.destroyPipelineLayout(self.logical_device, pipeline_layout, null);
+    return storage.createEntity(.{
+        vkb,
+        vki,
+        vkd,
+        components.VkInstance{ .v = instance },
+        components.VkPhysicalDevice{ .v = physical_device },
+        components.VkDevice{ .v = logical_device },
+        components.ComputeQueue{ .queue = compute_queue },
+        components.GraphicsQueue{ .queue = graphics_queue },
+        properties.properties,
+        host_image_properties,
+        components.VkSurface{ .v = surface },
+        queue_indices,
+        components.VkDebugUtilsMessenger{ .v = messenger },
+        auxillary_cmd_pool,
+        components.WindowPtr{ .ptr = window },
+    });
 }
 
 /// caller must destroy pipeline from vulkan
-pub inline fn createGraphicsPipeline(self: Context, create_info: vk.GraphicsPipelineCreateInfo) !vk.Pipeline {
+pub inline fn createGraphicsPipeline(vkd: components.vk_dispatch.Device, logical_device: components.VkDevice, create_info: vk.GraphicsPipelineCreateInfo) !vk.Pipeline {
     var pipeline: vk.Pipeline = undefined;
-    const result = try self.vkd.createGraphicsPipelines(
-        self.logical_device,
+    const result = try vkd.createGraphicsPipelines(
+        logical_device,
         .null_handle,
         1,
         @ptrCast(&create_info),
@@ -224,17 +327,16 @@ pub inline fn createGraphicsPipeline(self: Context, create_info: vk.GraphicsPipe
         @ptrCast(&pipeline),
     );
     if (result != vk.Result.success) {
-        // TODO: not panic?
-        std.debug.panic("failed to initialize pipeline!", .{});
+        return error{FailedToCreatePipeline};
     }
     return pipeline;
 }
 
 /// caller must both destroy pipeline from the heap and in vulkan
-pub fn createComputePipeline(self: Context, create_info: vk.ComputePipelineCreateInfo) !vk.Pipeline {
+pub fn createComputePipeline(vkd: components.vk_dispatch.Device, logical_device: components.VkDevice, create_info: vk.ComputePipelineCreateInfo) !vk.Pipeline {
     var pipeline: vk.Pipeline = undefined;
-    const result = try self.vkd.createComputePipelines(
-        self.logical_device,
+    const result = try vkd.createComputePipelines(
+        logical_device.v,
         .null_handle,
         1,
         @ptrCast(&create_info),
@@ -242,20 +344,14 @@ pub fn createComputePipeline(self: Context, create_info: vk.ComputePipelineCreat
         @ptrCast(&pipeline),
     );
     if (result != vk.Result.success) {
-        // TODO: not panic?
-        std.debug.panic("failed to initialize pipeline!", .{});
+        return error.FailedToCreatePipeline;
     }
 
     return pipeline;
 }
 
-/// destroy pipeline from vulkan *not* from the application memory
-pub fn destroyPipeline(self: Context, pipeline: *vk.Pipeline) void {
-    self.vkd.destroyPipeline(self.logical_device, pipeline.*, null);
-}
-
 /// caller must destroy returned render pass
-pub fn createRenderPass(self: Context, format: vk.Format) !vk.RenderPass {
+pub fn createRenderPass(vkd: components.vk_dispatch.Device, logical_device: components.VkDevice, format: vk.Format) !vk.RenderPass {
     const color_attachment = [_]vk.AttachmentDescription{
         .{
             .flags = .{},
@@ -315,17 +411,13 @@ pub fn createRenderPass(self: Context, format: vk.Format) !vk.RenderPass {
         .dependency_count = 1,
         .p_dependencies = @ptrCast(&subpass_dependency),
     };
-    return try self.vkd.createRenderPass(self.logical_device, &render_pass_info, null);
-}
-
-pub fn destroyRenderPass(self: Context, render_pass: vk.RenderPass) void {
-    self.vkd.destroyRenderPass(self.logical_device, render_pass, null);
+    return try vkd.createRenderPass(logical_device.v, &render_pass_info, null);
 }
 
 // TODO: should not be in context ...
-pub fn hasCopySrcLayout(self: Context, src_layout: vk.ImageLayout) bool {
-    if (self.host_image_properties.p_copy_src_layouts) |copy_src_layouts| {
-        const copy_src_layout_count = self.host_image_properties.copy_src_layout_count;
+pub fn hasCopySrcLayout(host_image_properties: components.VkPhysicalDeviceHostImageCopyProperties, src_layout: vk.ImageLayout) bool {
+    if (host_image_properties.p_copy_src_layouts) |copy_src_layouts| {
+        const copy_src_layout_count = host_image_properties.copy_src_layout_count;
         for (copy_src_layouts[0..copy_src_layout_count]) |device_src_layout| {
             if (src_layout == device_src_layout) {
                 return true;

@@ -53,6 +53,22 @@ pub const Storage = ecez.CreateStorage(.{
     VoxelRT.terrain.components.ChunkToGenerate,
     VoxelRT.terrain.components.Perlin,
 
+    render.context.components.vk_dispatch.Base,
+    render.context.components.vk_dispatch.Instance,
+    render.context.components.vk_dispatch.Device,
+    render.context.components.VkInstance,
+    render.context.components.VkPhysicalDeviceProperties,
+    render.context.components.VkPhysicalDeviceHostImageCopyProperties,
+    render.context.components.VkPhysicalDevice,
+    render.context.components.VkDevice,
+    render.context.components.VkSurface,
+    render.context.components.VkDebugUtilsMessenger,
+    render.context.components.ComputeQueue,
+    render.context.components.GraphicsQueue,
+    render.context.components.QueueFamilyIndices,
+    render.context.components.AuxillaryCommandPool,
+    render.context.components.WindowPtr,
+
     render.swapchain.components.SwapchainData,
     render.gpu_buffer_memory.components.GpuBufferMemory,
 });
@@ -69,7 +85,7 @@ pub const Scheduler = ecez.CreateScheduler(.{
 
     VoxelRTEvents.events.voxel_rt_update,
 
-    render.events.render_deinit,
+    render.CreateEvents(Storage).render_deinit,
 });
 
 pub const InputRuntime = input.CreateInputRuntime(Storage, Scheduler);
@@ -123,8 +139,13 @@ pub fn main() anyerror!void {
     var window = try zglfw.Window.create(3840, 2160, application_name, null);
     defer window.destroy();
 
-    const ctx = try render.Context.init(allocator, application_name, window);
-    defer ctx.deinit();
+    const ctx_entity = try render.context.createContextEntity(
+        Storage,
+        &storage,
+        allocator,
+        application_name,
+        window,
+    );
 
     // init input module with default input handler functions
     const input_rt = try InputRuntime.init(
@@ -196,7 +217,7 @@ pub fn main() anyerror!void {
         );
     }
 
-    var voxel_rt = try VoxelRT.init(allocator, ctx, Storage, &storage, grid_entity, .{
+    var voxel_rt = try VoxelRT.init(allocator, Storage, &storage, ctx_entity, grid_entity, .{
         .internal_resolution_width = internal_render_resolution[0],
         .internal_resolution_height = internal_render_resolution[1],
         .camera = .{
@@ -211,8 +232,8 @@ pub fn main() anyerror!void {
     });
     defer {
         // TODO: this should be removed when render is 100% ecez
-        voxel_rt.deinit(ctx);
-        scheduler.dispatchEvent(&storage, .render_deinit, ctx);
+        voxel_rt.deinit(Storage, &storage, ctx_entity);
+        scheduler.dispatchEvent(&storage, .render_deinit, .{});
     }
 
     try voxel_rt.pushMaterials(Storage, &storage, materials[0..]);
@@ -225,13 +246,12 @@ pub fn main() anyerror!void {
         const f32_delta_time: f32 = @floatCast(delta_time);
 
         scheduler.dispatchEvent(&storage, .voxel_rt_update, VoxelRT.EventArgument{
-            .ctx = ctx,
             .voxel_rt = &voxel_rt,
             .delta_time = f32_delta_time,
         });
         scheduler.waitEvent(.voxel_rt_update);
 
-        try voxel_rt.draw(ctx, Storage, &storage, f32_delta_time);
+        try voxel_rt.draw(ctx_entity, Storage, &storage, f32_delta_time);
 
         // Poll for and process events
         zglfw.pollEvents();

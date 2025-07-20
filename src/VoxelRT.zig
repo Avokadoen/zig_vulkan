@@ -9,7 +9,7 @@ const Vec2 = @Vector(2, f32);
 const ecez = @import("ecez");
 
 const render = @import("render.zig");
-const Context = render.Context;
+const context = render.context;
 
 const Pipeline = @import("voxel_rt/Pipeline.zig");
 pub const camera = @import("voxel_rt/camera.zig");
@@ -63,9 +63,9 @@ pub const Config = struct {
 /// init VoxelRT, api takes ownership of the brick_grid
 pub fn init(
     allocator: Allocator,
-    ctx: Context,
     comptime Storage: type,
     storage: *Storage,
+    ctx_entity: ecez.Entity,
     grid_entity: ecez.Entity,
     config: Config,
 ) !VoxelRT {
@@ -79,7 +79,7 @@ pub fn init(
     const sun_entity = try storage.createEntity(sun.createSunComponents(config.sun));
 
     var pipeline = try Pipeline.init(
-        ctx,
+        ctx_entity,
         allocator,
         Storage,
         storage,
@@ -92,7 +92,7 @@ pub fn init(
         sun_entity,
         config.pipeline,
     );
-    errdefer pipeline.deinit(ctx);
+    errdefer pipeline.deinit(Storage, storage, ctx_entity);
 
     const grid_device_state = try storage.getComponent(grid_entity, grid_state.components.Device);
     try pipeline.transfer(
@@ -108,15 +108,31 @@ pub fn init(
     };
 }
 
-pub fn draw(self: *VoxelRT, ctx: Context, comptime Storage: type, storage: *Storage, delta_time: f32) !void {
-    try self.pipeline.draw(ctx, Storage, storage, delta_time);
+pub fn draw(
+    self: *VoxelRT,
+    ctx_entity: ecez.Entity,
+    comptime Storage: type,
+    storage: *Storage,
+    delta_time: f32,
+) !void {
+    try self.pipeline.draw(Storage, storage, ctx_entity, delta_time);
 }
 
 /// push the materials to GPU
-pub fn pushMaterials(self: *VoxelRT, comptime Storage: type, storage: *Storage, materials: []const gpu_types.Material) !void {
+pub fn pushMaterials(
+    self: *VoxelRT,
+    comptime Storage: type,
+    storage: *Storage,
+    materials: []const gpu_types.Material,
+) !void {
     try self.pipeline.transfer(Storage, storage, 0, .material, materials);
 }
 
-pub fn deinit(self: VoxelRT, ctx: Context) void {
-    self.pipeline.deinit(ctx);
+pub fn deinit(
+    self: VoxelRT,
+    comptime Storage: type,
+    storage: *Storage,
+    ctx_entity: ecez.Entity,
+) void {
+    self.pipeline.deinit(Storage, storage, ctx_entity);
 }
