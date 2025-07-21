@@ -94,7 +94,7 @@ pub fn init(
     );
     errdefer pipeline.deinit(Storage, storage, ctx_entity);
 
-    const grid_device_state = try storage.getComponent(grid_entity, grid_state.components.Device);
+    const grid_device_state = storage.getComponent(grid_entity, grid_state.components.Device).?;
     try pipeline.transfer(
         Storage,
         storage,

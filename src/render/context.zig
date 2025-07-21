@@ -141,8 +141,7 @@ pub fn CreateSystems(comptime Storage: type) type {
                 ctx.vkd.destroyDevice(ctx.logical_device.v, null);
 
                 if (consts.enable_validation_layers) {
-                    // TODO: only use runtime when getComponent return optional
-                    const messenger = message_storage.getComponent(ctx.entity, components.DebugUtilsMessenger) catch unreachable;
+                    const messenger = message_storage.getComponent(ctx.entity, components.DebugUtilsMessenger).?;
                     ctx.vki.destroyDebugUtilsMessengerEXT(ctx.instance.v, messenger.v, null);
                 }
                 ctx.vki.destroyInstance(ctx.instance.v, null);

@@ -283,7 +283,7 @@ pub fn CreateInputTypes(comptime Storage: type) type {
                     event: event_argument.CursorPosEvent,
                 ) void {
                     if (state.getAny()) |item| {
-                        const prev_cursor_pos = prev_event_storage.getComponent(item.entity, *component.PrevCursorPos) catch null;
+                        const prev_cursor_pos = prev_event_storage.getComponent(item.entity, *component.PrevCursorPos);
                         defer {
                             prev_event_storage.setComponents(item.entity, .{component.PrevCursorPos{
                                 .event = event,
@@ -409,7 +409,7 @@ pub fn CreateInputRuntime(comptime Storage: type, comptime Scheduler: type) type
             const window_context = window.getUserPointer(CallbackWindowContext).?;
             defer allocator.destroy(window_context);
 
-            const imgui_context = window_context.storage.getComponent(self.input_ctx_entity, component.ImguiContext) catch unreachable;
+            const imgui_context = window_context.storage.getComponent(self.input_ctx_entity, component.ImguiContext).?;
             unlinkImguiCodes(imgui_context);
 
             window.setUserPointer(null);

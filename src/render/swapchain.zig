@@ -52,7 +52,7 @@ pub fn createSwapchainComponent(
     storage: *Storage,
     old_swapchain: ?vk.SwapchainKHR,
 ) !components.SwapchainData {
-    const ctx = try storage.getComponents(ctx_entity, struct {
+    const ctx = storage.getComponents(ctx_entity, struct {
         vki: context.components.vk_dispatch.Instance,
         vkd: context.components.vk_dispatch.Device,
         physical_device: context.components.PhysicalDevice,
@@ -62,7 +62,7 @@ pub fn createSwapchainComponent(
         surface: context.components.Surface,
         window: context.components.WindowPtr,
         auxillary_cmd_pool: context.components.AuxillaryCommandPool,
-    });
+    }).?;
 
     const sc_create_info = create_swapchain_info_blk: {
         const support_details = try SupportDetails.init(

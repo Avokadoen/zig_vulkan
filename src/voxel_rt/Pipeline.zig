@@ -79,7 +79,7 @@ pub fn init(
     const init_zone = tracy.ZoneN(@src(), "init pipeline");
     defer init_zone.End();
 
-    const ctx = try storage.getComponents(ctx_entity, struct {
+    const ctx = storage.getComponents(ctx_entity, struct {
         vki: context.components.vk_dispatch.Instance,
         physical_device: context.components.PhysicalDevice,
         physical_device_properties: context.components.PhysicalDeviceProperties,
@@ -89,7 +89,7 @@ pub fn init(
         queue_indices: context.components.QueueFamilyIndices,
         graphics_queue: context.components.GraphicsQueue,
         auxillary_cmd_pool: context.components.AuxillaryCommandPool,
-    });
+    }).?;
 
     // use graphics and compute index
     // if they are the same, then we use that index
@@ -378,7 +378,7 @@ pub fn init(
     );
     errdefer imgui_pipeline.deinit(ctx.vkd, ctx.logical_device);
 
-    const grid_device = try storage.getComponent(grid_entity, grid_state.components.Device);
+    const grid_device = storage.getComponent(grid_entity, grid_state.components.Device).?;
     const state_binding = ImguiGui.StateBinding{
         .grid_device = grid_device,
         .gfx_pipeline_shader_constants = gfx_pipeline.shader_constants,
@@ -420,7 +420,7 @@ pub fn deinit(self: Pipeline, comptime Storage: type, storage: *Storage, ctx_ent
         logical_device: context.components.Device,
         compute_queue: context.components.ComputeQueue,
         graphics_queue: context.components.GraphicsQueue,
-    }) catch unreachable;
+    }).?;
 
     ctx.vkd.queueWaitIdle(ctx.compute_queue.queue) catch {};
     ctx.vkd.queueWaitIdle(ctx.graphics_queue.queue) catch {};
@@ -466,10 +466,10 @@ pub fn draw(self: *Pipeline, comptime Storage: type, storage: *Storage, ctx_enti
         graphics_queue: context.components.GraphicsQueue,
         physical_device_properties: context.components.PhysicalDeviceProperties,
         window_ptr: context.components.WindowPtr,
-    }) catch unreachable;
+    }).?;
 
-    const device_camera = storage.getComponent(self.camera_entity, *camera.components.DeviceCamera) catch unreachable;
-    const device_sun = storage.getComponent(self.sun_entity, *sun.components.DeviceSun) catch unreachable;
+    const device_camera = storage.getComponent(self.camera_entity, *camera.components.DeviceCamera).?;
+    const device_sun = storage.getComponent(self.sun_entity, *sun.components.DeviceSun).?;
     const compute_semaphore = try self.compute_pipeline.dispatch(
         ctx.vkd,
         ctx.logical_device,
@@ -480,7 +480,7 @@ pub fn draw(self: *Pipeline, comptime Storage: type, storage: *Storage, ctx_enti
         device_sun.*,
     );
 
-    const swapchain_data = storage.getComponent(self.swapchain_entity, render.swapchain.components.SwapchainData) catch unreachable;
+    const swapchain_data = storage.getComponent(self.swapchain_entity, render.swapchain.components.SwapchainData).?;
     const image_index = blk: {
         const aquired = ctx.vkd.acquireNextImageKHR(
             ctx.logical_device.v,
@@ -521,8 +521,8 @@ pub fn draw(self: *Pipeline, comptime Storage: type, storage: *Storage, ctx_enti
     }
 
     const update_metrics = image_index == 0;
-    const camera_ptr = storage.getComponent(self.camera_entity, *camera.components.Camera) catch unreachable;
-    const sun_ptr = storage.getComponent(self.sun_entity, *sun.components.Sun) catch unreachable;
+    const camera_ptr = storage.getComponent(self.camera_entity, *camera.components.Camera).?;
+    const sun_ptr = storage.getComponent(self.sun_entity, *sun.components.Sun).?;
     try self.gui.newFrame(
         ctx.physical_device_properties,
         storage,
@@ -535,7 +535,10 @@ pub fn draw(self: *Pipeline, comptime Storage: type, storage: *Storage, ctx_enti
         dt,
     );
 
-    const vertex_index_buffer = storage.getComponent(self.vertex_index_buffer_entity, *gpu_buffer_memory.components.GpuBufferMemory) catch unreachable;
+    const vertex_index_buffer = storage.getComponent(
+        self.vertex_index_buffer_entity,
+        *gpu_buffer_memory.components.GpuBufferMemory,
+    ).?;
     try self.imgui_pipeline.updateBuffers(
         ctx.vkd,
         ctx.logical_device,
@@ -668,10 +671,10 @@ pub fn transfer(
     const DataType = buffer_type.ToType();
     const buffer_offset = type_offset + offset * @sizeOf(DataType);
 
-    const buffer = try storage.getComponent(
+    const buffer = storage.getComponent(
         self.compute_pipeline.buffer_entity,
         gpu_buffer_memory.components.GpuBufferMemory,
-    );
+    ).?;
 
     const mapped_device_data = buffer.typedMapAssumeMapped(DataType, buffer_offset);
     @memcpy(mapped_device_data[0..data.len], data);
@@ -713,7 +716,10 @@ fn rescalePipeline(
         _ = try vkd.waitForFences(logical_device.v, 1, @ptrCast(&self.render_complete_fence), vk.TRUE, std.math.maxInt(u64));
     }
 
-    const swapchain_ptr = try storage.getComponent(self.swapchain_entity, *render.swapchain.components.SwapchainData);
+    const swapchain_ptr = storage.getComponent(
+        self.swapchain_entity,
+        *render.swapchain.components.SwapchainData,
+    ).?;
     // recreate swapchain utilizing the old one
     const old_swapchain = swapchain_ptr.*;
     defer render.swapchain.destroySwapchainData(vkd, logical_device, old_swapchain);

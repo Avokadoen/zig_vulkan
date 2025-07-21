@@ -34,8 +34,8 @@
             .hash = "shader_compiler-1.0.0-bOVsasuGAADsqQPvVDRD-bSkQCwDBQx06dVyrQws0EFK",
         },
         .ecez = .{
-            .url = "git+https://github.com/Avokadoen/ecez.git/?ref=HEAD#9dfaa6f42e3e22c5641122880ea30a73b2bfd279",
-            .hash = "ecez-0.0.0-X-dkoDFYBQDfcUmio83hRP6cuM2d5Kh_Upwfzkqd8149",
+            .url = "git+https://github.com/avokadoen/ecez/?ref=HEAD#d9012d2e437b0ddcff4a5a974b886e71d9de180f",
+            .hash = "ecez-0.0.0-X-dkoLBrBQAJul5AMPQAWCHidUBpSJqrGG64X6LX8Ggt",
         },
     },
 
