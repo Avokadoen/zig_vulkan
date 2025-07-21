@@ -58,9 +58,6 @@ framebuffers: []vk.Framebuffer,
 
 shader_constants: *PushConstant,
 
-// shader modules stored for cleanup
-shader_modules: [2]vk.ShaderModule,
-
 pub fn init(
     allocator: Allocator,
     vkd: context.components.vk_dispatch.Device,
@@ -270,7 +267,7 @@ pub fn init(
             .p_specialization_info = null,
         };
     };
-    errdefer vkd.destroyShaderModule(logical_device.v, vert.module, null);
+    defer vkd.destroyShaderModule(logical_device.v, vert.module, null);
     const frag = blk: {
         const image_frag_spv align(@alignOf(u32)) = @embedFile("image_frag_spv").*;
 
@@ -289,7 +286,7 @@ pub fn init(
             .p_specialization_info = null,
         };
     };
-    errdefer vkd.destroyShaderModule(logical_device.v, frag.module, null);
+    defer vkd.destroyShaderModule(logical_device.v, frag.module, null);
     const shader_stages = [_]vk.PipelineShaderStageCreateInfo{ vert, frag };
 
     const vertex_input_bindings = [_]vk.VertexInputBindingDescription{.{
@@ -422,7 +419,6 @@ pub fn init(
         .command_pools = command_pools,
         .command_buffers = command_buffers,
         .framebuffers = framebuffers,
-        .shader_modules = [2]vk.ShaderModule{ vert.module, frag.module },
         .shader_constants = shader_constants,
     };
 }
@@ -454,8 +450,6 @@ pub fn deinit(
 
     vkd.destroyPipeline(logical_device.v, self.pipeline, null);
     vkd.destroyPipelineCache(logical_device.v, self.pipeline_cache, null);
-    vkd.destroyShaderModule(logical_device.v, self.shader_modules[0], null);
-    vkd.destroyShaderModule(logical_device.v, self.shader_modules[1], null);
     vkd.destroyPipelineLayout(logical_device.v, self.pipeline_layout, null);
     vkd.destroyDescriptorSetLayout(logical_device.v, self.descriptor_set_layout, null);
     vkd.destroyDescriptorPool(logical_device.v, self.descriptor_pool, null);
