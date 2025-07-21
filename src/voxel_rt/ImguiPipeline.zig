@@ -34,7 +34,6 @@ index_buffer_len: c_int,
 font_image: vk.Image,
 font_view: vk.ImageView,
 
-pipeline_cache: vk.PipelineCache,
 pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
 descriptor_pool: vk.DescriptorPool,
@@ -287,16 +286,6 @@ pub fn init(
         );
     }
 
-    const pipeline_cache = blk: {
-        const pipeline_cache_info = vk.PipelineCacheCreateInfo{
-            .flags = .{},
-            .initial_data_size = 0,
-            .p_initial_data = undefined,
-        };
-        break :blk try vkd.createPipelineCache(logical_device.v, &pipeline_cache_info, null);
-    };
-    errdefer vkd.destroyPipelineCache(logical_device.v, pipeline_cache, null);
-
     const pipeline_layout = blk: {
         const push_constant_range = vk.PushConstantRange{
             .stage_flags = .{ .vertex_bit = true },
@@ -476,7 +465,7 @@ pub fn init(
     var pipeline: vk.Pipeline = undefined;
     _ = try vkd.createGraphicsPipelines(
         logical_device.v,
-        pipeline_cache,
+        .null_handle,
         1,
         @ptrCast(&pipeline_create_info),
         null,
@@ -492,7 +481,6 @@ pub fn init(
         .index_buffer_len = 0,
         .font_image = font_image,
         .font_view = font_view,
-        .pipeline_cache = pipeline_cache,
         .pipeline_layout = pipeline_layout,
         .pipeline = pipeline,
         .descriptor_pool = descriptor_pool,
@@ -512,7 +500,6 @@ pub fn deinit(
 
     vkd.destroyPipeline(logical_device.v, self.pipeline, null);
     vkd.destroyPipelineLayout(logical_device.v, self.pipeline_layout, null);
-    vkd.destroyPipelineCache(logical_device.v, self.pipeline_cache, null);
     vkd.destroyDescriptorPool(logical_device.v, self.descriptor_pool, null);
     vkd.destroyDescriptorSetLayout(logical_device.v, self.descriptor_set_layout, null);
     vkd.destroyImageView(logical_device.v, self.font_view, null);
