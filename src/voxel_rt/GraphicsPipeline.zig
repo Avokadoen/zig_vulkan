@@ -60,8 +60,8 @@ shader_constants: *PushConstant,
 pub fn init(
     allocator: Allocator,
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
-    physical_device_properties: context.components.VkPhysicalDeviceProperties,
+    logical_device: context.components.Device,
+    physical_device_properties: context.components.PhysicalDeviceProperties,
     queue_indices: context.components.QueueFamilyIndices,
     swapchain: SwapchainData,
     render_pass: vk.RenderPass,
@@ -416,7 +416,7 @@ pub fn deinit(
     self: GraphicsPipeline,
     allocator: Allocator,
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
+    logical_device: context.components.Device,
 ) void {
     for (self.framebuffers) |buffer| {
         vkd.destroyFramebuffer(logical_device.v, buffer, null);

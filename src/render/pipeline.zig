@@ -10,7 +10,7 @@ const context = @import("context.zig");
 pub fn createFramebuffers(
     allocator: Allocator,
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
+    logical_device: context.components.Device,
     swapchain_data: *const swapchain.components.SwapchainData,
     render_pass: vk.RenderPass,
     prev_framebuffer: ?[]vk.Framebuffer,
@@ -40,7 +40,7 @@ pub fn createFramebuffers(
 /// create a command buffers, caller must destroy returned buffer with allocator
 pub fn createCmdBuffer(
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
+    logical_device: context.components.Device,
     command_pool: vk.CommandPool,
 ) !vk.CommandBuffer {
     const alloc_info = vk.CommandBufferAllocateInfo{

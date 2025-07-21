@@ -81,11 +81,11 @@ pub fn init(
 
     const ctx = try storage.getComponents(ctx_entity, struct {
         vki: context.components.vk_dispatch.Instance,
-        physical_device: context.components.VkPhysicalDevice,
-        physical_device_properties: context.components.VkPhysicalDeviceProperties,
-        host_image_properties: context.components.VkPhysicalDeviceHostImageCopyProperties,
+        physical_device: context.components.PhysicalDevice,
+        physical_device_properties: context.components.PhysicalDeviceProperties,
+        host_image_properties: context.components.PhysicalDeviceHostImageCopyProperties,
         vkd: context.components.vk_dispatch.Device,
-        logical_device: context.components.VkDevice,
+        logical_device: context.components.Device,
         queue_indices: context.components.QueueFamilyIndices,
         graphics_queue: context.components.GraphicsQueue,
         auxillary_cmd_pool: context.components.AuxillaryCommandPool,
@@ -267,12 +267,12 @@ pub fn init(
     errdefer ctx.vkd.destroyFence(ctx.logical_device.v, render_complete_fence, null);
 
     const MinSize = struct {
-        fn ssbo(physical_device_properties: context.components.VkPhysicalDeviceProperties, size: u64) u64 {
+        fn ssbo(physical_device_properties: context.components.PhysicalDeviceProperties, size: u64) u64 {
             const storage_size = physical_device_properties.limits.min_storage_buffer_offset_alignment;
             return storage_size * (std.math.divCeil(vk.DeviceSize, size, storage_size) catch unreachable);
         }
 
-        fn uniform(physical_device_properties: context.components.VkPhysicalDeviceProperties, size: u64) u64 {
+        fn uniform(physical_device_properties: context.components.PhysicalDeviceProperties, size: u64) u64 {
             const uniform_size = physical_device_properties.limits.min_uniform_buffer_offset_alignment;
             return uniform_size * (std.math.divCeil(vk.DeviceSize, size, uniform_size) catch unreachable);
         }
@@ -417,7 +417,7 @@ pub fn init(
 pub fn deinit(self: Pipeline, comptime Storage: type, storage: *Storage, ctx_entity: ecez.Entity) void {
     const ctx = storage.getComponents(ctx_entity, struct {
         vkd: context.components.vk_dispatch.Device,
-        logical_device: context.components.VkDevice,
+        logical_device: context.components.Device,
         compute_queue: context.components.ComputeQueue,
         graphics_queue: context.components.GraphicsQueue,
     }) catch unreachable;
@@ -460,11 +460,11 @@ pub fn draw(self: *Pipeline, comptime Storage: type, storage: *Storage, ctx_enti
 
     const ctx = storage.getComponents(ctx_entity, struct {
         vkd: context.components.vk_dispatch.Device,
-        logical_device: context.components.VkDevice,
+        logical_device: context.components.Device,
         queue_indices: context.components.QueueFamilyIndices,
         compute_queue: context.components.ComputeQueue,
         graphics_queue: context.components.GraphicsQueue,
-        physical_device_properties: context.components.VkPhysicalDeviceProperties,
+        physical_device_properties: context.components.PhysicalDeviceProperties,
         window_ptr: context.components.WindowPtr,
     }) catch unreachable;
 
@@ -686,7 +686,7 @@ fn rescalePipeline(
     storage: *Storage,
     ctx_entity: ecez.Entity,
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
+    logical_device: context.components.Device,
     window_ptr: context.components.WindowPtr,
 ) !void {
     const rescale_zone = tracy.ZoneN(@src(), "rescale pipeline");

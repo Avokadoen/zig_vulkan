@@ -68,9 +68,9 @@ buffer_entity: ecez.Entity,
 pub fn init(
     allocator: Allocator,
     vki: context.components.vk_dispatch.Instance,
-    physical_device: context.components.VkPhysicalDevice,
+    physical_device: context.components.PhysicalDevice,
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
+    logical_device: context.components.Device,
     queue_indices: context.components.QueueFamilyIndices,
     comptime Storage: type,
     storage: *Storage,
@@ -402,7 +402,7 @@ pub fn init(
 pub fn deinit(
     self: ComputePipeline,
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
+    logical_device: context.components.Device,
 ) void {
     // wait for all fences
     _ = vkd.waitForFences(
@@ -437,7 +437,7 @@ pub fn deinit(
 pub fn dispatch(
     self: *ComputePipeline,
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
+    logical_device: context.components.Device,
     compute_queue: context.components.ComputeQueue,
     queue_indices: context.components.QueueFamilyIndices,
     workgroup_size: WorkgroupSize,
@@ -621,7 +621,7 @@ pub fn recordCommandBuffer(
     try vkd.endCommandBuffer(self.command_buffer);
 }
 
-pub fn calculateDefaultWorkgroupSize(physical_device_properties: context.components.VkPhysicalDeviceProperties) WorkgroupSize {
+pub fn calculateDefaultWorkgroupSize(physical_device_properties: context.components.PhysicalDeviceProperties) WorkgroupSize {
     const dim_size = physical_device_properties.limits.max_compute_work_group_invocations;
     const sqrt_dim_size = @sqrt(@as(f64, @floatFromInt(dim_size)));
     const uniform_dim: u32 = @intFromFloat(@floor(sqrt_dim_size));

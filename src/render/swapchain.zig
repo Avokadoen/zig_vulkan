@@ -55,11 +55,11 @@ pub fn createSwapchainComponent(
     const ctx = try storage.getComponents(ctx_entity, struct {
         vki: context.components.vk_dispatch.Instance,
         vkd: context.components.vk_dispatch.Device,
-        physical_device: context.components.VkPhysicalDevice,
+        physical_device: context.components.PhysicalDevice,
         queue_indices: context.components.QueueFamilyIndices,
         graphics_queue: context.components.GraphicsQueue,
-        logical_device: context.components.VkDevice,
-        surface: context.components.VkSurface,
+        logical_device: context.components.Device,
+        surface: context.components.Surface,
         window: context.components.WindowPtr,
         auxillary_cmd_pool: context.components.AuxillaryCommandPool,
     });
@@ -185,7 +185,7 @@ pub fn createSwapchainComponent(
 
 pub fn destroySwapchainData(
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
+    logical_device: context.components.Device,
     swapchain_data: components.SwapchainData,
 ) void {
     for (swapchain_data.image_views[0..swapchain_data.image_len]) |view| {

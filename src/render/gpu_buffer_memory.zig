@@ -27,8 +27,8 @@ pub const components = struct {
         pub fn flush(
             self: GpuBufferMemory,
             vkd: context.components.vk_dispatch.Device,
-            logical_device: context.components.VkDevice,
-            physical_device_properties: context.components.VkPhysicalDeviceProperties,
+            logical_device: context.components.Device,
+            physical_device_properties: context.components.PhysicalDeviceProperties,
             offset: vk.DeviceSize,
             size: vk.DeviceSize,
         ) !void {
@@ -72,9 +72,9 @@ pub const systems = struct {
 
 pub fn createGpuBufferMemoryComponents(
     vki: context.components.vk_dispatch.Instance,
-    physical_device: context.components.VkPhysicalDevice,
+    physical_device: context.components.PhysicalDevice,
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
+    logical_device: context.components.Device,
     capacity: vk.DeviceSize,
     buf_usage_flags: vk.BufferUsageFlags,
     mem_prop_flags: vk.MemoryPropertyFlags,
@@ -134,7 +134,7 @@ pub fn createGpuBufferMemoryComponents(
 /// destroy buffer and free memory
 pub fn destroyBuffer(
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
+    logical_device: context.components.Device,
     buffer: components.GpuBufferMemory,
 ) void {
     vkd.unmapMemory(logical_device.v, buffer.memory);

@@ -91,7 +91,7 @@ pub fn handleRescale(self: ImguiGui, gui_width: f32, gui_height: f32) void {
 // Starts a new imGui frame and sets up windows and ui elements
 pub fn newFrame(
     self: *ImguiGui,
-    physical_device_properties: context.components.VkPhysicalDeviceProperties,
+    physical_device_properties: context.components.PhysicalDeviceProperties,
     storage: anytype,
     swapchain_extent: vk.Extent2D,
     camera_ptr: *camera.components.Camera,
@@ -212,7 +212,7 @@ fn drawCameraWindowIfEnabled(self: *ImguiGui, camera_ptr: *camera.components.Cam
 
 fn drawMetricsWindowIfEnabled(
     self: *ImguiGui,
-    physical_device_properties: context.components.VkPhysicalDeviceProperties,
+    physical_device_properties: context.components.PhysicalDeviceProperties,
     storage: anytype,
     camera_ptr: *camera.components.Camera,
     device_camera: *camera.components.DeviceCamera,

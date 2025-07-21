@@ -120,7 +120,7 @@ pub const TransitionConfig = struct {
 };
 pub fn transitionImageLayouts(
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
+    logical_device: context.components.Device,
     graphics_queue: context.components.GraphicsQueue,
     command_pool: vk.CommandPool,
     configs: []const TransitionConfig,
@@ -185,7 +185,7 @@ pub const DeviceImageCopyInfo = struct {
 ///  - dst_info: device image info submitted to the driver
 pub fn hostToDeviceCopy(
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
+    logical_device: context.components.Device,
     dst_image: vk.Image,
     comptime T: type,
     src_image: []const T,

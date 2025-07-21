@@ -45,10 +45,10 @@ image_memory: vk.DeviceMemory,
 pub fn init(
     allocator: std.mem.Allocator,
     vki: context.components.vk_dispatch.Instance,
-    physical_device: context.components.VkPhysicalDevice,
-    host_image_properties: context.components.VkPhysicalDeviceHostImageCopyProperties,
+    physical_device: context.components.PhysicalDevice,
+    host_image_properties: context.components.PhysicalDeviceHostImageCopyProperties,
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
+    logical_device: context.components.Device,
     graphics_queue: context.components.GraphicsQueue,
     init_command_pool: vk.CommandPool,
     render_pass: vk.RenderPass,
@@ -493,7 +493,7 @@ pub fn init(
 pub fn deinit(
     self: ImguiPipeline,
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
+    logical_device: context.components.Device,
 ) void {
     zgui.plot.deinit();
     zgui.deinit();
@@ -609,8 +609,8 @@ pub fn recordCommandBuffer(
 pub fn updateBuffers(
     self: *ImguiPipeline,
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
-    physical_device_properties: context.components.VkPhysicalDeviceProperties,
+    logical_device: context.components.Device,
+    physical_device_properties: context.components.PhysicalDeviceProperties,
     vertex_index_buffer: *render.gpu_buffer_memory.components.GpuBufferMemory,
 ) !void {
     const update_buffers_zone = tracy.ZoneN(@src(), "imgui: vertex & index update");

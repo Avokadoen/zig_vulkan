@@ -42,7 +42,7 @@ pub fn isInstanceExtensionsPresent(allocator: Allocator, vkb: dispatch.Base, tar
 
 pub fn findMemoryTypeIndex(
     vki: context.components.vk_dispatch.Instance,
-    physical_device: context.components.VkPhysicalDevice,
+    physical_device: context.components.PhysicalDevice,
     type_filter: u32,
     memory_flags: vk.MemoryPropertyFlags,
 ) error{NotFound}!u32 {
@@ -60,7 +60,7 @@ pub fn findMemoryTypeIndex(
 
 pub fn beginOneTimeCommandBuffer(
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
+    logical_device: context.components.Device,
     command_pool: vk.CommandPool,
 ) !vk.CommandBuffer {
     const allocate_info = vk.CommandBufferAllocateInfo{
@@ -85,7 +85,7 @@ pub fn beginOneTimeCommandBuffer(
 // TODO: synchronization should be improved in this function (currently very sub optimal)!
 pub inline fn endOneTimeCommandBuffer(
     vkd: context.components.vk_dispatch.Device,
-    logical_device: context.components.VkDevice,
+    logical_device: context.components.Device,
     graphics_queue: context.components.GraphicsQueue,
     command_pool: vk.CommandPool,
     command_buffer: vk.CommandBuffer,

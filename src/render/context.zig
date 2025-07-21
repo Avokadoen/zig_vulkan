@@ -19,14 +19,14 @@ pub const components = struct {
         pub const Device = dispatch.Device;
     };
 
-    pub const VkInstance = struct { v: vk.Instance };
-    pub const VkPhysicalDeviceProperties = vk.PhysicalDeviceProperties;
-    pub const VkPhysicalDeviceHostImageCopyProperties = vk.PhysicalDeviceHostImageCopyProperties;
-    pub const VkPhysicalDevice = struct { v: vk.PhysicalDevice };
-    pub const VkDevice = struct { v: vk.Device };
-    pub const VkSurface = struct { v: vk.SurfaceKHR };
+    pub const Instance = struct { v: vk.Instance };
+    pub const PhysicalDeviceProperties = vk.PhysicalDeviceProperties;
+    pub const PhysicalDeviceHostImageCopyProperties = vk.PhysicalDeviceHostImageCopyProperties;
+    pub const PhysicalDevice = struct { v: vk.PhysicalDevice };
+    pub const Device = struct { v: vk.Device };
+    pub const Surface = struct { v: vk.SurfaceKHR };
 
-    pub const VkDebugUtilsMessenger = struct { v: vk.DebugUtilsMessengerEXT };
+    pub const DebugUtilsMessenger = struct { v: vk.DebugUtilsMessengerEXT };
 
     pub const ComputeQueue = struct {
         queue: vk.Queue,
@@ -111,27 +111,27 @@ pub fn createQueueFamilyIndices(vki: dispatch.Instance, physical_device: vk.Phys
 pub const queries = struct {
     pub const VkdAndDevice = ecez.QueryAny(struct {
         vkd: components.vk_dispatch.Device,
-        logical_device: components.VkDevice,
+        logical_device: components.Device,
     }, .{}, .{});
 
     pub const PhysicalDeviceProperties = ecez.QueryAny(struct {
-        properties: components.VkPhysicalDeviceProperties,
+        properties: components.PhysicalDeviceProperties,
     }, .{}, .{});
 
     pub const DeinitComponents = ecez.QueryAny(struct {
         entity: ecez.Entity,
         vki: components.vk_dispatch.Instance,
         vkd: components.vk_dispatch.Device,
-        surface: components.VkSurface,
-        logical_device: components.VkDevice,
-        instance: components.VkInstance,
+        surface: components.Surface,
+        logical_device: components.Device,
+        instance: components.Instance,
         auxillary_cmd_pool: components.AuxillaryCommandPool,
     }, .{}, .{});
 };
 
 pub fn CreateSystems(comptime Storage: type) type {
     return struct {
-        const MessageStorage = Storage.Subset(.{components.VkDebugUtilsMessenger});
+        const MessageStorage = Storage.Subset(.{components.DebugUtilsMessenger});
 
         pub const deinit = struct {
             pub fn context(ctx_query: *queries.DeinitComponents, message_storage: *MessageStorage) void {
@@ -142,7 +142,7 @@ pub fn CreateSystems(comptime Storage: type) type {
 
                 if (consts.enable_validation_layers) {
                     // TODO: only use runtime when getComponent return optional
-                    const messenger = message_storage.getComponent(ctx.entity, components.VkDebugUtilsMessenger) catch unreachable;
+                    const messenger = message_storage.getComponent(ctx.entity, components.DebugUtilsMessenger) catch unreachable;
                     ctx.vki.destroyDebugUtilsMessengerEXT(ctx.instance.v, messenger.v, null);
                 }
                 ctx.vki.destroyInstance(ctx.instance.v, null);
@@ -300,23 +300,23 @@ pub fn createContextEntity(
         vkb,
         vki,
         vkd,
-        components.VkInstance{ .v = instance },
-        components.VkPhysicalDevice{ .v = physical_device },
-        components.VkDevice{ .v = logical_device },
+        components.Instance{ .v = instance },
+        components.PhysicalDevice{ .v = physical_device },
+        components.Device{ .v = logical_device },
         components.ComputeQueue{ .queue = compute_queue },
         components.GraphicsQueue{ .queue = graphics_queue },
         properties.properties,
         host_image_properties,
-        components.VkSurface{ .v = surface },
+        components.Surface{ .v = surface },
         queue_indices,
-        components.VkDebugUtilsMessenger{ .v = messenger },
+        components.DebugUtilsMessenger{ .v = messenger },
         auxillary_cmd_pool,
         components.WindowPtr{ .ptr = window },
     });
 }
 
 /// caller must destroy pipeline from vulkan
-pub inline fn createGraphicsPipeline(vkd: components.vk_dispatch.Device, logical_device: components.VkDevice, create_info: vk.GraphicsPipelineCreateInfo) !vk.Pipeline {
+pub inline fn createGraphicsPipeline(vkd: components.vk_dispatch.Device, logical_device: components.Device, create_info: vk.GraphicsPipelineCreateInfo) !vk.Pipeline {
     var pipeline: vk.Pipeline = undefined;
     const result = try vkd.createGraphicsPipelines(
         logical_device,
@@ -333,7 +333,7 @@ pub inline fn createGraphicsPipeline(vkd: components.vk_dispatch.Device, logical
 }
 
 /// caller must both destroy pipeline from the heap and in vulkan
-pub fn createComputePipeline(vkd: components.vk_dispatch.Device, logical_device: components.VkDevice, create_info: vk.ComputePipelineCreateInfo) !vk.Pipeline {
+pub fn createComputePipeline(vkd: components.vk_dispatch.Device, logical_device: components.Device, create_info: vk.ComputePipelineCreateInfo) !vk.Pipeline {
     var pipeline: vk.Pipeline = undefined;
     const result = try vkd.createComputePipelines(
         logical_device.v,
@@ -351,7 +351,7 @@ pub fn createComputePipeline(vkd: components.vk_dispatch.Device, logical_device:
 }
 
 /// caller must destroy returned render pass
-pub fn createRenderPass(vkd: components.vk_dispatch.Device, logical_device: components.VkDevice, format: vk.Format) !vk.RenderPass {
+pub fn createRenderPass(vkd: components.vk_dispatch.Device, logical_device: components.Device, format: vk.Format) !vk.RenderPass {
     const color_attachment = [_]vk.AttachmentDescription{
         .{
             .flags = .{},
@@ -415,7 +415,7 @@ pub fn createRenderPass(vkd: components.vk_dispatch.Device, logical_device: comp
 }
 
 // TODO: should not be in context ...
-pub fn hasCopySrcLayout(host_image_properties: components.VkPhysicalDeviceHostImageCopyProperties, src_layout: vk.ImageLayout) bool {
+pub fn hasCopySrcLayout(host_image_properties: components.PhysicalDeviceHostImageCopyProperties, src_layout: vk.ImageLayout) bool {
     if (host_image_properties.p_copy_src_layouts) |copy_src_layouts| {
         const copy_src_layout_count = host_image_properties.copy_src_layout_count;
         for (copy_src_layouts[0..copy_src_layout_count]) |device_src_layout| {
