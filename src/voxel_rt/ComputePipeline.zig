@@ -20,8 +20,21 @@ const ComputePipeline = @This();
 // TODO: constant data
 // TODO: explicit binding ..
 pub const StateConfigs = struct {
+    pub const max_uniforms = 4;
+    pub const max_ssbos = 8;
+
     uniform_sizes: []const u64,
     storage_sizes: []const u64,
+
+    pub fn init(uniform_sizes: []const u64, storage_sizes: []const u64) StateConfigs {
+        std.debug.assert(uniform_sizes.len < max_uniforms);
+        std.debug.assert(storage_sizes.len < max_ssbos);
+
+        return StateConfigs{
+            .uniform_sizes = uniform_sizes,
+            .storage_sizes = storage_sizes,
+        };
+    }
 };
 
 pub const ImageInfo = struct {
@@ -37,8 +50,6 @@ pub const WorkgroupSize = struct {
     y: u32,
 };
 
-allocator: Allocator,
-
 pipeline_layout: vk.PipelineLayout,
 pipeline: vk.Pipeline,
 
@@ -53,9 +64,8 @@ target_descriptor_layout: vk.DescriptorSetLayout,
 target_descriptor_pool: vk.DescriptorPool,
 target_descriptor_set: vk.DescriptorSet,
 
-// TODO: should be a slice or list. When the sum of a buffer size is greater than 250mb, we create a new buffer
-uniform_offsets: []vk.DeviceSize,
-storage_offsets: []vk.DeviceSize,
+uniform_offsets: [StateConfigs.max_uniforms]vk.DeviceSize,
+storage_offsets: [StateConfigs.max_ssbos]vk.DeviceSize,
 
 buffer_entity: ecez.Entity,
 
@@ -66,7 +76,6 @@ buffer_entity: ecez.Entity,
 /// initialize a compute pipeline, caller must make sure to call deinit, pipeline does not take ownership of target texture,
 /// texture should have a lifetime atleast the length of comptute pipeline
 pub fn init(
-    allocator: Allocator,
     vki: context.components.vk_dispatch.Instance,
     physical_device: context.components.PhysicalDevice,
     vkd: context.components.vk_dispatch.Device,
@@ -78,17 +87,17 @@ pub fn init(
     state_config: StateConfigs,
     specialization_constants: anytype,
 ) !ComputePipeline {
-    const uniform_offsets = try allocator.alloc(vk.DeviceSize, state_config.uniform_sizes.len);
-    errdefer allocator.free(uniform_offsets);
-    const storage_offsets = try allocator.alloc(vk.DeviceSize, state_config.storage_sizes.len);
-    errdefer allocator.free(storage_offsets);
+    const uniform_len = state_config.uniform_sizes.len;
+    const storage_len = state_config.storage_sizes.len;
+    var uniform_offsets: [StateConfigs.max_uniforms]vk.DeviceSize = undefined;
+    var storage_offsets: [StateConfigs.max_ssbos]vk.DeviceSize = undefined;
 
     var buffer_size: u64 = 0;
-    for (uniform_offsets, state_config.uniform_sizes) |*uniform_offset, size| {
+    for (uniform_offsets[0..uniform_len], state_config.uniform_sizes) |*uniform_offset, size| {
         uniform_offset.* = buffer_size;
         buffer_size += size;
     }
-    for (storage_offsets, state_config.storage_sizes) |*storage_offset, size| {
+    for (storage_offsets[0..storage_len], state_config.storage_sizes) |*storage_offset, size| {
         storage_offset.* = buffer_size;
         buffer_size += size;
     }
@@ -108,11 +117,11 @@ pub fn init(
         break :buffer_init try storage.createEntity(.{buffer});
     };
 
-    const set_count = 1 + state_config.uniform_sizes.len + state_config.storage_sizes.len;
-    const layout_bindings = try allocator.alloc(vk.DescriptorSetLayoutBinding, set_count);
-    defer allocator.free(layout_bindings);
-
+    const render_target_count = 1;
+    const max_set_count = render_target_count + StateConfigs.max_uniforms + StateConfigs.max_ssbos;
+    const set_count: u32 = @intCast(render_target_count + uniform_len + storage_len);
     const target_descriptor_layout = blk: {
+        var layout_bindings: [max_set_count]vk.DescriptorSetLayoutBinding = undefined;
         // target image
         layout_bindings[0] = vk.DescriptorSetLayoutBinding{
             .binding = 0,
@@ -149,16 +158,14 @@ pub fn init(
 
         const layout_info = vk.DescriptorSetLayoutCreateInfo{
             .flags = .{},
-            .binding_count = @intCast(layout_bindings.len),
-            .p_bindings = @ptrCast(layout_bindings.ptr),
+            .binding_count = set_count,
+            .p_bindings = @ptrCast(&layout_bindings),
         };
         break :blk try vkd.createDescriptorSetLayout(logical_device.v, &layout_info, null);
     };
     errdefer vkd.destroyDescriptorSetLayout(logical_device.v, target_descriptor_layout, null);
 
-    const pool_sizes = try allocator.alloc(vk.DescriptorPoolSize, set_count);
-    defer allocator.free(pool_sizes);
-
+    var pool_sizes: [max_set_count]vk.DescriptorPoolSize = undefined;
     const target_descriptor_pool = blk: {
         pool_sizes[0] = vk.DescriptorPoolSize{
             .type = .storage_image,
@@ -180,8 +187,8 @@ pub fn init(
         const pool_info = vk.DescriptorPoolCreateInfo{
             .flags = .{},
             .max_sets = 1,
-            .pool_size_count = @intCast(pool_sizes.len),
-            .p_pool_sizes = @ptrCast(pool_sizes.ptr),
+            .pool_size_count = @intCast(set_count),
+            .p_pool_sizes = @ptrCast(&pool_sizes),
         };
         break :blk try vkd.createDescriptorPool(logical_device.v, &pool_info, null);
     };
@@ -210,10 +217,8 @@ pub fn init(
     }
 
     {
-        const buffer_infos = try allocator.alloc(vk.DescriptorBufferInfo, set_count - 1);
-        defer allocator.free(buffer_infos);
-        const write_descriptor_sets = try allocator.alloc(vk.WriteDescriptorSet, set_count);
-        defer allocator.free(write_descriptor_sets);
+        var buffer_infos: [max_set_count - render_target_count]vk.DescriptorBufferInfo = undefined;
+        var write_descriptor_sets: [max_set_count]vk.WriteDescriptorSet = undefined;
 
         const image_info = vk.DescriptorImageInfo{
             .sampler = target_image_info.sampler,
@@ -272,8 +277,8 @@ pub fn init(
 
         vkd.updateDescriptorSets(
             logical_device.v,
-            @intCast(write_descriptor_sets.len),
-            write_descriptor_sets.ptr,
+            set_count,
+            &write_descriptor_sets,
             0,
             undefined,
         );
@@ -382,7 +387,6 @@ pub fn init(
     errdefer vkd.destroyFence(logical_device.v, complete_fence);
 
     return ComputePipeline{
-        .allocator = allocator,
         .pipeline_layout = pipeline_layout,
         .pipeline = pipeline,
         .command_pool = command_pool,
@@ -420,9 +424,6 @@ pub fn deinit(
         @ptrCast(&self.command_buffer),
     );
     vkd.destroyCommandPool(logical_device.v, self.command_pool, null);
-
-    self.allocator.free(self.uniform_offsets);
-    self.allocator.free(self.storage_offsets);
 
     vkd.destroySemaphore(logical_device.v, self.complete_semaphore, null);
     vkd.destroyFence(logical_device.v, self.complete_fence, null);

@@ -1,29 +1,26 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const tracy = @import("ztracy");
-
 const ecez = @import("ecez");
-
+const tracy = @import("ztracy");
 const vk = @import("vulkan");
+
 const render = @import("../render.zig");
 const context = render.context;
 const texture = render.texture;
 const vk_utils = render.vk_utils;
 const memory = render.memory;
+const gpu_buffer_memory = render.gpu_buffer_memory;
+const grid_state = @import("brick/state.zig");
+const camera = @import("camera.zig");
+const ComputePipeline = @import("ComputePipeline.zig");
+const gpu_types = @import("gpu_types.zig");
+const GraphicsPipeline = @import("GraphicsPipeline.zig");
+const ImguiGui = @import("ImguiGui.zig");
+const ImguiPipeline = @import("ImguiPipeline.zig");
+const sun = @import("sun.zig");
 
 // TODO: move pipelines to ./internal/render/
-const ComputePipeline = @import("ComputePipeline.zig");
-const GraphicsPipeline = @import("GraphicsPipeline.zig");
-const ImguiPipeline = @import("ImguiPipeline.zig");
-const gpu_buffer_memory = render.gpu_buffer_memory;
-
-const ImguiGui = @import("ImguiGui.zig");
-
-const camera = @import("camera.zig");
-const sun = @import("sun.zig");
-const grid_state = @import("brick/state.zig");
-const gpu_types = @import("gpu_types.zig");
 
 pub const Config = struct {
     material_buffer: u64 = 256,
@@ -291,7 +288,10 @@ pub fn init(
             MinSize.ssbo(ctx.physical_device_properties, @sizeOf(grid_state.Brick.StartIndex) * grid_state.brick_count),
             MinSize.ssbo(ctx.physical_device_properties, @sizeOf(grid_state.components.MaterialIndices.IndexType) * grid_state.components.MaterialIndices.material_index_count),
         };
-        const state_configs = ComputePipeline.StateConfigs{ .uniform_sizes = uniform_sizes[0..], .storage_sizes = storage_sizes[0..] };
+        const state_configs: ComputePipeline.StateConfigs = .init(
+            uniform_sizes[0..],
+            storage_sizes[0..],
+        );
 
         const target_image_info = ComputePipeline.ImageInfo{
             .width = @floatFromInt(internal_render_resolution.width),
@@ -310,7 +310,6 @@ pub fn init(
         };
 
         break :blk try ComputePipeline.init(
-            allocator,
             ctx.vki,
             ctx.physical_device,
             ctx.vkd,
