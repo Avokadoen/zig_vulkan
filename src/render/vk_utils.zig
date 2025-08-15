@@ -6,10 +6,44 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const ecez = @import("ecez");
 const vk = @import("vulkan");
-const dispatch = @import("dispatch.zig");
 
 const context = @import("context.zig");
+const dispatch = @import("dispatch.zig");
+
+pub const components = struct {
+    pub const PipelineLayout = vk.PipelineLayout;
+    pub const Pipeline = vk.Pipeline;
+};
+
+pub const queries = struct {
+    pub const PipelineLayout = ecez.Query(struct {
+        l: components.PipelineLayout,
+    }, .{}, .{});
+
+    pub const Pipeline = ecez.Query(struct {
+        p: components.Pipeline,
+    }, .{}, .{});
+};
+
+pub const systems = struct {
+    pub const deinit = struct {
+        pub fn destroyPipelineLayouts(ctx_query: *context.queries.VkdAndDevice, pipeline_layout_query: *queries.PipelineLayout) void {
+            const ctx = ctx_query.getAny().?;
+            while (pipeline_layout_query.next()) |pipeline_layout| {
+                ctx.vkd.destroyPipelineLayout(ctx.logical_device.v, pipeline_layout.l, null);
+            }
+        }
+
+        pub fn destroyPipeline(ctx_query: *context.queries.VkdAndDevice, pipeline_query: *queries.Pipeline) void {
+            const ctx = ctx_query.getAny().?;
+            while (pipeline_query.next()) |pipeline| {
+                ctx.vkd.destroyPipeline(ctx.logical_device.v, pipeline.p, null);
+            }
+        }
+    };
+};
 
 /// Check if extensions are available on host instance
 pub fn isInstanceExtensionsPresent(allocator: Allocator, vkb: dispatch.Base, target_extensions: []const [*:0]const u8) !bool {

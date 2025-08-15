@@ -3,22 +3,19 @@ const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
-const zglfw = @import("zglfw");
+const ecez = @import("ecez");
 const za = @import("zalgebra");
+const zglfw = @import("zglfw");
 const ztracy = @import("ztracy");
 
+const input = @import("input.zig");
 const render = @import("render.zig");
 const consts = render.consts;
-
-const input = @import("input.zig");
-
 const VoxelRT = @import("VoxelRT.zig");
 const grid = VoxelRT.grid;
 const gpu_types = VoxelRT.gpu_types;
 const vox = VoxelRT.vox;
 const terrain = VoxelRT.terrain;
-
-const ecez = @import("ecez");
 
 pub const Storage = ecez.CreateStorage(.{
     input.component.ImguiContext,
@@ -68,6 +65,9 @@ pub const Storage = ecez.CreateStorage(.{
     render.context.components.QueueFamilyIndices,
     render.context.components.AuxillaryCommandPool,
     render.context.components.WindowPtr,
+
+    render.vk_utils.components.Pipeline,
+    render.vk_utils.components.PipelineLayout,
 
     render.swapchain.components.SwapchainData,
     render.gpu_buffer_memory.components.GpuBufferMemory,

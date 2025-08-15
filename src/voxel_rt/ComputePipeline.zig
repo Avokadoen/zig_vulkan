@@ -2,15 +2,15 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const ecez = @import("ecez");
-const vk = @import("vulkan");
 const glfw = @import("glfw");
 const tracy = @import("ztracy");
+const vk = @import("vulkan");
 
 const render = @import("../render.zig");
+const vk_utils = render.vk_utils;
 const context = render.context;
 const gpu_buffer_memory = render.gpu_buffer_memory;
 const Texture = render.Texture;
-
 const DeviceCamera = @import("camera.zig").components.DeviceCamera;
 const DeviceSun = @import("sun.zig").components.DeviceSun;
 
@@ -50,8 +50,7 @@ pub const WorkgroupSize = struct {
     y: u32,
 };
 
-pipeline_layout: vk.PipelineLayout,
-pipeline: vk.Pipeline,
+pipeline_entity: ecez.Entity,
 
 command_pool: vk.CommandPool,
 command_buffer: vk.CommandBuffer,
@@ -384,11 +383,15 @@ pub fn init(
         },
     };
     const complete_fence = try vkd.createFence(logical_device.v, &fence_info, null);
-    errdefer vkd.destroyFence(logical_device.v, complete_fence);
+    errdefer vkd.destroyFence(logical_device.v, complete_fence, null);
+
+    const pipeline_entity = try storage.createEntity(.{
+        pipeline_layout,
+        pipeline,
+    });
 
     return ComputePipeline{
-        .pipeline_layout = pipeline_layout,
-        .pipeline = pipeline,
+        .pipeline_entity = pipeline_entity,
         .command_pool = command_pool,
         .command_buffer = command_buffer,
         .complete_semaphore = complete_semaphore,
@@ -430,13 +433,12 @@ pub fn deinit(
 
     vkd.destroyDescriptorSetLayout(logical_device.v, self.target_descriptor_layout, null);
     vkd.destroyDescriptorPool(logical_device.v, self.target_descriptor_pool, null);
-
-    vkd.destroyPipelineLayout(logical_device.v, self.pipeline_layout, null);
-    vkd.destroyPipeline(logical_device.v, self.pipeline, null);
 }
 
 pub fn dispatch(
     self: *ComputePipeline,
+    comptime Storage: type,
+    storage: *Storage,
     vkd: context.components.vk_dispatch.Device,
     logical_device: context.components.Device,
     compute_queue: context.components.ComputeQueue,
@@ -445,6 +447,11 @@ pub fn dispatch(
     device_camera: DeviceCamera,
     device_sun: DeviceSun,
 ) !vk.Semaphore {
+    const entity = storage.getComponents(self.pipeline_entity, struct {
+        pipeline_layout: vk.PipelineLayout,
+        pipeline: vk.Pipeline,
+    }).?;
+
     {
         const wait_compute_zone = tracy.ZoneN(@src(), "idle wait compute");
         defer wait_compute_zone.End();
@@ -465,7 +472,15 @@ pub fn dispatch(
     }
 
     try vkd.resetCommandPool(logical_device.v, self.command_pool, .{});
-    try self.recordCommandBuffer(vkd, queue_indices, workgroup_size, device_camera, device_sun);
+    try self.recordCommandBuffer(
+        vkd,
+        queue_indices,
+        entity.pipeline,
+        entity.pipeline_layout,
+        workgroup_size,
+        device_camera,
+        device_sun,
+    );
 
     {
         @setRuntimeSafety(false);
@@ -496,6 +511,8 @@ pub fn recordCommandBuffer(
     self: ComputePipeline,
     vkd: context.components.vk_dispatch.Device,
     queue_indices: context.components.QueueFamilyIndices,
+    pipeline: vk.Pipeline,
+    pipeline_layout: vk.PipelineLayout,
     workgroup_size: WorkgroupSize,
     device_camera: DeviceCamera,
     device_sun: DeviceSun,
@@ -519,12 +536,12 @@ pub fn recordCommandBuffer(
         vkd.cmdBeginDebugUtilsLabelEXT(self.command_buffer, &debug_label);
     }
 
-    vkd.cmdBindPipeline(self.command_buffer, vk.PipelineBindPoint.compute, self.pipeline);
+    vkd.cmdBindPipeline(self.command_buffer, vk.PipelineBindPoint.compute, pipeline);
 
     // push camera data as a push constant
     vkd.cmdPushConstants(
         self.command_buffer,
-        self.pipeline_layout,
+        pipeline_layout,
         .{ .compute_bit = true },
         0,
         @sizeOf(DeviceCamera),
@@ -534,7 +551,7 @@ pub fn recordCommandBuffer(
     // push sun data as a push constant
     vkd.cmdPushConstants(
         self.command_buffer,
-        self.pipeline_layout,
+        pipeline_layout,
         .{ .compute_bit = true },
         @sizeOf(DeviceCamera),
         @sizeOf(DeviceSun),
@@ -574,7 +591,7 @@ pub fn recordCommandBuffer(
     vkd.cmdBindDescriptorSets(
         self.command_buffer,
         .compute,
-        self.pipeline_layout,
+        pipeline_layout,
         0,
         1,
         @ptrCast(&self.target_descriptor_set),

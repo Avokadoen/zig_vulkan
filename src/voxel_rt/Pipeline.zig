@@ -470,6 +470,8 @@ pub fn draw(self: *Pipeline, comptime Storage: type, storage: *Storage, ctx_enti
     const device_camera = storage.getComponent(self.camera_entity, *camera.components.DeviceCamera).?;
     const device_sun = storage.getComponent(self.sun_entity, *sun.components.DeviceSun).?;
     const compute_semaphore = try self.compute_pipeline.dispatch(
+        Storage,
+        storage,
         ctx.vkd,
         ctx.logical_device,
         ctx.compute_queue,
