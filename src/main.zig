@@ -68,6 +68,8 @@ pub const Storage = ecez.CreateStorage(.{
 
     render.vk_utils.components.Pipeline,
     render.vk_utils.components.PipelineLayout,
+    render.vk_utils.components.CommandPool,
+    render.vk_utils.components.CommandBuffer,
 
     render.swapchain.components.SwapchainData,
     render.gpu_buffer_memory.components.GpuBufferMemory,

@@ -15,31 +15,45 @@ const dispatch = @import("dispatch.zig");
 pub const components = struct {
     pub const PipelineLayout = vk.PipelineLayout;
     pub const Pipeline = vk.Pipeline;
+
+    pub const CommandPool = vk.CommandPool;
+    pub const CommandBuffer = vk.CommandBuffer;
 };
 
 pub const queries = struct {
+    pub const CommandPool = ecez.Query(struct {
+        cmd_pool: components.CommandPool,
+    }, .{}, .{});
+
     pub const PipelineLayout = ecez.Query(struct {
-        l: components.PipelineLayout,
+        layout: components.PipelineLayout,
     }, .{}, .{});
 
     pub const Pipeline = ecez.Query(struct {
-        p: components.Pipeline,
+        pipeline: components.Pipeline,
     }, .{}, .{});
 };
 
 pub const systems = struct {
     pub const deinit = struct {
+        pub fn destroyCommandPools(ctx_query: *context.queries.VkdAndDevice, cmd_pool_query: *queries.CommandPool) void {
+            const ctx = ctx_query.getAny().?;
+            while (cmd_pool_query.next()) |entity| {
+                ctx.vkd.destroyCommandPool(ctx.logical_device.v, entity.cmd_pool, null);
+            }
+        }
+
         pub fn destroyPipelineLayouts(ctx_query: *context.queries.VkdAndDevice, pipeline_layout_query: *queries.PipelineLayout) void {
             const ctx = ctx_query.getAny().?;
-            while (pipeline_layout_query.next()) |pipeline_layout| {
-                ctx.vkd.destroyPipelineLayout(ctx.logical_device.v, pipeline_layout.l, null);
+            while (pipeline_layout_query.next()) |entity| {
+                ctx.vkd.destroyPipelineLayout(ctx.logical_device.v, entity.layout, null);
             }
         }
 
         pub fn destroyPipeline(ctx_query: *context.queries.VkdAndDevice, pipeline_query: *queries.Pipeline) void {
             const ctx = ctx_query.getAny().?;
-            while (pipeline_query.next()) |pipeline| {
-                ctx.vkd.destroyPipeline(ctx.logical_device.v, pipeline.p, null);
+            while (pipeline_query.next()) |entity| {
+                ctx.vkd.destroyPipeline(ctx.logical_device.v, entity.pipeline, null);
             }
         }
     };

@@ -52,8 +52,6 @@ pub const WorkgroupSize = struct {
 
 pipeline_entity: ecez.Entity,
 
-command_pool: vk.CommandPool,
-command_buffer: vk.CommandBuffer,
 complete_semaphore: vk.Semaphore,
 complete_fence: vk.Fence,
 
@@ -388,12 +386,12 @@ pub fn init(
     const pipeline_entity = try storage.createEntity(.{
         pipeline_layout,
         pipeline,
+        command_pool,
+        command_buffer,
     });
 
     return ComputePipeline{
         .pipeline_entity = pipeline_entity,
-        .command_pool = command_pool,
-        .command_buffer = command_buffer,
         .complete_semaphore = complete_semaphore,
         .complete_fence = complete_fence,
         .target_image_info = target_image_info,
@@ -420,14 +418,6 @@ pub fn deinit(
         std.math.maxInt(u64),
     ) catch |err| std.debug.print("failed to wait for gfx fence, err: {any}", .{err});
 
-    vkd.freeCommandBuffers(
-        logical_device.v,
-        self.command_pool,
-        @intCast(1),
-        @ptrCast(&self.command_buffer),
-    );
-    vkd.destroyCommandPool(logical_device.v, self.command_pool, null);
-
     vkd.destroySemaphore(logical_device.v, self.complete_semaphore, null);
     vkd.destroyFence(logical_device.v, self.complete_fence, null);
 
@@ -450,6 +440,8 @@ pub fn dispatch(
     const entity = storage.getComponents(self.pipeline_entity, struct {
         pipeline_layout: vk.PipelineLayout,
         pipeline: vk.Pipeline,
+        command_pool: vk.CommandPool,
+        command_buffer: vk.CommandBuffer,
     }).?;
 
     {
@@ -471,9 +463,10 @@ pub fn dispatch(
         );
     }
 
-    try vkd.resetCommandPool(logical_device.v, self.command_pool, .{});
+    try vkd.resetCommandPool(logical_device.v, entity.command_pool, .{});
     try self.recordCommandBuffer(
         vkd,
+        entity.command_buffer,
         queue_indices,
         entity.pipeline,
         entity.pipeline_layout,
@@ -492,7 +485,7 @@ pub fn dispatch(
             .p_wait_semaphores = semo_null_ptr,
             .p_wait_dst_stage_mask = wait_null_ptr,
             .command_buffer_count = 1,
-            .p_command_buffers = @ptrCast(&self.command_buffer),
+            .p_command_buffers = @ptrCast(&entity.command_buffer),
             .signal_semaphore_count = 1,
             .p_signal_semaphores = @ptrCast(&self.complete_semaphore),
         };
@@ -510,6 +503,7 @@ pub fn dispatch(
 pub fn recordCommandBuffer(
     self: ComputePipeline,
     vkd: context.components.vk_dispatch.Device,
+    command_buffer: vk.CommandBuffer,
     queue_indices: context.components.QueueFamilyIndices,
     pipeline: vk.Pipeline,
     pipeline_layout: vk.PipelineLayout,
@@ -526,21 +520,21 @@ pub fn recordCommandBuffer(
         },
         .p_inheritance_info = null,
     };
-    try vkd.beginCommandBuffer(self.command_buffer, &command_begin_info);
+    try vkd.beginCommandBuffer(command_buffer, &command_begin_info);
 
     if (render.consts.enable_debug_markers) {
         const debug_label = vk.DebugUtilsLabelEXT{
             .p_label_name = "Voxel Raytracing Cmds",
             .color = [4]f32{ 0.5, 0.0, 0.3, 1.0 },
         };
-        vkd.cmdBeginDebugUtilsLabelEXT(self.command_buffer, &debug_label);
+        vkd.cmdBeginDebugUtilsLabelEXT(command_buffer, &debug_label);
     }
 
-    vkd.cmdBindPipeline(self.command_buffer, vk.PipelineBindPoint.compute, pipeline);
+    vkd.cmdBindPipeline(command_buffer, vk.PipelineBindPoint.compute, pipeline);
 
     // push camera data as a push constant
     vkd.cmdPushConstants(
-        self.command_buffer,
+        command_buffer,
         pipeline_layout,
         .{ .compute_bit = true },
         0,
@@ -550,7 +544,7 @@ pub fn recordCommandBuffer(
 
     // push sun data as a push constant
     vkd.cmdPushConstants(
-        self.command_buffer,
+        command_buffer,
         pipeline_layout,
         .{ .compute_bit = true },
         @sizeOf(DeviceCamera),
@@ -575,7 +569,7 @@ pub fn recordCommandBuffer(
         },
     };
     vkd.cmdPipelineBarrier(
-        self.command_buffer,
+        command_buffer,
         .{},
         .{ .compute_shader_bit = true },
         .{},
@@ -589,7 +583,7 @@ pub fn recordCommandBuffer(
 
     // bind target texture
     vkd.cmdBindDescriptorSets(
-        self.command_buffer,
+        command_buffer,
         .compute,
         pipeline_layout,
         0,
@@ -601,7 +595,7 @@ pub fn recordCommandBuffer(
     const x_dispatch = @ceil(self.target_image_info.width / @as(f32, @floatFromInt(workgroup_size.x)));
     const y_dispatch = @ceil(self.target_image_info.height / @as(f32, @floatFromInt(workgroup_size.y)));
 
-    vkd.cmdDispatch(self.command_buffer, @intFromFloat(x_dispatch), @intFromFloat(y_dispatch), 1);
+    vkd.cmdDispatch(command_buffer, @intFromFloat(x_dispatch), @intFromFloat(y_dispatch), 1);
 
     const release_image_barrier = vk.ImageMemoryBarrier{
         .src_access_mask = .{ .shader_write_bit = true },
@@ -620,7 +614,7 @@ pub fn recordCommandBuffer(
         },
     };
     vkd.cmdPipelineBarrier(
-        self.command_buffer,
+        command_buffer,
         .{ .compute_shader_bit = true },
         .{},
         .{},
@@ -633,10 +627,10 @@ pub fn recordCommandBuffer(
     );
 
     if (render.consts.enable_debug_markers) {
-        vkd.cmdEndDebugUtilsLabelEXT(self.command_buffer);
+        vkd.cmdEndDebugUtilsLabelEXT(command_buffer);
     }
 
-    try vkd.endCommandBuffer(self.command_buffer);
+    try vkd.endCommandBuffer(command_buffer);
 }
 
 pub fn calculateDefaultWorkgroupSize(physical_device_properties: context.components.PhysicalDeviceProperties) WorkgroupSize {

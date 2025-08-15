@@ -22,6 +22,7 @@ pub fn CreateEvents(comptime Storage: type) type {
             "render_deinit",
             .{
                 gpu_buffer_memory.systems.deinit.gpuBufferMemory,
+                vk_utils.systems.deinit.destroyCommandPools,
                 vk_utils.systems.deinit.destroyPipelineLayouts,
                 vk_utils.systems.deinit.destroyPipeline,
                 swapchain.systems.deinit.swapchainData,
