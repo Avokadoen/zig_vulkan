@@ -66,6 +66,10 @@ pub fn build(b: *Build) void {
     exe.root_module.addImport("ztracy", ztracy.module("root"));
     exe.linkLibrary(ztracy.artifact("tracy"));
 
+    const ecez = b.dependency("ecez", .{});
+    const ecez_module = ecez.module("ecez");
+    exe.root_module.addImport("ecez", ecez_module);
+
     // link zgui
     const zgui = b.dependency("zgui", .{
         .shared = false,

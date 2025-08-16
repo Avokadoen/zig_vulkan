@@ -1,0 +1,202 @@
+/// Abstractions around vulkan physical device
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
+
+const vk = @import("vulkan");
+const dispatch = @import("dispatch.zig");
+const constants = @import("consts.zig");
+const swapchain = @import("swapchain.zig");
+const validation_layer = @import("validation_layer.zig");
+const context = @import("context.zig");
+
+/// check if physical device supports given target extensions
+// TODO: unify with getRequiredInstanceExtensions?
+pub fn isDeviceExtensionsPresent(allocator: Allocator, vki: dispatch.Instance, device: vk.PhysicalDevice, target_extensions: []const [*:0]const u8) !bool {
+    // query extensions available
+    var supported_extensions_count: u32 = 0;
+    // TODO: handle "VkResult.incomplete"
+    _ = try vki.enumerateDeviceExtensionProperties(device, null, &supported_extensions_count, null);
+
+    var extensions = try ArrayList(vk.ExtensionProperties).initCapacity(allocator, supported_extensions_count);
+    defer extensions.deinit();
+
+    _ = try vki.enumerateDeviceExtensionProperties(device, null, &supported_extensions_count, extensions.items.ptr);
+    extensions.items.len = supported_extensions_count;
+
+    var matches: u32 = 0;
+    for (target_extensions) |target_extension| {
+        const t_str_len = std.mem.indexOfScalar(u8, target_extension[0..vk.MAX_EXTENSION_NAME_SIZE], 0) orelse continue;
+
+        cmp: for (extensions.items) |existing| {
+            const existing_name: [*:0]const u8 = @ptrCast(&existing.extension_name);
+            const e_str_len = std.mem.indexOfScalar(u8, existing_name[0..vk.MAX_EXTENSION_NAME_SIZE], 0) orelse continue;
+            if (std.mem.eql(u8, target_extension[0..t_str_len], existing_name[0..e_str_len])) {
+                matches += 1;
+                break :cmp;
+            }
+        }
+    }
+
+    return matches == target_extensions.len;
+}
+
+// TODO: use internal allocator that is suitable
+/// select primary physical device in init
+pub fn selectPrimary(allocator: Allocator, vki: dispatch.Instance, instance: vk.Instance, surface: vk.SurfaceKHR) !vk.PhysicalDevice {
+    var device_count: u32 = 0;
+    _ = try vki.enumeratePhysicalDevices(instance, &device_count, null); // TODO: handle incomplete
+    if (device_count < 0) {
+        std.debug.panic("no GPU suitable for vulkan identified");
+    }
+
+    var devices = try allocator.alloc(vk.PhysicalDevice, device_count);
+    defer allocator.free(devices);
+
+    _ = try vki.enumeratePhysicalDevices(instance, &device_count, devices.ptr); // TODO: handle incomplete
+    devices.len = device_count;
+
+    var device_score: i32 = -1;
+    var device_index: ?usize = null;
+    for (devices, 0..) |device, i| {
+        const new_score = try deviceHeuristic(allocator, vki, device, surface);
+        if (device_score < new_score) {
+            device_score = new_score;
+            device_index = i;
+        }
+    }
+
+    if (device_index == null) {
+        return error.NoSuitablePhysicalDevice;
+    }
+
+    const val = devices[device_index.?];
+    return val;
+}
+
+/// Any suiteable GPU should result in a positive value, an unsuitable GPU might return a negative value
+fn deviceHeuristic(allocator: Allocator, vki: dispatch.Instance, device: vk.PhysicalDevice, surface: vk.SurfaceKHR) !i32 {
+    // TODO: rewrite function to have clearer distinction between required and bonus features
+    //       possible solutions:
+    //          - return error if missing feature and discard negative return value (use u32 instead)
+    //          - 2 bitmaps
+    const property_score = blk: {
+        const device_properties = vki.getPhysicalDeviceProperties(device);
+        const discrete = @as(i32, @intFromBool(device_properties.device_type == vk.PhysicalDeviceType.discrete_gpu)) + 5;
+        break :blk discrete;
+    };
+
+    const feature_score: i32 = blk: {
+        var host_image_copy_feature = vk.PhysicalDeviceHostImageCopyFeatures{};
+        var maintenance4_feature = vk.PhysicalDeviceMaintenance4Features{
+            .p_next = @ptrCast(&host_image_copy_feature),
+        };
+
+        var p_features: vk.PhysicalDeviceFeatures2 = .{
+            .p_next = @ptrCast(&maintenance4_feature),
+            .features = .{},
+        };
+
+        // Silence validation by calling vkGetPhysicalDeviceFeatures
+        _ = vki.getPhysicalDeviceFeatures(device);
+
+        vki.getPhysicalDeviceFeatures2(device, &p_features);
+        if (maintenance4_feature.maintenance_4 == vk.FALSE) {
+            break :blk -1000;
+        }
+        if (host_image_copy_feature.host_image_copy == vk.FALSE) {
+            break :blk -1000;
+        }
+        break :blk 10;
+    };
+
+    const queue_fam_score: i32 = blk: {
+        _ = context.createQueueFamilyIndices(vki, device, surface) catch break :blk -1000;
+        break :blk 10;
+    };
+
+    const extensions_score: i32 = blk: {
+        const extension_slice = constants.logical_device_extensions[0..];
+        const extensions_available = try isDeviceExtensionsPresent(allocator, vki, device, extension_slice);
+        if (!extensions_available) {
+            break :blk -1000;
+        }
+        break :blk 10;
+    };
+
+    const swapchain_score: i32 = blk: {
+        if (swapchain.SupportDetails.init(allocator, vki, device, surface)) |ok| {
+            defer ok.deinit(allocator);
+            break :blk 10;
+        } else |_| {
+            break :blk -1000;
+        }
+    };
+
+    return -30 + property_score + feature_score + queue_fam_score + extensions_score + swapchain_score;
+}
+
+pub fn createLogicalDevice(
+    allocator: Allocator,
+    vkb: dispatch.Base,
+    vki: dispatch.Instance,
+    queue_indices: context.components.QueueFamilyIndices,
+    physical_device: vk.PhysicalDevice,
+) !vk.Device {
+
+    // merge indices if they are identical according to vulkan spec
+    var family_indices = [_]u32{ queue_indices.graphics, undefined };
+    var indices: usize = 1;
+    if (queue_indices.compute != queue_indices.graphics) {
+        family_indices[indices] = queue_indices.compute;
+        indices += 1;
+    }
+
+    var queue_create_infos = try allocator.alloc(vk.DeviceQueueCreateInfo, indices);
+    defer allocator.free(queue_create_infos);
+
+    const queue_priority = [_]f32{1.0};
+    for (family_indices[0..indices], 0..) |family_index, i| {
+        queue_create_infos[i] = .{
+            .flags = .{},
+            .queue_family_index = family_index,
+            .queue_count = if (family_index == queue_indices.compute) queue_indices.compute_queue_count else 1,
+            .p_queue_priorities = &queue_priority,
+        };
+    }
+
+    var host_image_copy_feature = vk.PhysicalDeviceHostImageCopyFeatures{
+        .host_image_copy = vk.TRUE,
+    };
+    var synchronization2 = vk.PhysicalDeviceSynchronization2FeaturesKHR{
+        .p_next = @ptrCast(&host_image_copy_feature),
+        .synchronization_2 = vk.TRUE,
+    };
+    var maintenance_4_features = vk.PhysicalDeviceMaintenance4Features{
+        .p_next = @ptrCast(&synchronization2),
+        .maintenance_4 = vk.TRUE,
+    };
+    var device_feature_1_2 = vk.PhysicalDeviceVulkan12Features{
+        .p_next = @ptrCast(&maintenance_4_features),
+        .shader_int_8 = vk.TRUE,
+        .storage_buffer_8_bit_access = vk.TRUE,
+    };
+    const device_features = vk.PhysicalDeviceFeatures2{
+        .p_next = @ptrCast(&device_feature_1_2),
+        .features = .{},
+    };
+    const validation_layer_info = try validation_layer.Info.init(allocator, vkb);
+
+    const create_info = vk.DeviceCreateInfo{
+        .p_next = @ptrCast(&device_features),
+        .flags = .{},
+        .queue_create_info_count = @intCast(queue_create_infos.len),
+        .p_queue_create_infos = queue_create_infos.ptr,
+        .enabled_layer_count = validation_layer_info.enabled_layer_count,
+        .pp_enabled_layer_names = validation_layer_info.enabled_layer_names,
+        .enabled_extension_count = constants.logical_device_extensions.len,
+        .pp_enabled_extension_names = &constants.logical_device_extensions,
+        .p_enabled_features = null,
+    };
+    return vki.createDevice(physical_device, &create_info, null);
+}

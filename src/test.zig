@@ -1,3 +1,3 @@
 test {
-    _ = @import("modules/test.zig");
+    _ = @import("voxel_rt/test.zig");
 }
